@@ -167,6 +167,13 @@ function slurm-bridge::prerequisites() {
 		helm install "$jobset" oci://registry.k8s.io/jobset/charts/jobset --version "$jobsetVersion" \
 			--namespace "$jobsetNamespace" --create-namespace
 	fi
+	local lws="lws"
+	local lwsVersion="v0.6.2"
+	local lwsnamespace="lws-system"
+	if [ "$(helm list --all-namespaces --short --filter="$lws" | wc -l)" -eq 0 ]; then
+		helm install $lws https://github.com/kubernetes-sigs/lws/releases/download/$lwsVersion/lws-chart-$lwsVersion.tgz \
+			--namespace $lwsnamespace --create-namespace
+	fi
 	if $FLAG_EXTRAS; then
 		local metrics="metrics-server"
 		if [ "$(helm list --all-namespaces --short --filter="$metrics" | wc -l)" -eq 0 ]; then
