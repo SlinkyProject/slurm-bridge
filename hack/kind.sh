@@ -136,9 +136,9 @@ function slurm-bridge::helm() {
 function slurm-bridge::skaffold() {
 	slurm-bridge::prerequisites
 	(
-		cd "$ROOT_DIR/helm/slurm-bridge"
 		make values-dev || true
-		yq -i '.admission.managedNamespaces = "slurm-bridge"' values-test.yaml
+		cd "$ROOT_DIR/helm/slurm-bridge"
+		yq -i '.admission.managedNamespaces += "slurm-bridge"' values-dev.yaml
 		skaffold run -p dev
 	)
 }
