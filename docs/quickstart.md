@@ -16,6 +16,7 @@
     - [Annotations](#annotations)
     - [JobSets](#jobsets)
     - [PodGroups](#podgroups)
+    - [LeaderWorkerSet](#leaderworkerset)
 
 <!-- mdformat-toc end -->
 
@@ -191,10 +192,21 @@ Pods contained within a PodGroup will be co-scheduled and launched together. The
 PodGroup controller is responsible for managing the PodGroup status and other
 Pod interactions once marked as completed.
 
+### LeaderWorkerSet
+
+This section assumes [LeaderWorkerSet] is installed.
+
+LeaderWorkerSet groups will be co-scheduled so pods of each group will be
+guaranteed to launch together.
+
+**NOTE**: Topology-aware placement is not supported yet, so some features of
+LeaderWorkerSet may not behave as expected.
+
 <!-- Links -->
 
 [jobsets]: https://jobset.sigs.k8s.io/
 [kubelet]: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet
+[leaderworkerset]: https://lws.sigs.k8s.io/
 [mcs]: https://slurm.schedmd.com/mcs.html
 [podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [slurmd]: https://slurm.schedmd.com/slurmd.html

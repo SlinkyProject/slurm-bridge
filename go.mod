@@ -19,6 +19,7 @@ require (
 	k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979
 	sigs.k8s.io/controller-runtime v0.20.4
 	sigs.k8s.io/jobset v0.8.1
+	sigs.k8s.io/lws v0.6.1
 	sigs.k8s.io/scheduler-plugins v0.31.8
 	sigs.k8s.io/yaml v1.4.0
 )

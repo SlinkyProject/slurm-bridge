@@ -54,6 +54,8 @@ func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR
 	switch slurmJobIR.RootPOM.TypeMeta {
 	case podGroup_v1alpha1:
 		return t.PreFilterPodGroup(pod, slurmJobIR)
+	case lws_v1:
+		return t.PreFilterLWS(pod, slurmJobIR)
 	default:
 		return framework.NewStatus(framework.Success)
 	}
@@ -87,6 +89,8 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 		slurmJobIR, err = t.fromJob(pod, rootPOM)
 	case pod_v1:
 		slurmJobIR, err = t.fromPod(pod)
+	case lws_v1:
+		slurmJobIR, err = t.fromLws(pod, rootPOM)
 	default:
 		slurmJobIR, err = t.fromPod(pod)
 	}
@@ -119,9 +123,9 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 			memMax = *lim.Memory()
 		}
 	}
-	// If either CPU or Memory is set to 0, use nil so Slurm will use the
-	// default values of the partition. Slurm does not support unbounded
-	// cpu or memory.
+	// If either CPU or Memory is set to 0, leave that value unset so Slurm
+	// will use the default values of the partition. Slurm does not support
+	// unbounded cpu or memory.
 	if cpuMax.Value() > 0 {
 		slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(cpuMax.Value())) //nolint:gosec
 	}

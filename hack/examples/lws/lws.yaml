@@ -1,0 +1,42 @@
+---
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: vllm
+  namespace: slurm-bridge
+spec:
+  replicas: 2
+  leaderWorkerTemplate:
+    size: 3
+    restartPolicy: RecreateGroupOnPodRestart
+    leaderTemplate:
+      metadata:
+        labels:
+          role: leader
+      spec:
+        containers:
+          - name: leader
+            image: busybox:stable
+            command: [sh, -c, sleep infinite]
+    workerTemplate:
+      spec:
+        containers:
+          - name: worker
+            image: busybox:stable
+            command: [sh, -c, sleep infinite]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-leader
+  namespace: slurm-bridge
+spec:
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    leaderworkerset.sigs.k8s.io/name: vllm
+    role: leader
+  type: ClusterIP

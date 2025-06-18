@@ -24,6 +24,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
@@ -50,6 +51,7 @@ func init() {
 	utilruntime.Must(sched.AddToScheme(scheme))
 	utilruntime.Must(batchv1.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
+	utilruntime.Must(lws.AddToScheme(scheme))
 }
 
 // Slurmbridge is a plugin that schedules pods in a group.

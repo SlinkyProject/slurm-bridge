@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Added support for LeaderWorkerSet
 - Added support for setting placeholder UserId and GroupId
 - Added managedNamespaceSelector to the admission controller
 
