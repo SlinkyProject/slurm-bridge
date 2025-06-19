@@ -18,19 +18,19 @@ import (
 
 type SlurmJobIRJobInfo struct {
 	Account      *string
+	CpuPerTask   *int32
 	Constraints  *string
+	JobName      *string
 	Licenses     *string
+	MemPerNode   *int64 // memory in megabytes
+	MinNodes     *int32
+	MaxNodes     *int32
 	Partition    *string
+	QOS          *string
 	Reservation  *string
 	TasksPerNode *int32
 	TimeLimit    *int32
-	QOS          *string
 	Wckey        *string
-	CpuPerTask   *int32
-	MemPerNode   *int64 // memory in megabytes
-	JobName      *string
-	MinNodes     *int32
-	MaxNodes     *int32
 }
 
 // Slurm Job Intermediate Representation (IR)
@@ -105,14 +105,6 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			slurmJobIR.JobInfo.Account = &value
 		case wellknown.AnnotationConstraints:
 			slurmJobIR.JobInfo.Constraints = &value
-		case wellknown.AnnotationLicenses:
-			slurmJobIR.JobInfo.Licenses = &value
-		case wellknown.AnnotationPartition:
-			slurmJobIR.JobInfo.Partition = &value
-		case wellknown.AnnotationReservation:
-			slurmJobIR.JobInfo.Reservation = &value
-		case wellknown.AnnotationJobName:
-			slurmJobIR.JobInfo.JobName = &value
 		case wellknown.AnnotationCpuPerTask:
 			rs, err := resource.ParseQuantity(value)
 			if err != nil {
@@ -120,6 +112,16 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			}
 			val := int32(rs.Value())
 			slurmJobIR.JobInfo.CpuPerTask = &val
+		case wellknown.AnnotationJobName:
+			slurmJobIR.JobInfo.JobName = &value
+		case wellknown.AnnotationLicenses:
+			slurmJobIR.JobInfo.Licenses = &value
+		case wellknown.AnnotationMaxNodes:
+			num, err := ConvStrTo32(value)
+			if err != nil {
+				return err
+			}
+			slurmJobIR.JobInfo.MaxNodes = num
 		case wellknown.AnnotationMemPerNode:
 			rs, err := resource.ParseQuantity(value)
 			if err != nil {
@@ -128,26 +130,24 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			val := rs.Value()
 			val = val / 1048576
 			slurmJobIR.JobInfo.MemPerNode = &val
-		case wellknown.AnnotationTimeLimit:
-			num, err := ConvStrTo32(value)
-			if err != nil {
-				return err
-			}
-			slurmJobIR.JobInfo.TimeLimit = num
 		case wellknown.AnnotationMinNodes:
 			num, err := ConvStrTo32(value)
 			if err != nil {
 				return err
 			}
 			slurmJobIR.JobInfo.MinNodes = num
-		case wellknown.AnnotationMaxNodes:
+		case wellknown.AnnotationPartition:
+			slurmJobIR.JobInfo.Partition = &value
+		case wellknown.AnnotationQOS:
+			slurmJobIR.JobInfo.QOS = &value
+		case wellknown.AnnotationReservation:
+			slurmJobIR.JobInfo.Reservation = &value
+		case wellknown.AnnotationTimeLimit:
 			num, err := ConvStrTo32(value)
 			if err != nil {
 				return err
 			}
-			slurmJobIR.JobInfo.MaxNodes = num
-		case wellknown.AnnotationQOS:
-			slurmJobIR.JobInfo.QOS = &value
+			slurmJobIR.JobInfo.TimeLimit = num
 		case wellknown.AnnotationWckey:
 			slurmJobIR.JobInfo.Wckey = &value
 		}

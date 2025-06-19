@@ -145,20 +145,9 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			Flags: &[]v0043.V0043JobDescMsgFlags{
 				v0043.V0043JobDescMsgFlagsEXTERNALJOB,
 			},
-			Licenses: slurmJobIR.JobInfo.Licenses,
-			McsLabel: ptr.To(r.mcsLabel),
-			Name:     slurmJobIR.JobInfo.JobName,
-			Partition: func() *string {
-				if slurmJobIR.JobInfo.Partition == nil {
-					return &r.partition
-				} else {
-					return slurmJobIR.JobInfo.Partition
-				}
-			}(),
-			Qos:         slurmJobIR.JobInfo.QOS,
-			Reservation: slurmJobIR.JobInfo.Reservation,
-			// SharedNone is effectively Exclusive
-			Shared: &[]v0043.V0043JobDescMsgShared{v0043.V0043JobDescMsgSharedNone},
+			Licenses:     slurmJobIR.JobInfo.Licenses,
+			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
+			McsLabel:     ptr.To(r.mcsLabel),
 			MemoryPerNode: func() *v0043.V0043Uint64NoValStruct {
 				if slurmJobIR.JobInfo.MemPerNode != nil {
 					return &v0043.V0043Uint64NoValStruct{
@@ -171,7 +160,18 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 				}
 			}(),
 			MinimumNodes: slurmJobIR.JobInfo.MinNodes,
-			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
+			Name:         slurmJobIR.JobInfo.JobName,
+			Partition: func() *string {
+				if slurmJobIR.JobInfo.Partition == nil {
+					return &r.partition
+				} else {
+					return slurmJobIR.JobInfo.Partition
+				}
+			}(),
+			Qos:         slurmJobIR.JobInfo.QOS,
+			Reservation: slurmJobIR.JobInfo.Reservation,
+			// SharedNone is effectively Exclusive
+			Shared:       &[]v0043.V0043JobDescMsgShared{v0043.V0043JobDescMsgSharedNone},
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
 			TimeLimit: func() *v0043.V0043Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {
