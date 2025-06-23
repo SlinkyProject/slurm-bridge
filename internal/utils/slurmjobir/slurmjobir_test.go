@@ -18,7 +18,7 @@ import (
 )
 
 func TestTranslateToSlurmJobIR(t *testing.T) {
-	podWithAnnotation := st.MakePod().Namespace("default").Name("testpod").Annotations(map[string]string{wellknown.AnnotationAccount: "test1"}).Obj()
+	podWithAnnotation := st.MakePod().Namespace("default").Name("testpod").Annotations(map[string]string{wellknown.AnnotationAccount: "test1", wellknown.AnnotationGroupId: "1000", wellknown.AnnotationUserId: "1000"}).Obj()
 	podWithBadAnnotation := st.MakePod().Namespace("default").Name("testpod").Annotations(map[string]string{wellknown.AnnotationCpuPerTask: "NaN"}).Obj()
 	type args struct {
 		client client.Client
@@ -56,6 +56,8 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 						Namespace: "default",
 						Annotations: map[string]string{
 							wellknown.AnnotationAccount: "test1",
+							wellknown.AnnotationGroupId: "1000",
+							wellknown.AnnotationUserId:  "1000",
 						},
 						ResourceVersion: "999",
 					},
@@ -65,6 +67,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 				},
 				JobInfo: SlurmJobIRJobInfo{
 					Account: ptr.To("test1"),
+					GroupId: ptr.To("1000"),
 					MaxNodes: func() *int32 {
 						maxNodes := int32(1)
 						return &maxNodes
@@ -73,6 +76,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 						tasksPerNode := int32(1)
 						return &tasksPerNode
 					}(),
+					UserId: ptr.To("1000"),
 				},
 			},
 			wantErr: false,
@@ -155,6 +159,7 @@ func Test_parseAnnotations(t *testing.T) {
 					wellknown.AnnotationAccount:     "slurm",
 					wellknown.AnnotationConstraints: "foo",
 					wellknown.AnnotationCpuPerTask:  "200m",
+					wellknown.AnnotationGroupId:     "1000",
 					wellknown.AnnotationJobName:     "jobname",
 					wellknown.AnnotationLicenses:    "mathlib",
 					wellknown.AnnotationMaxNodes:    "4",
@@ -164,6 +169,7 @@ func Test_parseAnnotations(t *testing.T) {
 					wellknown.AnnotationQOS:         "high",
 					wellknown.AnnotationReservation: "training",
 					wellknown.AnnotationTimeLimit:   "30",
+					wellknown.AnnotationUserId:      "1000",
 					wellknown.AnnotationWckey:       "key",
 				},
 			},
@@ -173,6 +179,7 @@ func Test_parseAnnotations(t *testing.T) {
 					Account:     ptr.To("slurm"),
 					Constraints: ptr.To("foo"),
 					CpuPerTask:  ptr.To(int32(1)),
+					GroupId:     ptr.To("1000"),
 					JobName:     ptr.To("jobname"),
 					Licenses:    ptr.To("mathlib"),
 					MemPerNode:  ptr.To(int64(1024)),
@@ -182,6 +189,7 @@ func Test_parseAnnotations(t *testing.T) {
 					QOS:         ptr.To("high"),
 					Reservation: ptr.To("training"),
 					TimeLimit:   ptr.To(int32(30)),
+					UserId:      ptr.To("1000"),
 					Wckey:       ptr.To("key"),
 				},
 			},

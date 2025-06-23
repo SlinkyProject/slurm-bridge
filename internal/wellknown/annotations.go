@@ -17,6 +17,9 @@ const (
 	// AnnotationCpuPerTask sets the number of cpus
 	// per task
 	AnnotationCpuPerTask = "slinky.slurm.net/cpu-per-task"
+	// AnnotationGroupId overrides the default groupid
+	// for the Slurm placeholder job.
+	AnnotationGroupId = "slinky.slurm.net/group-id"
 	// AnnotationJobName sets the job name for
 	// the slurm job
 	AnnotationJobName = "slinky.slurm.net/job-name"
@@ -44,6 +47,9 @@ const (
 	// AnnotationTimelimit sets the Time Limit in minutes
 	// for the Slurm placeholder job.
 	AnnotationTimeLimit = "slinky.slurm.net/timelimit"
+	// AnnotationUserId overrides the default userid
+	// for the Slurm placeholder job.
+	AnnotationUserId = "slinky.slurm.net/user-id"
 	// AnnotationWckey sets the Wckey
 	// for the Slurm placeholder job.
 	AnnotationWckey = "slinky.slurm.net/wckey"

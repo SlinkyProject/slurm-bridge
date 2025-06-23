@@ -145,6 +145,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			Flags: &[]v0043.V0043JobDescMsgFlags{
 				v0043.V0043JobDescMsgFlagsEXTERNALJOB,
 			},
+			GroupId:      slurmJobIR.JobInfo.GroupId,
 			Licenses:     slurmJobIR.JobInfo.Licenses,
 			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
 			McsLabel:     ptr.To(r.mcsLabel),
@@ -184,7 +185,8 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 					return &v0043.V0043Uint32NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
-			Wckey: slurmJobIR.JobInfo.Wckey,
+			UserId: slurmJobIR.JobInfo.UserId,
+			Wckey:  slurmJobIR.JobInfo.Wckey,
 		},
 	}
 	if !update {

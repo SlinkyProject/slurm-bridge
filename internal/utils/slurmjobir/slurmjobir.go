@@ -20,6 +20,7 @@ type SlurmJobIRJobInfo struct {
 	Account      *string
 	CpuPerTask   *int32
 	Constraints  *string
+	GroupId      *string
 	JobName      *string
 	Licenses     *string
 	MemPerNode   *int64 // memory in megabytes
@@ -30,6 +31,7 @@ type SlurmJobIRJobInfo struct {
 	Reservation  *string
 	TasksPerNode *int32
 	TimeLimit    *int32
+	UserId       *string
 	Wckey        *string
 }
 
@@ -105,6 +107,8 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			slurmJobIR.JobInfo.Account = &value
 		case wellknown.AnnotationConstraints:
 			slurmJobIR.JobInfo.Constraints = &value
+		case wellknown.AnnotationGroupId:
+			slurmJobIR.JobInfo.GroupId = &value
 		case wellknown.AnnotationCpuPerTask:
 			rs, err := resource.ParseQuantity(value)
 			if err != nil {
@@ -148,6 +152,8 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 				return err
 			}
 			slurmJobIR.JobInfo.TimeLimit = num
+		case wellknown.AnnotationUserId:
+			slurmJobIR.JobInfo.UserId = &value
 		case wellknown.AnnotationWckey:
 			slurmJobIR.JobInfo.Wckey = &value
 		}
