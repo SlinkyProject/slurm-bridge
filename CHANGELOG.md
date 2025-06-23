@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## \[Unreleased\]
+## [Unreleased]
 
 ### Added
 
@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
 - Initial project release.
 
 ### Fixed
+
 - Fixed generation of values-dev.yaml in hack/kind.sh
 
 ### Changed

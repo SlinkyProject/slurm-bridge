@@ -42,7 +42,7 @@ repos:
       - id: mdformat
         args:
           - --wrap=80
-        exclude: (\.chglog/.*|CHANGELOG|helm/.*)\.md
+        exclude: (\.chglog/.*|helm/.*)\.md
         additional_dependencies:
           - mdformat-toc
           - mdformat-tables
