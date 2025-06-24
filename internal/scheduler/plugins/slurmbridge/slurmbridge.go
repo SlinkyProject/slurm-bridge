@@ -172,10 +172,14 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state *framework.CycleStat
 	}
 
 	// Create a placeholder job in Slurm if needed
-	if placeholderJob == nil {
+	if placeholderJob.JobId == 0 {
 		jobid, err := sb.slurmControl.SubmitJob(ctx, pod, slurmJobIR)
 		if err != nil {
-			aggErrors := err.(utilerrors.Aggregate).Errors()
+			aggErrors := func() utilerrors.Aggregate {
+				var target utilerrors.Aggregate
+				_ = errors.As(err, &target)
+				return target
+			}().Errors()
 			for _, e := range aggErrors {
 				if strings.ToLower(e.Error()) == ErrorNodeConfigInvalid.Error() {
 					logger.Error(err, "invalid node configuration for placeholder job")

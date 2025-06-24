@@ -273,7 +273,7 @@ govulncheck: govulncheck-bin ## Run govulncheck
 # https://github.com/golangci/golangci-lint/blob/main/.pre-commit-hooks.yaml
 .PHONY: golangci-lint
 golangci-lint: golangci-lint-bin ## Run golangci-lint.
-	$(GOLANGCI_LINT) run --new-from-rev HEAD --fix
+	$(GOLANGCI_LINT) run --fix
 
 # https://github.com/golangci/golangci-lint/blob/main/.pre-commit-hooks.yaml
 .PHONY: golangci-lint-fmt

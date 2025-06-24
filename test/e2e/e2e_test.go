@@ -55,7 +55,7 @@ var _ = Describe("controller", Ordered, func() {
 			var err error
 
 			By("building the manager(Operator) image")
-			cmd := exec.Command("make", "docker-build",
+			cmd := exec.Command("make", "docker-build", //nolint:gosec // disable G204
 				fmt.Sprintf("DOCKERFILE_PATH=%s", operatorDF),
 				fmt.Sprintf("IMG=%s", operatorImage))
 			_, err = Run(cmd)
@@ -71,11 +71,11 @@ var _ = Describe("controller", Ordered, func() {
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
 			By("deploying the controller-manager")
-			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", operatorImage))
+			cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", operatorImage)) //nolint:gosec // disable G204
 			_, err = Run(cmd)
 			ExpectWithOffset(1, err).NotTo(HaveOccurred())
 
-			By("validating that the controller-manager pod is running as expected")
+			By("validating that the controller-manager pod is running as expected") //nolint:gosec // disable G204
 			verifyControllerUp := func() error {
 				// Get pod name
 

@@ -92,20 +92,20 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Placeh
 	job := &slurmtypes.V0043JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
 	if jobId == "" {
-		return nil, nil
+		return &jobOut, nil
 	}
 
 	err := r.Get(ctx, jobId, job)
 	if err != nil {
 		if err.Error() == http.StatusText(http.StatusNotFound) {
-			return nil, nil
+			return &jobOut, nil
 		}
 		logger.Error(err, "could not get job for pod", "pod", klog.KObj(pod))
 		return nil, err
 	}
 
 	if job.GetStateAsSet().HasAny(v0043.V0043JobInfoJobStateCANCELLED, v0043.V0043JobInfoJobStateCOMPLETED) {
-		return nil, nil
+		return &jobOut, nil
 	}
 	logger.V(5).Info("found matching job")
 	jobOut.JobId = *job.JobId

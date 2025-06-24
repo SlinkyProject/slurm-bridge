@@ -283,7 +283,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				ctx: context.Background(),
 				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "3"}).Obj(),
 			},
-			want:    nil,
+			want:    &PlaceholderJob{},
 			wantErr: false,
 		},
 		{
@@ -314,7 +314,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				ctx: context.Background(),
 				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj(),
 			},
-			want:    nil,
+			want:    &PlaceholderJob{},
 			wantErr: false,
 		},
 		{

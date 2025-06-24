@@ -114,7 +114,7 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			if err != nil {
 				return err
 			}
-			val := int32(rs.Value())
+			val := int32(rs.Value()) //nolint:gosec // disable G115
 			slurmJobIR.JobInfo.CpuPerTask = &val
 		case wellknown.AnnotationJobName:
 			slurmJobIR.JobInfo.JobName = &value
@@ -132,7 +132,7 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 				return err
 			}
 			val := rs.Value()
-			val = val / 1048576
+			val /= 1048576 // value for 1024x1024 to follow what we need for slurm job IR
 			slurmJobIR.JobInfo.MemPerNode = &val
 		case wellknown.AnnotationMinNodes:
 			num, err := ConvStrTo32(value)

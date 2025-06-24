@@ -64,7 +64,7 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 	// If the pod had a placeholder job and now MinMember can no longer be satisfied because
 	// one or more pods were deleted after submitting the placeholder job, return an error
 	// to indicate placeholder job cleanup must occur.
-	if int32(numPodsWaiting) < podGroup.Spec.MinMember {
+	if numPodsWaiting < int(podGroup.Spec.MinMember) {
 		if pod.Labels[wellknown.LabelPlaceholderJobId] == "" {
 			return framework.NewStatus(framework.Error, ErrorInsuffientPods.Error())
 		} else {
@@ -111,7 +111,7 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 	}
 
 	if podGroup.Spec.MinResources.Cpu().Value() != 0 {
-		val := int32(podGroup.Spec.MinResources.Cpu().Value())
+		val := int32(podGroup.Spec.MinResources.Cpu().Value()) //nolint:gosec // disable G115
 		slurmJobIR.JobInfo.CpuPerTask = &val
 	}
 
@@ -119,7 +119,7 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 		slurmJobIR.JobInfo.MinNodes = &podGroup.Spec.MinMember
 	}
 
-	maxNodes := int32(len(slurmJobIR.Pods.Items))
+	maxNodes := int32(len(slurmJobIR.Pods.Items)) //nolint:gosec // disable G115
 	slurmJobIR.JobInfo.MaxNodes = &maxNodes
 	tasksPerNode := int32(1)
 	slurmJobIR.JobInfo.TasksPerNode = &tasksPerNode
