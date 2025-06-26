@@ -7,8 +7,9 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
   - role: worker
-    labels:
-      slinky.slurm.net/slurm-nodename: slurm-bridge-0
+  - role: worker
+  - role: worker
+  - role: worker
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -16,8 +17,6 @@ nodes:
           kubeletExtraArgs:
             register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
-    labels:
-      slinky.slurm.net/slurm-nodename: slurm-bridge-1
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -25,8 +24,6 @@ nodes:
           kubeletExtraArgs:
             register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
-    labels:
-      slinky.slurm.net/slurm-nodename: slurm-bridge-2
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -34,6 +31,23 @@ nodes:
           kubeletExtraArgs:
             register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
-  - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"

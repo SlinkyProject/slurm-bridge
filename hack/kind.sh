@@ -37,10 +37,6 @@ function sys::check() {
 		echo "'skaffold' is required: https://skaffold.dev/"
 		fail=true
 	fi
-	if ! command -v yq >/dev/null 2>&1; then
-		echo "'yq' is required: https://github.com/mikefarah/yq"
-		fail=true
-	fi
 	if ! command -v kubectl >/dev/null 2>&1; then
 		echo "'kubectl' is recommended: https://kubernetes.io/docs/reference/kubectl/"
 	fi
@@ -135,6 +131,7 @@ function slurm-bridge::helm() {
 
 function slurm-bridge::skaffold() {
 	slurm-bridge::prerequisites
+	slurm-bridge::nodes
 	(
 		make values-dev || true
 		cd "$ROOT_DIR/helm/slurm-bridge"
@@ -194,6 +191,25 @@ function slurm-bridge::prerequisites() {
 	kubectl create namespace slurm-bridge || true
 }
 
+function slurm-bridge::nodes() {
+	local partition="slurm-bridge"
+	if [ ! "$(kubectl exec -it -n slurm pods/slurm-controller-0 -- scontrol show partition=$partition >/dev/null 2>&1)" ]; then
+		kubectl exec -n slurm pods/slurm-controller-0 -- \
+			scontrol create partition="$partition"
+	fi
+	BRIDGE_NODES=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
+	echo "$BRIDGE_NODES" | while IFS= read -r node; do
+		cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
+		memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
+		kubectl exec -n slurm pods/slurm-controller-0 -- \
+			scontrol create nodename="$node" \
+			cpus="$cpus" RealMemory="${memory%Ki}" \
+			state=EXTERNAL
+	done
+	kubectl exec -n slurm pods/slurm-controller-0 -- \
+		scontrol update partitionname="$partition" nodes="$(echo "$BRIDGE_NODES" | paste -sd, -)"
+}
+
 function slurm::install() {
 	local version="0.3.0"
 
@@ -205,13 +221,9 @@ function slurm::install() {
 
 	local slurm="slurm"
 	if [ "$(helm list --all-namespaces --short --filter="^${slurm}$" | wc -l)" -eq 0 ]; then
-		local valuesFile="/tmp/values-$slurm.yaml"
-		curl -L "https://raw.githubusercontent.com/SlinkyProject/slurm-operator/refs/tags/v${version}/helm/$slurm/values.yaml" -o "$valuesFile"
-		yq -i '.compute.nodesets[0].name = "slurm-bridge"' "$valuesFile"
-		yq -i '.compute.nodesets[0].replicas = 3' "$valuesFile"
 		helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
 			--version="$version" --namespace=slurm --create-namespace --wait \
-			-f "$valuesFile"
+			--set "compute.nodesets[0].replicas=0"
 	fi
 }
 
