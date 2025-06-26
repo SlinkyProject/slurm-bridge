@@ -138,7 +138,6 @@ function slurm-bridge::skaffold() {
 	(
 		make values-dev || true
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		yq -i '.admission.managedNamespaces += "slurm-bridge"' values-dev.yaml
 		skaffold run -p dev
 	)
 }

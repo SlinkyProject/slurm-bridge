@@ -34,6 +34,10 @@ profiles:
         releases:
           - name: slurm-bridge
             chartPath: ./
+            setValues:
+              admission:
+                managedNamespaces:
+                  - slurm-bridge
             valuesFiles:
               - ./values-dev.yaml
             setValueTemplates:
