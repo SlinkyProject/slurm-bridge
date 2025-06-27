@@ -10,12 +10,34 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+func podWithResources(cpuRequest, memoryRequest, cpuLimit, memoryLimit string) corev1.Pod {
+	return corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse(cpuRequest),
+							corev1.ResourceMemory: resource.MustParse(memoryRequest),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse(cpuLimit),
+							corev1.ResourceMemory: resource.MustParse(memoryLimit),
+						},
+					},
+				},
+			},
+		},
+	}
+}
 
 func TestTranslateToSlurmJobIR(t *testing.T) {
 	podWithAnnotation := st.MakePod().Namespace("default").Name("testpod").Annotations(map[string]string{wellknown.AnnotationAccount: "test1", wellknown.AnnotationGroupId: "1000", wellknown.AnnotationUserId: "1000"}).Obj()
@@ -126,6 +148,96 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("TranslateToSlurmJobIR() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_parsePodsCpuAndMemory(t *testing.T) {
+	type args struct {
+		slurmJobIR *SlurmJobIR
+	}
+	tests := []struct {
+		name       string
+		args       args
+		cpuPerTask *int32
+		memPerNode *int64
+	}{
+		{
+			name: "No requests or limits set",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{{}},
+					},
+				},
+			},
+			cpuPerTask: nil,
+			memPerNode: nil,
+		},
+		{
+			name: "requests set",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithResources("1", "100Mi", "2", "200Mi"),
+						},
+					},
+					JobInfo: SlurmJobIRJobInfo{},
+				},
+			},
+			cpuPerTask: ptr.To(int32(2)),
+			memPerNode: ptr.To(int64(200)),
+		},
+		{
+			name: "requests set on multiple pods",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithResources("1", "100Mi", "2", "400Mi"),
+							{},
+							podWithResources("8", "100Mi", "2", "200Mi"),
+						},
+					},
+					JobInfo: SlurmJobIRJobInfo{},
+				},
+			},
+			cpuPerTask: ptr.To(int32(8)),
+			memPerNode: ptr.To(int64(400)),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsePodsCpuAndMemory(tt.args.slurmJobIR)
+			if !apiequality.Semantic.DeepEqual(tt.cpuPerTask, tt.args.slurmJobIR.JobInfo.CpuPerTask) {
+				var gotCpu, wantCpu interface{}
+				if tt.args.slurmJobIR.JobInfo.CpuPerTask != nil {
+					gotCpu = *tt.args.slurmJobIR.JobInfo.CpuPerTask
+				} else {
+					gotCpu = nil
+				}
+				if tt.cpuPerTask != nil {
+					wantCpu = *tt.cpuPerTask
+				} else {
+					wantCpu = nil
+				}
+				t.Errorf("parsePodsCpuAndMemory() CPU = %v, want %v", gotCpu, wantCpu)
+			}
+			if !apiequality.Semantic.DeepEqual(tt.memPerNode, tt.args.slurmJobIR.JobInfo.MemPerNode) {
+				var gotMem, wantMem interface{}
+				if tt.args.slurmJobIR.JobInfo.MemPerNode != nil {
+					gotMem = *tt.args.slurmJobIR.JobInfo.MemPerNode
+				} else {
+					gotMem = nil
+				}
+				if tt.memPerNode != nil {
+					wantMem = *tt.memPerNode
+				} else {
+					wantMem = nil
+				}
+				t.Errorf("parsePodsCpuAndMemory() Memory = %v, want %v", gotMem, wantMem)
 			}
 		})
 	}

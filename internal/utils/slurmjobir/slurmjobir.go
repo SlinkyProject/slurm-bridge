@@ -9,7 +9,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	resourcehelper "k8s.io/component-helpers/resource"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
@@ -92,8 +94,40 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 		return nil, err
 	}
 	slurmJobIR.RootPOM = *rootPOM
+	parsePodsCpuAndMemory(slurmJobIR)
 	err = parseAnnotations(slurmJobIR, rootPOM.Annotations)
 	return slurmJobIR, err
+}
+
+/* Set CPU and Memory for the placeholder job based on the maximum Pod CPU and Memory (including overhead) */
+func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
+	var cpuMax resource.Quantity
+	var memMax resource.Quantity
+	for _, p := range slurmJobIR.Pods.Items {
+		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
+		req := resourcehelper.PodRequests(&p, resourcehelper.PodResourcesOptions{})
+		if req.Cpu().Cmp(cpuMax) == 1 {
+			cpuMax = *req.Cpu()
+		}
+		if lim.Cpu().Cmp(cpuMax) == 1 {
+			cpuMax = *lim.Cpu()
+		}
+		if req.Memory().Cmp(memMax) == 1 {
+			memMax = *req.Memory()
+		}
+		if lim.Memory().Cmp(memMax) == 1 {
+			memMax = *lim.Memory()
+		}
+	}
+	// If either CPU or Memory is set to 0, use nil so Slurm will use the
+	// default values of the partition. Slurm does not support unbounded
+	// cpu or memory.
+	if cpuMax.Value() > 0 {
+		slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(cpuMax.Value())) //nolint:gosec
+	}
+	if memMax.Value() > 0 {
+		slurmJobIR.JobInfo.MemPerNode = ptr.To(GetMemoryFromQuantity(&memMax))
+	}
 }
 
 func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {

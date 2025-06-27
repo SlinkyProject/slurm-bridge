@@ -71,8 +71,6 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 ## Limitations
 
 - Exclusive, whole node allocations are made for each pod.
-- Annotations may be used to set CpusPerTask and MemoryPerNode for placeholder
-  jobs.
 
 ## Installation
 
