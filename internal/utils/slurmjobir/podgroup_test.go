@@ -289,7 +289,7 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 					},
 				},
 			},
-			want: framework.NewStatus(framework.Error, ErrorCouldNotGetPodGroup.Error()),
+			want: framework.NewStatus(framework.Error, ErrorPodGroupCouldNotGet.Error()),
 		},
 		{
 			name: "PodGroup phase is Failed",

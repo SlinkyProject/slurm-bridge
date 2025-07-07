@@ -4,9 +4,15 @@
 package slurmjobir
 
 import (
+	"errors"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+)
+
+var (
+	ErrorInsuffientPods        = errors.New("not enough pending pods to create placeholder job")
+	ErrorPlaceholderJobInvalid = errors.New("not enough pending pods for created placeholder job")
 )
 
 func ConvStrTo32(input string) (output *int32, err error) {

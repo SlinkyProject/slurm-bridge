@@ -20,13 +20,11 @@ var (
 	// Ref: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/kep/42-podgroup-coscheduling/README.md
 	podGroup_v1alpha1 = metav1.TypeMeta{APIVersion: "scheduling.x-k8s.io/v1alpha1", Kind: "PodGroup"}
 
-	ErrorCouldNotGetPodGroup   = errors.New("could not get podgroup")
-	ErrorInsuffientPods        = errors.New("not enough pending pods to satisfy MinMember")
-	ErrorPlaceholderJobInvalid = errors.New("not enough pending pods to satisfy MinMembers for Placeholder job")
-	ErrorPodGroupRunning       = errors.New("PodGroup status is Running")
-	ErrorPodGroupUnknown       = errors.New("PodGroup status is Unknown")
-	ErrorPodGroupFailed        = errors.New("PodGroup status is Failed")
-	ErrorPodGroupFinished      = errors.New("PodGroup status is Finished")
+	ErrorPodGroupCouldNotGet = errors.New("could not get podgroup")
+	ErrorPodGroupRunning     = errors.New("PodGroup status is Running")
+	ErrorPodGroupUnknown     = errors.New("PodGroup status is Unknown")
+	ErrorPodGroupFailed      = errors.New("PodGroup status is Failed")
+	ErrorPodGroupFinished    = errors.New("PodGroup status is Finished")
 )
 
 // PreFilter performs PodGroup specific PreFilter functions
@@ -34,7 +32,7 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 	podGroup := &sched.PodGroup{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.GetNamespace(), Name: slurmJobIR.RootPOM.GetName()}
 	if err := t.Get(t.ctx, key, podGroup); err != nil {
-		return framework.NewStatus(framework.Error, ErrorCouldNotGetPodGroup.Error())
+		return framework.NewStatus(framework.Error, ErrorPodGroupCouldNotGet.Error())
 	}
 
 	// If the PodGroup is in a state other than Running or Scheduling the pod will not
