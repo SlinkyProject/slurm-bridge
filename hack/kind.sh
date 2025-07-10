@@ -276,8 +276,8 @@ ONESHOT OPTIONS:
 OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
 	--bridge            Deploy slurm-bridge with skaffold.
-    --extras            Install optional dependencies (metrics, prometheus, keda).
-    --kjob              Install kjob CRDs and build kubectl-kjob
+	--extras            Install optional dependencies (metrics, prometheus, keda).
+	--kjob              Install kjob CRDs and build kubectl-kjob
 
 HELP OPTIONS:
 	--debug             Show script debug information.
