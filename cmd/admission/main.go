@@ -125,8 +125,10 @@ func main() {
 		os.Exit(1)
 	}
 	podAdmission := admission.PodAdmission{
-		ManagedNamespaces: cfg.ManagedNamespaces,
-		SchedulerName:     cfg.SchedulerName,
+		Client:                   mgr.GetClient(),
+		ManagedNamespaces:        cfg.ManagedNamespaces,
+		ManagedNamespaceSelector: cfg.ManagedNamespaceSelector,
+		SchedulerName:            cfg.SchedulerName,
 	}
 	if err := podAdmission.SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Pod")

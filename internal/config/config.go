@@ -4,7 +4,8 @@
 package config
 
 import (
-	yaml "gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v3"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -12,11 +13,12 @@ const (
 )
 
 type Config struct {
-	SchedulerName     string   `yaml:"schedulerName"`
-	SlurmRestApi      string   `yaml:"slurmRestApi"`
-	ManagedNamespaces []string `yaml:"managedNamespaces"`
-	MCSLabel          string   `yaml:"mcsLabel"`
-	Partition         string   `yaml:"partition"`
+	SchedulerName            string                `yaml:"schedulerName"`
+	SlurmRestApi             string                `yaml:"slurmRestApi"`
+	ManagedNamespaces        []string              `yaml:"managedNamespaces"`
+	ManagedNamespaceSelector *metav1.LabelSelector `yaml:"managedNamespaceSelector"`
+	MCSLabel                 string                `yaml:"mcsLabel"`
+	Partition                string                `yaml:"partition"`
 }
 
 func Unmarshal(in []byte) (*Config, error) {

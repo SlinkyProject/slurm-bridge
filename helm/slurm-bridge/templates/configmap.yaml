@@ -14,9 +14,14 @@ data:
   config.yaml: |
     schedulerName: {{ include "slurm-bridge.scheduler.name" . }}
     slurmRestApi: {{ .Values.sharedConfig.slurmRestApi }}
+    {{- if .Values.admission.managedNamespaceSelector }}
+    managedNamespaceSelector:
+      {{- toYaml .Values.admission.managedNamespaceSelector | nindent 6 }}
+    {{- else }}
     managedNamespaces:
     {{- range .Values.admission.managedNamespaces }}
       - {{ . }}
+    {{- end }}
     {{- end }}
     mcsLabel: {{ .Values.schedulerConfig.mcsLabel }}
     partition: {{ .Values.schedulerConfig.partition }}

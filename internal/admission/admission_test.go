@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -522,6 +523,105 @@ func TestPodAdmission_ValidateDelete(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("PodAdmission.ValidateDelete() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPodAdmission_NamespaceSelector(t *testing.T) {
+	tests := []struct {
+		name                     string
+		managedNamespaceSelector *metav1.LabelSelector
+		managedNamespaces        []string
+		namespace                *corev1.Namespace
+		pod                      *corev1.Pod
+		expectedManaged          bool
+	}{
+		{
+			name: "namespace matches selector",
+			managedNamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"managed": "true"},
+			},
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "managed-ns",
+					Labels: map[string]string{"managed": "true"},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "managed-ns",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: corev1.DefaultSchedulerName,
+				},
+			},
+			expectedManaged: true,
+		},
+		{
+			name: "namespace does not match selector",
+			managedNamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"managed": "true"},
+			},
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "unmanaged-ns",
+					Labels: map[string]string{"managed": "false"},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "unmanaged-ns",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: corev1.DefaultSchedulerName,
+				},
+			},
+			expectedManaged: false,
+		},
+		{
+			name:              "selector is nil, fallback to managedNamespaces",
+			managedNamespaces: []string{"managed-ns"},
+			namespace: &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "managed-ns",
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "managed-ns",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: corev1.DefaultSchedulerName,
+				},
+			},
+			expectedManaged: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().WithRuntimeObjects(tt.namespace).Build()
+			r := &PodAdmission{
+				Client:                   fakeClient,
+				SchedulerName:            SchedulerName,
+				ManagedNamespaces:        tt.managedNamespaces,
+				ManagedNamespaceSelector: tt.managedNamespaceSelector,
+			}
+
+			err := r.Default(context.TODO(), tt.pod)
+			if err != nil {
+				t.Fatalf("Default() returned an unexpected error: %v", err)
+			}
+
+			if tt.expectedManaged {
+				if tt.pod.Spec.SchedulerName != SchedulerName {
+					t.Errorf("expected scheduler name to be %q, but got %q", SchedulerName, tt.pod.Spec.SchedulerName)
+				}
+			} else {
+				if tt.pod.Spec.SchedulerName == SchedulerName {
+					t.Errorf("expected scheduler name not to be %q, but it was", SchedulerName)
+				}
 			}
 		})
 	}
