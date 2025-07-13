@@ -15,6 +15,7 @@ Helm Chart for using Slurm as a Kubernetes Scheduler
 | admission.enabled | bool | `true` |  Enables admission controller. |
 | admission.image.repository | string | `"ghcr.io/slinkyproject/slurm-bridge-admission"` |  Set the image repository to use. |
 | admission.image.tag | string | The Release appVersion. |  Set the image tag to use. |
+| admission.managedNamespaceSelector | object | `{}` |  A label selector to select namespaces to be monitored by the pod admission controller. If this is set, managedNamespaces will be ignored. Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors |
 | admission.managedNamespaces | list | `[]` |  List of namespaces to be monitored by the pod admission controller. Pods created in any of these namespaces will have their `.spec.schedulerName` changed to slurm-bridge. |
 | admission.nodeSelector | object | `{}` |  |
 | admission.priorityClassName | string | `""` |  Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |

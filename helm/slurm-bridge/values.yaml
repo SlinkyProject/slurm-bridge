@@ -162,6 +162,12 @@ admission:
   managedNamespaces: []
     # - managedNamespace1
     # - managedNamespace2
+  #
+  # -- (object)
+  # A label selector to select namespaces to be monitored by the pod admission controller.
+  # If this is set, managedNamespaces will be ignored.
+  # Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
+  managedNamespaceSelector: {}
 
 #
 # Configuration settings for the controllers.

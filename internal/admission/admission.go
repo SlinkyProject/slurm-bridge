@@ -10,17 +10,21 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 type PodAdmission struct {
-	SchedulerName     string
-	ManagedNamespaces []string `yaml:"managedNamespaces"`
+	client.Client
+	SchedulerName            string
+	ManagedNamespaces        []string
+	ManagedNamespaceSelector *metav1.LabelSelector
 }
 
 func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -42,7 +46,11 @@ func (r *PodAdmission) Default(ctx context.Context, obj runtime.Object) error {
 		return fmt.Errorf("expected a Pod but got a %T", obj)
 	}
 	logger.V(1).Info("Defaulting", "pod", klog.KObj(pod), "pod.Spec.SchedulerName", pod.Spec.SchedulerName)
-	if !r.isManagedNamespace(pod.Namespace) {
+	isManaged, err := r.isManagedNamespace(ctx, pod.Namespace)
+	if err != nil {
+		return err
+	}
+	if !isManaged {
 		return nil
 	}
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
@@ -62,7 +70,11 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, obj runtime.Object) (
 		return nil, fmt.Errorf("expected a Pod but got a %T", obj)
 	}
 	logger.V(1).Info("ValidateCreate", "pod", klog.KObj(pod))
-	if !r.isManagedNamespace(pod.Namespace) {
+	isManaged, err := r.isManagedNamespace(ctx, pod.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	if !isManaged {
 		return nil, nil
 	}
 	if pod.Labels[wellknown.LabelPlaceholderJobId] != "" {
@@ -79,7 +91,11 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldObj runtime.Object
 	newPod := newObj.(*corev1.Pod)
 	oldPod := oldObj.(*corev1.Pod)
 	logger.V(1).Info("ValidateUpdate", "newPod", klog.KObj(newPod), "oldPod", klog.KObj(oldPod))
-	if !r.isManagedNamespace(newPod.Namespace) {
+	isManaged, err := r.isManagedNamespace(ctx, newPod.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	if !isManaged {
 		return nil, nil
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
@@ -102,6 +118,22 @@ func (r *PodAdmission) ValidateDelete(ctx context.Context, obj runtime.Object) (
 	return nil, nil
 }
 
-func (r *PodAdmission) isManagedNamespace(namespace string) bool {
-	return slices.Contains(r.ManagedNamespaces, namespace)
+func (r *PodAdmission) isManagedNamespace(ctx context.Context, namespace string) (bool, error) {
+	if r.ManagedNamespaceSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(r.ManagedNamespaceSelector)
+		if err != nil {
+			return false, fmt.Errorf("error creating label selector: %w", err)
+		}
+		nsList := &corev1.NamespaceList{}
+		if err := r.List(ctx, nsList, &client.ListOptions{LabelSelector: selector}); err != nil {
+			return false, fmt.Errorf("error listing namespaces: %w", err)
+		}
+		for _, ns := range nsList.Items {
+			if ns.Name == namespace {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return slices.Contains(r.ManagedNamespaces, namespace), nil
 }

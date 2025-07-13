@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestUnmarshal(t *testing.T) {
@@ -76,6 +77,22 @@ func TestUnmarshal(t *testing.T) {
 			},
 			want: &Config{
 				Partition: "slurm-bridge",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Test managedNamespaceSelector",
+			args: args{
+				in: []byte(`
+managedNamespaceSelector:
+  matchLabels:
+    slurm-bridge: managed
+`),
+			},
+			want: &Config{
+				ManagedNamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"slurm-bridge": "managed"},
+				},
 			},
 			wantErr: false,
 		},

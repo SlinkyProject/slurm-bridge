@@ -24,7 +24,9 @@ Any pods created in certain namespaces will have their `.spec.schedulerName`
 changed to our [scheduler].
 
 Managed namespaces are defined as a list of namespace as configured in the
-admission controller's `values.yaml` for `managedNamespaces[]`.
+admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
+`managedNamespaceSelector` can be used to select namespaces based on labels. If
+`managedNamespaceSelector` is set, `managedNamespaces` will be ignored.
 
 ### Sequence Diagram
 
