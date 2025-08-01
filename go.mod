@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
-	github.com/SlinkyProject/slurm-client v0.2.0-20250324092609-984a7d1e6dd9.0.20250604195907-a1a2d827c799
+	github.com/SlinkyProject/slurm-client v0.3.1-20250801102150-043094ce1e4e
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
 	github.com/puttsk/hostlist v0.1.0

@@ -27,4 +27,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Changed slurm-client version to 0.3.1
+- Changed references from V0041 to V0043 data parser in pod controller
+
 ### Removed

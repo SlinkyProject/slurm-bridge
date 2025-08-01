@@ -133,15 +133,15 @@ func (r *PodReconciler) setupInternal() {
 
 func (r *PodReconciler) setupEventHandler() {
 	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0041JobInfo)
+	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0043JobInfo)
 	if informer == nil {
 		return
 	}
 	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0041JobInfo)
+			job, ok := obj.(*slurmtypes.V0043JobInfo)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0041JobInfo"), "failed to cast object")
+				logger.Error(fmt.Errorf("expected V0043JobInfo"), "failed to cast object")
 				return
 			}
 			// Ignore event if a placeholderInfo struct can not be parsed
@@ -153,14 +153,14 @@ func (r *PodReconciler) setupEventHandler() {
 			r.generatePodEvents(jobId, true)
 		},
 		UpdateFunc: func(oldObj, newObj any) {
-			jobOld, ok := oldObj.(*slurmtypes.V0041JobInfo)
+			jobOld, ok := oldObj.(*slurmtypes.V0043JobInfo)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0041JobInfo"), "failed to cast old object")
+				logger.Error(fmt.Errorf("expected V0043JobInfo"), "failed to cast old object")
 				return
 			}
-			jobNew, ok := newObj.(*slurmtypes.V0041JobInfo)
+			jobNew, ok := newObj.(*slurmtypes.V0043JobInfo)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0041JobInfo"), "failed to cast new object")
+				logger.Error(fmt.Errorf("expected V0043JobInfo"), "failed to cast new object")
 				return
 			}
 			// Ignore event if a placeholderInfo struct can not be parsed
@@ -174,9 +174,9 @@ func (r *PodReconciler) setupEventHandler() {
 			}
 		},
 		DeleteFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0041JobInfo)
+			job, ok := obj.(*slurmtypes.V0043JobInfo)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0041JobInfo"), "failed to cast object")
+				logger.Error(fmt.Errorf("expected V0043JobInfo"), "failed to cast object")
 				return
 			}
 			// Ignore event if a placeholderInfo struct can not be parsed
