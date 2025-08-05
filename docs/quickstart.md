@@ -84,10 +84,10 @@ kubectl create secret generic slurm-bridge-jwt-token --namespace=slinky --from-l
 Download values and install the `slurm-bridge` from OCI package:
 
 ```bash
-curl -L https://raw.githubusercontent.com/SlinkyProject/slurm-bridge/refs/tags/v0.3.0/helm/slurm-bridge/values.yaml \
+curl -L https://raw.githubusercontent.com/SlinkyProject/slurm-bridge/refs/tags/v0.3.1/helm/slurm-bridge/values.yaml \
   -o values-bridge.yaml
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
-  --values=values-bridge.yaml --version=0.3.0 --namespace=slinky --create-namespace
+  --values=values-bridge.yaml --version=0.3.1 --namespace=slinky --create-namespace
 ```
 
 **NOTE**: `slurm-bridge` must be able to communicate with Slurm REST API. By

@@ -6,21 +6,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Added support for LeaderWorkerSet
-- Added support for setting placeholder UserId and GroupId
-- Added managedNamespaceSelector to the admission controller
-
 ### Fixed
 
 ### Changed
 
 ### Removed
 
-## v0.3.0
+## v0.3.1
 
 ### Added
 
-- Initial project release.
+- Added support for LeaderWorkerSet
+- Added managedNamespaceSelector to the admission controller
+- Added support for setting placeholder UserId and GroupId
 
 ### Fixed
 
@@ -32,5 +30,17 @@ All notable changes to this project will be documented in this file.
 - Changed slurm-client version to 0.3.1
 - Changed references from V0041 to V0043 data parser in pod controller
 - Changed kind.sh to use Slurm dynamic nodes
+
+### Removed
+
+## v0.3.0
+
+### Added
+
+- Initial project release.
+
+### Fixed
+
+### Changed
 
 ### Removed

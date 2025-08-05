@@ -1,6 +1,6 @@
 ##@ General
 
-VERSION ?= 0.3.0
+VERSION ?= 0.3.1
 
 # Image URL to use all building/pushing image targets
 

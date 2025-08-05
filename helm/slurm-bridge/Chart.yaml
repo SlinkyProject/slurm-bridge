@@ -7,4 +7,4 @@ appVersion: "25.05"
 description: Helm Chart for using Slurm as a Kubernetes Scheduler
 name: slurm-bridge
 type: application
-version: 0.3.0
+version: 0.3.1

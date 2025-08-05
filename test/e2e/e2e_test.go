@@ -15,7 +15,7 @@ import (
 const (
 	namespace = "slurm-bridge-system"
 	domain    = "slinky.slurm.net"
-	version   = "0.3.0"
+	version   = "0.3.1"
 
 	operatorDF = "build/operator/Dockerfile"
 )
