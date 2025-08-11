@@ -28,7 +28,7 @@ purposes. Slurm becomes the source of truth for scheduling among managed nodes.
 A managed node is defined as a node that has a colocated `kubelet` and `slurmd`
 on the same physical host, and the slurm-bridge can schedule on.
 
-```{mermaid}
+```mermaid
 sequenceDiagram
   autonumber
 
@@ -63,7 +63,7 @@ sequenceDiagram
 The workload controller reconciles Kubernetes Pods and Slurm Jobs. Slurm is the
 source of truth for what workload is allowed to run on which managed nodes.
 
-```{mermaid}
+```mermaid
 sequenceDiagram
   autonumber
 

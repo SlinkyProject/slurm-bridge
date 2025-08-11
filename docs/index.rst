@@ -1,102 +1,157 @@
-   Download the slurm-bridge repository
-   `here <https://github.com/SlinkyProject/slurm-bridge>`__, start using
-   bridge with the `quickstart guide <quickstart.html>`__, or read on
-   to learn more.
+Slurm Bridge
+============
 
-Slurm-bridge
-================================
+.. container::
+
+   |License| |Tag| |Go-Version| |Last-Commit|
+
+Run `Slurm <https://slurm.schedmd.com/overview.html>`__ as a
+`Kubernetes <https://kubernetes.io/>`__ scheduler. A
+`Slinky <https://slinky.ai/>`__ project.
+
+Table of Contents
+-----------------
+
+.. raw:: html
+
+   <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
+
+- `Slurm Bridge <#slurm-bridge>`__
+
+  - `Table of Contents <#table-of-contents>`__
+  - `Overview <#overview>`__
+  - `Features <#features>`__
+
+    - `Slurm <#slurm>`__
+
+  - `Requirements <#requirements>`__
+  - `Limitations <#limitations>`__
+  - `Installation <#installation>`__
+  - `Documentation <#documentation>`__
+  - `License <#license>`__
+
+.. raw:: html
+
+   <!-- mdformat-toc end -->
+
+Overview
+--------
 
 `Slurm <https://slurm.schedmd.com/overview.html>`__ and
 `Kubernetes <https://kubernetes.io/>`__ are workload managers originally
-designed for different kinds of workloads. Kubernetes excels at
-scheduling workloads that run for an indefinite amount of time, with
-potentially vague resource requirements, on a single node, with loose
-policy, but can scale its resource pool infinitely to meet demand; Slurm
-excels at quickly scheduling workloads that run for a finite amount of
-time, with well defined resource requirements and topology, on multiple
-nodes, with strict policy, and a known resource pool.
+designed for different kinds of workloads. In broad strokes: Kubernetes
+excels at scheduling workloads that typically run for an indefinite
+amount of time, with potentially vague resource requirements, on a
+single node, with loose policy, but can scale its resource pool
+infinitely to meet demand; Slurm excels at quickly scheduling workloads
+that run for a finite amount of time, with well defined resource
+requirements and topology, on multiple nodes, with strict policy, but
+its resource pool is known.
 
-Why you need ``slurm-bridge`` and what it can do
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
---------------
-
-This project enables users to take advantage of the best features of
-both workload managers. It contains a
+This project enables the best of both workload managers. It contains a
 `Kubernetes <https://kubernetes.io/>`__ scheduler to manage select
-workloads from Kubernetes, which allows for co-location of Kubernetes
-and Slurm workloads within the same cluster. This means the same
-hardware can be used to run both traditional HPC and cloud-like
-workloads, reducing operating costs.
-
-Using ``slurm-bridge``, workloads can be submitted from within a
-Kubernetes context as a ``Pod``, ``PodGroup``, ``Job``, or ``JobSet``,
-or from a Slurm context using ``salloc`` or ``sbatch``. Workloads
-submitted via Slurm will execute as they would in a Slurm-only
-environment, using ``slurmd``. Workloads submitted from Kubernetes will
-have their resource requirements translated into a representative Slurm
-job by ``slurm-bridge``. That job will serve as a placeholder and will
-be scheduled by the Slurm controller. Upon resource allocation to a K8s
-workload by the Slurm controller, ``slurm-bridge`` will bind the
-workload’s pod(s) to the allocated node(s). At that point, the kubelet
-will launch and run the pod the same as it would within a standard
-Kubernetes instance.
-
-.. image:: _static/images/slurm-bridge_big-picture.svg
-   :width: 80%
-   :align: center
+workload from Kubernetes.
 
 For additional architectural notes, see the
 `architecture <architecture.html>`__ docs.
 
 Features
-~~~~~~~~
+--------
 
---------------
+Slurm
+~~~~~
 
-``slurm-bridge`` enables scheduling of Kubernetes workloads using the
-Slurm scheduler, and can take advantage of most of the scheduling
-features of `Slurm <https://slurm.schedmd.com/overview.html>`__ itself.
-These include:
+Slurm is a full featured HPC workload manager. To highlight a few
+features:
 
--  `Priority <https://slurm.schedmd.com/priority_multifactor.html>`__:
-   assigns priorities to jobs upon submission and on an ongoing basis
-   (e.g. as they age).
--  `Preemption <https://slurm.schedmd.com/preempt.html>`__: stop one or
-   more low-priority jobs to let a high-priority job run.
--  `QoS <https://slurm.schedmd.com/qos.html>`__: sets of policies
-   affecting scheduling priority, preemption, and resource limits.
--  `Fairshare <https://slurm.schedmd.com/fair_tree.html>`__: distribute
-   resources equitably among users and accounts based on historical
-   usage.
--  `Reservations <https://slurm.schedmd.com/reservations.html>`__:
-   reserve resources for select users or groups
+- `Priority <https://slurm.schedmd.com/priority_multifactor.html>`__:
+  assigns priorities to jobs upon submission and on an ongoing basis
+  (e.g. as they age).
+- `Preemption <https://slurm.schedmd.com/preempt.html>`__: stop one or
+  more low-priority jobs to let a high-priority job run.
+- `QoS <https://slurm.schedmd.com/qos.html>`__: sets of policies
+  affecting scheduling priority, preemption, and resource limits.
+- `Fairshare <https://slurm.schedmd.com/fair_tree.html>`__: distribute
+  resources equitably among users and accounts based on historical
+  usage.
 
-Supported Versions
-~~~~~~~~~~~~~~~~~~
+Requirements
+------------
 
---------------
+- **Kubernetes Version**: >=
+  `v1.29 <https://kubernetes.io/blog/2023/12/13/kubernetes-v1-29-release/>`__
+- **Slurm Version**: >=
+  `25.05 <https://www.schedmd.com/slurm-version-25-05-0-is-now-available/>`__
 
--  Kubernetes Version: >= v1.29
--  Slurm Version: >= 25.05
+Limitations
+-----------
 
-Current Limitations
-~~~~~~~~~~~~~~~~~~~
+- Exclusive, whole node allocations are made for each pod.
 
---------------
+Installation
+------------
 
--  Exclusive, whole node allocations are made for each pod.
+Create a secret for slurm-bridge to communicate with Slurm.
 
---------------
+.. code:: sh
 
-Get started using ``slurm-bridge`` with the `quickstart guide <quickstart.html>`__!
+   export SLURM_JWT=$(scontrol token username=slurm lifespan=infinite)
+   kubectl create namespace slurm-bridge
+   kubectl create secret generic slurm-bridge-jwt-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+
+Install the slurm-bridge scheduler:
+
+.. code:: sh
+
+   helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
+     --namespace=slinky --create-namespace
+
+For additional instructions, see the
+`quickstart <quickstart.html>`__ guide.
+
+Documentation
+-------------
+
+Project documentation is located in the `docs <./docs/>`__ directory of
+this repository.
+
+Slinky documentation can be found
+`here <https://slinky.schedmd.com/docs/>`__.
+
+License
+-------
+
+Copyright (C) SchedMD LLC.
+
+Licensed under the `Apache License, Version
+2.0 <http://www.apache.org/licenses/LICENSE-2.0>`__ you may not use
+project except in compliance with the license.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an “AS IS” BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+.. raw:: html
+
+   <!-- Links -->
+
+.. |License| image:: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge
+   :target: ./LICENSES/Apache-2.0.txt
+.. |Tag| image:: https://img.shields.io/github/v/tag/SlinkyProject/slurm-bridge?style=for-the-badge
+   :target: https://github.com/SlinkyProject/slurm-bridge/tags/
+.. |Go-Version| image:: https://img.shields.io/github/go-mod/go-version/SlinkyProject/slurm-bridge?style=for-the-badge
+   :target: ./go.mod
+.. |Last-Commit| image:: https://img.shields.io/github/last-commit/SlinkyProject/slurm-bridge?style=for-the-badge
+   :target: https://github.com/SlinkyProject/slurm-bridge/commits/
 
 .. toctree::
-   :maxdepth: 1
-   :caption: Documentation
+    :maxdepth: 2
+    :hidden:
 
-   admission <admission.html>
-   architecture <architecture.html>
-   controllers <controllers.html>
-   quickstart <quickstart.html>
-   scheduler <scheduler.html>
+    admission.md
+    architecture.md
+    controllers.md
+    quickstart.md
+    scheduler.md

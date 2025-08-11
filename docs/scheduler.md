@@ -28,7 +28,7 @@ correctly.
 
 ### Sequence Diagram
 
-```{mermaid}
+```mermaid
 sequenceDiagram
   autonumber
 

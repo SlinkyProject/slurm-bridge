@@ -42,7 +42,7 @@ resource pool is known.
 This project enables the best of both workload managers. It contains a
 [Kubernetes] scheduler to manage select workload from Kubernetes.
 
-<img src="./docs/assets/slurm-bridge_big-picture.svg" alt="Slurm Bridge Architecture" width="100%" height="auto" />
+<img src="./docs/_static/images/slurm-bridge_big-picture.svg" alt="Slurm Bridge Architecture" width="100%" height="auto" />
 
 For additional architectural notes, see the [architecture] docs.
 

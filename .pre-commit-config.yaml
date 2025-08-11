@@ -114,6 +114,12 @@ repos:
         language: system
         require_serial: true
         pass_filenames: false
+      - id: make-generate-docs
+        name: Make Generate Docs
+        entry: make generate-docs
+        language: system
+        pass_filenames: false
+        require_serial: true
       - id: make-tests
         name: Make Tests
         entry: make test

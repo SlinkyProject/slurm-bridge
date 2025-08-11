@@ -36,7 +36,7 @@ launch the pod instead of `slurmd`.
 
 ## Pod Flowchart
 
-![Pod Flowchart](./assets/slurm-bridge_pod-flowchart.svg)
+![Pod Flowchart](./_static/images/slurm-bridge_pod-flowchart.svg)
 
 The above diagram represents the process of scheduling a pod with Slurm through
 the following sequence:

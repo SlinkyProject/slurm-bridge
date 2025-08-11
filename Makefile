@@ -133,6 +133,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
 GOVULNCHECK ?= $(LOCALBIN)/govulncheck-$(GOVULNCHECK_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 HELM_DOCS ?= $(LOCALBIN)/helm-docs-$(HELM_DOCS_VERSION)
+PANDOC ?= $(LOCALBIN)/pandoc-$(PANDOC_VERSION)
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.3.0
@@ -141,6 +142,7 @@ ENVTEST_VERSION ?= release-0.21
 GOVULNCHECK_VERSION ?= latest
 GOLANGCI_LINT_VERSION ?= v2.1.6
 HELM_DOCS_VERSION ?= v1.14.2
+PANDOC_VERSION ?= 3.7.0.2
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -172,6 +174,21 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 helm-docs-bin: $(HELM_DOCS) ## Download helm-docs locally if necessary.
 $(HELM_DOCS): $(LOCALBIN)
 	$(call go-install-tool,$(HELM_DOCS),github.com/norwoodj/helm-docs/cmd/helm-docs,$(HELM_DOCS_VERSION))
+
+.PHONY: pandoc-bin
+pandoc-bin: $(PANDOC) ## Download pandoc locally if necessary.
+$(PANDOC): $(LOCALBIN)
+	@if ! [ -f "$(PANDOC)" ]; then \
+		if [ "$(shell go env GOOS)" != "darwin" ]; then \
+			curl -sSLo $(PANDOC).tar.gz https://github.com/jgm/pandoc/releases/download/$(PANDOC_VERSION)/pandoc-$(PANDOC_VERSION)-$(shell go env GOOS)-$(shell go env GOARCH).tar.gz ;\
+			tar xv --directory=$(LOCALBIN) --file=$(PANDOC).tar.gz pandoc-$(PANDOC_VERSION)/bin/pandoc --strip-components=2 ;\
+		else \
+			curl -sSLo $(PANDOC).zip https://github.com/jgm/pandoc/releases/download/$(PANDOC_VERSION)/pandoc-$(PANDOC_VERSION)-$(shell go env GOARCH)-macOS.zip ;\
+			unzip -oqqjd $(LOCALBIN) $(PANDOC).zip ;\
+		fi ;\
+		mv $(LOCALBIN)/pandoc $(PANDOC) ;\
+		rm -f $(PANDOC).tar.gz $(PANDOC).zip ;\
+	fi
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
@@ -240,6 +257,25 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 	go generate ./...
+
+.PHONY: generate-docs
+generate-docs: pandoc-bin
+	$(PANDOC) --quiet README.md -o docs/index.rst
+	cat ./docs/_static/toc.rst >> docs/index.rst
+	printf '\n' >> docs/index.rst
+	find docs -type f -name "*.md" -exec basename {} \; | awk '{print "    "$$1}' | env LC_ALL=C sort >> docs/index.rst
+	sed -i -E '/<.\/docs\/[A-Za-z]*.md/s/.\/docs\///g' docs/index.rst
+	sed -i -E '/<[A-Za-z]*.md>`/s/.md>/.html>/g' docs/index.rst
+
+DOCS_IMAGE ?= $(REGISTRY)/sphinx
+
+.PHONY: build-docs
+build-docs: ## Build the container image used to develop the docs
+	$(CONTAINER_TOOL) build -t $(DOCS_IMAGE) ./docs
+
+.PHONY: run-docs
+run-docs: build-docs ## Run the container image for docs development
+	$(CONTAINER_TOOL) run --rm --network host -v ./docs:/docs:z $(DOCS_IMAGE) sphinx-autobuild --port 8000 /docs /build/html
 
 .PHONY: clean
 clean: ## Clean files.

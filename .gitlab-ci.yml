@@ -40,7 +40,7 @@ test:
   script:
     - set -euo pipefail
     - apk update && apk upgrade
-    - apk add --no-cache make bash shellcheck shfmt pre-commit
+    - apk add --no-cache make bash shellcheck shfmt pre-commit curl
     - pre-commit run --verbose --all-files --show-diff-on-failure
   coverage: /total:\s+\(statements\)\s+\d+.\d+%/
   artifacts:
