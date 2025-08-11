@@ -89,14 +89,14 @@ Current Limitations
 
 --------------
 
-Get started using ``slurm-bridge`` with the `quickstart guide <quickstart.md>`__!
+Get started using ``slurm-bridge`` with the `quickstart guide <quickstart.html>`__!
 
 .. toctree::
    :maxdepth: 1
    :caption: Documentation
 
-   admission <admission.md>
-   architecture <architecture.md>
-   controllers <controllers.md>
-   quickstart <quickstart.md>
-   scheduler <scheduler.md>
+   admission <admission.html>
+   architecture <architecture.html>
+   controllers <controllers.html>
+   quickstart <quickstart.html>
+   scheduler <scheduler.html>

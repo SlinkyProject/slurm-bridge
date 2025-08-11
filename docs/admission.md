@@ -30,7 +30,7 @@ admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
 
 ### Sequence Diagram
 
-```mermaid
+```{mermaid}
 sequenceDiagram
   autonumber
 
