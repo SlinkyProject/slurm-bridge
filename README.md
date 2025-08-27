@@ -117,7 +117,7 @@ specific language governing permissions and limitations under the License.
 [kubernetes]: https://kubernetes.io/
 [quickstart]: ./docs/quickstart.md
 [slinky]: https://slinky.ai/
-[slinky-docs]: https://slinky.schedmd.com/docs/
+[slinky-docs]: https://slinky.schedmd.com/
 [slurm]: https://slurm.schedmd.com/overview.html
 [slurm-fairshare]: https://slurm.schedmd.com/fair_tree.html
 [slurm-preempt]: https://slurm.schedmd.com/preempt.html
