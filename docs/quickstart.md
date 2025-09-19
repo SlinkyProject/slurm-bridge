@@ -93,7 +93,6 @@ EOF
 ```
 
 > [!NOTE]
->
 > A long lifetime is used as `slurm-bridge` does not automatically restart when
 > the secret is refreshed. This is a limitation that will be addressed in a
 > subsequent release.
@@ -142,7 +141,6 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 ```
 
 > [!NOTE]
->
 > `slurm-bridge` must be able to communicate with Slurm REST API. By default, it
 > assumes a default Slurm chart installation and uses
 > http://slurm-restapi.slurm:6820.

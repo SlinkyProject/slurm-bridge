@@ -134,7 +134,6 @@ LeaderWorkerSet groups will be co-scheduled so pods of each group will be
 guaranteed to launch together.
 
 > [!NOTE]
->
 > Topology-aware placement is not supported yet, so some features of
 > LeaderWorkerSet may not behave as expected.
 
