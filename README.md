@@ -57,7 +57,7 @@ the workload's pod(s) to the allocated node(s). At that point, the kubelet will
 launch and run the pod the same as it would within a standard Kubernetes
 instance
 
-<img src="./docs/_static/images/slurm-bridge_big-picture.svg" alt="Slurm Bridge Architecture" width="100%" height="auto" />
+!["Slurm Bridge Architecture"](./docs/_static/images/slurm-bridge_big-picture.svg)
 
 For additional architectural notes, see the [architecture] docs.
 

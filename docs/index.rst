@@ -68,6 +68,11 @@ will bind the workload’s pod(s) to the allocated node(s). At that point,
 the kubelet will launch and run the pod the same as it would within a
 standard Kubernetes instance
 
+.. figure:: _static/images/slurm-bridge_big-picture.svg
+   :alt: “Slurm Bridge Architecture”
+
+   “Slurm Bridge Architecture”
+
 For additional architectural notes, see the
 `architecture <architecture.html>`__ docs.
 
