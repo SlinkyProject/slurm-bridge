@@ -174,6 +174,10 @@ function slurm-bridge::prerequisites() {
 				--namespace "$keda" --create-namespace
 		fi
 	fi
+	if $FLAG_DRA; then
+		dra-example-driver::install
+	fi
+
 	slurm::install
 	slurm-bridge::secret
 	kubectl create namespace slurm-bridge || true
@@ -191,19 +195,33 @@ function slurm-bridge::nodes() {
 		kubectl exec -n slurm pods/slurm-controller-0 -- \
 			scontrol create partition="$partition"
 	fi
-	BRIDGE_NODES=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
-	echo "$BRIDGE_NODES" | while IFS= read -r node; do
-		cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
-		memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
-		if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
-			kubectl exec -n slurm pods/slurm-controller-0 -- \
-				scontrol create nodename="$node" \
-				cpus="$cpus" RealMemory="${memory%Ki}" \
-				state=EXTERNAL
-		fi
-	done
-	kubectl exec -n slurm pods/slurm-controller-0 -- \
-		scontrol update partitionname="$partition" nodes="$(echo "$BRIDGE_NODES" | paste -sd, -)"
+	if $FLAG_EXTERNAL; then
+		local bridge_nodes
+		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
+		echo "$bridge_nodes" | while IFS= read -r node; do
+			local cpus memory
+			cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
+			memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
+			if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
+				kubectl exec -n slurm pods/slurm-controller-0 -- \
+					scontrol create nodename="$node" state=external \
+					cpus="$cpus" realmemory="${memory%Ki}" \
+					gres="gpu:gpu.example.com:8" \
+					gresconf=count=8,name=gpu,type=gpu.example.com,file=/home/dev/gpu0
+			fi
+		done
+		kubectl exec -n slurm pods/slurm-controller-0 -- \
+			scontrol update partitionname="$partition" nodes="$(echo "$bridge_nodes" | paste -sd, -)"
+	else
+		kubectl get pods -n slurm -l nodeset.slinky.slurm.net/name=slurm-worker-slurm-bridge \
+			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}" | while read -r node hostname; do
+			if [[ -n $node && -n $hostname ]]; then
+				kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname"
+			else
+				echo "Skipping node as one or both of 'node'/'hostname' is not set" >&2
+			fi
+		done
+	fi
 }
 
 function slurm::install() {
@@ -218,9 +236,18 @@ function slurm::install() {
 
 	local slurm="slurm"
 	if [ "$(helm list --all-namespaces --short --filter="^${slurm}$" | wc -l)" -eq 0 ]; then
-		helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
-			--version="$version" --namespace=slurm --create-namespace --wait \
-			--set "nodesets.slinky.enabled=false"
+		if $FLAG_EXTERNAL; then
+			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
+				--version="$version" --namespace=slurm --create-namespace --wait \
+				--set 'controller.slurmctld.image.tag=25.11-ubuntu24.04' \
+				--set 'controller.reconfigure.image.tag=25.11-ubuntu24.04' \
+				--set 'restapi.slurmrestd.image.tag=25.11-ubuntu24.04' \
+				--set "nodesets.slinky.enabled=false"
+		else
+			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
+				--version="$version" --namespace=slurm --create-namespace --wait \
+				-f "${SCRIPT_DIR}/slurm-bridge-nodes.yaml"
+		fi
 	fi
 }
 
@@ -244,12 +271,43 @@ function kjob::install() {
 	echo -e "sudo cp ${SCRIPT_DIR}/kubectl-kjob /usr/local/bin/kubectl-kjob\n"
 }
 
+function dra-example-driver::install() {
+	local version="0.2.0"
+	local dra_path
+	dra_path=$(mktemp -d)
+	git clone -b "v${version}" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
+	(
+		cd "$dra_path"
+
+		# Build DRA images and load them into kind cluster.
+		export KIND_CLUSTER_NAME="kind"
+		./demo/build-driver.sh
+
+		# Install with selectors and tolerations for slurm-bridge.
+		local helm_chart="./deployments/helm/dra-example-driver/"
+		cd $helm_chart
+		cat <<EOF >./values-dev.yaml
+kubeletPlugin:
+  nodeSelector:
+    scheduler.slinky.slurm.net/slurm-bridge: "worker"
+  tolerations:
+    - key: "slinky.slurm.net/managed-node"
+      operator: "Equal"
+      value: "slurm-bridge-scheduler"
+      effect: "NoExecute"
+EOF
+		helm upgrade -i --create-namespace --namespace dra-example-driver \
+			-f values.yaml -f values-dev.yaml \
+			dra-example-driver .
+	)
+}
+
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--create|--delete] [--config=KIND_CONFIG_PATH]
-	        [--install|--uninstall] [--extras] [--kjob]
+	        [--install|--uninstall] [--extras] [--kjob] [--dra-example]
 	        [-h|--help] [KIND_CLUSTER_NAME]
 
 ONESHOT OPTIONS:
@@ -262,6 +320,7 @@ OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--kjob              Install kjob CRDs and build kubectl-kjob
+	--dra-example       Install DRA example driver
 
 HELP OPTIONS:
 	--debug             Show script debug information.
@@ -305,10 +364,12 @@ FLAG_DELETE=false
 FLAG_INSTALL=false
 FLAG_UNINSTALL=false
 FLAG_EXTRAS=false
+FLAG_DRA=false
 FLAG_KJOB=false
+FLAG_EXTERNAL=true
 
 SHORT="+h"
-LONG="create,config:,delete,debug,helm,bridge,install,extras,kjob,uninstall,help"
+LONG="create,config:,delete,debug,helm,bridge,install,extras,kjob,dra-example,uninstall,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -351,6 +412,10 @@ while :; do
 		;;
 	--kjob)
 		FLAG_KJOB=true
+		shift
+		;;
+	--dra-example)
+		FLAG_DRA=true
 		shift
 		;;
 	--uninstall)
