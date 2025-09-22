@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Update kubeVersion parsing to handle provider suffixes (e.g., GKE
+  x.y.z-gke.a).
+
 ### Changed
 
 ### Removed
