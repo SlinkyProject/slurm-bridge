@@ -18,7 +18,7 @@ Slurm as a Kubernetes Scheduler
 
 ## Requirements
 
-Kubernetes: `>= 1.29`
+Kubernetes: `>= 1.29.0-0`
 
 ## Values
 
