@@ -230,4 +230,4 @@ sharedConfig:
   #
   # -- (string)
   # The secret containing a SLURM_JWT token for authentication.
-  slurmJwtSecret: slurm-bridge-jwt-token
+  slurmJwtSecret: slurm-bridge-token
