@@ -141,9 +141,6 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
 			Constraints:             slurmJobIR.JobInfo.Constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
-			Environment: &v0043.V0043StringArray{
-				"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin",
-			},
 			Flags: &[]v0043.V0043JobDescMsgFlags{
 				v0043.V0043JobDescMsgFlagsEXTERNALJOB,
 			},
