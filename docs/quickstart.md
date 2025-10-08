@@ -115,7 +115,7 @@ values should work without modification.
 Downloading `values.yaml`:
 
 ```bash
-VERSION=v0.4.0
+VERSION=v0.4.1
 curl -L https://raw.githubusercontent.com/SlinkyProject/slurm-bridge/refs/tags/$VERSION/helm/slurm-bridge/values.yaml \
   -o values-bridge.yaml
 ```
@@ -135,7 +135,7 @@ variables:
 ##### 3. Install the `slurm-bridge` Helm Chart:
 
 ```bash
-VERSION=0.4.0
+VERSION=0.4.1
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
   --values=values-bridge.yaml --version=$VERSION --namespace=slinky --create-namespace
 ```
