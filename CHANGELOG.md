@@ -8,8 +8,20 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Changed
+
+### Removed
+
+## v0.4.1
+
+### Added
+
+### Fixed
+
 - Update kubeVersion parsing to handle provider suffixes (e.g., GKE
   x.y.z-gke.a).
+- Fixed image rendering in docs/index.rst.
+- Conversion of GHFM admonitions from .md to .rst.
 
 ### Changed
 
