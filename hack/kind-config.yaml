@@ -15,6 +15,14 @@ nodes:
     kubeadmConfigPatches:
       - |
         kind: ClusterConfiguration
+        controllerManager:
+          extraArgs:
+            v: "6"
+        scheduler:
+          extraArgs:
+            v: "5"
+      - |
+        kind: ClusterConfiguration
         apiServer:
           extraArgs:
             runtime-config: "resource.k8s.io/v1beta1=true"
