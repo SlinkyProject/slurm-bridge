@@ -6,6 +6,7 @@ package slurmbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -14,6 +15,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -43,6 +46,7 @@ var (
 	scheme = runtime.NewScheme()
 
 	ErrorNoKubeNode        = errors.New("no more placeholder nodes to annotate pods")
+	ErrorNoKubeNodeMatch   = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed   = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid = errors.New("requested node configuration is not available")
 )
@@ -309,8 +313,20 @@ func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string
 	for _, slurmNode := range slurmNodes {
 		kubeNode, ok := nodeNameMap[slurmNode]
 		if !ok {
-			// Assume the kubeNode == slurmNode Name
-			kubeNode = slurmNode
+			// If the slurmNode exists as a kube node, they are
+			// assumed to be the same node. If not, return an error
+			// that the slurm job included an unknown node.
+			if sb.handle.ClientSet() != nil {
+				if _, err := sb.handle.ClientSet().CoreV1().Nodes().Get(ctx, slurmNode, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+					out := fmt.Sprintf("no matching kube nodes for Slurm node: %s", slurmNode)
+					logger.Error(ErrorNoKubeNodeMatch, out)
+					return nil, ErrorNoKubeNodeMatch
+				}
+				kubeNode = slurmNode
+			} else {
+				return nil, ErrorNoKubeNodeMatch
+			}
+
 		}
 		kubeNodes.Insert(kubeNode)
 	}
