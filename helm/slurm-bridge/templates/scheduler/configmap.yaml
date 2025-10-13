@@ -19,12 +19,22 @@ data:
     profiles:
     - schedulerName: {{ include "slurm-bridge.scheduler.name" . }}
       plugins:
+        preFilter:
+          enabled:
+          - name: 'VolumeBinding'
         queueSort:
           enabled:
           - name: 'PrioritySort'
         filter:
           enabled:
+          - name: 'VolumeBinding'
           - name: 'TaintToleration'
+        reserve:
+          enabled:
+          - name: 'VolumeBinding'
+        preBind:
+          enabled:
+          - name: 'VolumeBinding'
         bind:
           enabled:
           - name: 'DefaultBinder'
