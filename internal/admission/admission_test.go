@@ -310,6 +310,29 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "PodWithResourceClaim",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+					},
+					Spec: corev1.PodSpec{
+						ResourceClaims: []corev1.PodResourceClaim{
+							corev1.PodResourceClaim{
+								Name: "gpu",
+							},
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
 			name: "PodWithoutLabelOrAnnotation",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},
