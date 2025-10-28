@@ -480,3 +480,121 @@ func TestNewControl(t *testing.T) {
 		})
 	}
 }
+
+func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
+	type fields struct {
+		Client    client.Client
+		mcsLabel  string
+		partition string
+	}
+	type args struct {
+		ctx      context.Context
+		nodeName string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "No slurm nodes",
+			fields: fields{
+				Client: func() client.Client {
+					return fake.NewClientBuilder().
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:      context.Background(),
+				nodeName: "node1",
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "Get node fails",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							return fmt.Errorf("failed to get node")
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+			},
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name: "Node exists",
+			fields: fields{
+				Client: func() client.Client {
+					nodes := &slurmtypes.V0043NodeList{
+						Items: []slurmtypes.V0043Node{
+							{V0043Node: v0043.V0043Node{
+								Name: ptr.To("node1"),
+							}},
+						},
+					}
+					return fake.NewClientBuilder().
+						WithLists(nodes).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:      context.Background(),
+				nodeName: "node1",
+			},
+			want:    true,
+			wantErr: false,
+		},
+		{
+			name: "Node does no exist",
+			fields: fields{
+				Client: func() client.Client {
+					nodes := &slurmtypes.V0043NodeList{
+						Items: []slurmtypes.V0043Node{
+							{V0043Node: v0043.V0043Node{
+								Name: ptr.To("node1"),
+							}},
+						},
+					}
+					return fake.NewClientBuilder().
+						WithLists(nodes).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:      context.Background(),
+				nodeName: "node2",
+			},
+			want:    false,
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{
+				Client:    tt.fields.Client,
+				mcsLabel:  tt.fields.mcsLabel,
+				partition: tt.fields.partition,
+			}
+			got, err := r.IsSlurmNode(tt.args.ctx, tt.args.nodeName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("realSlurmControl.IsSlurmNode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("realSlurmControl.IsSlurmNode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

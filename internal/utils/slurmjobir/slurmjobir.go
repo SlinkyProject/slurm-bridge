@@ -29,6 +29,7 @@ type SlurmJobIRJobInfo struct {
 	MemPerNode   *int64 // memory in megabytes
 	MinNodes     *int32
 	MaxNodes     *int32
+	Nodes        []string
 	Partition    *string
 	QOS          *string
 	Reservation  *string

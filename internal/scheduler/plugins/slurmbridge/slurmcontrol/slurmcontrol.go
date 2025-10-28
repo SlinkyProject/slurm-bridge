@@ -6,6 +6,7 @@ package slurmcontrol
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -32,6 +33,7 @@ type SlurmControlInterface interface {
 	GetJob(ctx context.Context, pod *corev1.Pod) (*PlaceholderJob, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
+	IsSlurmNode(ctx context.Context, node string) (bool, error)
 }
 
 // RealPodControl is the default implementation of SlurmControlInterface.
@@ -160,8 +162,10 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 					return &v0043.V0043Uint64NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
-			MinimumNodes: slurmJobIR.JobInfo.MinNodes,
-			Name:         slurmJobIR.JobInfo.JobName,
+			MinimumNodes:  slurmJobIR.JobInfo.MinNodes,
+			Name:          slurmJobIR.JobInfo.JobName,
+			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
+			RequiredNodes: ptr.To(v0043.V0043CsvString(slurmJobIR.JobInfo.Nodes)),
 			Partition: func() *string {
 				if slurmJobIR.JobInfo.Partition == nil {
 					return &r.partition
@@ -203,6 +207,23 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		}
 	}
 	return ptr.Deref(job.JobId, 0), nil
+}
+
+func (r *realSlurmControl) IsSlurmNode(ctx context.Context, nodeName string) (bool, error) {
+	logger := klog.FromContext(ctx)
+
+	node := &slurmtypes.V0043Node{}
+	nodeKey := object.ObjectKey(nodeName)
+
+	err := r.Get(ctx, nodeKey, node)
+	if err != nil {
+		if err.Error() == http.StatusText(http.StatusNotFound) {
+			return false, nil
+		}
+		logger.Error(err, "could not get slurm node", "pod", nodeName)
+		return false, err
+	}
+	return true, nil
 }
 
 var _ SlurmControlInterface = &realSlurmControl{}
