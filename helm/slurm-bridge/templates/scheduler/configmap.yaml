@@ -22,13 +22,14 @@ data:
         queueSort:
           enabled:
           - name: 'PrioritySort'
+        filter:
+          enabled:
+          - name: 'TaintToleration'
         bind:
           enabled:
           - name: 'DefaultBinder'
         multiPoint:
           enabled:
           - name: SlurmBridge
-          disabled:
-          - name: '*'
       pluginConfig:
       - name: SlurmBridge
