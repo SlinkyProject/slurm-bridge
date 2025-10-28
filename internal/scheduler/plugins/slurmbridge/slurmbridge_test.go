@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
@@ -108,6 +109,68 @@ func TestNew(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlurmBridge_PreEnqueue(t *testing.T) {
+	ctx := context.Background()
+	pod := st.MakePod().Name("pod1").Obj()
+
+	type fields struct {
+		Client        kubeclient.Client
+		schedulerName string
+		slurmControl  slurmcontrol.SlurmControlInterface
+		handle        framework.Handle
+	}
+	type args struct {
+		ctx context.Context
+		pod *corev1.Pod
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   *fwk.Status
+	}{
+		{
+			name: "Pod is patched with toleration",
+			fields: fields{
+				Client:       kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: nil,
+			},
+			args: args{
+				ctx: ctx,
+				pod: st.MakePod().Name("pod1").Obj(),
+			},
+			want: fwk.NewStatus(fwk.Success),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sb := &SlurmBridge{
+				Client:        tt.fields.Client,
+				schedulerName: tt.fields.schedulerName,
+				slurmControl:  tt.fields.slurmControl,
+				handle:        tt.fields.handle,
+			}
+			got := sb.PreEnqueue(tt.args.ctx, tt.args.pod)
+			if !apiequality.Semantic.DeepEqual(got.Reasons(), tt.want.Reasons()) {
+				t.Errorf("SlurmBridge.PreEnqueue() got1.Reasons() = %v, want %v", got.Reasons(), tt.want.Reasons())
+			}
+			if tt.want.Code() == fwk.Success {
+				found := false
+				p := corev1.Pod{}
+				_ = tt.fields.Client.Get(ctx, kubeclient.ObjectKeyFromObject(pod), &p)
+				for _, toleration := range p.Spec.Tolerations {
+					if apiequality.Semantic.DeepEqual(toleration, *utils.NewTolerationNodeBridged(sb.schedulerName)) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("SlurmBridge.PreEnqueue() was a success but taint was not found.")
+				}
 			}
 		})
 	}

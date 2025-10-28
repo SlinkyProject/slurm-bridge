@@ -63,6 +63,7 @@ type SlurmBridge struct {
 	handle        framework.Handle
 }
 
+var _ framework.PreEnqueuePlugin = &SlurmBridge{}
 var _ framework.PreFilterPlugin = &SlurmBridge{}
 var _ framework.FilterPlugin = &SlurmBridge{}
 
@@ -117,6 +118,26 @@ func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (fram
 		handle:        handle,
 	}
 	return plugin, nil
+}
+
+// PreEnqueue will add the slurm-bridge toleration to the pod.
+func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Status {
+
+	logger := klog.FromContext(ctx)
+	logger.V(5).Info("adding toleration to pod", pod)
+
+	toUpdate := pod.DeepCopy()
+	toleration := utils.NewTolerationNodeBridged(sb.schedulerName)
+	toUpdate.Spec.Tolerations = utils.MergeTolerations(toUpdate.Spec.Tolerations, *toleration)
+	if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
+		logger.Error(err, "failed to update pod with slurm job id")
+		return fwk.NewStatus(fwk.Unschedulable, "error patching finalizer")
+	}
+	// Update pod data after performing a Patch
+	if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	return fwk.NewStatus(fwk.Success)
 }
 
 // PreFilter will check if a Slurm placeholder job has been created for the pod.
@@ -284,8 +305,6 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		}
 		toUpdate := p.DeepCopy()
 		toUpdate.Annotations[wellknown.AnnotationPlaceholderNode] = node
-		toleration := utils.NewTolerationNodeBridged(sb.schedulerName)
-		toUpdate.Spec.Tolerations = utils.MergeTolerations(toUpdate.Spec.Tolerations, *toleration)
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")
 			return ErrorPodUpdateFailed
