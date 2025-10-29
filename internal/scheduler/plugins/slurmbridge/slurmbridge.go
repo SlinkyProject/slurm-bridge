@@ -45,6 +45,7 @@ var (
 	ErrorNoKubeNode        = errors.New("no more placeholder nodes to annotate pods")
 	ErrorPodUpdateFailed   = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid = errors.New("requested node configuration is not available")
+	ErrorNoNodesAssigned   = errors.New("no nodes assigned to job")
 )
 
 func init() {
@@ -66,6 +67,7 @@ type SlurmBridge struct {
 var _ framework.PreEnqueuePlugin = &SlurmBridge{}
 var _ framework.PreFilterPlugin = &SlurmBridge{}
 var _ framework.FilterPlugin = &SlurmBridge{}
+var _ framework.PostFilterPlugin = &SlurmBridge{}
 
 const (
 	Name = "SlurmBridge"
@@ -195,7 +197,95 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		return nil, fs
 	}
 
-	// Create a placeholder job in Slurm if needed
+	// If a placeholder job does not exist, this plugin should return as a success
+	// with no PreFilterResult. Because Filter will ultimately detect that slurm
+	// has not scheduled any nodes to the pods (no node annotation), the PostFilter
+	// plugin will be invoked. The placeholder job will then be created in the
+	// PostFilter plugin stage. If a placeholder job exists and is running, update
+	// pods with node assignments.
+	if placeholderJob.JobId == 0 {
+		return nil, fwk.NewStatus(fwk.Success)
+	} else {
+		logger.V(4).Info("placeholder job exists")
+		if placeholderJob.Nodes == "" {
+			logger.V(4).Info("placeholder job exists but no nodes have been allocated")
+			return nil, fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error())
+		}
+		// The placeholder job is running. Assign nodes to pods.
+		slurmNodes, _ := hostlist.Expand(placeholderJob.Nodes)
+		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
+		if err != nil {
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		err = sb.annotatePodsWithNodes(ctx, placeholderJob.JobId, kubeNodes.Clone(), &slurmJobIR.Pods)
+		if err != nil {
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		// Update pod after performing a Patch so subsequent plugins have
+		// accurate annotations
+		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		// By passing the list of nodes in the placeholder job as PreFilterResult,
+		// Filter plugins will only run for nodes in the Slurm job. This is the final
+		// PreFilter step that must occur before pods are allowed to run.
+		return &framework.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
+	}
+}
+
+// PostFilter will create the Slurm placeholder job once the pod has been
+// processed by the PreFilter and Filter plugins. This allows the rest of
+// the kubernetes plugins to have a say in which pods would be feasible for
+// Slurm to schedule the pod(s) on.
+func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m framework.NodeToStatusReader) (*framework.PostFilterResult, *fwk.Status) {
+	logger := klog.FromContext(ctx)
+
+	// Construct an intermediate representation of the Slurm placeholder job
+	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, ctx, pod)
+	if err != nil {
+		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	// Determine if a placeholder job for the pod exists in Slurm
+	placeholderJob, err := sb.slurmControl.GetJob(ctx, pod)
+	if err != nil {
+		logger.Error(err, "error checking for Slurm job")
+		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	// Create the Slurm placeholder job based on the nodes that have
+	// not been filtered out by Filter plugins. Because the SlurmBridge
+	// Filter plugin runs last, and will fail if the node annotation does
+	// not match, a failure from SlurmBridge means none of the other
+	// Filter plugins rejected the node and it can be fed into Slurm
+	// as a node to schedule with.
+	feasibleNodes, err := m.NodesForStatusCode(sb.handle.SnapshotSharedLister().NodeInfos(), fwk.Unschedulable)
+	if err != nil {
+		logger.Error(err, "error getting nodes that SlurmBridge can use")
+		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	for _, node := range feasibleNodes {
+		status := m.Get(node.Node().Name)
+		// If the Unschedulable code was set by SlurmBridge
+		// that means no other plugin filtered out this node.
+		// As long as the node is known to Slurm, we will include
+		// this node for consideration.
+		if status.Plugin() == Name {
+			slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
+			if isSlurm, _ := sb.slurmControl.IsSlurmNode(ctx, slurmName); isSlurm {
+				slurmJobIR.JobInfo.Nodes = append(slurmJobIR.JobInfo.Nodes, slurmName)
+			}
+		}
+	}
+
+	// If this situation occurs, the best we can do is trigger another
+	// scheduling cycle.
+	if len(slurmJobIR.JobInfo.Nodes) < len(slurmJobIR.Pods.Items) {
+		return nil, fwk.NewStatus(fwk.Success)
+	}
+
+	// If no placeholder job exists, we should create one with the list
+	// of nodes that passed Filter plugins.
 	if placeholderJob.JobId == 0 {
 		jobid, err := sb.slurmControl.SubmitJob(ctx, pod, slurmJobIR)
 		if err != nil {
@@ -218,43 +308,32 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		return nil, fwk.NewStatus(fwk.Pending)
-	} else {
-		logger.V(4).Info("placeholder job exists")
-		if placeholderJob.Nodes == "" {
-			logger.V(4).Info("placeholder job exists but no nodes have been allocated")
-			// As the placeholder job is not yet running, update to the job
-			// to include any changes from slurmJobIR.
-			jobid, err := sb.slurmControl.UpdateJob(ctx, pod, slurmJobIR)
-			if err != nil {
-				logger.Error(err, "error updating Slurm job")
-				return nil, fwk.NewStatus(fwk.Pending, err.Error())
-			}
-			// Update the pods with the jobId label in case there
-			// are new pods included in slurmJobIR after the update.
-			err = sb.labelPodsWithJobId(ctx, jobid, slurmJobIR)
-			if err != nil {
-				logger.Error(err, "error labeling pods after update")
-				return nil, fwk.NewStatus(fwk.Error, err.Error())
-			}
-			return nil, fwk.NewStatus(fwk.Pending, "no nodes assigned")
-		}
-		slurmNodes, _ := hostlist.Expand(placeholderJob.Nodes)
-		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
-		if err != nil {
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		err = sb.annotatePodsWithNodes(ctx, placeholderJob.JobId, kubeNodes.Clone(), &slurmJobIR.Pods)
-		if err != nil {
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		// Update pod after performing a Patch so subsequent plugins have
-		// accurate annotations
-		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		return &framework.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
+		return nil, fwk.NewStatus(fwk.Success)
 	}
+
+	logger.V(4).Info("placeholder job exists")
+	if placeholderJob.Nodes == "" {
+		logger.V(4).Info("placeholder job exists but no nodes have been allocated")
+		// As the placeholder job is not yet running, update to the job
+		// to include any changes from slurmJobIR.
+		jobid, err := sb.slurmControl.UpdateJob(ctx, pod, slurmJobIR)
+		if err != nil {
+			logger.Error(err, "error updating Slurm job")
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		// Update the pods with the jobId label in case there
+		// are new pods included in slurmJobIR after the update.
+		err = sb.labelPodsWithJobId(ctx, jobid, slurmJobIR)
+		if err != nil {
+			logger.Error(err, "error labeling pods after update")
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		return nil, fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error())
+	}
+
+	// If we get here, that means the job started running after PreFilter occurred.
+	// Return a success so the pod will get another PreFilter attempt.
+	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
 // annotatePodsWithNodes will annotate a jobid to pods and add a finalizer to
@@ -375,6 +454,9 @@ func (sb *SlurmBridge) PreFilterExtensions() framework.PreFilterExtensions {
 }
 
 // Filter will verify the node annotation matches the node being filtered.
+// This must be the last configured Filter plugin so PostFilter can make
+// the assertion that a failure from this Filter plugin implies no other
+// Filter plugin removed the node from consideration before getting here.
 func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo fwk.NodeInfo) *fwk.Status {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("filter func", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
