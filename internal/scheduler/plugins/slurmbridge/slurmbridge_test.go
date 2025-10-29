@@ -115,6 +115,10 @@ func TestNew(t *testing.T) {
 
 func TestSlurmBridge_PreFilter(t *testing.T) {
 	ctx := context.Background()
+	nodeInfo := []fwk.NodeInfo{
+		framework.NewNodeInfo(),
+	}
+	nodeInfo[0].SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
 	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
 	cs := clientsetfake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
@@ -325,9 +329,11 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Pending, "no nodes assigned"),
 		},
 		{
-			name: "Placeholder job exists",
+			name: "Placeholder job exists but nodes don't match",
 			fields: fields{
-				client:        kubefake.NewFakeClient(pod.DeepCopy()),
+				client: kubefake.NewFakeClient(
+					pod.DeepCopy(),
+				),
 				schedulerName: "slurm-bridge-scheduler",
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0043JobInfoList{
@@ -356,6 +362,53 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				ctx:   ctx,
 				state: framework.NewCycleState(),
 				pod:   pod.DeepCopy(),
+			},
+			want:  nil,
+			want1: fwk.NewStatus(fwk.Error, ErrorNoKubeNodeMatch.Error()),
+		},
+		{
+			name: "Placeholder job exists",
+			fields: fields{
+				client: kubefake.NewFakeClient(
+					pod.DeepCopy(),
+					&corev1.NodeList{
+						Items: []corev1.Node{
+							{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: "node1",
+								},
+							},
+						}},
+				),
+				schedulerName: "slurm-bridge-scheduler",
+				slurmControl: func() slurmcontrol.SlurmControlInterface {
+					list := &types.V0043JobInfoList{
+						Items: []types.V0043JobInfo{
+							{V0043JobInfo: v0043.V0043JobInfo{
+								AdminComment: func() *string {
+									pi := placeholderinfo.PlaceholderInfo{
+										Pods: []string{"slurm/pod1"},
+									}
+									return ptr.To(pi.ToString())
+								}(),
+								JobId:    ptr.To[int32](1),
+								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								Nodes:    ptr.To("node1"),
+							}},
+						},
+					}
+					c := fake.NewClientBuilder().
+						WithLists(list).
+						Build()
+					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+				}(),
+				handle: f,
+			},
+			args: args{
+				ctx:      ctx,
+				state:    framework.NewCycleState(),
+				pod:      pod.DeepCopy(),
+				nodeinfo: nodeInfo,
 			},
 			want:  &framework.PreFilterResult{NodeNames: sets.New("node1")},
 			want1: fwk.NewStatus(fwk.Success, ""),
