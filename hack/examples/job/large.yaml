@@ -5,7 +5,7 @@ metadata:
   name: job-sleep-large
   namespace: slurm-bridge
   annotations:
-    slinky.slurm.net/job-name: job-sleep-large
+    slurmjob.slinky.slurm.net/job-name: job-sleep-large
 spec:
   completions: 3
   parallelism: 2

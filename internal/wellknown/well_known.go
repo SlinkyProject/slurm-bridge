@@ -8,4 +8,5 @@ const (
 	SlinkyPrefix = "slinky.slurm.net/"
 
 	SchedulerPrefix = "scheduler." + SlinkyPrefix
+	SlurmJobPrefix  = "slurmjob." + SlinkyPrefix
 )

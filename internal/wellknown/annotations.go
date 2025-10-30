@@ -7,53 +7,55 @@ const (
 	// AnnotationPlaceholderNode indicates the Node which corresponds to the
 	// the pod's placeholder job.
 	AnnotationPlaceholderNode = SlinkyPrefix + "slurm-node"
+)
 
+const (
 	// AnnotationAccount overrides the default account
 	// for the Slurm placeholder job.
-	AnnotationAccount = SlinkyPrefix + "account"
+	AnnotationAccount = SlurmJobPrefix + "account"
 	// AnnotationConstraint sets the constraint
 	// for the Slurm placeholder job.
-	AnnotationConstraints = SlinkyPrefix + "constraints"
+	AnnotationConstraints = SlurmJobPrefix + "constraints"
 	// AnnotationCpuPerTask sets the number of cpus
 	// per task
-	AnnotationCpuPerTask = SlinkyPrefix + "cpu-per-task"
+	AnnotationCpuPerTask = SlurmJobPrefix + "cpu-per-task"
 	// AnnotationGres overrides the default gres
 	// for the Slurm placeholder job.
-	AnnotationGres = SlinkyPrefix + "gres"
+	AnnotationGres = SlurmJobPrefix + "gres"
 	// AnnotationGroupId overrides the default groupid
 	// for the Slurm placeholder job.
-	AnnotationGroupId = SlinkyPrefix + "group-id"
+	AnnotationGroupId = SlurmJobPrefix + "group-id"
 	// AnnotationJobName sets the job name for
 	// the slurm job
-	AnnotationJobName = SlinkyPrefix + "job-name"
+	AnnotationJobName = SlurmJobPrefix + "job-name"
 	// AnnotationLicenses sets the licenses
 	// for the Slurm placeholder job.
-	AnnotationLicenses = SlinkyPrefix + "licenses"
+	AnnotationLicenses = SlurmJobPrefix + "licenses"
 	// AnnotationMaxNodes sets the maximum number of
 	// nodes for the placeholder job
-	AnnotationMaxNodes = SlinkyPrefix + "max-nodes"
+	AnnotationMaxNodes = SlurmJobPrefix + "max-nodes"
 	// AnnotationMemPerNode sets the amount of memory
 	// per node
-	AnnotationMemPerNode = SlinkyPrefix + "mem-per-node"
+	AnnotationMemPerNode = SlurmJobPrefix + "mem-per-node"
 	// AnnotationMinNodes sets the minimum number of
 	// nodes for the placeholder job
-	AnnotationMinNodes = SlinkyPrefix + "min-nodes"
+	AnnotationMinNodes = SlurmJobPrefix + "min-nodes"
 	// AnnotationPartitions overrides the default partition
 	// for the Slurm placeholder job.
-	AnnotationPartition = SlinkyPrefix + "partition"
+	AnnotationPartition = SlurmJobPrefix + "partition"
 	// AnnotationQOS overrides the default QOS
 	// for the Slurm placeholder job.
-	AnnotationQOS = SlinkyPrefix + "qos"
+	AnnotationQOS = SlurmJobPrefix + "qos"
 	// AnnotationReservation sets the reservation
 	// for the Slurm placeholder job.
-	AnnotationReservation = SlinkyPrefix + "reservation"
+	AnnotationReservation = SlurmJobPrefix + "reservation"
 	// AnnotationTimelimit sets the Time Limit in minutes
 	// for the Slurm placeholder job.
-	AnnotationTimeLimit = SlinkyPrefix + "timelimit"
+	AnnotationTimeLimit = SlurmJobPrefix + "timelimit"
 	// AnnotationUserId overrides the default userid
 	// for the Slurm placeholder job.
-	AnnotationUserId = SlinkyPrefix + "user-id"
+	AnnotationUserId = SlurmJobPrefix + "user-id"
 	// AnnotationWckey sets the Wckey
 	// for the Slurm placeholder job.
-	AnnotationWckey = SlinkyPrefix + "wckey"
+	AnnotationWckey = SlurmJobPrefix + "wckey"
 )

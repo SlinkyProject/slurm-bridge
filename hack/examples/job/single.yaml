@@ -5,7 +5,7 @@ metadata:
   name: job-sleep-single
   namespace: slurm-bridge
   annotations:
-    slinky.slurm.net/job-name: job-sleep-single
+    slurmjob.slinky.slurm.net/job-name: job-sleep-single
 spec:
   completions: 1
   parallelism: 1
