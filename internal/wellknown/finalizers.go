@@ -6,5 +6,5 @@ package wellknown
 const (
 	// FinalizerScheduler exists to process pod deletion events. Once a pod processes
 	// if a placeholder job can be deleted, the finalizer is removed.
-	FinalizerScheduler = "scheduler.slurm.net/finalizer"
+	FinalizerScheduler = SchedulerPrefix + "finalizer"
 )

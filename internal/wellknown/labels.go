@@ -6,9 +6,9 @@ package wellknown
 const (
 	// LabelSlurmNodeName indicates the Slurm NodeName which corresponds to the
 	// labeled Kubernetes node.
-	LabelSlurmNodeName = "slinky.slurm.net/slurm-nodename"
+	LabelSlurmNodeName = SlinkyPrefix + "slurm-nodename"
 
 	// LabelPlaceholderJobId indicates the Slurm JobId which corresponds to the
 	// the pod's placeholder job.
-	LabelPlaceholderJobId = "scheduler.slinky.slurm.net/slurm-jobid"
+	LabelPlaceholderJobId = SchedulerPrefix + "slurm-jobid"
 )
