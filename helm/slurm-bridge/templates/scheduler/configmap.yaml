@@ -29,6 +29,8 @@ data:
           enabled:
           - name: 'VolumeBinding'
           - name: 'TaintToleration'
+          disabled:
+          - name: 'NodeResourcesFit'
         reserve:
           enabled:
           - name: 'VolumeBinding'

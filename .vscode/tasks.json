@@ -78,6 +78,8 @@
         "      enabled:\n",
         "      - name: 'VolumeBinding'\n",
         "      - name: 'TaintToleration'\n",
+        "      disabled:\n",
+        "      - name: 'NodeResourcesFit'\n",
         "    reserve:\n",
         "      enabled:\n",
         "      - name: 'VolumeBinding'\n",
