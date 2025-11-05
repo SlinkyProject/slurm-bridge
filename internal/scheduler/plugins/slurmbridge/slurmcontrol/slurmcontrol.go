@@ -28,6 +28,7 @@ type PlaceholderJob struct {
 }
 
 type SlurmControlInterface interface {
+	GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error)
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	GetJobsForPods(ctx context.Context) (*map[string]PlaceholderJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*PlaceholderJob, error)
@@ -41,6 +42,23 @@ type realSlurmControl struct {
 	client.Client
 	mcsLabel  string
 	partition string
+}
+
+type NodeResources struct {
+	Node           string
+	SocketsPerNode int32
+	CoresPerSocket int32
+	MemAlloc       int64
+	CoreBitmap     string
+	Channel        int32
+	Gres           []GresLayout
+}
+
+type GresLayout struct {
+	Count int64
+	Index string
+	Name  string
+	Type  string
 }
 
 // DeleteSlurmJob will delete a placeholder job
@@ -221,6 +239,47 @@ func (r *realSlurmControl) IsSlurmNode(ctx context.Context, nodeName string) (bo
 		return false, err
 	}
 	return true, nil
+}
+
+// GetResources will return the resources used by a node for a given JobId
+func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error) {
+	logger := klog.FromContext(ctx)
+
+	nodes := &slurmtypes.V0044NodeResourceLayout{}
+	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
+	if jobId == "" {
+		return &NodeResources{}, nil
+	}
+
+	err := r.Get(ctx, jobId, nodes)
+	if err != nil {
+		logger.Error(err, "could not get node resource layout for pod", "pod", klog.KObj(pod))
+		return nil, err
+	}
+	for _, n := range nodes.V0044NodeResourceLayoutList {
+		if n.Node != nodeName {
+			continue
+		}
+		nodeOut := NodeResources{
+			Node:           n.Node,
+			SocketsPerNode: ptr.Deref(n.SocketsPerNode, 0),
+			CoresPerSocket: ptr.Deref(n.CoresPerSocket, 0),
+			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
+			CoreBitmap:     ptr.Deref(n.CoreBitmap, ""),
+			Channel:        ptr.Deref(ptr.Deref(n.Channel, v0044.V0044Uint32NoValStruct{}).Number, 0),
+			Gres:           make([]GresLayout, len(ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}))),
+		}
+		for i, g := range ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}) {
+			nodeOut.Gres[i] = GresLayout{
+				Name:  g.Name,
+				Type:  ptr.Deref(g.Type, ""),
+				Count: ptr.Deref(g.Count, 0),
+				Index: ptr.Deref(g.Index, ""),
+			}
+		}
+		return &nodeOut, nil
+	}
+	return &NodeResources{}, nil
 }
 
 var _ SlurmControlInterface = &realSlurmControl{}

@@ -12,13 +12,16 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+
 	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
+
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
@@ -594,6 +597,210 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("realSlurmControl.IsSlurmNode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_GetResources(t *testing.T) {
+	type fields struct {
+		Client    client.Client
+		mcsLabel  string
+		partition string
+	}
+	type args struct {
+		ctx      context.Context
+		pod      *corev1.Pod
+		nodeName string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    *NodeResources
+		wantErr bool
+	}{
+		{
+			name: "No JobId",
+			fields: fields{
+				Client: func() client.Client {
+					return fake.NewClientBuilder().
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: ""},
+					},
+				},
+				nodeName: "",
+			},
+			want:    &NodeResources{},
+			wantErr: false,
+		},
+		{
+			name: "Failed to Get",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							return fmt.Errorf("failed to get resources")
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "No data",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want:    &NodeResources{},
+			wantErr: false,
+		},
+		{
+			name: "Safely dereference pointers",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							resources := slurmtypes.V0044NodeResourceLayout{
+								V0044NodeResourceLayoutList: []v0044.V0044NodeResourceLayout{
+									{Node: "node1"},
+									{Node: "node2"},
+								},
+							}
+							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+								layout := resources.DeepCopy()
+								*o = *layout
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want: &NodeResources{
+				Node: "node2",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Return GRES",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							resources := slurmtypes.V0044NodeResourceLayout{
+								V0044NodeResourceLayoutList: []v0044.V0044NodeResourceLayout{
+									{Node: "node1"},
+									{
+										Node: "node2",
+										Gres: &v0044.V0044NodeGresLayoutList{
+											{
+												Count: ptr.To(int64(2)),
+												Index: ptr.To("1-2"),
+												Name:  "gpu",
+												Type:  ptr.To("gpu.example.com"),
+											},
+										},
+									},
+								},
+							}
+							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+								layout := resources.DeepCopy()
+								*o = *layout
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want: &NodeResources{
+				Node: "node2",
+				Gres: []GresLayout{
+					{
+						Count: int64(2),
+						Index: "1-2",
+						Name:  "gpu",
+						Type:  "gpu.example.com",
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{
+				Client:    tt.fields.Client,
+				mcsLabel:  tt.fields.mcsLabel,
+				partition: tt.fields.partition,
+			}
+			got, err := r.GetResources(tt.args.ctx, tt.args.pod, tt.args.nodeName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("realSlurmControl.GetResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !apiequality.Semantic.DeepEqual(got, tt.want) {
+				t.Errorf("realSlurmControl.GetResources() = %v, want %v", got, tt.want)
 			}
 		})
 	}
