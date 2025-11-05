@@ -83,7 +83,13 @@ rules:
   resources: ["jobsets", "jobsets/status"]
   verbs: ["get", "list", "watch", "create"]
 - apiGroups: ["resource.k8s.io"]
-  resources: ["deviceclasses", "resourceslices", "resourceclaims"]
+  resources: ["resourceclaims"]
+  verbs: ["get", "list", "watch", "create", "update"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["resourceclaims/status"]
+  verbs: ["patch", "update"]
+- apiGroups: ["resource.k8s.io"]
+  resources: ["deviceclasses", "resourceslices"]
   verbs: ["get", "list", "watch"]
 ---
 kind: ClusterRoleBinding
