@@ -1,0 +1,27 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-sleep-dra
+  namespace: slurm-bridge
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: job-sleep-dra
+spec:
+  completions: 1
+  parallelism: 1
+  template:
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      containers:
+        - name: sleep
+          image: busybox:stable
+          command: [sh, -c, sleep 30]
+          resources:
+            requests:
+              cpu: '1'
+              memory: 100Mi
+            limits:
+              cpu: '1'
+              memory: 100Mi
+              deviceclass.resource.kubernetes.io/gpu.example.com: 1
+      restartPolicy: Never
