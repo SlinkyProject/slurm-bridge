@@ -45,11 +45,12 @@ import (
 var (
 	scheme = runtime.NewScheme()
 
-	ErrorNoKubeNode        = errors.New("no more placeholder nodes to annotate pods")
-	ErrorNoKubeNodeMatch   = errors.New("slurm node matches no Kube nodes")
-	ErrorPodUpdateFailed   = errors.New("failed to update pod")
-	ErrorNodeConfigInvalid = errors.New("requested node configuration is not available")
-	ErrorNoNodesAssigned   = errors.New("no nodes assigned to job")
+	ErrorNoKubeNode           = errors.New("no more placeholder nodes to annotate pods")
+	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
+	ErrorPodUpdateFailed      = errors.New("failed to update pod")
+	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
+	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
+	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
 )
 
 func init() {
@@ -153,6 +154,11 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
 func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*framework.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
+
+	if pod.Spec.ResourceClaims != nil {
+		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
+		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
+	}
 
 	// Populate podToJob representation to validate pod label and annotation
 	if err := sb.validatePodToJob(ctx, pod); err != nil {
