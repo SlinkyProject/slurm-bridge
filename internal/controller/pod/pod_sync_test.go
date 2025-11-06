@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -333,7 +334,7 @@ var _ = Describe("Sync()", func() {
 	})
 })
 
-var _ = Describe("deleteFinalizer()", func() {
+var _ = Describe("prepareTerminalPod()", func() {
 	var controller *PodReconciler
 
 	podName := "foo"
@@ -357,12 +358,21 @@ var _ = Describe("deleteFinalizer()", func() {
 					},
 					Status: corev1.PodStatus{
 						Phase: corev1.PodSucceeded,
+						ExtendedResourceClaimStatus: &corev1.PodExtendedResourceClaimStatus{
+							ResourceClaimName: "foo",
+						},
 					},
 				},
 			},
 		}
+		claim := &resourcev1.ResourceClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: metav1.NamespaceDefault,
+			},
+		}
 		controller = &PodReconciler{
-			Client:        fake.NewFakeClient(podList),
+			Client:        fake.NewFakeClient(podList, claim),
 			Scheme:        scheme.Scheme,
 			SlurmClient:   c,
 			EventCh:       make(chan event.GenericEvent, 5),
@@ -374,17 +384,23 @@ var _ = Describe("deleteFinalizer()", func() {
 	Context("With pods and jobs", func() {
 		It("Should not terminate the job", func() {
 			By("Reconciling")
-			err := controller.deleteFinalizer(ctx, req)
+			err := controller.prepareTerminalPod(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check pod existence")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
+			podKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: podName}
 			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
+			err = controller.Get(ctx, podKey, pod)
 			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
 
 			By("Check finalizer does not exist")
 			Expect(pod.ObjectMeta.Finalizers).To(BeEmpty())
+
+			By("Check ResourceClaim does not exist")
+			claimKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: podName}
+			claim := &resourcev1.ResourceClaim{}
+			err = controller.Get(ctx, claimKey, claim)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 })
