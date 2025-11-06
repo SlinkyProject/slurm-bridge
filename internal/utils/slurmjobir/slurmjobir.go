@@ -5,8 +5,11 @@ package slurmjobir
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	resourcehelper "k8s.io/component-helpers/resource"
@@ -16,6 +19,11 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+)
+
+const (
+	nvidiaDevicePlugin = "nvidia.com/gpu"
+	amdDevicePlugin    = "amd.com/gpu"
 )
 
 type SlurmJobIRJobInfo struct {
@@ -139,22 +147,28 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 
 /* Set GRES for the placeholder job to the maximum quantity of GPUs requested */
 func parseGPUDevicePlugin(slurmJobIR *SlurmJobIR) {
-
+	var gres string
 	var gresMax resource.Quantity
-	gpuTypes := []corev1.ResourceName{
-		"nvidia.com/gpu",
-		"amd.com/gpu",
-	}
 	for _, p := range slurmJobIR.Pods.Items {
 		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
-		for _, vendor := range gpuTypes {
-			if quantity, exists := lim[vendor]; exists && quantity.Cmp(gresMax) > 0 {
-				gresMax = quantity
+		for resourceName, quantity := range lim {
+			if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
+				if quantity.Cmp(gresMax) > 0 {
+					gresMax = quantity
+					gres = fmt.Sprintf("gres/gpu=%s", quantity.String())
+				}
+			}
+			if strings.HasPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix) {
+				if quantity.Cmp(gresMax) > 0 {
+					deviceClass := strings.TrimPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
+					gres = fmt.Sprintf("gres/gpu:%s=%s", deviceClass, quantity.String())
+					gresMax = quantity
+				}
 			}
 		}
 	}
-	if !gresMax.IsZero() {
-		slurmJobIR.JobInfo.Gres = ptr.To("gres/gpu=" + gresMax.String())
+	if gres != "" {
+		slurmJobIR.JobInfo.Gres = ptr.To(gres)
 	}
 }
 

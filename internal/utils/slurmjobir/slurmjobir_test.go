@@ -9,6 +9,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -321,6 +322,33 @@ func Test_parseGPUDevicePlugin(t *testing.T) {
 				},
 			},
 			want: ptr.To("gres/gpu=2"),
+		},
+		{
+			name: "GPU requested via DRA Extended Resource Claim",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"gpu.nvidia.com", "1"),
+						},
+					},
+				},
+			},
+			want: ptr.To("gres/gpu:gpu.nvidia.com=1"),
+		},
+		{
+			name: "Multiple GPU DRA Extended Resource Claims",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"gpu.nvidia.com", "1"),
+							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"gpu.nvidia.com", "2"),
+						},
+					},
+				},
+			},
+			want: ptr.To("gres/gpu:gpu.nvidia.com=2"),
 		},
 	}
 	for _, tt := range tests {
