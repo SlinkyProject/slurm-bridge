@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -83,19 +83,19 @@ var _ = Describe("syncKubernetes()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},
@@ -158,19 +158,19 @@ var _ = Describe("syncSlurm()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},
@@ -253,19 +253,19 @@ var _ = Describe("Sync()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},

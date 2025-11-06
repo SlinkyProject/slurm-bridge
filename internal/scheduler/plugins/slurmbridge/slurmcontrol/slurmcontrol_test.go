@@ -12,7 +12,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
@@ -58,9 +58,9 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job that does not exist",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								JobId: ptr.To[int32](2),
 							}},
 						},
@@ -84,9 +84,9 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								JobId: ptr.To[int32](1),
 							}},
 						},
@@ -173,9 +173,9 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			name: "List jobs",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -183,7 +183,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1, node2"),
 							}},
 						},
@@ -259,9 +259,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not found",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -269,7 +269,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
 							}},
 						},
@@ -290,9 +290,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -300,7 +300,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateCANCELLED},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateCANCELLED},
 								Nodes:    ptr.To(""),
 							}},
 						},
@@ -321,9 +321,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found and running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/foo"},
@@ -331,7 +331,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
 							}},
 						},
@@ -412,7 +412,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0043JobInfo).JobId = ptr.To(int32(1))
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
 							return nil
 						},
 					}
@@ -537,9 +537,9 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			name: "Node exists",
 			fields: fields{
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0043NodeList{
-						Items: []slurmtypes.V0043Node{
-							{V0043Node: v0043.V0043Node{
+					nodes := &slurmtypes.V0044NodeList{
+						Items: []slurmtypes.V0044Node{
+							{V0044Node: v0044.V0044Node{
 								Name: ptr.To("node1"),
 							}},
 						},
@@ -560,9 +560,9 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			name: "Node does no exist",
 			fields: fields{
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0043NodeList{
-						Items: []slurmtypes.V0043Node{
-							{V0043Node: v0043.V0043Node{
+					nodes := &slurmtypes.V0044NodeList{
+						Items: []slurmtypes.V0044Node{
+							{V0044Node: v0044.V0044Node{
 								Name: ptr.To("node1"),
 							}},
 						},

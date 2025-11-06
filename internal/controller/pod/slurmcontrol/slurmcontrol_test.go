@@ -14,7 +14,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
@@ -58,10 +58,10 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0043JobInfo{
-						V0043JobInfo: v0043.V0043JobInfo{
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId:    ptr.To[int32](1),
-							JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+							JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -84,11 +84,11 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found but cancelled",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0043JobInfo{
-						V0043JobInfo: v0043.V0043JobInfo{
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId: ptr.To[int32](1),
-							JobState: &[]v0043.V0043JobInfoJobState{
-								v0043.V0043JobInfoJobStateCANCELLED,
+							JobState: &[]v0044.V0044JobInfoJobState{
+								v0044.V0044JobInfoJobStateCANCELLED,
 							},
 						},
 					}
@@ -112,11 +112,11 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found but completed",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0043JobInfo{
-						V0043JobInfo: v0043.V0043JobInfo{
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId: ptr.To[int32](1),
-							JobState: &[]v0043.V0043JobInfoJobState{
-								v0043.V0043JobInfoJobStateCOMPLETED,
+							JobState: &[]v0044.V0044JobInfoJobState{
+								v0044.V0044JobInfoJobStateCOMPLETED,
 							},
 						},
 					}
@@ -184,8 +184,8 @@ func Test_realSlurmControl_TerminateJob(t *testing.T) {
 			name: "Job deleted",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0043JobInfo{
-						V0043JobInfo: v0043.V0043JobInfo{
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId: ptr.To[int32](1),
 						},
 					}

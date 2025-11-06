@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
@@ -32,7 +32,7 @@ type realSlurmControl struct {
 
 // GetJob implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	job := &types.V0043JobInfo{}
+	job := &types.V0044JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
 	if jobId == "" {
 		return false, nil
@@ -44,7 +44,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 		}
 		return false, err
 	}
-	if job.GetStateAsSet().Has(v0043.V0043JobInfoJobStateRUNNING) {
+	if job.GetStateAsSet().Has(v0044.V0044JobInfoJobStateRUNNING) {
 		return true, nil
 	}
 	return false, nil
@@ -52,8 +52,8 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 
 // TerminateJob implements SlurmControlInterface.
 func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error {
-	job := &types.V0043JobInfo{
-		V0043JobInfo: v0043.V0043JobInfo{
+	job := &types.V0044JobInfo{
+		V0044JobInfo: v0044.V0044JobInfo{
 			JobId: ptr.To(jobId),
 		},
 	}
