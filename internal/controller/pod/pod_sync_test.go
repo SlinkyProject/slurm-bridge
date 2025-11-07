@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -82,19 +83,19 @@ var _ = Describe("syncKubernetes()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},
@@ -157,19 +158,19 @@ var _ = Describe("syncSlurm()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},
@@ -252,19 +253,19 @@ var _ = Describe("Sync()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0043JobInfoList{
-			Items: []slurmtypes.V0043JobInfo{
+		jobList := &slurmtypes.V0044JobInfoList{
+			Items: []slurmtypes.V0044JobInfo{
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To(jobId),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
 					},
 				},
 				{
-					V0043JobInfo: v0043.V0043JobInfo{
+					V0044JobInfo: v0044.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
-						JobState:     &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+						JobState:     &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
 					},
 				},
@@ -333,7 +334,7 @@ var _ = Describe("Sync()", func() {
 	})
 })
 
-var _ = Describe("deleteFinalizer()", func() {
+var _ = Describe("prepareTerminalPod()", func() {
 	var controller *PodReconciler
 
 	podName := "foo"
@@ -357,12 +358,21 @@ var _ = Describe("deleteFinalizer()", func() {
 					},
 					Status: corev1.PodStatus{
 						Phase: corev1.PodSucceeded,
+						ExtendedResourceClaimStatus: &corev1.PodExtendedResourceClaimStatus{
+							ResourceClaimName: "foo",
+						},
 					},
 				},
 			},
 		}
+		claim := &resourcev1.ResourceClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "foo",
+				Namespace: metav1.NamespaceDefault,
+			},
+		}
 		controller = &PodReconciler{
-			Client:        fake.NewFakeClient(podList),
+			Client:        fake.NewFakeClient(podList, claim),
 			Scheme:        scheme.Scheme,
 			SlurmClient:   c,
 			EventCh:       make(chan event.GenericEvent, 5),
@@ -374,17 +384,23 @@ var _ = Describe("deleteFinalizer()", func() {
 	Context("With pods and jobs", func() {
 		It("Should not terminate the job", func() {
 			By("Reconciling")
-			err := controller.deleteFinalizer(ctx, req)
+			err := controller.prepareTerminalPod(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check pod existence")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
+			podKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: podName}
 			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
+			err = controller.Get(ctx, podKey, pod)
 			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
 
 			By("Check finalizer does not exist")
 			Expect(pod.ObjectMeta.Finalizers).To(BeEmpty())
+
+			By("Check ResourceClaim does not exist")
+			claimKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: podName}
+			claim := &resourcev1.ResourceClaim{}
+			err = controller.Get(ctx, claimKey, claim)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 })

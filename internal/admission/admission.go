@@ -83,6 +83,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, obj runtime.Object) (
 	if pod.Annotations[wellknown.AnnotationPlaceholderNode] != "" {
 		return nil, fmt.Errorf("can't create a pod with a slurm placeholder node annotation")
 	}
+	if pod.Spec.ResourceClaims != nil {
+		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
+	}
 	return nil, nil
 }
 

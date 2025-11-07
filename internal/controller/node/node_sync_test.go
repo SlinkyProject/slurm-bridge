@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
@@ -44,11 +44,11 @@ var _ = Describe("syncTaint()", func() {
 		k8sClient := fake.NewFakeClient(nodeList)
 		Expect(k8sClient).NotTo(BeNil())
 
-		slurmNodeList := &slurmtypes.V0043NodeList{
-			Items: []slurmtypes.V0043Node{
-				{V0043Node: v0043.V0043Node{Name: ptr.To("slurm-0")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-0")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-1")}},
+		slurmNodeList := &slurmtypes.V0044NodeList{
+			Items: []slurmtypes.V0044Node{
+				{V0044Node: v0044.V0044Node{Name: ptr.To("slurm-0")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-0")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-1")}},
 			},
 		}
 		slurmClient := slurmclientfake.NewClientBuilder().WithLists(slurmNodeList).Build()
@@ -184,30 +184,30 @@ var _ = Describe("syncState()", func() {
 		k8sClient := fake.NewFakeClient(nodeList)
 		Expect(k8sClient).NotTo(BeNil())
 
-		slurmNodeList := &slurmtypes.V0043NodeList{
-			Items: []slurmtypes.V0043Node{
-				{V0043Node: v0043.V0043Node{Name: ptr.To("slurm-0")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-0")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-1")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-2")}},
-				{V0043Node: v0043.V0043Node{Name: ptr.To("bridged-3")}},
+		slurmNodeList := &slurmtypes.V0044NodeList{
+			Items: []slurmtypes.V0044Node{
+				{V0044Node: v0044.V0044Node{Name: ptr.To("slurm-0")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-0")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-1")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-2")}},
+				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-3")}},
 			},
 		}
 		updateFn := func(_ context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
 			switch o := obj.(type) {
-			case *slurmtypes.V0043Node:
-				r, ok := req.(v0043.V0043UpdateNodeMsg)
+			case *slurmtypes.V0044Node:
+				r, ok := req.(v0044.V0044UpdateNodeMsg)
 				if !ok {
 					return errors.New("failed to cast request object")
 				}
-				stateSet := set.New(ptr.Deref(o.State, []v0043.V0043NodeState{})...)
-				statesReq := ptr.Deref(r.State, []v0043.V0043UpdateNodeMsgState{})
+				stateSet := set.New(ptr.Deref(o.State, []v0044.V0044NodeState{})...)
+				statesReq := ptr.Deref(r.State, []v0044.V0044UpdateNodeMsgState{})
 				for _, stateReq := range statesReq {
 					switch stateReq {
-					case v0043.V0043UpdateNodeMsgStateUNDRAIN:
-						stateSet.Delete(v0043.V0043NodeStateDRAIN)
+					case v0044.V0044UpdateNodeMsgStateUNDRAIN:
+						stateSet.Delete(v0044.V0044NodeStateDRAIN)
 					default:
-						stateSet.Insert(v0043.V0043NodeState(stateReq))
+						stateSet.Insert(v0044.V0044NodeState(stateReq))
 					}
 				}
 				o.State = ptr.To(stateSet.UnsortedList())

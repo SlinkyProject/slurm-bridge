@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
@@ -163,10 +163,10 @@ var _ = Describe("Pod Controller", func() {
 		It("should generate a single pod event", func() {
 			By("calling generateEvents for jobId 1")
 			eventCh := make(chan event.GenericEvent)
-			jobList := &slurmtypes.V0043JobInfoList{
-				Items: []slurmtypes.V0043JobInfo{
+			jobList := &slurmtypes.V0044JobInfoList{
+				Items: []slurmtypes.V0044JobInfo{
 					{
-						V0043JobInfo: v0043.V0043JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId: ptr.To[int32](1),
 						},
 					},
@@ -189,10 +189,10 @@ var _ = Describe("Pod Controller", func() {
 		It("should generate a single pod event and delete the job", func() {
 			By("calling generateEvents for jobId 2 with no pods")
 			eventCh := make(chan event.GenericEvent)
-			jobList := &slurmtypes.V0043JobInfoList{
-				Items: []slurmtypes.V0043JobInfo{
+			jobList := &slurmtypes.V0044JobInfoList{
+				Items: []slurmtypes.V0044JobInfo{
 					{
-						V0043JobInfo: v0043.V0043JobInfo{
+						V0044JobInfo: v0044.V0044JobInfo{
 							JobId: ptr.To[int32](2),
 						},
 					},
@@ -201,7 +201,7 @@ var _ = Describe("Pod Controller", func() {
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
 			controllerReconciler := New(k8sClient, k8sClient.Scheme(), eventCh, slurmClient)
 			controllerReconciler.generatePodEvents(2, true)
-			job := &slurmtypes.V0043JobInfo{}
+			job := &slurmtypes.V0044JobInfo{}
 			err := slurmClient.Get(ctx, object.ObjectKey("2"), job)
 			Expect(err.Error()).To(Equal(http.StatusText(http.StatusNotFound)))
 		})

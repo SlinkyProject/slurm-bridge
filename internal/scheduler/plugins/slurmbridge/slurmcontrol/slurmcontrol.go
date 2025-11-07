@@ -12,7 +12,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
@@ -28,6 +28,7 @@ type PlaceholderJob struct {
 }
 
 type SlurmControlInterface interface {
+	GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error)
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	GetJobsForPods(ctx context.Context) (*map[string]PlaceholderJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*PlaceholderJob, error)
@@ -43,10 +44,27 @@ type realSlurmControl struct {
 	partition string
 }
 
+type NodeResources struct {
+	Node           string
+	SocketsPerNode int32
+	CoresPerSocket int32
+	MemAlloc       int64
+	CoreBitmap     string
+	Channel        int32
+	Gres           []GresLayout
+}
+
+type GresLayout struct {
+	Count int64
+	Index string
+	Name  string
+	Type  string
+}
+
 // DeleteSlurmJob will delete a placeholder job
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
-	job := &slurmtypes.V0043JobInfo{}
+	job := &slurmtypes.V0044JobInfo{}
 	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelPlaceholderJobId])
 	if jobId == 0 {
 		return nil
@@ -63,7 +81,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]PlaceholderJob, error) {
 	logger := klog.FromContext(ctx)
 
-	jobs := &slurmtypes.V0043JobInfoList{}
+	jobs := &slurmtypes.V0044JobInfoList{}
 
 	err := r.List(ctx, jobs)
 	if err != nil {
@@ -91,7 +109,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Placeh
 	logger := klog.FromContext(ctx)
 	jobOut := PlaceholderJob{}
 
-	job := &slurmtypes.V0043JobInfo{}
+	job := &slurmtypes.V0044JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
 	if jobId == "" {
 		return &jobOut, nil
@@ -106,7 +124,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Placeh
 		return nil, err
 	}
 
-	if job.GetStateAsSet().HasAny(v0043.V0043JobInfoJobStateCANCELLED, v0043.V0043JobInfoJobStateCOMPLETED) {
+	if job.GetStateAsSet().HasAny(v0044.V0044JobInfoJobStateCANCELLED, v0044.V0044JobInfoJobStateCOMPLETED) {
 		return &jobOut, nil
 	}
 	logger.V(5).Info("found matching job")
@@ -133,39 +151,36 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 	for _, p := range slurmJobIR.Pods.Items {
 		phInfo.Pods = append(phInfo.Pods, p.Namespace+"/"+p.Name)
 	}
-	job := &slurmtypes.V0043JobInfo{}
-	jobSubmit := v0043.V0043JobSubmitReq{
-		Job: &v0043.V0043JobDescMsg{
+	job := &slurmtypes.V0044JobInfo{}
+	jobSubmit := v0044.V0044JobSubmitReq{
+		Job: &v0044.V0044JobDescMsg{
 			Account:                 slurmJobIR.JobInfo.Account,
 			AdminComment:            ptr.To(phInfo.ToString()),
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
 			Constraints:             slurmJobIR.JobInfo.Constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
-			Environment: &v0043.V0043StringArray{
-				"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin",
-			},
-			Flags: &[]v0043.V0043JobDescMsgFlags{
-				v0043.V0043JobDescMsgFlagsEXTERNALJOB,
+			Flags: &[]v0044.V0044JobDescMsgFlags{
+				v0044.V0044JobDescMsgFlagsEXTERNALJOB,
 			},
 			GroupId:      slurmJobIR.JobInfo.GroupId,
 			Licenses:     slurmJobIR.JobInfo.Licenses,
 			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
 			McsLabel:     ptr.To(r.mcsLabel),
-			MemoryPerNode: func() *v0043.V0043Uint64NoValStruct {
+			MemoryPerNode: func() *v0044.V0044Uint64NoValStruct {
 				if slurmJobIR.JobInfo.MemPerNode != nil {
-					return &v0043.V0043Uint64NoValStruct{
+					return &v0044.V0044Uint64NoValStruct{
 						Infinite: ptr.To(false),
 						Number:   slurmJobIR.JobInfo.MemPerNode,
 						Set:      ptr.To(true),
 					}
 				} else {
-					return &v0043.V0043Uint64NoValStruct{Set: ptr.To(false)}
+					return &v0044.V0044Uint64NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
 			MinimumNodes:  slurmJobIR.JobInfo.MinNodes,
 			Name:          slurmJobIR.JobInfo.JobName,
 			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
-			RequiredNodes: ptr.To(v0043.V0043CsvString(slurmJobIR.JobInfo.Nodes)),
+			RequiredNodes: ptr.To(v0044.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
 			Partition: func() *string {
 				if slurmJobIR.JobInfo.Partition == nil {
 					return &r.partition
@@ -176,17 +191,17 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			Qos:         slurmJobIR.JobInfo.QOS,
 			Reservation: slurmJobIR.JobInfo.Reservation,
 			// SharedNone is effectively Exclusive
-			Shared:       &[]v0043.V0043JobDescMsgShared{v0043.V0043JobDescMsgSharedNone},
+			Shared:       &[]v0044.V0044JobDescMsgShared{v0044.V0044JobDescMsgSharedNone},
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
-			TimeLimit: func() *v0043.V0043Uint32NoValStruct {
+			TimeLimit: func() *v0044.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {
-					return &v0043.V0043Uint32NoValStruct{
+					return &v0044.V0044Uint32NoValStruct{
 						Infinite: ptr.To(false),
 						Number:   slurmJobIR.JobInfo.TimeLimit,
 						Set:      ptr.To(true),
 					}
 				} else {
-					return &v0043.V0043Uint32NoValStruct{Set: ptr.To(false)}
+					return &v0044.V0044Uint32NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
 			TresPerNode: slurmJobIR.JobInfo.Gres,
@@ -212,7 +227,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 func (r *realSlurmControl) IsSlurmNode(ctx context.Context, nodeName string) (bool, error) {
 	logger := klog.FromContext(ctx)
 
-	node := &slurmtypes.V0043Node{}
+	node := &slurmtypes.V0044Node{}
 	nodeKey := object.ObjectKey(nodeName)
 
 	err := r.Get(ctx, nodeKey, node)
@@ -224,6 +239,47 @@ func (r *realSlurmControl) IsSlurmNode(ctx context.Context, nodeName string) (bo
 		return false, err
 	}
 	return true, nil
+}
+
+// GetResources will return the resources used by a node for a given JobId
+func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error) {
+	logger := klog.FromContext(ctx)
+
+	nodes := &slurmtypes.V0044NodeResourceLayout{}
+	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
+	if jobId == "" {
+		return &NodeResources{}, nil
+	}
+
+	err := r.Get(ctx, jobId, nodes)
+	if err != nil {
+		logger.Error(err, "could not get node resource layout for pod", "pod", klog.KObj(pod))
+		return nil, err
+	}
+	for _, n := range nodes.V0044NodeResourceLayoutList {
+		if n.Node != nodeName {
+			continue
+		}
+		nodeOut := NodeResources{
+			Node:           n.Node,
+			SocketsPerNode: ptr.Deref(n.SocketsPerNode, 0),
+			CoresPerSocket: ptr.Deref(n.CoresPerSocket, 0),
+			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
+			CoreBitmap:     ptr.Deref(n.CoreBitmap, ""),
+			Channel:        ptr.Deref(ptr.Deref(n.Channel, v0044.V0044Uint32NoValStruct{}).Number, 0),
+			Gres:           make([]GresLayout, len(ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}))),
+		}
+		for i, g := range ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}) {
+			nodeOut.Gres[i] = GresLayout{
+				Name:  g.Name,
+				Type:  ptr.Deref(g.Type, ""),
+				Count: ptr.Deref(g.Count, 0),
+				Index: ptr.Deref(g.Index, ""),
+			}
+		}
+		return &nodeOut, nil
+	}
+	return &NodeResources{}, nil
 }
 
 var _ SlurmControlInterface = &realSlurmControl{}

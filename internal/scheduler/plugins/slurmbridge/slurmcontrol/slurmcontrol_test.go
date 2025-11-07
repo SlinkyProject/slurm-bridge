@@ -12,13 +12,16 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0043 "github.com/SlinkyProject/slurm-client/api/v0043"
+
+	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
+
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
@@ -58,9 +61,9 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job that does not exist",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								JobId: ptr.To[int32](2),
 							}},
 						},
@@ -84,9 +87,9 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								JobId: ptr.To[int32](1),
 							}},
 						},
@@ -173,9 +176,9 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			name: "List jobs",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -183,7 +186,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1, node2"),
 							}},
 						},
@@ -259,9 +262,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not found",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -269,7 +272,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
 							}},
 						},
@@ -290,9 +293,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -300,7 +303,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateCANCELLED},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateCANCELLED},
 								Nodes:    ptr.To(""),
 							}},
 						},
@@ -321,9 +324,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found and running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0043JobInfoList{
-						Items: []slurmtypes.V0043JobInfo{
-							{V0043JobInfo: v0043.V0043JobInfo{
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: v0044.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/foo"},
@@ -331,7 +334,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0043.V0043JobInfoJobState{v0043.V0043JobInfoJobStateRUNNING},
+								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
 							}},
 						},
@@ -412,7 +415,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0043JobInfo).JobId = ptr.To(int32(1))
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
 							return nil
 						},
 					}
@@ -537,9 +540,9 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			name: "Node exists",
 			fields: fields{
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0043NodeList{
-						Items: []slurmtypes.V0043Node{
-							{V0043Node: v0043.V0043Node{
+					nodes := &slurmtypes.V0044NodeList{
+						Items: []slurmtypes.V0044Node{
+							{V0044Node: v0044.V0044Node{
 								Name: ptr.To("node1"),
 							}},
 						},
@@ -560,9 +563,9 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			name: "Node does no exist",
 			fields: fields{
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0043NodeList{
-						Items: []slurmtypes.V0043Node{
-							{V0043Node: v0043.V0043Node{
+					nodes := &slurmtypes.V0044NodeList{
+						Items: []slurmtypes.V0044Node{
+							{V0044Node: v0044.V0044Node{
 								Name: ptr.To("node1"),
 							}},
 						},
@@ -594,6 +597,210 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("realSlurmControl.IsSlurmNode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_GetResources(t *testing.T) {
+	type fields struct {
+		Client    client.Client
+		mcsLabel  string
+		partition string
+	}
+	type args struct {
+		ctx      context.Context
+		pod      *corev1.Pod
+		nodeName string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    *NodeResources
+		wantErr bool
+	}{
+		{
+			name: "No JobId",
+			fields: fields{
+				Client: func() client.Client {
+					return fake.NewClientBuilder().
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: ""},
+					},
+				},
+				nodeName: "",
+			},
+			want:    &NodeResources{},
+			wantErr: false,
+		},
+		{
+			name: "Failed to Get",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							return fmt.Errorf("failed to get resources")
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "No data",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want:    &NodeResources{},
+			wantErr: false,
+		},
+		{
+			name: "Safely dereference pointers",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							resources := slurmtypes.V0044NodeResourceLayout{
+								V0044NodeResourceLayoutList: []v0044.V0044NodeResourceLayout{
+									{Node: "node1"},
+									{Node: "node2"},
+								},
+							}
+							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+								layout := resources.DeepCopy()
+								*o = *layout
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want: &NodeResources{
+				Node: "node2",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Return GRES",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+							resources := slurmtypes.V0044NodeResourceLayout{
+								V0044NodeResourceLayoutList: []v0044.V0044NodeResourceLayout{
+									{Node: "node1"},
+									{
+										Node: "node2",
+										Gres: &v0044.V0044NodeGresLayoutList{
+											{
+												Count: ptr.To(int64(2)),
+												Index: ptr.To("1-2"),
+												Name:  "gpu",
+												Type:  ptr.To("gpu.example.com"),
+											},
+										},
+									},
+								},
+							}
+							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+								layout := resources.DeepCopy()
+								*o = *layout
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: &corev1.Pod{
+					ObjectMeta: v1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+					},
+				},
+				nodeName: "node2",
+			},
+			want: &NodeResources{
+				Node: "node2",
+				Gres: []GresLayout{
+					{
+						Count: int64(2),
+						Index: "1-2",
+						Name:  "gpu",
+						Type:  "gpu.example.com",
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{
+				Client:    tt.fields.Client,
+				mcsLabel:  tt.fields.mcsLabel,
+				partition: tt.fields.partition,
+			}
+			got, err := r.GetResources(tt.args.ctx, tt.args.pod, tt.args.nodeName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("realSlurmControl.GetResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !apiequality.Semantic.DeepEqual(got, tt.want) {
+				t.Errorf("realSlurmControl.GetResources() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
@@ -45,11 +46,12 @@ import (
 var (
 	scheme = runtime.NewScheme()
 
-	ErrorNoKubeNode        = errors.New("no more placeholder nodes to annotate pods")
-	ErrorNoKubeNodeMatch   = errors.New("slurm node matches no Kube nodes")
-	ErrorPodUpdateFailed   = errors.New("failed to update pod")
-	ErrorNodeConfigInvalid = errors.New("requested node configuration is not available")
-	ErrorNoNodesAssigned   = errors.New("no nodes assigned to job")
+	ErrorNoKubeNode           = errors.New("no more placeholder nodes to annotate pods")
+	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
+	ErrorPodUpdateFailed      = errors.New("failed to update pod")
+	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
+	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
+	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
 )
 
 func init() {
@@ -72,6 +74,7 @@ var _ framework.PreEnqueuePlugin = &SlurmBridge{}
 var _ framework.PreFilterPlugin = &SlurmBridge{}
 var _ framework.FilterPlugin = &SlurmBridge{}
 var _ framework.PostFilterPlugin = &SlurmBridge{}
+var _ framework.PreBindPlugin = &SlurmBridge{}
 
 const (
 	Name = "SlurmBridge"
@@ -153,6 +156,11 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
 func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*framework.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
+
+	if pod.Spec.ResourceClaims != nil {
+		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
+		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
+	}
 
 	// Populate podToJob representation to validate pod label and annotation
 	if err := sb.validatePodToJob(ctx, pod); err != nil {
@@ -338,6 +346,43 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	// If we get here, that means the job started running after PreFilter occurred.
 	// Return a success so the pod will get another PreFilter attempt.
 	return nil, fwk.NewStatus(fwk.Success, "")
+}
+
+// PreBindPreFlight will check if any GRES was requested for the placeholder job
+func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
+	return nil
+}
+
+// PreBind will generate ResourceClaims for any GRES allocation in Slurm.
+// If a GRES allocation does not have a corresponding DeviceClass, it will
+// be skipped.
+func (sb *SlurmBridge) PreBind(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
+
+	// Construct an intermediate representation of the Slurm placeholder job
+	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, ctx, pod)
+	if err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	// Only run PreBind if a GRES resource was reserved by Slurm.
+	// Note that whole node allocations in slurm will look like
+	// GRES devices were requested, but that doesn't mean the pod
+	// intended to use them.
+	if ptr.Deref(slurmJobIR.JobInfo.Gres, "") == "" {
+		return nil
+	}
+
+	resources, err := sb.slurmControl.GetResources(ctx, pod, nodeName)
+	if err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	err = sb.createResourceClaim(ctx, pod, nodeName, resources)
+	if err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	return nil
 }
 
 // annotatePodsWithNodes will annotate a jobid to pods and add a finalizer to

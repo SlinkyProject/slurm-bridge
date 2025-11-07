@@ -130,28 +130,28 @@ func (r *NodeReconciler) setupInternal() {
 
 func (r *NodeReconciler) setupEventHandler() {
 	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0043Node)
+	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0044Node)
 	if informer == nil {
 		return
 	}
 	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
-			node, ok := obj.(*slurmtypes.V0043Node)
+			node, ok := obj.(*slurmtypes.V0044Node)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0043Node"), "failed to cast object")
+				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
 				return
 			}
 			r.EventCh <- nodeEvent(*node.Name)
 		},
 		UpdateFunc: func(oldObj, newObj interface{}) {
-			nodeOld, ok := oldObj.(*slurmtypes.V0043Node)
+			nodeOld, ok := oldObj.(*slurmtypes.V0044Node)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0043Node"), "failed to cast old object")
+				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast old object")
 				return
 			}
-			nodeNew, ok := newObj.(*slurmtypes.V0043Node)
+			nodeNew, ok := newObj.(*slurmtypes.V0044Node)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0043Node"), "failed to cast new object")
+				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast new object")
 				return
 			}
 			if !apiequality.Semantic.DeepEqual(nodeNew.Address, nodeOld.Address) ||
@@ -160,9 +160,9 @@ func (r *NodeReconciler) setupEventHandler() {
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			node, ok := obj.(*slurmtypes.V0043Node)
+			node, ok := obj.(*slurmtypes.V0044Node)
 			if !ok {
-				logger.Error(fmt.Errorf("expected V0043Node"), "failed to cast object")
+				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
 				return
 			}
 			r.EventCh <- nodeEvent(*node.Name)
