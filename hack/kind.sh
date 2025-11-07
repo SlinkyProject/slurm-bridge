@@ -225,7 +225,7 @@ function slurm-bridge::nodes() {
 }
 
 function slurm::install() {
-	local version="0.4.1"
+	local version="1.0.0-rc1"
 
 	local slurmOperator="slurm-operator"
 	if [ "$(helm list --all-namespaces --short --filter="^${slurmOperator}$" | wc -l)" -eq 0 ]; then
@@ -239,9 +239,6 @@ function slurm::install() {
 		if $FLAG_EXTERNAL; then
 			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
-				--set 'controller.slurmctld.image.tag=25.11-ubuntu24.04' \
-				--set 'controller.reconfigure.image.tag=25.11-ubuntu24.04' \
-				--set 'restapi.slurmrestd.image.tag=25.11-ubuntu24.04' \
 				--set "nodesets.slinky.enabled=false"
 		else
 			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
