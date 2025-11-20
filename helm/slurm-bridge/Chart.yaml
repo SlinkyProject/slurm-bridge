@@ -5,8 +5,8 @@ kubeVersion: ">= 1.34.0-0"
 name: slurm-bridge
 description: Slurm as a Kubernetes Scheduler
 type: application
-appVersion: "25.05"
-version: 1.0.0-rc1
+appVersion: "25.11"
+version: 1.0.0
 
 annotations:
   license: Apache-2.0

@@ -34,7 +34,7 @@ version-match: version ## Check if versions are consistent.
 		echo "VERSION is not semver: $(VERSION)" ;\
 		exit 1 ;\
 	fi
-	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), sed -i -E 's/version:[[:space:]]+.+$$/version: $(VERSION)/g' ${chart} ;)
+	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), $(SED) -i -E 's/version:[[:space:]]+.+$$/version: $(VERSION)/g' ${chart} ;)
 
 ##@ Build
 
