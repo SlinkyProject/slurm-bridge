@@ -4,3 +4,4 @@ sphinx-autobuild
 sphinx-design
 sphinx-copybutton
 sphinx_rtd_theme
+sphinx-mermaid
