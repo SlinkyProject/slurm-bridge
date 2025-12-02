@@ -13,7 +13,7 @@ author = 'SchedMD'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ["myst_parser", "sphinx_design", "sphinx_copybutton"]
+extensions = ["myst_parser", "sphinx_design", "sphinx_copybutton", "sphinxmermaid"]
 myst_enable_extensions = ["colon_fence"]
 myst_fence_as_directive = ["mermaid"]
 
