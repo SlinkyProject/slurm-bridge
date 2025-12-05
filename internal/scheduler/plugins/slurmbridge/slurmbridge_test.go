@@ -11,6 +11,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -221,7 +222,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		{
 			name: "JobId and Node assignment exist in annotations",
 			fields: fields{
-				client: nil,
+				client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
@@ -243,11 +244,12 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 						Build()
 					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
 				}(),
+				handle: f,
 			},
 			args: args{
 				ctx:   context.Background(),
-				state: nil,
-				pod: st.MakePod().Name("pod1").Namespace("slurm").Annotations(map[string]string{
+				state: framework.NewCycleState(),
+				pod: st.MakePod().Name("pod1").Annotations(map[string]string{
 					wellknown.AnnotationPlaceholderNode: "node1",
 				}).Labels(map[string]string{
 					wellknown.LabelPlaceholderJobId: "1"}).
@@ -753,6 +755,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
 			}
+			s := &stateData{}
+			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, tt.args.ctx, tt.args.pod)
+			tt.args.state.Write(stateKey, s)
 			got, got1 := sb.PostFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.m)
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("SlurmBridge.PostFilter() got = %v, want %v", got, tt.want)
