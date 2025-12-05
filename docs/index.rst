@@ -1,10 +1,6 @@
 Slurm Bridge
 ============
 
-.. container::
-
-   |License| |Tag| |Go-Version| |Last-Commit|
-
 Run `Slurm <https://slurm.schedmd.com/overview.html>`__ as a
 `Kubernetes <https://kubernetes.io/>`__ scheduler. A
 `Slinky <https://slinky.ai/>`__ project.
@@ -173,15 +169,6 @@ limitations under the License.
 .. raw:: html
 
    <!-- Links -->
-
-.. |License| image:: https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge
-   :target: ./LICENSES/Apache-2.0.txt
-.. |Tag| image:: https://img.shields.io/github/v/tag/SlinkyProject/slurm-bridge?style=for-the-badge
-   :target: https://github.com/SlinkyProject/slurm-bridge/tags/
-.. |Go-Version| image:: https://img.shields.io/github/go-mod/go-version/SlinkyProject/slurm-bridge?style=for-the-badge
-   :target: ./go.mod
-.. |Last-Commit| image:: https://img.shields.io/github/last-commit/SlinkyProject/slurm-bridge?style=for-the-badge
-   :target: https://github.com/SlinkyProject/slurm-bridge/commits/
 
 .. toctree::
     :maxdepth: 2

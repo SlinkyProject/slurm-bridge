@@ -1,14 +1,5 @@
 # Slurm Bridge
 
-<div align="center">
-
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)](./LICENSES/Apache-2.0.txt)
-[![Tag](https://img.shields.io/github/v/tag/SlinkyProject/slurm-bridge?style=for-the-badge)](https://github.com/SlinkyProject/slurm-bridge/tags/)
-[![Go-Version](https://img.shields.io/github/go-mod/go-version/SlinkyProject/slurm-bridge?style=for-the-badge)](./go.mod)
-[![Last-Commit](https://img.shields.io/github/last-commit/SlinkyProject/slurm-bridge?style=for-the-badge)](https://github.com/SlinkyProject/slurm-bridge/commits/)
-
-</div>
-
 Run [Slurm] as a [Kubernetes] scheduler. A [Slinky] project.
 
 ## Table of Contents
