@@ -26,13 +26,6 @@
       ],
       "preLaunchTask": "Setup Scheduler",
       "envFile": "/tmp/slurm-bridge.env"
-    },
-    {
-      "name": "Test",
-      "type": "go",
-      "request": "launch",
-      "mode": "test",
-      "program": "${workspaceFolder}/${relativeFileDirname}"
     }
   ]
 }
