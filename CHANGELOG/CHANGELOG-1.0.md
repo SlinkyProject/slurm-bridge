@@ -1,3 +1,17 @@
+## v1.0.1
+
+### Fixed
+
+- Update go toolchain to 1.25.5.
+- Upgrade containerd to address CVE-2024-40635, CVE-2024-25621, and
+  CVE-2025-64329.
+
+### Changed
+
+- Set enabled and disabled scheduler plugins explicitly and disable all by
+  default with multipoint.
+- Update slurm-client version to v1.0.1.
+
 ## v1.0.0
 
 ## v1.0.0-rc1
