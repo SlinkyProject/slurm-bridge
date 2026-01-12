@@ -303,7 +303,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--kjob] [--dra-example]
+	        [--extras] [--kjob] [--dra-example] [--all]
 	        [-h|--help] [KIND_CLUSTER_NAME]
 
 OPTIONS:
@@ -360,7 +360,7 @@ OPT_KJOB=false
 OPT_EXTERNAL=true
 
 SHORT="+h"
-LONG="recreate,config:,delete,debug,bridge,extras,kjob,dra-example,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-example,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -395,6 +395,13 @@ while :; do
 		;;
 	--dra-example)
 		OPT_DRA=true
+		shift
+		;;
+	--all)
+		OPT_BRIDGE=true
+		OPT_KJOB=true
+		OPT_DRA=true
+		OPT_EXTRAS=true
 		shift
 		;;
 	-h | --help)
