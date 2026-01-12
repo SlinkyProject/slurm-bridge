@@ -98,7 +98,7 @@ function helm::uninstall() {
 		"jobset"
 		"lws"
 	)
-	if $FLAG_EXTRAS; then
+	if $OPT_EXTRAS; then
 		namespace+=("metrics-server")
 		namespace+=("prometheus")
 		namespace+=("keda")
@@ -123,7 +123,7 @@ function slurm-bridge::skaffold() {
 function slurm-bridge::prerequisites() {
 	helm repo add bitnami https://charts.bitnami.com/bitnami
 	helm repo add jetstack https://charts.jetstack.io
-	if $FLAG_EXTRAS; then
+	if $OPT_EXTRAS; then
 		helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
 		helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 		helm repo add kedacore https://kedacore.github.io/charts
@@ -155,7 +155,7 @@ function slurm-bridge::prerequisites() {
 		helm install $lws https://github.com/kubernetes-sigs/lws/releases/download/$lwsVersion/lws-chart-$lwsVersion.tgz \
 			--namespace $lwsnamespace --create-namespace
 	fi
-	if $FLAG_EXTRAS; then
+	if $OPT_EXTRAS; then
 		local metrics="metrics-server"
 		if [ "$(helm list --all-namespaces --short --filter="$metrics" | wc -l)" -eq 0 ]; then
 			helm install "$metrics" metrics-server/metrics-server \
@@ -174,7 +174,7 @@ function slurm-bridge::prerequisites() {
 				--namespace "$keda" --create-namespace
 		fi
 	fi
-	if $FLAG_DRA; then
+	if $OPT_DRA; then
 		dra-example-driver::install
 	fi
 
@@ -195,7 +195,7 @@ function slurm-bridge::nodes() {
 		kubectl exec -n slurm pods/slurm-controller-0 -- \
 			scontrol create partition="$partition"
 	fi
-	if $FLAG_EXTERNAL; then
+	if $OPT_EXTERNAL; then
 		local bridge_nodes
 		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
 		echo "$bridge_nodes" | while IFS= read -r node; do
@@ -236,7 +236,7 @@ function slurm::install() {
 
 	local slurm="slurm"
 	if [ "$(helm list --all-namespaces --short --filter="^${slurm}$" | wc -l)" -eq 0 ]; then
-		if $FLAG_EXTERNAL; then
+		if $OPT_EXTERNAL; then
 			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
 				--set "nodesets.slinky.enabled=false"
@@ -327,43 +327,43 @@ EOF
 }
 
 function main() {
-	if $FLAG_DEBUG; then
+	if $OPT_DEBUG; then
 		set -x
 	fi
 	local cluster_name="${1:-"kind"}"
-	if $FLAG_DELETE; then
+	if $OPT_DELETE; then
 		kind::delete "$cluster_name"
 		return
-	elif $FLAG_UNINSTALL; then
+	elif $OPT_UNINSTALL; then
 		helm::uninstall
 		return
-	elif $FLAG_CREATE; then
-		kind::start "$cluster_name" "$FLAG_CONFIG"
+	elif $OPT_CREATE; then
+		kind::start "$cluster_name" "$OPT_CONFIG"
 		return
 	fi
 
-	kind::start "$cluster_name" "$FLAG_CONFIG"
+	kind::start "$cluster_name" "$OPT_CONFIG"
 
-	if $FLAG_INSTALL; then
+	if $OPT_INSTALL; then
 		slurm-bridge::prerequisites
 		return
 	fi
 	slurm-bridge::skaffold
-	if $FLAG_KJOB; then
+	if $OPT_KJOB; then
 		kjob::install
 	fi
 }
 
-FLAG_DEBUG=false
-FLAG_CREATE=false
-FLAG_CONFIG="$SCRIPT_DIR/kind-config.yaml"
-FLAG_DELETE=false
-FLAG_INSTALL=false
-FLAG_UNINSTALL=false
-FLAG_EXTRAS=false
-FLAG_DRA=false
-FLAG_KJOB=false
-FLAG_EXTERNAL=true
+OPT_DEBUG=false
+OPT_CREATE=false
+OPT_CONFIG="$SCRIPT_DIR/kind-config.yaml"
+OPT_DELETE=false
+OPT_INSTALL=false
+OPT_UNINSTALL=false
+OPT_EXTRAS=false
+OPT_DRA=false
+OPT_KJOB=false
+OPT_EXTERNAL=true
 
 SHORT="+h"
 LONG="create,config:,delete,debug,helm,bridge,install,extras,kjob,dra-example,uninstall,help"
@@ -372,53 +372,53 @@ eval set -- "${OPTS}"
 while :; do
 	case "$1" in
 	--debug)
-		FLAG_DEBUG=true
+		OPT_DEBUG=true
 		shift
 		;;
 	--create)
-		FLAG_CREATE=true
+		OPT_CREATE=true
 		shift
-		if $FLAG_CREATE && $FLAG_DELETE; then
+		if $OPT_CREATE && $OPT_DELETE; then
 			echo "Flags --create and --delete are mutually exclusive!"
 			exit 1
 		fi
 		;;
 	--config)
-		FLAG_CONFIG="$2"
+		OPT_CONFIG="$2"
 		shift 2
 		;;
 	--delete)
-		FLAG_DELETE=true
+		OPT_DELETE=true
 		shift
-		if $FLAG_CREATE && $FLAG_DELETE; then
+		if $OPT_CREATE && $OPT_DELETE; then
 			echo "Flags --create and --delete are mutually exclusive!"
 			exit 1
 		fi
 		;;
 	--install)
-		FLAG_INSTALL=true
+		OPT_INSTALL=true
 		shift
-		if $FLAG_INSTALL && $FLAG_UNINSTALL; then
+		if $OPT_INSTALL && $OPT_UNINSTALL; then
 			echo "Flags --install and --uninstall are mutually exclusive!"
 			exit 1
 		fi
 		;;
 	--extras)
-		FLAG_EXTRAS=true
+		OPT_EXTRAS=true
 		shift
 		;;
 	--kjob)
-		FLAG_KJOB=true
+		OPT_KJOB=true
 		shift
 		;;
 	--dra-example)
-		FLAG_DRA=true
+		OPT_DRA=true
 		shift
 		;;
 	--uninstall)
-		FLAG_UNINSTALL=true
+		OPT_UNINSTALL=true
 		shift
-		if $FLAG_INSTALL && $FLAG_UNINSTALL; then
+		if $OPT_INSTALL && $OPT_UNINSTALL; then
 			echo "Flags --install and --uninstall are mutually exclusive!"
 			exit 1
 		fi
