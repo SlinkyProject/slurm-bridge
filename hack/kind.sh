@@ -71,7 +71,7 @@ function kind::start() {
 	sys::check
 	kind::prerequisites
 	local cluster_name="${1:-"kind"}"
-	local kind_config="${2:-"$SCRIPT_DIR/kind-config.yaml"}"
+	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
 	if [ "$(kind get clusters | grep -oc kind)" -eq 0 ]; then
 		if [ "$(command -v systemd-run)" ]; then
 			CMD="systemd-run --scope --user"
@@ -351,7 +351,7 @@ function main() {
 
 OPT_DEBUG=false
 OPT_RECREATE=false
-OPT_CONFIG="$SCRIPT_DIR/kind-config.yaml"
+OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
 OPT_BRIDGE=false
 OPT_EXTRAS=false
