@@ -102,7 +102,7 @@ When running Slurm on baremetal:
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm-bridge
-kubectl create secret generic slurm-bridge-jwt-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+kubectl create secret generic slurm-bridge-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
 ##### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
