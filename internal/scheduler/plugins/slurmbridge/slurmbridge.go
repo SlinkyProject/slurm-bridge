@@ -26,7 +26,6 @@ import (
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
@@ -382,19 +381,9 @@ func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, 
 // be skipped.
 func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
 
-	s, err := getStateData(state)
-	if err != nil {
-		return fwk.NewStatus(fwk.Error, err.Error())
-	}
-
-	// Only run PreBind if a GRES resource was reserved by Slurm.
-	// Note that whole node allocations in slurm will look like
-	// GRES devices were requested, but that doesn't mean the pod
+	// Note that whole node allocations in slurm will look like all
+	// resources were requested, but that doesn't mean the pod
 	// intended to use them.
-	if ptr.Deref(s.slurmJobIR.JobInfo.Gres, "") == "" {
-		return nil
-	}
-
 	resources, err := sb.slurmControl.GetResources(ctx, pod, nodeName)
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
