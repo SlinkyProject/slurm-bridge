@@ -5,6 +5,7 @@ package pod
 
 import (
 	"context"
+	"time"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -58,6 +59,11 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		logger.V(2).Info("Pod is not scheduled by the slurm-bridge, skipping",
 			"pod", klog.KObj(pod), "scheduler", r.SchedulerName)
 		return nil
+	}
+
+	// Requeue Pod request until terminal
+	if !podv1.IsPodTerminal(pod) {
+		durationStore.Push(podKey, 30*time.Second)
 	}
 
 	if active, _ := utils.PodRunningReady(pod); !active {
