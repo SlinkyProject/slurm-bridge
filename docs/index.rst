@@ -107,6 +107,13 @@ Limitations
 -----------
 
 - Exclusive, whole node allocations are made for each pod.
+- Only supports the following DRA drivers:
+
+  - `DRA Driver
+    CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs.
+  - `DRA Example
+    Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
+    for GPUs.
 
 Installation
 ------------

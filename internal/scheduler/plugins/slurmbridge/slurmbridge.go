@@ -386,7 +386,7 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	err = sb.preBindExtendedResources(ctx, pod, nodeName, resources)
+	err = sb.manageResourceClaim(ctx, pod, nodeName, resources)
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
