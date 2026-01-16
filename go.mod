@@ -6,6 +6,7 @@ toolchain go1.25.5
 
 require (
 	github.com/SlinkyProject/slurm-client v1.0.1
+	github.com/kelindar/bitmap v1.5.3
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/puttsk/hostlist v0.1.0
@@ -78,6 +79,8 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kelindar/simd v1.1.2 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mailru/easyjson v0.9.1 // indirect
 	github.com/moby/term v0.5.2 // indirect
