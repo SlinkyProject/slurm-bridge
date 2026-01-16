@@ -6,20 +6,14 @@ package pod
 import (
 	"context"
 	"flag"
-	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -29,12 +23,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 const (
@@ -135,95 +126,5 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
 		eventRecorder: eventRecorder,
 	}
-	if r.EventCh != nil {
-		r.setupEventHandler()
-	}
 	return r
-}
-
-func (r *PodReconciler) setupEventHandler() {
-	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0044JobInfo)
-	if informer == nil {
-		return
-	}
-	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(job.JobId, 0)
-			r.generatePodEvents(jobId, true)
-		},
-		UpdateFunc: func(oldObj, newObj any) {
-			jobOld, ok := oldObj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast old object")
-				return
-			}
-			jobNew, ok := newObj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast new object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(jobNew.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(jobNew.JobId, 0)
-			if !apiequality.Semantic.DeepEqual(jobNew.JobState, jobOld.JobState) {
-				r.generatePodEvents(jobId, false)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(job.JobId, 0)
-			r.generatePodEvents(jobId, true)
-		},
-	})
-}
-
-// generatePodEvents will enqueue generic pod events for each pod labeled with a jobId
-func (r *PodReconciler) generatePodEvents(jobId int32, delete bool) {
-	ctx := context.Background()
-	logger := log.FromContext(ctx)
-
-	podList := &corev1.PodList{}
-	opts := &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(labels.Set{wellknown.LabelPlaceholderJobId: strconv.Itoa(int(jobId))}),
-	}
-	if err := r.List(ctx, podList, opts); err != nil {
-		logger.Error(err, "failed to get pods")
-		return
-	}
-
-	logger.V(1).Info("Generating pod reconcile requests", "jobId", jobId, "requests", len(podList.Items))
-	for _, p := range podList.Items {
-		r.EventCh <- event.GenericEvent{Object: &p}
-	}
-
-	if delete && len(podList.Items) == 0 {
-		logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
-		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
-			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-				"jobId", jobId)
-		}
-	}
 }

@@ -12,6 +12,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
@@ -198,6 +199,43 @@ func TestGetRootOwnerMetadata(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("GetRootOwnerMetadata() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNamespacedNameFromString(t *testing.T) {
+	tests := []struct {
+		name          string
+		qualifiedName string
+		want          types.NamespacedName
+	}{
+		{
+			name:          "empty",
+			qualifiedName: "",
+			want:          types.NamespacedName{},
+		},
+		{
+			name:          "qualified",
+			qualifiedName: "foo/bar",
+			want: types.NamespacedName{
+				Namespace: "foo",
+				Name:      "bar",
+			},
+		},
+		{
+			name:          "name",
+			qualifiedName: "bar",
+			want: types.NamespacedName{
+				Name: "bar",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NamespacedNameFromString(tt.qualifiedName)
+			if !apiequality.Semantic.DeepEqual(got, tt.want) {
+				t.Errorf("NamespacedNameFromString() = %v, want %v", got, tt.want)
 			}
 		})
 	}
