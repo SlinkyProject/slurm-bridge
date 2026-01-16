@@ -190,8 +190,9 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			}(),
 			Qos:         slurmJobIR.JobInfo.QOS,
 			Reservation: slurmJobIR.JobInfo.Reservation,
-			// SharedNone is effectively Exclusive
-			Shared:       &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone},
+			Shared: &[]api.V0044JobDescMsgShared{
+				api.V0044JobDescMsgSharedNone, // SharedNone is Exclusive
+			},
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
 			TimeLimit: func() *api.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {
