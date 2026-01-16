@@ -36,16 +36,17 @@ func (sb *SlurmBridge) createResourceClaim(ctx context.Context, pod *corev1.Pod,
 
 	var deviceRequests []resourcev1.DeviceRequest
 	for _, gres := range resources.Gres {
-		if sb.validateDeviceClass(ctx, gres.Type) {
-			deviceRequests = append(deviceRequests, resourcev1.DeviceRequest{
-				Name: gres.Name,
-				Exactly: &resourcev1.ExactDeviceRequest{
-					DeviceClassName: gres.Type,
-					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-					Count:           int64(gres.Count),
-				},
-			})
+		if !sb.validateDeviceClass(ctx, gres.Type) {
+			continue
 		}
+		deviceRequests = append(deviceRequests, resourcev1.DeviceRequest{
+			Name: gres.Name,
+			Exactly: &resourcev1.ExactDeviceRequest{
+				DeviceClassName: gres.Type,
+				AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+				Count:           int64(gres.Count),
+			},
+		})
 	}
 
 	// If the placeholderJob has no GRES allocations, there are no ResourceClaims to create
@@ -120,14 +121,15 @@ func generateRequestMappings(pod *corev1.Pod, resources *slurmcontrol.NodeResour
 	for _, c := range containers {
 		for req := range c.Resources.Requests {
 			for _, dev := range resources.Gres {
-				if strings.HasSuffix(req.String(), dev.Type) {
-					requestMappings = append(requestMappings,
-						corev1.ContainerExtendedResourceRequest{
-							ContainerName: c.Name,
-							RequestName:   dev.Name,
-							ResourceName:  resourcev1.ResourceDeviceClassPrefix + dev.Type,
-						})
+				if !strings.HasSuffix(req.String(), dev.Type) {
+					continue
 				}
+				reqMap := corev1.ContainerExtendedResourceRequest{
+					ContainerName: c.Name,
+					RequestName:   dev.Name,
+					ResourceName:  resourcev1.ResourceDeviceClassPrefix + dev.Type,
+				}
+				requestMappings = append(requestMappings, reqMap)
 			}
 		}
 	}
@@ -166,8 +168,6 @@ func expandDevices(gresCount int64, gresIndexes string) ([]string, error) {
 }
 
 func (sb *SlurmBridge) getAllocationResult(ctx context.Context, nodeName string, resources *slurmcontrol.NodeResources) *resourcev1.AllocationResult {
-
-	var allocation resourcev1.AllocationResult
 	var devices []resourcev1.DeviceRequestAllocationResult
 
 	for _, gres := range resources.Gres {
@@ -185,24 +185,29 @@ func (sb *SlurmBridge) getAllocationResult(ctx context.Context, nodeName string,
 			devices = append(devices, dev)
 		}
 	}
-	allocation.Devices = resourcev1.DeviceAllocationResult{
-		Results: devices,
-	}
-	allocation.NodeSelector = &corev1.NodeSelector{
-		NodeSelectorTerms: []corev1.NodeSelectorTerm{
-			{
-				MatchFields: []corev1.NodeSelectorRequirement{
-					{
-						Key:      "metadata.name",
-						Operator: "In",
-						Values:   []string{nodeName},
+
+	res := &resourcev1.AllocationResult{
+		AllocationTimestamp: &metav1.Time{
+			Time: time.Now(),
+		},
+		Devices: resourcev1.DeviceAllocationResult{
+			Results: devices,
+		},
+		NodeSelector: &corev1.NodeSelector{
+			NodeSelectorTerms: []corev1.NodeSelectorTerm{
+				{
+					MatchFields: []corev1.NodeSelectorRequirement{
+						{
+							Key:      "metadata.name",
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{nodeName},
+						},
 					},
 				},
 			},
 		},
 	}
-	allocation.AllocationTimestamp = &metav1.Time{Time: time.Now()}
-	return &allocation
+	return res
 }
 
 // Verify a GRES type exists for the DeviceClass
