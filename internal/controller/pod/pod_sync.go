@@ -91,19 +91,13 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
-	notFound := false
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			notFound = true
-		} else {
-			return err
+			logger.V(2).Info("Pod not found, no Job ID", "pod", podKey)
+			return nil
 		}
-	}
-
-	if notFound {
-		logger.V(2).Info("Pod not found, no Job ID", "pod", podKey)
-		return nil
+		return err
 	}
 
 	if pod.DeletionTimestamp == nil && !podv1.IsPodTerminal(pod) {
@@ -149,19 +143,13 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
-	notFound := false
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			notFound = true
-		} else {
-			return err
+			logger.V(2).Info("Pod not found, no finalizer to remove", "pod", podKey)
+			return nil
 		}
-	}
-
-	if notFound {
-		logger.V(2).Info("Pod not found, no finalizer to remove", "pod", podKey)
-		return nil
+		return err
 	}
 
 	if pod.DeletionTimestamp == nil && !podv1.IsPodTerminal(pod) {
