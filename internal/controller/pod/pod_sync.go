@@ -193,7 +193,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 			logger.Error(err, "failed to get resource claim", "claimKey", claimKey)
 			return err
 		}
-		if err := r.Delete(ctx, &claim, &client.DeleteOptions{}); err != nil {
+		if err := r.Delete(ctx, &claim); err != nil {
 			logger.Error(err, "failed to delete resource claim", "claim", claim)
 			return err
 		}
