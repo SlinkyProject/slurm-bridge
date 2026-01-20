@@ -55,7 +55,7 @@ var _ = Describe("syncTaint()", func() {
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 
@@ -222,7 +222,7 @@ var _ = Describe("syncState()", func() {
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 

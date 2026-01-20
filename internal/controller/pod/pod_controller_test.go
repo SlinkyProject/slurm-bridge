@@ -27,6 +27,10 @@ import (
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
+const (
+	schedulerName = "slurm-bridge-scheduler"
+)
+
 var _ = Describe("Pod Controller", func() {
 	Context("SetupWithManager()", func() {
 		It("Should initialize successfully", func() {
@@ -100,7 +104,7 @@ var _ = Describe("Pod Controller", func() {
 			By("Reconciling the created resource")
 			eventCh := make(chan event.GenericEvent)
 			slurmClient := slurmclientfake.NewFakeClient()
-			controllerReconciler := New(k8sClient, k8sClient.Scheme(), eventCh, slurmClient)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -173,7 +177,7 @@ var _ = Describe("Pod Controller", func() {
 				},
 			}
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
-			controllerReconciler := New(k8sClient, k8sClient.Scheme(), eventCh, slurmClient)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 
 			go func() {
 				controllerReconciler.generatePodEvents(1, false)
@@ -199,7 +203,7 @@ var _ = Describe("Pod Controller", func() {
 				},
 			}
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
-			controllerReconciler := New(k8sClient, k8sClient.Scheme(), eventCh, slurmClient)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 			controllerReconciler.generatePodEvents(2, true)
 			job := &slurmtypes.V0044JobInfo{}
 			err := slurmClient.Get(ctx, object.ObjectKey("2"), job)

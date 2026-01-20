@@ -133,23 +133,13 @@ func main() {
 	}
 	go slurmClient.Start(context.Background())
 
-	if err = (&node.NodeReconciler{
-		Client:        mgr.GetClient(),
-		SchedulerName: cfg.SchedulerName,
-		Scheme:        mgr.GetScheme(),
-		SlurmClient:   slurmClient,
-		EventCh:       make(chan event.GenericEvent, 100),
-	}).SetupWithManager(mgr); err != nil {
+	nodeEventCh := make(chan event.GenericEvent, 100)
+	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
-	if err = (&pod.PodReconciler{
-		Client:        mgr.GetClient(),
-		SchedulerName: cfg.SchedulerName,
-		Scheme:        mgr.GetScheme(),
-		SlurmClient:   slurmClient,
-		EventCh:       make(chan event.GenericEvent, 100),
-	}).SetupWithManager(mgr); err != nil {
+	podEventCh := make(chan event.GenericEvent, 100)
+	if err := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
