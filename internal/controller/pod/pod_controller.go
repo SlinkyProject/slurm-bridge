@@ -38,6 +38,8 @@ import (
 )
 
 const (
+	ControllerName = "pod-controller"
+
 	// BackoffGCInterval is the time that has to pass before next iteration of backoff GC is run
 	BackoffGCInterval = 1 * time.Minute
 )
@@ -106,13 +108,12 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.setupInternal()
 	podEventHandler := &podEventHandler{
 		SchedulerName: r.SchedulerName,
 		Reader:        mgr.GetCache(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("workload-controller").
+		Named(ControllerName).
 		Watches(&corev1.Pod{}, podEventHandler).
 		WatchesRawSource(source.Channel(r.EventCh, podEventHandler)).
 		WithOptions(controller.Options{
@@ -121,16 +122,23 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *PodReconciler) setupInternal() {
-	if r.eventRecorder == nil {
-		r.eventRecorder = record.NewBroadcaster().NewRecorder(r.Scheme, corev1.EventSource{Component: "workload-controller"})
-	}
-	if r.slurmControl == nil {
-		r.slurmControl = slurmcontrol.NewControl(r.SlurmClient)
+func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *PodReconciler {
+	scheme := kubeClient.Scheme()
+	eventSource := corev1.EventSource{Component: ControllerName}
+	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
+	r := &PodReconciler{
+		Client:        kubeClient,
+		Scheme:        scheme,
+		EventCh:       eventCh,
+		SchedulerName: schedulerName,
+		SlurmClient:   slurmClient,
+		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		eventRecorder: eventRecorder,
 	}
 	if r.EventCh != nil {
 		r.setupEventHandler()
 	}
+	return r
 }
 
 func (r *PodReconciler) setupEventHandler() {
@@ -218,15 +226,4 @@ func (r *PodReconciler) generatePodEvents(jobId int32, delete bool) {
 				"jobId", jobId)
 		}
 	}
-}
-
-func New(client client.Client, scheme *runtime.Scheme, eventCh chan event.GenericEvent, slurmClient slurmclient.Client) *PodReconciler {
-	r := &PodReconciler{
-		Client:      client,
-		Scheme:      scheme,
-		EventCh:     eventCh,
-		SlurmClient: slurmClient,
-	}
-	r.setupInternal()
-	return r
 }

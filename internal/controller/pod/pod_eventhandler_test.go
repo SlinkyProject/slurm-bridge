@@ -20,10 +20,6 @@ func newQueue() workqueue.TypedRateLimitingInterface[reconcile.Request] {
 	return workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[reconcile.Request]())
 }
 
-const (
-	schedulerName = "slurm-bridge-scheduler"
-)
-
 func Test_podEventHandler_Create(t *testing.T) {
 	type fields struct {
 		Reader client.Reader

@@ -43,6 +43,8 @@ func init() {
 }
 
 var (
+	ControllerName = "node-controller"
+
 	maxConcurrentReconciles = 1
 
 	// this is a short cut for any sub-functions to notify the reconcile how long to wait to requeue
@@ -102,7 +104,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.setupInternal()
 	nodeEventHandler := &nodeEventHandler{
 		Reader: mgr.GetCache(),
 	}
@@ -116,16 +117,23 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *NodeReconciler) setupInternal() {
-	if r.eventRecorder == nil {
-		r.eventRecorder = record.NewBroadcaster().NewRecorder(r.Scheme, corev1.EventSource{Component: "node-controller"})
-	}
-	if r.slurmControl == nil {
-		r.slurmControl = slurmcontrol.NewControl(r.SlurmClient)
+func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *NodeReconciler {
+	scheme := kubeClient.Scheme()
+	eventSource := corev1.EventSource{Component: ControllerName}
+	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
+	r := &NodeReconciler{
+		Client:        kubeClient,
+		Scheme:        scheme,
+		SchedulerName: schedulerName,
+		EventCh:       eventCh,
+		SlurmClient:   slurmClient,
+		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		eventRecorder: eventRecorder,
 	}
 	if r.EventCh != nil {
 		r.setupEventHandler()
 	}
+	return r
 }
 
 func (r *NodeReconciler) setupEventHandler() {
@@ -178,16 +186,4 @@ func nodeEvent(name string) event.GenericEvent {
 			},
 		},
 	}
-}
-
-func New(client client.Client, scheme *runtime.Scheme, schedulerName string, eventCh chan event.GenericEvent, slurmClient slurmclient.Client) *NodeReconciler {
-	r := &NodeReconciler{
-		Client:        client,
-		SchedulerName: schedulerName,
-		Scheme:        scheme,
-		EventCh:       eventCh,
-		SlurmClient:   slurmClient,
-	}
-	r.setupInternal()
-	return r
 }
