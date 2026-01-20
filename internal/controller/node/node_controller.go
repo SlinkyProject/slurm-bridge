@@ -143,7 +143,7 @@ func (r *NodeReconciler) setupEventHandler() {
 		return
 	}
 	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			node, ok := obj.(*slurmtypes.V0044Node)
 			if !ok {
 				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
@@ -151,7 +151,7 @@ func (r *NodeReconciler) setupEventHandler() {
 			}
 			r.EventCh <- nodeEvent(*node.Name)
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
+		UpdateFunc: func(oldObj, newObj any) {
 			nodeOld, ok := oldObj.(*slurmtypes.V0044Node)
 			if !ok {
 				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast old object")
@@ -167,7 +167,7 @@ func (r *NodeReconciler) setupEventHandler() {
 				r.EventCh <- nodeEvent(*nodeNew.Name)
 			}
 		},
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(obj any) {
 			node, ok := obj.(*slurmtypes.V0044Node)
 			if !ok {
 				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
