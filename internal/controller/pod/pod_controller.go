@@ -205,21 +205,21 @@ func (r *PodReconciler) generatePodEvents(jobId int32, delete bool) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx)
 
-	pods := &corev1.PodList{}
+	podList := &corev1.PodList{}
 	opts := &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(labels.Set{wellknown.LabelPlaceholderJobId: strconv.Itoa(int(jobId))}),
 	}
-	if err := r.List(ctx, pods, opts); err != nil {
+	if err := r.List(ctx, podList, opts); err != nil {
 		logger.Error(err, "failed to get pods")
 		return
 	}
 
-	logger.V(1).Info("Generating pod reconcile requests", "jobId", jobId, "requests", len(pods.Items))
-	for _, p := range pods.Items {
+	logger.V(1).Info("Generating pod reconcile requests", "jobId", jobId, "requests", len(podList.Items))
+	for _, p := range podList.Items {
 		r.EventCh <- event.GenericEvent{Object: &p}
 	}
 
-	if delete && len(pods.Items) == 0 {
+	if delete && len(podList.Items) == 0 {
 		logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
 		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
 			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",

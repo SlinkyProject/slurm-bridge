@@ -105,13 +105,13 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 		return nil
 	}
 
-	pods := &corev1.PodList{}
+	podList := &corev1.PodList{}
 	listOpts := &client.ListOptions{
 		LabelSelector: labels.SelectorFromSet(labels.Set{
 			wellknown.LabelPlaceholderJobId: pod.Labels[wellknown.LabelPlaceholderJobId],
 		}),
 	}
-	if err := r.List(context.Background(), pods, listOpts); err != nil {
+	if err := r.List(context.Background(), podList, listOpts); err != nil {
 		logger.Error(err, "failed to fetch pods associated with Slurm job")
 		return err
 	}
@@ -119,7 +119,7 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	// If there are no pods labeled with this jobId the Slurm Job may
 	// be terminated.
 	activePods := 0
-	for _, p := range pods.Items {
+	for _, p := range podList.Items {
 		if p.DeletionTimestamp == nil && !podv1.IsPodTerminal(&p) {
 			activePods++
 		}
