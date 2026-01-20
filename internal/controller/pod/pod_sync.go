@@ -106,10 +106,12 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	}
 
 	pods := &corev1.PodList{}
-	if err := r.List(context.Background(), pods,
-		&client.ListOptions{LabelSelector: labels.SelectorFromSet(
-			labels.Set{wellknown.LabelPlaceholderJobId: pod.Labels[wellknown.LabelPlaceholderJobId]},
-		)}); err != nil {
+	listOpts := &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{
+			wellknown.LabelPlaceholderJobId: pod.Labels[wellknown.LabelPlaceholderJobId],
+		}),
+	}
+	if err := r.List(context.Background(), pods, listOpts); err != nil {
 		logger.Error(err, "failed to fetch pods associated with Slurm job")
 		return err
 	}
