@@ -14,7 +14,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
@@ -59,9 +59,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId:    ptr.To[int32](1),
-							JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -85,10 +85,10 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId: ptr.To[int32](1),
-							JobState: &[]v0044.V0044JobInfoJobState{
-								v0044.V0044JobInfoJobStateCANCELLED,
+							JobState: &[]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateCANCELLED,
 							},
 						},
 					}
@@ -113,10 +113,10 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId: ptr.To[int32](1),
-							JobState: &[]v0044.V0044JobInfoJobState{
-								v0044.V0044JobInfoJobStateCOMPLETED,
+							JobState: &[]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateCOMPLETED,
 							},
 						},
 					}
@@ -185,7 +185,7 @@ func Test_realSlurmControl_TerminateJob(t *testing.T) {
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId: ptr.To[int32](1),
 						},
 					}
