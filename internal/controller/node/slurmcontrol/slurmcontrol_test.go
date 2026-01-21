@@ -16,7 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
@@ -56,8 +56,8 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 				Client: func() client.Client {
 					list := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node-0")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node-1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node-0")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node-1")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -142,7 +142,7 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 		{
 			name: "found",
 			fields: func() fields {
-				node := &types.V0044Node{V0044Node: v0044.V0044Node{Name: ptr.To("node-0")}}
+				node := &types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("node-0")}}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
 				}
@@ -195,7 +195,7 @@ func Test_realSlurmControl_MakeNodeUndrain(t *testing.T) {
 		{
 			name: "found",
 			fields: func() fields {
-				node := &types.V0044Node{V0044Node: v0044.V0044Node{Name: ptr.To("node-0")}}
+				node := &types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("node-0")}}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
 				}
@@ -252,9 +252,9 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 			name: "not drain",
 			fields: func() fields {
 				node := &types.V0044Node{
-					V0044Node: v0044.V0044Node{
+					V0044Node: api.V0044Node{
 						Name:  ptr.To("node-0"),
-						State: ptr.To([]v0044.V0044NodeState{v0044.V0044NodeStateIDLE}),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
 					},
 				}
 				return fields{
@@ -272,9 +272,9 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 			name: "is drain",
 			fields: func() fields {
 				node := &types.V0044Node{
-					V0044Node: v0044.V0044Node{
+					V0044Node: api.V0044Node{
 						Name:  ptr.To("node-0"),
-						State: ptr.To([]v0044.V0044NodeState{v0044.V0044NodeStateIDLE, v0044.V0044NodeStateDRAIN}),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
 					},
 				}
 				return fields{

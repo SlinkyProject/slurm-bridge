@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
@@ -170,7 +170,7 @@ var _ = Describe("Pod Controller", func() {
 			jobList := &slurmtypes.V0044JobInfoList{
 				Items: []slurmtypes.V0044JobInfo{
 					{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId: ptr.To[int32](1),
 						},
 					},
@@ -196,7 +196,7 @@ var _ = Describe("Pod Controller", func() {
 			jobList := &slurmtypes.V0044JobInfoList{
 				Items: []slurmtypes.V0044JobInfo{
 					{
-						V0044JobInfo: v0044.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
 							JobId: ptr.To[int32](2),
 						},
 					},
