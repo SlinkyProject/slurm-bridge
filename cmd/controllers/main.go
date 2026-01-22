@@ -29,6 +29,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
+	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -137,6 +138,10 @@ func main() {
 	nodeEventCh := make(chan event.GenericEvent, 100)
 	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
+		os.Exit(1)
+	}
+	if err := slurmnode.NewRunnable(mgr.GetClient(), slurmClient, nodeEventCh).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmNode")
 		os.Exit(1)
 	}
 	podEventCh := make(chan event.GenericEvent, 100)
