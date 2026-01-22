@@ -6,16 +6,12 @@ package node
 import (
 	"context"
 	"flag"
-	"fmt"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
@@ -130,60 +125,5 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
 		eventRecorder: eventRecorder,
 	}
-	if r.EventCh != nil {
-		r.setupEventHandler()
-	}
 	return r
-}
-
-func (r *NodeReconciler) setupEventHandler() {
-	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0044Node)
-	if informer == nil {
-		return
-	}
-	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			node, ok := obj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
-				return
-			}
-			r.EventCh <- nodeEvent(*node.Name)
-		},
-		UpdateFunc: func(oldObj, newObj any) {
-			nodeOld, ok := oldObj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast old object")
-				return
-			}
-			nodeNew, ok := newObj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast new object")
-				return
-			}
-			if !apiequality.Semantic.DeepEqual(nodeNew.Address, nodeOld.Address) ||
-				!apiequality.Semantic.DeepEqual(nodeNew.Hostname, nodeOld.Hostname) {
-				r.EventCh <- nodeEvent(*nodeNew.Name)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			node, ok := obj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
-				return
-			}
-			r.EventCh <- nodeEvent(*node.Name)
-		},
-	})
-}
-
-func nodeEvent(name string) event.GenericEvent {
-	return event.GenericEvent{
-		Object: &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-		},
-	}
 }
