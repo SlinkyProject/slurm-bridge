@@ -119,7 +119,7 @@ function slurm-bridge::prerequisites() {
 
 	chartName="jobset"
 	if ! helm::find "$chartName"; then
-		local version="v0.8.1"
+		local version="v0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
 			--namespace "${chartName}-system" --create-namespace
 	fi
@@ -194,7 +194,7 @@ function slurm::install() {
 	slurm::prerequisites
 
 	local chartName
-	local version="1.0.0"
+	local version="1.0.x"
 
 	chartName="slurm-operator"
 	if ! helm::find "$chartName"; then
