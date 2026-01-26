@@ -39,14 +39,8 @@ func (sb *SlurmBridge) createResourceClaim(ctx context.Context, pod *corev1.Pod,
 		if !sb.validateDeviceClass(ctx, gres.Type) {
 			continue
 		}
-		deviceRequests = append(deviceRequests, resourcev1.DeviceRequest{
-			Name: gres.Name,
-			Exactly: &resourcev1.ExactDeviceRequest{
-				DeviceClassName: gres.Type,
-				AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-				Count:           int64(gres.Count),
-			},
-		})
+		request := deviceRequest(gres.Name, gres.Type, gres.Count)
+		deviceRequests = append(deviceRequests, request)
 	}
 
 	// If the placeholderJob has no GRES allocations, there are no ResourceClaims to create
@@ -112,6 +106,17 @@ func (sb *SlurmBridge) createResourceClaim(ctx context.Context, pod *corev1.Pod,
 	}
 
 	return nil
+}
+
+func deviceRequest(name, deviceClassName string, count int64) resourcev1.DeviceRequest {
+	return resourcev1.DeviceRequest{
+		Name: name,
+		Exactly: &resourcev1.ExactDeviceRequest{
+			DeviceClassName: deviceClassName,
+			AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+			Count:           count,
+		},
+	}
 }
 
 func generateRequestMappings(pod *corev1.Pod, resources *slurmcontrol.NodeResources) []corev1.ContainerExtendedResourceRequest {
