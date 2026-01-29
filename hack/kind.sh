@@ -161,13 +161,20 @@ function slurm-bridge::nodes() {
 		local bridge_nodes
 		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
 		echo "$bridge_nodes" | while IFS= read -r node; do
-			local cpus memory
+			local cpus memory memory_mb
 			cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
 			memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
+			# Convert node capacity (Ki/Mi/Gi) to MB for scontrol realmemory
+			case "$memory" in
+				*Ki) memory_mb=$((${memory%Ki} / 1024)) ;;
+				*Mi) memory_mb=${memory%Mi} ;;
+				*Gi) memory_mb=$((${memory%Gi} * 1024)) ;;
+				*)   memory_mb=${memory%%[!0-9]*}; [ -z "$memory_mb" ] && memory_mb=0 ;;
+			esac
 			if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
 				kubectl exec -n slurm pods/slurm-controller-0 -- \
 					scontrol create nodename="$node" state=external \
-					cpus="$cpus" realmemory="${memory%Ki}" \
+					cpus="$cpus" realmemory="$memory_mb" \
 					gres="gpu:gpu.example.com:8" \
 					gresconf=count=8,name=gpu,type=gpu.example.com,file=/home/dev/gpu0
 			fi
