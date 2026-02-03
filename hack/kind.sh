@@ -102,7 +102,7 @@ function slurm-bridge::install() {
 	slurm-bridge::nodes
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		skaffold run -p dev
+		skaffold run
 	)
 }
 

@@ -5,50 +5,28 @@
 # https://skaffold.dev/docs/references/yaml/
 apiVersion: skaffold/v4beta1
 kind: Config
-profiles:
-  - name: dev
-    build:
-      artifacts:
-        - image: slinky.slurm.net/slurm-bridge-scheduler
-          context: ../../
-          docker:
-            dockerfile: Dockerfile
-            target: scheduler
-        - image: slinky.slurm.net/slurm-bridge-admission
-          context: ../../
-          docker:
-            dockerfile: Dockerfile
-            target: admission
-        - image: slinky.slurm.net/slurm-bridge-controllers
-          context: ../../
-          docker:
-            dockerfile: Dockerfile
-            target: controllers
-      tagPolicy:
-        inputDigest: {}
-      local:
-        useDockerCLI: true
-        push: false
-    deploy:
-      helm:
-        releases:
-          - name: slurm-bridge
-            chartPath: ./
-            setValues:
-              admission:
-                managedNamespaces:
-                  - slurm-bridge
-            valuesFiles:
-              - ./values-dev.yaml
-            setValueTemplates:
-              scheduler.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_scheduler}}'
-              scheduler.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_scheduler}}'
-              admission.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_admission}}'
-              admission.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_admission}}'
-              controllers.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_controllers}}'
-              controllers.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_controllers}}'
-            namespace: slinky
-            createNamespace: true
+build:
+  artifacts:
+    - image: slinky.slurm.net/slurm-bridge-scheduler
+      context: ../../
+      docker:
+        dockerfile: Dockerfile
+        target: scheduler
+    - image: slinky.slurm.net/slurm-bridge-admission
+      context: ../../
+      docker:
+        dockerfile: Dockerfile
+        target: admission
+    - image: slinky.slurm.net/slurm-bridge-controllers
+      context: ../../
+      docker:
+        dockerfile: Dockerfile
+        target: controllers
+  tagPolicy:
+    inputDigest: {}
+  local:
+    useDockerCLI: true
+    push: false
 deploy:
   helm:
     releases:
@@ -56,5 +34,12 @@ deploy:
         chartPath: ./
         valuesFiles:
           - ./values-dev.yaml
+        setValueTemplates:
+          scheduler.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_scheduler}}'
+          scheduler.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_scheduler}}'
+          admission.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_admission}}'
+          admission.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_admission}}'
+          controllers.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_controllers}}'
+          controllers.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_controllers}}'
         namespace: slinky
         createNamespace: true
