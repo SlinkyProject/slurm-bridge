@@ -13,7 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
@@ -65,15 +65,15 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 		return err
 	}
 
-	if slurmNode.GetStateAsSet().Has(v0044.V0044NodeStateDRAIN) {
+	if slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN) {
 		logger.V(1).Info("node is already drained, skipping drain request",
 			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
 		return nil
 	}
 
 	logger.Info("Make Slurm node drain", "node", klog.KObj(node))
-	req := v0044.V0044UpdateNodeMsg{
-		State:  ptr.To([]v0044.V0044UpdateNodeMsgState{v0044.V0044UpdateNodeMsgStateDRAIN}),
+	req := api.V0044UpdateNodeMsg{
+		State:  ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN}),
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
@@ -101,8 +101,8 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	}
 
 	nodeReason := ptr.Deref(slurmNode.Reason, "")
-	if !slurmNode.GetStateAsSet().Has(v0044.V0044NodeStateDRAIN) ||
-		slurmNode.GetStateAsSet().Has(v0044.V0044NodeStateUNDRAIN) {
+	if !slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN) ||
+		slurmNode.GetStateAsSet().Has(api.V0044NodeStateUNDRAIN) {
 		logger.V(1).Info("Node is already undrained, skipping undrain request",
 			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
 		return nil
@@ -113,8 +113,8 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	}
 
 	logger.Info("Make Slurm node undrain", "node", klog.KObj(node))
-	req := v0044.V0044UpdateNodeMsg{
-		State:  ptr.To([]v0044.V0044UpdateNodeMsgState{v0044.V0044UpdateNodeMsgStateUNDRAIN}),
+	req := api.V0044UpdateNodeMsg{
+		State:  ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateUNDRAIN}),
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
@@ -135,7 +135,7 @@ func (r *realSlurmControl) IsNodeDrain(ctx context.Context, node *corev1.Node) (
 		return false, err
 	}
 
-	isDrain := slurmNode.GetStateAsSet().Has(v0044.V0044NodeStateDRAIN)
+	isDrain := slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN)
 	return isDrain, nil
 }
 

@@ -6,6 +6,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -67,6 +68,9 @@ func (r *NodeReconciler) syncTaint(ctx context.Context, req reconcile.Request) e
 
 	bridgedNodeNames := slurmNodeNameSet.Intersection(kubeNodeNameSet)
 	if bridgedNodeNames.Has(nodeutils.GetSlurmNodeName(node)) {
+		// Requeue until no longer a bridged node
+		durationStore.Push(node.Name, 30*time.Second)
+
 		// Taint bridged Kubernetes nodes
 		logger.V(1).Info("add taint to bridged node", "node", klog.KObj(node))
 		return r.taintNode(ctx, node, kubeNodeNameMap)

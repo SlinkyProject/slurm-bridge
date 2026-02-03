@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 )
@@ -86,7 +86,7 @@ var _ = Describe("Node Controller", func() {
 			By("Reconciling the created resource")
 			eventCh := make(chan event.TypedGenericEvent[client.Object])
 			slurmClient := slurmclientfake.NewFakeClient()
-			controllerReconciler := New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 			Expect(controllerReconciler).NotTo(BeNil())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -100,12 +100,12 @@ var _ = Describe("Node Controller", func() {
 			eventCh := make(chan event.TypedGenericEvent[client.Object])
 			list := &slurmtypes.V0044NodeList{
 				Items: []slurmtypes.V0044Node{
-					{V0044Node: v0044.V0044Node{Name: ptr.To(resourceName)}},
-					{V0044Node: v0044.V0044Node{Name: ptr.To("node-0")}},
+					{V0044Node: api.V0044Node{Name: ptr.To(resourceName)}},
+					{V0044Node: api.V0044Node{Name: ptr.To("node-0")}},
 				},
 			}
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(list).Build()
-			controllerReconciler := New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 			Expect(controllerReconciler).NotTo(BeNil())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

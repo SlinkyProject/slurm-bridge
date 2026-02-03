@@ -5,9 +5,11 @@ package utils
 
 import (
 	"context"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -58,4 +60,17 @@ func getNextControllerOwner(obj client.Object) *metav1.OwnerReference {
 		}
 	}
 	return nil
+}
+
+func NamespacedNameFromString(qualifiedName string) types.NamespacedName {
+	parts := strings.Split(qualifiedName, "/")
+	if len(parts) != 2 {
+		return types.NamespacedName{
+			Name: parts[0],
+		}
+	}
+	return types.NamespacedName{
+		Namespace: parts[0],
+		Name:      parts[1],
+	}
 }
