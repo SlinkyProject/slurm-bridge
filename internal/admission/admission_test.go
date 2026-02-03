@@ -18,6 +18,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
 const (
@@ -348,6 +350,88 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			want:    nil,
 			wantErr: false,
 		},
+		{
+			name: "PodWithSharedUser",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "PodWithSharedInvalid",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "invalid",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithSharedAndPodGroupLabel",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+						Labels: map[string]string{
+							sched.PodGroupLabel: "pg",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithSharedAndLWSLabel",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+						Labels: map[string]string{
+							lwsv1.GroupUniqueHashLabelKey: "lws",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -485,6 +569,177 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						Namespace: namespace,
 						Labels: map[string]string{
 							wellknown.AnnotationPlaceholderNode: "node2",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "UpdatePodWithSharedUser",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "UpdatePodWithSharedInvalid",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "invalid",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "UpdatePodWithSharedAndPodGroupLabel",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+						Labels: map[string]string{
+							sched.PodGroupLabel: "pg",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "UpdatePodWithSharedAndLWSLabel",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationShared: "user",
+						},
+						Labels: map[string]string{
+							lwsv1.GroupUniqueHashLabelKey: "lws",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "AddSharedAnnotationWhenPlaceholderJobRunning",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node1",
+						},
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node1",
+							wellknown.AnnotationShared:          "user",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "ChangeSharedAnnotationValueWhenPlaceholderJobRunning",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node1",
+							wellknown.AnnotationShared:          "user",
+						},
+					},
+				},
+				newObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node1",
+							wellknown.AnnotationShared:          "none",
 						},
 					},
 				},
