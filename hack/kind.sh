@@ -267,10 +267,10 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
-	local version="0.2.0"
+	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
-	git clone -b "v${version}" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
+	git clone -b "$version" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
 	(
 		cd "$dra_path"
 
