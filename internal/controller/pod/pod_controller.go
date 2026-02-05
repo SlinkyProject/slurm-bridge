@@ -6,20 +6,14 @@ package pod
 import (
 	"context"
 	"flag"
-	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -29,15 +23,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 const (
+	ControllerName = "pod-controller"
+
 	// BackoffGCInterval is the time that has to pass before next iteration of backoff GC is run
 	BackoffGCInterval = 1 * time.Minute
 )
@@ -106,13 +99,12 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.setupInternal()
 	podEventHandler := &podEventHandler{
 		SchedulerName: r.SchedulerName,
 		Reader:        mgr.GetCache(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		Named("workload-controller").
+		Named(ControllerName).
 		Watches(&corev1.Pod{}, podEventHandler).
 		WatchesRawSource(source.Channel(r.EventCh, podEventHandler)).
 		WithOptions(controller.Options{
@@ -121,112 +113,18 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *PodReconciler) setupInternal() {
-	if r.eventRecorder == nil {
-		r.eventRecorder = record.NewBroadcaster().NewRecorder(r.Scheme, corev1.EventSource{Component: "workload-controller"})
-	}
-	if r.slurmControl == nil {
-		r.slurmControl = slurmcontrol.NewControl(r.SlurmClient)
-	}
-	if r.EventCh != nil {
-		r.setupEventHandler()
-	}
-}
-
-func (r *PodReconciler) setupEventHandler() {
-	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0044JobInfo)
-	if informer == nil {
-		return
-	}
-	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(job.JobId, 0)
-			r.generatePodEvents(jobId, true)
-		},
-		UpdateFunc: func(oldObj, newObj any) {
-			jobOld, ok := oldObj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast old object")
-				return
-			}
-			jobNew, ok := newObj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast new object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(jobNew.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(jobNew.JobId, 0)
-			if !apiequality.Semantic.DeepEqual(jobNew.JobState, jobOld.JobState) {
-				r.generatePodEvents(jobId, false)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			job, ok := obj.(*slurmtypes.V0044JobInfo)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044JobInfo"), "failed to cast object")
-				return
-			}
-			// Ignore event if a placeholderInfo struct can not be parsed
-			phInfo := &placeholderinfo.PlaceholderInfo{}
-			if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
-				return
-			}
-			jobId := ptr.Deref(job.JobId, 0)
-			r.generatePodEvents(jobId, true)
-		},
-	})
-}
-
-// generatePodEvents will enqueue generic pod events for each pod labeled with a jobId
-func (r *PodReconciler) generatePodEvents(jobId int32, delete bool) {
-	ctx := context.Background()
-	logger := log.FromContext(ctx)
-
-	pods := &corev1.PodList{}
-	opts := &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(labels.Set{wellknown.LabelPlaceholderJobId: strconv.Itoa(int(jobId))}),
-	}
-	if err := r.List(ctx, pods, opts); err != nil {
-		logger.Error(err, "failed to get pods")
-		return
-	}
-
-	logger.V(1).Info("Generating pod reconcile requests", "jobId", jobId, "requests", len(pods.Items))
-	for _, p := range pods.Items {
-		r.EventCh <- event.GenericEvent{Object: &p}
-	}
-
-	if delete && len(pods.Items) == 0 {
-		logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
-		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
-			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-				"jobId", jobId)
-		}
-	}
-}
-
-func New(client client.Client, scheme *runtime.Scheme, eventCh chan event.GenericEvent, slurmClient slurmclient.Client) *PodReconciler {
+func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *PodReconciler {
+	scheme := kubeClient.Scheme()
+	eventSource := corev1.EventSource{Component: ControllerName}
+	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
 	r := &PodReconciler{
-		Client:      client,
-		Scheme:      scheme,
-		EventCh:     eventCh,
-		SlurmClient: slurmClient,
+		Client:        kubeClient,
+		Scheme:        scheme,
+		EventCh:       eventCh,
+		SchedulerName: schedulerName,
+		SlurmClient:   slurmClient,
+		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		eventRecorder: eventRecorder,
 	}
-	r.setupInternal()
 	return r
 }

@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
@@ -46,16 +46,16 @@ var _ = Describe("syncTaint()", func() {
 
 		slurmNodeList := &slurmtypes.V0044NodeList{
 			Items: []slurmtypes.V0044Node{
-				{V0044Node: v0044.V0044Node{Name: ptr.To("slurm-0")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-0")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-1")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("slurm-0")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-0")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-1")}},
 			},
 		}
 		slurmClient := slurmclientfake.NewClientBuilder().WithLists(slurmNodeList).Build()
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 
@@ -186,28 +186,28 @@ var _ = Describe("syncState()", func() {
 
 		slurmNodeList := &slurmtypes.V0044NodeList{
 			Items: []slurmtypes.V0044Node{
-				{V0044Node: v0044.V0044Node{Name: ptr.To("slurm-0")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-0")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-1")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-2")}},
-				{V0044Node: v0044.V0044Node{Name: ptr.To("bridged-3")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("slurm-0")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-0")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-1")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-2")}},
+				{V0044Node: api.V0044Node{Name: ptr.To("bridged-3")}},
 			},
 		}
 		updateFn := func(_ context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
 			switch o := obj.(type) {
 			case *slurmtypes.V0044Node:
-				r, ok := req.(v0044.V0044UpdateNodeMsg)
+				r, ok := req.(api.V0044UpdateNodeMsg)
 				if !ok {
 					return errors.New("failed to cast request object")
 				}
-				stateSet := set.New(ptr.Deref(o.State, []v0044.V0044NodeState{})...)
-				statesReq := ptr.Deref(r.State, []v0044.V0044UpdateNodeMsgState{})
+				stateSet := set.New(ptr.Deref(o.State, []api.V0044NodeState{})...)
+				statesReq := ptr.Deref(r.State, []api.V0044UpdateNodeMsgState{})
 				for _, stateReq := range statesReq {
 					switch stateReq {
-					case v0044.V0044UpdateNodeMsgStateUNDRAIN:
-						stateSet.Delete(v0044.V0044NodeStateDRAIN)
+					case api.V0044UpdateNodeMsgStateUNDRAIN:
+						stateSet.Delete(api.V0044NodeStateDRAIN)
 					default:
-						stateSet.Insert(v0044.V0044NodeState(stateReq))
+						stateSet.Insert(api.V0044NodeState(stateReq))
 					}
 				}
 				o.State = ptr.To(stateSet.UnsortedList())
@@ -222,7 +222,7 @@ var _ = Describe("syncState()", func() {
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = New(k8sClient, k8sClient.Scheme(), schedulerName, eventCh, slurmClient)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 

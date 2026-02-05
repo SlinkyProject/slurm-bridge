@@ -13,7 +13,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
@@ -226,7 +226,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -234,7 +234,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
 							}},
 						},
@@ -290,7 +290,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -298,7 +298,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
 							}},
 						},
@@ -328,7 +328,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -336,7 +336,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
 							}},
 						},
@@ -374,7 +374,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"slurm/pod1"},
@@ -382,7 +382,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 									return ptr.To(pi.ToString())
 								}(),
 								JobId:    ptr.To[int32](1),
-								JobState: &[]v0044.V0044JobInfoJobState{v0044.V0044JobInfoJobStateRUNNING},
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
 							}},
 						},
@@ -546,8 +546,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node2")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -586,8 +586,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node2")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -621,8 +621,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node2")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -655,7 +655,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					jobs := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								JobId: ptr.To(int32(1)),
 								Nodes: ptr.To(""),
 								AdminComment: func() *string {
@@ -669,8 +669,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node2")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -708,7 +708,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					jobs := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								JobId: ptr.To(int32(1)),
 								Nodes: ptr.To(""),
 								AdminComment: func() *string {
@@ -722,8 +722,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: v0044.V0044Node{Name: ptr.To("node2")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -928,7 +928,7 @@ func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								JobId: ptr.To[int32](1),
 							}},
 						},
@@ -1010,7 +1010,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"/pod1"},
@@ -1043,7 +1043,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"/pod1"},
@@ -1076,7 +1076,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
-							{V0044JobInfo: v0044.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
 									pi := placeholderinfo.PlaceholderInfo{
 										Pods: []string{"/pod1"},

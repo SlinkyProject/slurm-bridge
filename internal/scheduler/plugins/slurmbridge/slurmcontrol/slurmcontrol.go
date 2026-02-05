@@ -12,7 +12,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	v0044 "github.com/SlinkyProject/slurm-client/api/v0044"
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
@@ -124,7 +124,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Placeh
 		return nil, err
 	}
 
-	if job.GetStateAsSet().HasAny(v0044.V0044JobInfoJobStateCANCELLED, v0044.V0044JobInfoJobStateCOMPLETED) {
+	if job.GetStateAsSet().HasAny(api.V0044JobInfoJobStateCANCELLED, api.V0044JobInfoJobStateCOMPLETED) {
 		return &jobOut, nil
 	}
 	logger.V(5).Info("found matching job")
@@ -145,22 +145,22 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 }
 
 // sharedForJob returns the shared policy for the job
-func sharedForJob(slurmJobIR *slurmjobir.SlurmJobIR) *[]v0044.V0044JobDescMsgShared {
+func sharedForJob(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V0044JobDescMsgShared {
 	if len(slurmJobIR.Pods.Items) != 1 || slurmJobIR.JobInfo.Shared == nil {
-		return &[]v0044.V0044JobDescMsgShared{v0044.V0044JobDescMsgSharedNone}
+		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
 	}
-	shared, ok := map[string]v0044.V0044JobDescMsgShared{
-		"mcs":           v0044.V0044JobDescMsgSharedMcs,
-		"none":          v0044.V0044JobDescMsgSharedNone,
-		"oversubscribe": v0044.V0044JobDescMsgSharedOversubscribe,
-		"topo":          v0044.V0044JobDescMsgSharedTopo,
-		"user":          v0044.V0044JobDescMsgSharedUser,
+	shared, ok := map[string]api.V0044JobDescMsgShared{
+		"mcs":           api.V0044JobDescMsgSharedMcs,
+		"none":          api.V0044JobDescMsgSharedNone,
+		"oversubscribe": api.V0044JobDescMsgSharedOversubscribe,
+		"topo":          api.V0044JobDescMsgSharedTopo,
+		"user":          api.V0044JobDescMsgSharedUser,
 	}[*slurmJobIR.JobInfo.Shared]
 
 	if !ok {
-		shared = v0044.V0044JobDescMsgSharedNone
+		shared = api.V0044JobDescMsgSharedNone
 	}
-	return &[]v0044.V0044JobDescMsgShared{shared}
+	return &[]api.V0044JobDescMsgShared{shared}
 }
 
 // submitJob will create or update a placeholder job Slurm.
@@ -171,35 +171,35 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		phInfo.Pods = append(phInfo.Pods, p.Namespace+"/"+p.Name)
 	}
 	job := &slurmtypes.V0044JobInfo{}
-	jobSubmit := v0044.V0044JobSubmitReq{
-		Job: &v0044.V0044JobDescMsg{
+	jobSubmit := api.V0044JobSubmitReq{
+		Job: &api.V0044JobDescMsg{
 			Account:                 slurmJobIR.JobInfo.Account,
 			AdminComment:            ptr.To(phInfo.ToString()),
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
 			Constraints:             slurmJobIR.JobInfo.Constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
-			Flags: &[]v0044.V0044JobDescMsgFlags{
-				v0044.V0044JobDescMsgFlagsEXTERNALJOB,
+			Flags: &[]api.V0044JobDescMsgFlags{
+				api.V0044JobDescMsgFlagsEXTERNALJOB,
 			},
 			GroupId:      slurmJobIR.JobInfo.GroupId,
 			Licenses:     slurmJobIR.JobInfo.Licenses,
 			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
 			McsLabel:     ptr.To(r.mcsLabel),
-			MemoryPerNode: func() *v0044.V0044Uint64NoValStruct {
+			MemoryPerNode: func() *api.V0044Uint64NoValStruct {
 				if slurmJobIR.JobInfo.MemPerNode != nil {
-					return &v0044.V0044Uint64NoValStruct{
+					return &api.V0044Uint64NoValStruct{
 						Infinite: ptr.To(false),
 						Number:   slurmJobIR.JobInfo.MemPerNode,
 						Set:      ptr.To(true),
 					}
 				} else {
-					return &v0044.V0044Uint64NoValStruct{Set: ptr.To(false)}
+					return &api.V0044Uint64NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
 			MinimumNodes:  slurmJobIR.JobInfo.MinNodes,
 			Name:          slurmJobIR.JobInfo.JobName,
 			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
-			RequiredNodes: ptr.To(v0044.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
+			RequiredNodes: ptr.To(api.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
 			Partition: func() *string {
 				if slurmJobIR.JobInfo.Partition == nil {
 					return &r.partition
@@ -211,15 +211,15 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			Reservation:  slurmJobIR.JobInfo.Reservation,
 			Shared:       sharedForJob(slurmJobIR),
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
-			TimeLimit: func() *v0044.V0044Uint32NoValStruct {
+			TimeLimit: func() *api.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {
-					return &v0044.V0044Uint32NoValStruct{
+					return &api.V0044Uint32NoValStruct{
 						Infinite: ptr.To(false),
 						Number:   slurmJobIR.JobInfo.TimeLimit,
 						Set:      ptr.To(true),
 					}
 				} else {
-					return &v0044.V0044Uint32NoValStruct{Set: ptr.To(false)}
+					return &api.V0044Uint32NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
 			TresPerNode: slurmJobIR.JobInfo.Gres,
@@ -284,10 +284,10 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 			CoresPerSocket: ptr.Deref(n.CoresPerSocket, 0),
 			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
 			CoreBitmap:     ptr.Deref(n.CoreBitmap, ""),
-			Channel:        ptr.Deref(ptr.Deref(n.Channel, v0044.V0044Uint32NoValStruct{}).Number, 0),
-			Gres:           make([]GresLayout, len(ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}))),
+			Channel:        ptr.Deref(ptr.Deref(n.Channel, api.V0044Uint32NoValStruct{}).Number, 0),
+			Gres:           make([]GresLayout, len(ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}))),
 		}
-		for i, g := range ptr.Deref(n.Gres, v0044.V0044NodeGresLayoutList{}) {
+		for i, g := range ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}) {
 			nodeOut.Gres[i] = GresLayout{
 				Name:  g.Name,
 				Type:  ptr.Deref(g.Type, ""),
