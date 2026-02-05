@@ -6,16 +6,12 @@ package node
 import (
 	"context"
 	"flag"
-	"fmt"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/flowcontrol"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -27,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
@@ -43,6 +38,8 @@ func init() {
 }
 
 var (
+	ControllerName = "node-controller"
+
 	maxConcurrentReconciles = 1
 
 	// this is a short cut for any sub-functions to notify the reconcile how long to wait to requeue
@@ -102,7 +99,6 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.setupInternal()
 	nodeEventHandler := &nodeEventHandler{
 		Reader: mgr.GetCache(),
 	}
@@ -116,78 +112,18 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *NodeReconciler) setupInternal() {
-	if r.eventRecorder == nil {
-		r.eventRecorder = record.NewBroadcaster().NewRecorder(r.Scheme, corev1.EventSource{Component: "node-controller"})
-	}
-	if r.slurmControl == nil {
-		r.slurmControl = slurmcontrol.NewControl(r.SlurmClient)
-	}
-	if r.EventCh != nil {
-		r.setupEventHandler()
-	}
-}
-
-func (r *NodeReconciler) setupEventHandler() {
-	logger := log.FromContext(context.Background())
-	informer := r.SlurmClient.GetInformer(slurmtypes.ObjectTypeV0044Node)
-	if informer == nil {
-		return
-	}
-	informer.SetEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			node, ok := obj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
-				return
-			}
-			r.EventCh <- nodeEvent(*node.Name)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			nodeOld, ok := oldObj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast old object")
-				return
-			}
-			nodeNew, ok := newObj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast new object")
-				return
-			}
-			if !apiequality.Semantic.DeepEqual(nodeNew.Address, nodeOld.Address) ||
-				!apiequality.Semantic.DeepEqual(nodeNew.Hostname, nodeOld.Hostname) {
-				r.EventCh <- nodeEvent(*nodeNew.Name)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			node, ok := obj.(*slurmtypes.V0044Node)
-			if !ok {
-				logger.Error(fmt.Errorf("expected V0044Node"), "failed to cast object")
-				return
-			}
-			r.EventCh <- nodeEvent(*node.Name)
-		},
-	})
-}
-
-func nodeEvent(name string) event.GenericEvent {
-	return event.GenericEvent{
-		Object: &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: name,
-			},
-		},
-	}
-}
-
-func New(client client.Client, scheme *runtime.Scheme, schedulerName string, eventCh chan event.GenericEvent, slurmClient slurmclient.Client) *NodeReconciler {
+func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *NodeReconciler {
+	scheme := kubeClient.Scheme()
+	eventSource := corev1.EventSource{Component: ControllerName}
+	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
 	r := &NodeReconciler{
-		Client:        client,
-		SchedulerName: schedulerName,
+		Client:        kubeClient,
 		Scheme:        scheme,
+		SchedulerName: schedulerName,
 		EventCh:       eventCh,
 		SlurmClient:   slurmClient,
+		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		eventRecorder: eventRecorder,
 	}
-	r.setupInternal()
 	return r
 }

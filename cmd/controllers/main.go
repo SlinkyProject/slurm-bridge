@@ -28,6 +28,8 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
+	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
+	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -133,24 +135,22 @@ func main() {
 	}
 	go slurmClient.Start(context.Background())
 
-	if err = (&node.NodeReconciler{
-		Client:        mgr.GetClient(),
-		SchedulerName: cfg.SchedulerName,
-		Scheme:        mgr.GetScheme(),
-		SlurmClient:   slurmClient,
-		EventCh:       make(chan event.GenericEvent, 100),
-	}).SetupWithManager(mgr); err != nil {
+	nodeEventCh := make(chan event.GenericEvent, 100)
+	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}
-	if err = (&pod.PodReconciler{
-		Client:        mgr.GetClient(),
-		SchedulerName: cfg.SchedulerName,
-		Scheme:        mgr.GetScheme(),
-		SlurmClient:   slurmClient,
-		EventCh:       make(chan event.GenericEvent, 100),
-	}).SetupWithManager(mgr); err != nil {
+	if err := slurmnode.NewRunnable(mgr.GetClient(), slurmClient, nodeEventCh).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmNode")
+		os.Exit(1)
+	}
+	podEventCh := make(chan event.GenericEvent, 100)
+	if err := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
+		os.Exit(1)
+	}
+	if err := slurmjob.NewRunnable(mgr.GetClient(), slurmClient, podEventCh).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmJob")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

@@ -5,6 +5,7 @@ package pod
 
 import (
 	"context"
+	"time"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -60,6 +61,11 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		return nil
 	}
 
+	// Requeue Pod request until terminal
+	if !podv1.IsPodTerminal(pod) {
+		durationStore.Push(podKey, 30*time.Second)
+	}
+
 	if active, _ := utils.PodRunningReady(pod); !active {
 		logger.V(2).Info("Pod is not running, skipping", "pod", klog.KObj(pod))
 		return nil
@@ -91,19 +97,13 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
-	notFound := false
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			notFound = true
-		} else {
-			return err
+			logger.V(2).Info("Pod not found, no Job ID", "pod", podKey)
+			return nil
 		}
-	}
-
-	if notFound {
-		logger.V(2).Info("Pod not found, no Job ID", "pod", podKey)
-		return nil
+		return err
 	}
 
 	if pod.DeletionTimestamp == nil && !podv1.IsPodTerminal(pod) {
@@ -111,11 +111,13 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 		return nil
 	}
 
-	pods := &corev1.PodList{}
-	if err := r.List(context.Background(), pods,
-		&client.ListOptions{LabelSelector: labels.SelectorFromSet(
-			labels.Set{wellknown.LabelPlaceholderJobId: pod.Labels[wellknown.LabelPlaceholderJobId]},
-		)}); err != nil {
+	podList := &corev1.PodList{}
+	listOpts := &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{
+			wellknown.LabelPlaceholderJobId: pod.Labels[wellknown.LabelPlaceholderJobId],
+		}),
+	}
+	if err := r.List(ctx, podList, listOpts); err != nil {
 		logger.Error(err, "failed to fetch pods associated with Slurm job")
 		return err
 	}
@@ -123,7 +125,7 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	// If there are no pods labeled with this jobId the Slurm Job may
 	// be terminated.
 	activePods := 0
-	for _, p := range pods.Items {
+	for _, p := range podList.Items {
 		if p.DeletionTimestamp == nil && !podv1.IsPodTerminal(&p) {
 			activePods++
 		}
@@ -149,19 +151,13 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
-	notFound := false
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			notFound = true
-		} else {
-			return err
+			logger.V(2).Info("Pod not found, no finalizer to remove", "pod", podKey)
+			return nil
 		}
-	}
-
-	if notFound {
-		logger.V(2).Info("Pod not found, no finalizer to remove", "pod", podKey)
-		return nil
+		return err
 	}
 
 	if pod.DeletionTimestamp == nil && !podv1.IsPodTerminal(pod) {
@@ -193,7 +189,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 			logger.Error(err, "failed to get resource claim", "claimKey", claimKey)
 			return err
 		}
-		if err := r.Delete(ctx, &claim, &client.DeleteOptions{}); err != nil {
+		if err := r.Delete(ctx, &claim); err != nil {
 			logger.Error(err, "failed to delete resource claim", "claim", claim)
 			return err
 		}
