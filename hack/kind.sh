@@ -260,6 +260,7 @@ function kjob::install() {
 		make kubectl-kjob
 		cp "./bin/kubectl-kjob" "$SCRIPT_DIR/kubectl-kjob"
 	)
+	kubectl create namespace slurm-bridge || true
 	kubectl apply -f "${SCRIPT_DIR}"/kjob.yaml
 	echo -e "\nRun the following command to install the kubectl kjob plugin:"
 	echo -e "sudo cp ${SCRIPT_DIR}/kubectl-kjob /usr/local/bin/kubectl-kjob\n"
