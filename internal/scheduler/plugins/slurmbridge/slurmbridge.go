@@ -154,7 +154,7 @@ func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (fram
 func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Status {
 
 	logger := klog.FromContext(ctx)
-	logger.V(5).Info("adding toleration to pod", pod)
+	logger.V(5).Info("adding toleration to pod", "pod", klog.KObj(pod))
 
 	toUpdate := pod.DeepCopy()
 	toleration := utils.NewTolerationNodeBridged(sb.schedulerName)
@@ -339,7 +339,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 			logger.Error(err, "error submitting Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		logger.V(5).Info("submitted placeholder to slurm", klog.KObj(pod))
+		logger.V(5).Info("submitted placeholder to slurm", "pod", klog.KObj(pod))
 		err = sb.labelPodsWithJobId(ctx, jobid, s.slurmJobIR)
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
