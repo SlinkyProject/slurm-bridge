@@ -76,7 +76,7 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Limitations
 
-- Exclusive, whole node allocations are made for each pod.
+- Exclusive, whole node allocations are made for each pod when using group workloads (PodGroups, LeaderWorkerSet).
 
 ## Installation
 
@@ -96,6 +96,10 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 ```
 
 For additional instructions, see the [quickstart] guide.
+
+## Configuration
+
+For setting up Slurm and slurm-bridge for certain use-cases, see [Configuration](docs/configuration.md).
 
 ## Documentation
 

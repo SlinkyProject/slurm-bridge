@@ -100,6 +100,7 @@ see the [annotations.go] source.
 | slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes. | "3"          |
 | slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.        | "8Gi"        |
 | slurmjob.slinky.slurm.net/partition    | Overrides the default partition.  | "debug"      |
+| slurmjob.slinky.slurm.net/shared       | Sets the shared policy.           | "user"       |
 
 An example of the annotations in use:
 
