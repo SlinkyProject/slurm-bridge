@@ -66,7 +66,7 @@ func TestSlurmbridge_Name(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	ctx := context.Background()
-	cs := clientsetfake.NewSimpleClientset()
+	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
@@ -83,12 +83,12 @@ func TestNew(t *testing.T) {
 	type args struct {
 		ctx    context.Context
 		obj    runtime.Object
-		handle framework.Handle
+		handle fwk.Handle
 	}
 	tests := []struct {
 		name    string
 		args    args
-		want    framework.Plugin
+		want    fwk.Plugin
 		wantErr bool
 	}{
 		{
@@ -124,7 +124,7 @@ func TestSlurmBridge_PreEnqueue(t *testing.T) {
 		Client        kubeclient.Client
 		schedulerName string
 		slurmControl  slurmcontrol.SlurmControlInterface
-		handle        framework.Handle
+		handle        fwk.Handle
 	}
 	type args struct {
 		ctx context.Context
@@ -185,7 +185,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 	}
 	nodeInfo[0].SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
 	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
-	cs := clientsetfake.NewSimpleClientset()
+	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
@@ -204,7 +204,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		client        kubeclient.Client
 		schedulerName string
 		slurmControl  slurmcontrol.SlurmControlInterface
-		handle        framework.Handle
+		handle        fwk.Handle
 	}
 	type args struct {
 		ctx      context.Context
@@ -216,7 +216,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		name   string
 		fields fields
 		args   args
-		want   *framework.PreFilterResult
+		want   *fwk.PreFilterResult
 		want1  *fwk.Status
 	}{
 		{
@@ -255,7 +255,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					wellknown.LabelPlaceholderJobId: "1"}).
 					Obj(),
 			},
-			want:  &framework.PreFilterResult{NodeNames: sets.New("node1")},
+			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
 			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
@@ -400,7 +400,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				pod:      pod.DeepCopy(),
 				nodeinfo: nodeInfo,
 			},
-			want:  &framework.PreFilterResult{NodeNames: sets.New("node1")},
+			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
 			want1: fwk.NewStatus(fwk.Success, ""),
 		},
 	}
@@ -429,7 +429,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 func TestSlurmBridge_PostFilter(t *testing.T) {
 	ctx := context.Background()
 	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
-	cs := clientsetfake.NewSimpleClientset()
+	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
@@ -456,19 +456,19 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		Client        kubeclient.Client
 		schedulerName string
 		slurmControl  slurmcontrol.SlurmControlInterface
-		handle        framework.Handle
+		handle        fwk.Handle
 	}
 	type args struct {
 		ctx   context.Context
 		state fwk.CycleState
 		pod   *corev1.Pod
-		m     framework.NodeToStatusReader
+		m     fwk.NodeToStatusReader
 	}
 	tests := []struct {
 		name   string
 		fields fields
 		args   args
-		want   *framework.PostFilterResult
+		want   *fwk.PostFilterResult
 		want1  *fwk.Status
 	}{
 		{
@@ -776,12 +776,12 @@ func TestSlurmBridge_PreFilterExtensions(t *testing.T) {
 	type fields struct {
 		client       kubeclient.Client
 		slurmControl slurmcontrol.SlurmControlInterface
-		handle       framework.Handle
+		handle       fwk.Handle
 	}
 	tests := []struct {
 		name   string
 		fields fields
-		want   framework.PreFilterExtensions
+		want   fwk.PreFilterExtensions
 	}{
 		{
 			name:   "PreFilterExtension returns",
@@ -812,7 +812,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 	type fields struct {
 		client       kubeclient.Client
 		slurmControl slurmcontrol.SlurmControlInterface
-		handle       framework.Handle
+		handle       fwk.Handle
 	}
 	type args struct {
 		ctx      context.Context
@@ -878,7 +878,7 @@ func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
 	pod := st.MakePod().Name("pod1").Annotations(
 		map[string]string{wellknown.AnnotationPlaceholderNode: "node1"}).Labels(
 		map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
-	cs := clientsetfake.NewSimpleClientset()
+	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
@@ -895,7 +895,7 @@ func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
 	type fields struct {
 		Client       kubeclient.Client
 		slurmControl slurmcontrol.SlurmControlInterface
-		handle       framework.Handle
+		handle       fwk.Handle
 	}
 	type args struct {
 		ctx context.Context
@@ -966,7 +966,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 	type fields struct {
 		Client       kubeclient.Client
 		slurmControl slurmcontrol.SlurmControlInterface
-		handle       framework.Handle
+		handle       fwk.Handle
 	}
 	type args struct {
 		ctx context.Context

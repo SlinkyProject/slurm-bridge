@@ -17,8 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultbinder"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
 	fwkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
@@ -127,7 +127,7 @@ func TestSlurmBridge_getAllocationResult(t *testing.T) {
 		Client        client.Client
 		schedulerName string
 		slurmControl  slurmcontrol.SlurmControlInterface
-		handle        framework.Handle
+		handle        fwk.Handle
 	}
 	type args struct {
 		ctx       context.Context
