@@ -109,18 +109,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: "default",  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: "default",
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
-						SchedulerName: "test-scheduler", // Custom scheduler
-						Containers: []corev1.Container{ // Define containers in the pod
+						SchedulerName: "test-scheduler",
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -135,18 +135,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: corev1.DefaultSchedulerName,
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -161,18 +161,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: "custom-scheduler",
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -187,18 +187,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: corev1.DefaultSchedulerName,
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
