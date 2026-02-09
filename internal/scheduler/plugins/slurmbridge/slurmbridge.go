@@ -25,7 +25,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -67,14 +66,13 @@ type SlurmBridge struct {
 	client.Client
 	schedulerName string
 	slurmControl  slurmcontrol.SlurmControlInterface
-	handle        framework.Handle
+	handle        fwk.Handle
 }
 
-var _ framework.PreEnqueuePlugin = &SlurmBridge{}
-var _ framework.PreFilterPlugin = &SlurmBridge{}
-var _ framework.FilterPlugin = &SlurmBridge{}
-var _ framework.PostFilterPlugin = &SlurmBridge{}
-var _ framework.PreBindPlugin = &SlurmBridge{}
+var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
+var _ fwk.PreFilterPlugin = &SlurmBridge{}
+var _ fwk.FilterPlugin = &SlurmBridge{}
+var _ fwk.PostFilterPlugin = &SlurmBridge{}
 
 const (
 	Name = "SlurmBridge"
@@ -86,7 +84,7 @@ func (sb *SlurmBridge) Name() string {
 }
 
 // New initializes and returns a new Slurmbridge plugin.
-func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (framework.Plugin, error) {
+func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin, error) {
 
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("creating new SlurmBridge plugin")
@@ -154,7 +152,7 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 // queue.
 // If a placeholder job is found, determine which node(s) have been assigned to the
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
-func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*framework.PreFilterResult, *fwk.Status) {
+func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 
 	if pod.Spec.ResourceClaims != nil {
@@ -176,7 +174,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		node != "" {
 		phNode := make(sets.Set[string])
 		phNode.Insert(node)
-		return &framework.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
+		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
 	}
 
 	// Construct an intermediate representation of the Slurm placeholder job
@@ -241,7 +239,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		// By passing the list of nodes in the placeholder job as PreFilterResult,
 		// Filter plugins will only run for nodes in the Slurm job. This is the final
 		// PreFilter step that must occur before pods are allowed to run.
-		return &framework.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
+		return &fwk.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
 	}
 }
 
@@ -249,7 +247,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 // processed by the PreFilter and Filter plugins. This allows the rest of
 // the kubernetes plugins to have a say in which pods would be feasible for
 // Slurm to schedule the pod(s) on.
-func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m framework.NodeToStatusReader) (*framework.PostFilterResult, *fwk.Status) {
+func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m fwk.NodeToStatusReader) (*fwk.PostFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 
 	// Construct an intermediate representation of the Slurm placeholder job
@@ -510,7 +508,7 @@ func (sb *SlurmBridge) deletePlaceholderJob(ctx context.Context, pod *corev1.Pod
 }
 
 // PreFilterExtensions returns a PreFilterExtensions interface if the plugin implements one.
-func (sb *SlurmBridge) PreFilterExtensions() framework.PreFilterExtensions {
+func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 	return nil
 }
 
