@@ -109,18 +109,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: "default",  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: "default",
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
-						SchedulerName: "test-scheduler", // Custom scheduler
-						Containers: []corev1.Container{ // Define containers in the pod
+						SchedulerName: "test-scheduler",
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -135,18 +135,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: corev1.DefaultSchedulerName,
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -161,18 +161,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: "custom-scheduler",
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -187,18 +187,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 				ctx: context.TODO(),
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-pod", // Name of the Pod
-						Namespace: namespace,  // Namespace where the Pod is located
-						Labels: map[string]string{ // Pod labels
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels: map[string]string{
 							"app": "test-app",
 						},
 					},
 					Spec: corev1.PodSpec{
 						SchedulerName: corev1.DefaultSchedulerName,
-						Containers: []corev1.Container{ // Define containers in the pod
+						Containers: []corev1.Container{
 							{
-								Name:  "test-container", // Name of the container
-								Image: "test-image",     // Image to be used for the container
+								Name:  "test-container",
+								Image: "test-image",
 							},
 						},
 					},
@@ -206,6 +206,58 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			},
 			wantErr: false,
 			sched:   SchedulerName,
+		},
+		{
+			name: "PodWithSchedulerNameInUnmanagedNamespace",
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							"app": "test-app",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+			sched:   SchedulerName,
+		},
+		{
+			name: "PodWithDefaultSchedulerInUnmanagedNamespace",
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							"app": "test-app",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: corev1.DefaultSchedulerName,
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+			sched:   corev1.DefaultSchedulerName,
 		},
 	}
 	for _, tt := range tests {
@@ -348,6 +400,97 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			want:    nil,
 			wantErr: false,
 		},
+		{
+			name: "PodWithSchedulerNameInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "PodWithSchedulerNameAndJobIDInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithSchedulerNameAndResourceClaimInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+						ResourceClaims: []corev1.PodResourceClaim{
+							{
+								Name: "gpu",
+							},
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithDifferentSchedulerInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				obj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: "other-scheduler",
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -483,7 +626,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					},
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
-						Labels: map[string]string{
+						Annotations: map[string]string{
 							wellknown.AnnotationPlaceholderNode: "node2",
 						},
 					},
@@ -491,6 +634,117 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			want:    nil,
 			wantErr: true,
+		},
+		{
+			name: "RunningPodWithSchedulerNameCantChangeJobIDInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+				newObj: &corev1.Pod{
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "2",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "RunningPodWithSchedulerNameCantChangeNodeInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+				newObj: &corev1.Pod{
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Annotations: map[string]string{
+							wellknown.AnnotationPlaceholderNode: "node2",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithDifferentSchedulerInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldObj: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "1",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: "other-scheduler",
+					},
+				},
+				newObj: &corev1.Pod{
+					Status: corev1.PodStatus{
+						Phase: corev1.PodRunning,
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "unmanaged-ns",
+						Labels: map[string]string{
+							wellknown.LabelPlaceholderJobId: "2",
+						},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: "other-scheduler",
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
