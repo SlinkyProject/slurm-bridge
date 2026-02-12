@@ -1,3 +1,16 @@
+## v1.0.2
+
+### Fixed
+
+- Fixed edge case where the Kubernetes API drops reconcile requests such that
+  the slurm-bridge controllers are unable to use that trigger to synchronize
+  workloads, causing a desynchronized state and slurm-bridge scheduling may
+  halt.
+
+### Changed
+
+- Update slurm-client version to v1.0.2.
+
 ## v1.0.1
 
 ### Fixed

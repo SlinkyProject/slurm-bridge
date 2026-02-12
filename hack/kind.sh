@@ -225,7 +225,7 @@ function slurm-bridge::nodes() {
 }
 
 function slurm::install() {
-	local version="1.0.1"
+	local version="1.0.2"
 
 	local slurmOperator="slurm-operator"
 	if [ "$(helm list --all-namespaces --short --filter="^${slurmOperator}$" | wc -l)" -eq 0 ]; then
