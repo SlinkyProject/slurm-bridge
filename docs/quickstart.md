@@ -38,6 +38,8 @@ started.
     [slurmd]
   - At least one partition consisting solely of nodes with the above
     configuration
+  - Nodes configured with at least CPUs and RealMemory so that pods
+    request can be matched with Slurm's Nodes.
   - MCS labels enabled:
     ```conf
     # slurm.conf
@@ -69,6 +71,8 @@ helm install cert-manager jetstack/cert-manager \
 
 Create a secret for slurm-bridge to communicate with Slurm.
 
+###### 2.1. When running Slurm in `slurm-operator`:
+
 When running Slurm in `slurm-operator`:
 
 ```sh
@@ -97,12 +101,27 @@ EOF
 > the secret is refreshed. This is a limitation that will be addressed in a
 > subsequent release.
 
-When running Slurm on baremetal:
+###### 2.1. When running Slurm on baremetal:
+
+You need to generate a token for the target user and create a new secret with it.
 
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+```
+
+Also make sure your slurmrestd exposes at least v0.0.44 API version.
+Use the following command to check available API versions:
+
+```sh
+~$ slurmrestd -d list
+Possible data_parser plugins:
+data_parser/v0.0.44
+data_parser/v0.0.42
+data_parser/v0.0.43
+data_parser/v0.0.41
+~$ 
 ```
 
 ##### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
@@ -378,6 +397,18 @@ generally the more useful of the two outputs.
 At this point, you should have a functional `slurm-bridge` cluster, and are
 running jobs. Recommended next steps involve reviewing our documentation on
 [workloads]
+
+In case the job did not properly launched, try to bypass the admission controler and
+check if the scheduler got the job. To do so, update the hack/examples/single.yaml file,
+and add key `schedulerName` set to `slurm-bridge-scheduler` under spec:
+
+```yaml
+    spec:
+      schedulerName: slurm-bridge-scheduler
+```
+
+If the scheduler got the job but fail to schedule (FailedScheduling),
+check your Slurm cluster's slurmctld service logs for errors.
 
 <!-- Links -->
 
