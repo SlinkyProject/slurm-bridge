@@ -52,7 +52,7 @@ func (r *PodAdmission) Default(ctx context.Context, obj runtime.Object) error {
 	if err != nil {
 		return err
 	}
-	if !isManaged {
+	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil
 	}
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
@@ -76,7 +76,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, obj runtime.Object) (
 	if err != nil {
 		return nil, err
 	}
-	if !isManaged {
+	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
 	if pod.Labels[wellknown.LabelPlaceholderJobId] != "" {
@@ -103,7 +103,7 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldObj runtime.Object
 	if err != nil {
 		return nil, err
 	}
-	if !isManaged {
+	if !isManaged && newPod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and

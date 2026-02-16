@@ -7,7 +7,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
-
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
 
 function kind::prerequisites() {
@@ -72,7 +71,7 @@ function kind::start() {
 	sys::check
 	kind::prerequisites
 	local cluster_name="${1:-"kind"}"
-	local kind_config="${2:-"$SCRIPT_DIR/kind-config.yaml"}"
+	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
 	if [ "$(kind get clusters | grep -oc kind)" -eq 0 ]; then
 		if [ "$(command -v systemd-run)" ]; then
 			CMD="systemd-run --scope --user"
@@ -88,94 +87,48 @@ function kind::delete() {
 	kind delete cluster --name "$cluster_name"
 }
 
-function helm::uninstall() {
-	local namespace=(
-		"scheduler-plugins"
-		"slurm"
-		"slurm-operator"
-		"slinky"
-		"cert-manager"
-		"jobset"
-		"lws"
-	)
-	if $FLAG_EXTRAS; then
-		namespace+=("metrics-server")
-		namespace+=("prometheus")
-		namespace+=("keda")
+function helm::find() {
+	local item="$1"
+	if [ -z "$item" ]; then
+		return 0
+	elif [ "$(helm list --all-namespaces --short --filter="^${item}$" | wc -l)" -eq 0 ]; then
+		return 1
 	fi
-	for name in "${namespace[@]}"; do
-		if [ "$(helm --namespace="$name" list --all --short | wc -l)" -gt 0 ]; then
-			helm uninstall --namespace="$name" "$(helm --namespace="$name" ls --all --short)"
-		fi
-	done
+	return 0
 }
 
-function slurm-bridge::skaffold() {
+function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	slurm-bridge::nodes
 	(
-		make values-dev || true
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		skaffold run -p dev
+		skaffold run
 	)
 }
 
 function slurm-bridge::prerequisites() {
-	helm repo add bitnami https://charts.bitnami.com/bitnami
-	helm repo add jetstack https://charts.jetstack.io
-	if $FLAG_EXTRAS; then
-		helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
-		helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-		helm repo add kedacore https://kedacore.github.io/charts
-	fi
-	helm repo update
-	local certManager="cert-manager"
-	if [ "$(helm list --all-namespaces --short --filter="$certManager" | wc -l)" -eq 0 ]; then
-		helm install "$certManager" jetstack/cert-manager \
-			--namespace "$certManager" --create-namespace --set crds.enabled=true
-	fi
+	local chartName
+
 	# enables podgroup
-	local schedPlugins="scheduler-plugins"
-	if [ "$(helm list --all-namespaces --short --filter="$schedPlugins" | wc -l)" -eq 0 ]; then
-		helm install --repo https://scheduler-plugins.sigs.k8s.io "$schedPlugins" "$schedPlugins" \
-			--namespace "$schedPlugins" --create-namespace \
+	chartName="scheduler-plugins"
+	if ! helm::find "$chartName"; then
+		helm install --repo https://scheduler-plugins.sigs.k8s.io "$chartName" "$chartName" \
+			--namespace "$chartName" --create-namespace \
 			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
 	fi
-	local jobset="jobset"
-	local jobsetVersion="v0.8.1"
-	local jobsetNamespace="jobset-system"
-	if [ "$(helm list --all-namespaces --short --filter="$jobset" | wc -l)" -eq 0 ]; then
-		helm install "$jobset" oci://registry.k8s.io/jobset/charts/jobset --version "$jobsetVersion" \
-			--namespace "$jobsetNamespace" --create-namespace
+
+	chartName="jobset"
+	if ! helm::find "$chartName"; then
+		local version="v0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
+			--namespace "${chartName}-system" --create-namespace
 	fi
-	local lws="lws"
-	local lwsVersion="v0.6.2"
-	local lwsnamespace="lws-system"
-	if [ "$(helm list --all-namespaces --short --filter="$lws" | wc -l)" -eq 0 ]; then
-		helm install $lws https://github.com/kubernetes-sigs/lws/releases/download/$lwsVersion/lws-chart-$lwsVersion.tgz \
-			--namespace $lwsnamespace --create-namespace
-	fi
-	if $FLAG_EXTRAS; then
-		local metrics="metrics-server"
-		if [ "$(helm list --all-namespaces --short --filter="$metrics" | wc -l)" -eq 0 ]; then
-			helm install "$metrics" metrics-server/metrics-server \
-				--set args="{--kubelet-insecure-tls}" \
-				--namespace "$metrics" --create-namespace
-		fi
-		local prometheus="prometheus"
-		if [ "$(helm list --all-namespaces --short --filter="$prometheus" | wc -l)" -eq 0 ]; then
-			helm install "$prometheus" prometheus-community/kube-prometheus-stack \
-				--namespace "$prometheus" --create-namespace --set installCRDs=true \
-				--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-		fi
-		local keda="keda"
-		if [ "$(helm list --all-namespaces --short --filter="$keda" | wc -l)" -eq 0 ]; then
-			helm install "$keda" kedacore/keda \
-				--namespace "$keda" --create-namespace
-		fi
-	fi
-	if $FLAG_DRA; then
-		dra-example-driver::install
+
+	chartName="lws"
+	if ! helm::find "$chartName"; then
+		local version="v0.6.2"
+		helm install "$chartName" https://github.com/kubernetes-sigs/lws/releases/download/$version/lws-chart-$version.tgz \
+			--namespace "${chartName}-system" --create-namespace
 	fi
 
 	slurm::install
@@ -195,7 +148,7 @@ function slurm-bridge::nodes() {
 		kubectl exec -n slurm pods/slurm-controller-0 -- \
 			scontrol create partition="$partition"
 	fi
-	if $FLAG_EXTERNAL; then
+	if $OPT_EXTERNAL; then
 		local bridge_nodes
 		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
 		echo "$bridge_nodes" | while IFS= read -r node; do
@@ -224,27 +177,71 @@ function slurm-bridge::nodes() {
 	fi
 }
 
-function slurm::install() {
-	local version="1.0.0"
+function slurm::prerequisites() {
+	helm repo add jetstack https://charts.jetstack.io
+	helm repo update
 
-	local slurmOperator="slurm-operator"
-	if [ "$(helm list --all-namespaces --short --filter="^${slurmOperator}$" | wc -l)" -eq 0 ]; then
-		helm install $slurmOperator oci://ghcr.io/slinkyproject/charts/slurm-operator \
+	local chartName
+
+	chartName="cert-manager"
+	if ! helm::find "$chartName"; then
+		helm install "$chartName" jetstack/cert-manager \
+			--namespace "$chartName" --create-namespace --set crds.enabled=true
+	fi
+}
+
+function slurm::install() {
+	slurm::prerequisites
+
+	local chartName
+	local version="1.0.x"
+
+	chartName="slurm-operator"
+	if ! helm::find "$chartName"; then
+		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
 			--version="$version" --namespace=slinky --create-namespace --wait \
 			--set 'crds.enabled=true'
 	fi
 
-	local slurm="slurm"
-	if [ "$(helm list --all-namespaces --short --filter="^${slurm}$" | wc -l)" -eq 0 ]; then
-		if $FLAG_EXTERNAL; then
-			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
+	chartName="slurm"
+	if ! helm::find "$chartName"; then
+		if $OPT_EXTERNAL; then
+			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
 				--set "nodesets.slinky.enabled=false"
 		else
-			helm install slurm oci://ghcr.io/slinkyproject/charts/slurm \
+			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
 				-f "${SCRIPT_DIR}/slurm-bridge-nodes.yaml"
 		fi
+	fi
+}
+
+function extras::install() {
+	helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	helm repo update
+
+	local chartName
+
+	chartName="metrics-server"
+	if ! helm::find "$chartName"; then
+		helm install "$chartName" metrics-server/metrics-server \
+			--set args="{--kubelet-insecure-tls}" \
+			--namespace "$chartName" --create-namespace
+	fi
+
+	chartName="prometheus"
+	if ! helm::find "$chartName"; then
+		helm install "$chartName" prometheus-community/kube-prometheus-stack \
+			--namespace "$chartName" --create-namespace --set installCRDs=true \
+			--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+	fi
+
+	chartName="keda"
+	if ! helm::find "$chartName"; then
+		helm install "$chartName" kedacore/keda \
+			--namespace "$chartName" --create-namespace
 	fi
 }
 
@@ -263,6 +260,7 @@ function kjob::install() {
 		make kubectl-kjob
 		cp "./bin/kubectl-kjob" "$SCRIPT_DIR/kubectl-kjob"
 	)
+	kubectl create namespace slurm-bridge || true
 	kubectl apply -f "${SCRIPT_DIR}"/kjob.yaml
 	echo -e "\nRun the following command to install the kubectl kjob plugin:"
 	echo -e "sudo cp ${SCRIPT_DIR}/kubectl-kjob /usr/local/bin/kubectl-kjob\n"
@@ -303,17 +301,14 @@ function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
-	usage: $(basename "$0") [--create|--delete] [--config=KIND_CONFIG_PATH]
-	        [--install|--uninstall] [--extras] [--kjob] [--dra-example]
+	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
+	        [--recreate|--delete]
+	        [--extras] [--kjob] [--dra-example] [--all]
 	        [-h|--help] [KIND_CLUSTER_NAME]
 
-ONESHOT OPTIONS:
-	--create            Create kind cluster and nothing else.
-	--delete            Delete kind cluster and nothing else.
-	--install           Install dependencies and nothing else.
-	--uninstall         Uninstall all helm releases and nothing else.
-
 OPTIONS:
+	--recreate          Delete the Kind cluster and continue.
+	--delete            Delete the Kind cluster and exit.
 	--config=PATH       Use the specified kind config when creating.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--kjob              Install kjob CRDs and build kubectl-kjob
@@ -327,101 +322,87 @@ EOF
 }
 
 function main() {
-	if $FLAG_DEBUG; then
+	if $OPT_DEBUG; then
 		set -x
 	fi
 	local cluster_name="${1:-"kind"}"
-	if $FLAG_DELETE; then
+	if $OPT_DELETE || $OPT_RECREATE; then
 		kind::delete "$cluster_name"
-		return
-	elif $FLAG_UNINSTALL; then
-		helm::uninstall
-		return
-	elif $FLAG_CREATE; then
-		kind::start "$cluster_name" "$FLAG_CONFIG"
-		return
+		$OPT_DELETE && return
 	fi
 
-	kind::start "$cluster_name" "$FLAG_CONFIG"
+	kind::start "$cluster_name" "$OPT_CONFIG"
 
-	if $FLAG_INSTALL; then
-		slurm-bridge::prerequisites
-		return
+	make -C "$ROOT_DIR" values-dev || true
+
+	if $OPT_EXTRAS; then
+		extras::install
 	fi
-	slurm-bridge::skaffold
-	if $FLAG_KJOB; then
+	if $OPT_DRA; then
+		dra-example-driver::install
+	fi
+	if $OPT_BRIDGE; then
+		slurm-bridge::install
+	fi
+	if $OPT_KJOB; then
 		kjob::install
 	fi
 }
 
-FLAG_DEBUG=false
-FLAG_CREATE=false
-FLAG_CONFIG="$SCRIPT_DIR/kind-config.yaml"
-FLAG_DELETE=false
-FLAG_INSTALL=false
-FLAG_UNINSTALL=false
-FLAG_EXTRAS=false
-FLAG_DRA=false
-FLAG_KJOB=false
-FLAG_EXTERNAL=true
+OPT_DEBUG=false
+OPT_RECREATE=false
+OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
+OPT_DELETE=false
+OPT_BRIDGE=false
+OPT_EXTRAS=false
+OPT_DRA=false
+OPT_KJOB=false
+OPT_EXTERNAL=true
 
 SHORT="+h"
-LONG="create,config:,delete,debug,helm,bridge,install,extras,kjob,dra-example,uninstall,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-example,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
 	case "$1" in
 	--debug)
-		FLAG_DEBUG=true
+		OPT_DEBUG=true
 		shift
 		;;
-	--create)
-		FLAG_CREATE=true
+	--recreate)
+		OPT_RECREATE=true
 		shift
-		if $FLAG_CREATE && $FLAG_DELETE; then
-			echo "Flags --create and --delete are mutually exclusive!"
-			exit 1
-		fi
 		;;
 	--config)
-		FLAG_CONFIG="$2"
+		OPT_CONFIG="$2"
 		shift 2
 		;;
 	--delete)
-		FLAG_DELETE=true
+		OPT_DELETE=true
 		shift
-		if $FLAG_CREATE && $FLAG_DELETE; then
-			echo "Flags --create and --delete are mutually exclusive!"
-			exit 1
-		fi
 		;;
-	--install)
-		FLAG_INSTALL=true
+	--bridge)
+		OPT_BRIDGE=true
 		shift
-		if $FLAG_INSTALL && $FLAG_UNINSTALL; then
-			echo "Flags --install and --uninstall are mutually exclusive!"
-			exit 1
-		fi
 		;;
 	--extras)
-		FLAG_EXTRAS=true
+		OPT_EXTRAS=true
 		shift
 		;;
 	--kjob)
-		FLAG_KJOB=true
+		OPT_KJOB=true
 		shift
 		;;
 	--dra-example)
-		FLAG_DRA=true
+		OPT_DRA=true
 		shift
 		;;
-	--uninstall)
-		FLAG_UNINSTALL=true
+	--all)
+		OPT_BRIDGE=true
+		OPT_KJOB=true
+		OPT_DRA=true
+		OPT_EXTRAS=true
 		shift
-		if $FLAG_INSTALL && $FLAG_UNINSTALL; then
-			echo "Flags --install and --uninstall are mutually exclusive!"
-			exit 1
-		fi
 		;;
 	-h | --help)
 		main::help
