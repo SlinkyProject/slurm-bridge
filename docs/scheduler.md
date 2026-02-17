@@ -93,14 +93,14 @@ to change the parameters that are used to submit a placeholder job to Slurm. The
 following table lists some of the available annotations. For a complete list,
 see the [annotations.go] source.
 
-| Annotation                             | Description                       | Example      |
-| -------------------------------------- | --------------------------------- | ------------ |
-| slurmjob.slinky.slurm.net/gres         | Overrides the default gres.       | "GPU:V100:2" |
-| slurmjob.slinky.slurm.net/job-name     | Sets the job name.                | "research"   |
-| slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes. | "3"          |
-| slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.        | "8Gi"        |
-| slurmjob.slinky.slurm.net/partition    | Overrides the default partition.  | "debug"      |
-| slurmjob.slinky.slurm.net/shared       | Sets the shared policy.           | "user"       |
+| Annotation                             | Description                                              | Example      |
+| -------------------------------------- | -----------------------------------------=-------------- | ------------ |
+| slurmjob.slinky.slurm.net/gres         | Overrides the default gres.                              | "GPU:V100:2" |
+| slurmjob.slinky.slurm.net/job-name     | Sets the job name.                                       | "research"   |
+| slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes.                        | "3"          |
+| slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.                               | "8Gi"        |
+| slurmjob.slinky.slurm.net/partition    | Overrides the default partition.                         | "debug"      |
+| slurmjob.slinky.slurm.net/shared       | Sets the shared policy. Only "user" or "none" supported. | "user"       |
 
 An example of the annotations in use:
 

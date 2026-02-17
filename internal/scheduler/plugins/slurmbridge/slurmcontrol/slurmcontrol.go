@@ -150,11 +150,8 @@ func sharedForJob(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V0044JobDescMsgShare
 		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
 	}
 	shared, ok := map[string]api.V0044JobDescMsgShared{
-		"mcs":           api.V0044JobDescMsgSharedMcs,
-		"none":          api.V0044JobDescMsgSharedNone,
-		"oversubscribe": api.V0044JobDescMsgSharedOversubscribe,
-		"topo":          api.V0044JobDescMsgSharedTopo,
-		"user":          api.V0044JobDescMsgSharedUser,
+		"none": api.V0044JobDescMsgSharedNone,
+		"user": api.V0044JobDescMsgSharedUser,
 	}[*slurmJobIR.JobInfo.Shared]
 
 	if !ok {

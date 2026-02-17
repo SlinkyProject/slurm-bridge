@@ -97,10 +97,6 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 
 For additional instructions, see the [quickstart] guide.
 
-## Configuration
-
-For setting up Slurm and slurm-bridge for certain use-cases, see [Configuration](docs/configuration.md).
-
 ## Documentation
 
 Project documentation is located in the [docs] directory of this repository.

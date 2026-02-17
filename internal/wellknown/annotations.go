@@ -70,12 +70,12 @@ const (
 
 // SharedAllowedValues are the allowed values for the shared annotation
 // (V0044JobDescMsgShared in slurm-client).
-var SharedAllowedValues = []string{"mcs", "none", "oversubscribe", "topo", "user"}
+var SharedAllowedValues = []string{"none", "user"}
 
 // ValidateSharedValue returns true if v is one of SharedAllowedValues.
 func ValidateSharedValue(v string) error {
 	if slices.Contains(SharedAllowedValues, v) {
 		return nil
 	}
-	return fmt.Errorf("shared annotation value must be one of: mcs, none, oversubscribe, topo, user")
+	return fmt.Errorf("shared annotation value must be one of: none, user")
 }
