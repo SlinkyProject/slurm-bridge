@@ -303,16 +303,18 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--kjob] [--dra-example] [--all]
-	        [-h|--help] [KIND_CLUSTER_NAME]
+	        [--extras] [--bridge] [--kjob] [--dra-example] [--all]
+	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 OPTIONS:
+	--config=PATH       Use the specified kind config when creating.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
-	--config=PATH       Use the specified kind config when creating.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
+	--bridge            Install slurm-bridge
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-example       Install DRA example driver
+	--all               Install all charts for slurm-bridge
 
 HELP OPTIONS:
 	--debug             Show script debug information.
