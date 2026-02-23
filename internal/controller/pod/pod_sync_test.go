@@ -66,6 +66,19 @@ func newPod(name string, jobId int32) *corev1.Pod {
 	}
 }
 
+func newTerminatingPod(name string, jobId int32) *corev1.Pod {
+	pod := newPod(name, jobId)
+	now := metav1.Now()
+	pod.DeletionTimestamp = &now
+	return pod
+}
+
+func newTerminalPod(name string, jobId int32) *corev1.Pod {
+	pod := newPod(name, jobId)
+	pod.Status.Phase = corev1.PodSucceeded
+	return pod
+}
+
 func newRequest(name string) ctrl.Request {
 	return ctrl.Request{
 		NamespacedName: types.NamespacedName{
@@ -221,6 +234,78 @@ var _ = Describe("syncSlurm()", func() {
 
 			By("Check job existence")
 			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(exists).To(BeTrue())
+		})
+
+		It("Should not terminate the job for a terminating pod", func() {
+			By("Setting the pod as terminating but non-terminal")
+			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
+			pod := &corev1.Pod{}
+			err := controller.Get(ctx, key, pod)
+			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
+			pod.Finalizers = []string{wellknown.FinalizerScheduler}
+			err = controller.Update(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+			err = controller.Delete(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+			err = controller.Get(ctx, key, pod)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pod.DeletionTimestamp).NotTo(BeNil())
+
+			By("Reconciling")
+			err = controller.syncSlurm(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Check job is still running")
+			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(exists).To(BeTrue())
+		})
+
+		It("Should not terminate the job while another pod is terminating", func() {
+			By("Creating a terminal pod and a non-terminal terminating pod for the same Slurm job")
+			terminalPod := newTerminalPod("foo-terminal", jobId)
+			terminatingPod := newPod("foo-terminating", jobId)
+			terminatingPod.Finalizers = []string{wellknown.FinalizerScheduler}
+			podList := &corev1.PodList{
+				Items: []corev1.Pod{*terminalPod, *terminatingPod},
+			}
+			jobList := &slurmtypes.V0044JobInfoList{
+				Items: []slurmtypes.V0044JobInfo{
+					{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:        ptr.To(jobId),
+							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+							AdminComment: ptr.To(newPlaceholderInfo("foo-terminal").ToString()),
+						},
+					},
+				},
+			}
+			c := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
+			localController := &PodReconciler{
+				Client:        fake.NewFakeClient(podList),
+				Scheme:        scheme.Scheme,
+				SlurmClient:   c,
+				EventCh:       make(chan event.GenericEvent, 5),
+				slurmControl:  slurmcontrol.NewControl(c),
+				eventRecorder: record.NewFakeRecorder(10),
+			}
+			err := localController.Delete(ctx, terminatingPod)
+			Expect(err).NotTo(HaveOccurred())
+			err = localController.Get(ctx, types.NamespacedName{
+				Namespace: corev1.NamespaceDefault,
+				Name:      terminatingPod.Name,
+			}, terminatingPod)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(terminatingPod.DeletionTimestamp).NotTo(BeNil())
+
+			By("Reconciling the terminal pod")
+			err = localController.syncSlurm(ctx, newRequest("foo-terminal"))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Check job is still running because a non-terminal pod still exists")
+			exists, err := localController.slurmControl.IsJobRunning(ctx, terminatingPod)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(exists).To(BeTrue())
 		})
@@ -401,6 +486,47 @@ var _ = Describe("prepareTerminalPod()", func() {
 			claim := &resourcev1.ResourceClaim{}
 			err = controller.Get(ctx, claimKey, claim)
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("Should not remove finalizer for terminating pod", func() {
+			By("Creating a non-terminal terminating pod with finalizer and claim")
+			podName := "terminating"
+			terminatingPod := newTerminatingPod(podName, 1)
+			terminatingPod.Finalizers = []string{wellknown.FinalizerScheduler}
+			terminatingPod.Status.ExtendedResourceClaimStatus = &corev1.PodExtendedResourceClaimStatus{
+				ResourceClaimName: "terminating-claim",
+			}
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "terminating-claim",
+					Namespace: metav1.NamespaceDefault,
+				},
+			}
+			localController := &PodReconciler{
+				Client:        fake.NewFakeClient(terminatingPod, claim),
+				Scheme:        scheme.Scheme,
+				SlurmClient:   slurmclientfake.NewFakeClient(),
+				EventCh:       make(chan event.GenericEvent, 5),
+				slurmControl:  slurmcontrol.NewControl(slurmclientfake.NewFakeClient()),
+				eventRecorder: record.NewFakeRecorder(10),
+			}
+
+			By("Reconciling")
+			err := localController.prepareTerminalPod(ctx, newRequest(podName))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Check finalizer still exists")
+			podKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: podName}
+			pod := &corev1.Pod{}
+			err = localController.Get(ctx, podKey, pod)
+			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
+			Expect(pod.ObjectMeta.Finalizers).To(Equal([]string{wellknown.FinalizerScheduler}))
+
+			By("Check ResourceClaim still exists")
+			claimKey := types.NamespacedName{Namespace: metav1.NamespaceDefault, Name: "terminating-claim"}
+			gotClaim := &resourcev1.ResourceClaim{}
+			err = localController.Get(ctx, claimKey, gotClaim)
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
