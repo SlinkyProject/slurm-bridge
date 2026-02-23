@@ -39,7 +39,6 @@ import (
 	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
-	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
 )
 
 func TestSlurmbridge_Name(t *testing.T) {

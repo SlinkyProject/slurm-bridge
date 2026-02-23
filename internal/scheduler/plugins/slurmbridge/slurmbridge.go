@@ -22,7 +22,7 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,8 +42,6 @@ import (
 )
 
 var (
-	scheme = runtime.NewScheme()
-
 	ErrorNoKubeNode           = errors.New("no more placeholder nodes to annotate pods")
 	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed      = errors.New("failed to update pod")
@@ -53,11 +51,11 @@ var (
 )
 
 func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(sched.AddToScheme(scheme))
-	utilruntime.Must(batchv1.AddToScheme(scheme))
-	utilruntime.Must(jobset.AddToScheme(scheme))
-	utilruntime.Must(lws.AddToScheme(scheme))
+	utilruntime.Must(scheme.AddToScheme(scheme.Scheme))
+	utilruntime.Must(sched.AddToScheme(scheme.Scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme.Scheme))
+	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
 }
 
 // Slurmbridge is a plugin that schedules pods in a group.
@@ -122,7 +120,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	}
 	cfg := config.UnmarshalOrDie(data)
 
-	client, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
+	client, err := client.New(handle.KubeConfig(), client.Options{})
 	if err != nil {
 		return nil, err
 	}
