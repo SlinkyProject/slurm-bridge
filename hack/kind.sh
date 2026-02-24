@@ -267,10 +267,10 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
-	local version="0.2.0"
+	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
-	git clone -b "v${version}" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
+	git clone -b "$version" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
 	(
 		cd "$dra_path"
 
@@ -297,13 +297,28 @@ EOF
 	)
 }
 
+function dra-driver-cpu::install() {
+	local version="main"
+	local dra_path
+	dra_path=$(mktemp -d)
+	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
+	(
+		cd "$dra_path"
+		make kind-install-cpu-dra CLUSTER_NAME=kind
+	)
+	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
+		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
+	kubectl -n kube-system patch daemonset dracpu --type='json' \
+		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
+}
+
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--bridge] [--kjob] [--dra-example] [--all]
+	        [--extras] [--bridge] [--kjob] [--dra-example-driver] [--dra-driver-cpu] [--all]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 OPTIONS:
@@ -313,7 +328,8 @@ OPTIONS:
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--bridge            Install slurm-bridge
 	--kjob              Install kjob CRDs and build kubectl-kjob
-	--dra-example       Install DRA example driver
+	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
+	--dra-example-driver Install DRA driver: dra-example-driver
 	--all               Install all charts for slurm-bridge
 
 HELP OPTIONS:
@@ -340,7 +356,10 @@ function main() {
 	if $OPT_EXTRAS; then
 		extras::install
 	fi
-	if $OPT_DRA; then
+	if $OPT_DRA_DRIVER_CPU; then
+		dra-driver-cpu::install
+	fi
+	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install
 	fi
 	if $OPT_BRIDGE; then
@@ -357,12 +376,13 @@ OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
 OPT_BRIDGE=false
 OPT_EXTRAS=false
-OPT_DRA=false
+OPT_DRA_DRIVER_CPU=false
+OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
 OPT_EXTERNAL=true
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-example,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -395,14 +415,19 @@ while :; do
 		OPT_KJOB=true
 		shift
 		;;
-	--dra-example)
-		OPT_DRA=true
+	--dra-driver-cpu)
+		OPT_DRA_DRIVER_CPU=true
+		shift
+		;;
+	--dra-example-driver)
+		OPT_DRA_EXAMPLE_DRIVER=true
 		shift
 		;;
 	--all)
 		OPT_BRIDGE=true
 		OPT_KJOB=true
-		OPT_DRA=true
+		OPT_DRA_DRIVER_CPU=true
+		OPT_DRA_EXAMPLE_DRIVER=true
 		OPT_EXTRAS=true
 		shift
 		;;

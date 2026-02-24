@@ -7,6 +7,8 @@ apiVersion: kind.x-k8s.io/v1alpha4
 featureGates:
   DynamicResourceAllocation: true
   DRAExtendedResource: true
+  DRAResourceClaimDeviceStatus: true
+  DRAConsumableCapacity: true
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri"]
@@ -22,6 +24,7 @@ nodes:
         scheduler:
           extraArgs:
             v: "5"
+            vmodule: "allocator=6,dynamicresources=6"
       - |
         kind: ClusterConfiguration
         apiServer:

@@ -71,12 +71,15 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 | Software   |                             Minimum Version                              |
 | :--------- | :----------------------------------------------------------------------: |
-| Kubernetes | [v1.34](https://kubernetes.io/blog/2025/08/27/kubernetes-v1-34-release/) |
+| Kubernetes | [v1.35](https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/) |
 | Slurm      | [25.05](https://www.schedmd.com/slurm-version-25-05-0-is-now-available/) |
 
 ## Limitations
 
 - Exclusive, whole node allocations are made for each pod.
+- Only supports the following DRA drivers:
+  - [DRA Driver CPU][dra-driver-cpu] for CPUs.
+  - [DRA Example Driver][dra-example-driver] for GPUs.
 
 ## Installation
 
@@ -132,6 +135,8 @@ specific language governing permissions and limitations under the License.
 [architecture]: ./docs/architecture.md
 [contact-schedmd]: https://www.schedmd.com/slurm-resources/contact-schedmd/
 [docs]: ./docs/
+[dra-driver-cpu]: https://github.com/kubernetes-sigs/dra-driver-cpu
+[dra-example-driver]: https://github.com/kubernetes-sigs/dra-example-driver
 [kubernetes]: https://kubernetes.io/
 [quickstart]: ./docs/quickstart.md
 [slinky]: https://slinky.ai/

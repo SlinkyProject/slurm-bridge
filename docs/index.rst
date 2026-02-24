@@ -98,7 +98,7 @@ Compatibility
 +------------+-----------------------------------------------------------------------------+
 | Software   | Minimum Version                                                             |
 +============+=============================================================================+
-| Kubernetes | `v1.34 <https://kubernetes.io/blog/2025/08/27/kubernetes-v1-34-release/>`__ |
+| Kubernetes | `v1.35 <https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/>`__ |
 +------------+-----------------------------------------------------------------------------+
 | Slurm      | `25.05 <https://www.schedmd.com/slurm-version-25-05-0-is-now-available/>`__ |
 +------------+-----------------------------------------------------------------------------+
@@ -107,6 +107,13 @@ Limitations
 -----------
 
 - Exclusive, whole node allocations are made for each pod.
+- Only supports the following DRA drivers:
+
+  - `DRA Driver
+    CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs.
+  - `DRA Example
+    Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
+    for GPUs.
 
 Installation
 ------------
