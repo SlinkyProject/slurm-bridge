@@ -85,6 +85,10 @@ delete-demo-cluster: ## Delete the kind cluster.
 demo-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
 	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
 
+.PHONY: demo-setup-keys
+demo-setup-keys: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
+	./hack/demo-setup-keys.sh
+
 HACK_EXAMPLES ?= $(sort $(wildcard hack/examples/*/*.yaml))
 
 .PHONY: demo-examples

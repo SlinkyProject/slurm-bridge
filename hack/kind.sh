@@ -126,7 +126,7 @@ function slurm-bridge::prerequisites() {
 
 	chartName="lws"
 	if ! helm::find "$chartName"; then
-		local version="0.6.2"
+		local version="0.6.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" \
 			--namespace "${chartName}-system" --create-namespace
