@@ -67,6 +67,35 @@ push-images: build-images ## Push container images.
 push-charts: build-chart ## Push OCI packages.
 	$(foreach chart, $(wildcard ./*.tgz), helm push ${chart} oci://$(REGISTRY)/charts ;)
 
+##@ Demo
+
+EXISTING_KIND := $(shell kind get clusters 2>/dev/null | head -1)
+KIND_CLUSTER_NAME ?= $(if $(EXISTING_KIND),$(EXISTING_KIND),slurm-bridge-demo)
+
+.PHONY: create-demo-cluster
+create-demo-cluster: ## Spin up a kind cluster and install slurm-bridge using hack/kind.sh.
+	@if [ -z "$(EXISTING_KIND)" ]; then ./hack/kind.sh $(KIND_CLUSTER_NAME); fi
+	./hack/kind.sh --bridge $(KIND_CLUSTER_NAME)
+
+.PHONY: delete-demo-cluster
+delete-demo-cluster: ## Delete the kind cluster.
+	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
+
+.PHONY: demo-dra
+demo-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
+	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
+
+HACK_EXAMPLES ?= $(sort $(wildcard hack/examples/*/*.yaml))
+
+.PHONY: demo-examples
+demo-examples: ## Run all hack/examples YAMLs and watch (apply then observe; Ctrl+C to stop watch).
+	@if ! kubectl get namespace slurm-bridge >/dev/null 2>&1; then \
+		./hack/kind.sh --bridge $(KIND_CLUSTER_NAME); \
+	fi; \
+	./hack/bridge_watch.sh & WATCH_PID=$$!; \
+	for f in $(HACK_EXAMPLES); do kubectl apply -f "$$f"; done; \
+	wait $$WATCH_PID
+
 ##@ Deployment
 
 # Get the OS to set platform specific commands
