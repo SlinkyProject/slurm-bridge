@@ -39,26 +39,26 @@ function sys::check() {
 	if ! command -v kubectl >/dev/null 2>&1; then
 		echo "'kubectl' is recommended: https://kubernetes.io/docs/reference/kubectl/"
 	fi
-	if [[ $OSTYPE == 'linux'* ]]; then
+	if [[ $OSTYPE == "linux"* ]]; then
 		if [ "$(/usr/sbin/sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
-			echo "Recommended to increase 'kernel.keys.maxkeys':"
-			echo "  $ sudo sysctl -w kernel.keys.maxkeys=2000"
-			echo "  $ echo 'kernel.keys.maxkeys=2000' | sudo tee --append /etc/sysctl.d/kernel"
+			echo "Recommended to increase 'kernel.keys.maxkeys': run  make demo-setup-keys  or: sudo sysctl -w kernel.keys.maxkeys=2000"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.file-max)" -lt 10000000 ]; then
-			echo "Recommended to increase 'fs.file-max':"
-			echo "  $ sudo sysctl -w fs.file-max=10000000"
-			echo "  $ echo 'fs.file-max=10000000' | sudo tee --append /etc/sysctl.d/fs"
+			echo "Recommended to increase 'fs.file-max': run  make demo-setup-keys  or: sudo sysctl -w fs.file-max=10000000"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
-			echo "Recommended to increase 'fs.inotify.max_user_instances':"
-			echo "  $ sudo sysctl -w fs.inotify.max_user_instances=65535"
-			echo "  $ echo 'fs.inotify.max_user_instances=65535' | sudo tee --append /etc/sysctl.d/fs"
+			echo "Recommended to increase 'fs.inotify.max_user_instances': run  make demo-setup-keys  or: sudo sysctl -w fs.inotify.max_user_instances=65535"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
-			echo "Recommended to increase 'fs.inotify.max_user_watches':"
-			echo "  $ sudo sysctl -w fs.inotify.max_user_watches=1048576"
-			echo "  $ echo 'fs.inotify.max_user_watches=1048576' | sudo tee --append /etc/sysctl.d/fs"
+			echo "Recommended to increase 'fs.inotify.max_user_watches': run  make demo-setup-keys  or: sudo sysctl -w fs.inotify.max_user_watches=1048576"
+		fi
+	elif [[ $OSTYPE == "darwin"* ]]; then
+		# macOS: host file limits (Kind runs in a Linux VM; these affect host-side tooling).
+		if [ "$(sysctl -n kern.maxfiles 2>/dev/null)" -lt 65536 ] 2>/dev/null; then
+			echo "Recommended to increase 'kern.maxfiles': run  make demo-setup-keys  or: sudo sysctl -w kern.maxfiles=65536"
+		fi
+		if [ "$(sysctl -n kern.maxfilesperproc 2>/dev/null)" -lt 65536 ] 2>/dev/null; then
+			echo "Recommended to increase 'kern.maxfilesperproc': run  make demo-setup-keys  or: sudo sysctl -w kern.maxfilesperproc=65536"
 		fi
 	fi
 
