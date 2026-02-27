@@ -72,7 +72,7 @@ function kind::start() {
 	kind::prerequisites
 	local cluster_name="${1:-"kind"}"
 	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
-	if [ "$(kind get clusters | grep -oc kind)" -eq 0 ]; then
+	if ! kind get clusters 2>/dev/null | grep -Fxq "$cluster_name"; then
 		if [ "$(command -v systemd-run)" ]; then
 			CMD="systemd-run --scope --user"
 		else
@@ -84,6 +84,7 @@ function kind::start() {
 }
 
 function kind::delete() {
+	local cluster_name="${1:-kind}"
 	kind delete cluster --name "$cluster_name"
 }
 
@@ -100,6 +101,7 @@ function helm::find() {
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	slurm-bridge::nodes
+	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
 		skaffold run
@@ -112,6 +114,7 @@ function slurm-bridge::prerequisites() {
 	# enables podgroup
 	chartName="scheduler-plugins"
 	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing scheduler-plugins..."
 		helm install --repo https://scheduler-plugins.sigs.k8s.io "$chartName" "$chartName" \
 			--namespace "$chartName" --create-namespace \
 			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
@@ -119,6 +122,7 @@ function slurm-bridge::prerequisites() {
 
 	chartName="jobset"
 	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing jobset..."
 		local version="v0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
 			--namespace "${chartName}-system" --create-namespace
@@ -126,18 +130,22 @@ function slurm-bridge::prerequisites() {
 
 	chartName="lws"
 	if ! helm::find "$chartName"; then
-		local version="0.6.x"
+		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
+		local version="0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" \
 			--namespace "${chartName}-system" --create-namespace
 	fi
 
+	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm::install
+	echo "[slurm-bridge] Creating slurm-bridge secret and namespace..."
 	slurm-bridge::secret
 	kubectl create namespace slurm-bridge || true
 }
 
 function slurm-bridge::nodes() {
+	echo "[slurm-bridge] Waiting for slurm-controller-0 and configuring partition..."
 
 	# Wait for slurm-controller-0 to be ready and give the pod
 	# additional time to wait out a reconfigure restart.
@@ -186,6 +194,7 @@ function slurm::prerequisites() {
 
 	chartName="cert-manager"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing cert-manager..."
 		helm install "$chartName" jetstack/cert-manager \
 			--namespace "$chartName" --create-namespace --set crds.enabled=true
 	fi
@@ -199,13 +208,18 @@ function slurm::install() {
 
 	chartName="slurm-operator"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing slurm-operator..."
 		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
 			--version="$version" --namespace=slinky --create-namespace --wait \
 			--set 'crds.enabled=true'
 	fi
+	# Wait for webhook to be ready so slurm chart install does not hit "connection refused"
+	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null || true
+	sleep 5
 
 	chartName="slurm"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing slurm chart..."
 		if $OPT_EXTERNAL; then
 			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
@@ -268,6 +282,7 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
+	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
@@ -276,7 +291,7 @@ function dra-example-driver::install() {
 		cd "$dra_path"
 
 		# Build DRA images and load them into kind cluster.
-		export KIND_CLUSTER_NAME="kind"
+		export KIND_CLUSTER_NAME="$cluster_name"
 		./demo/build-driver.sh
 
 		# Install with selectors and tolerations for slurm-bridge.
@@ -299,13 +314,14 @@ EOF
 }
 
 function dra-driver-cpu::install() {
+	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
 	(
 		cd "$dra_path"
-		make kind-install-cpu-dra CLUSTER_NAME=kind
+		make kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
 	)
 	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
@@ -358,10 +374,10 @@ function main() {
 		extras::install
 	fi
 	if $OPT_DRA_DRIVER_CPU; then
-		dra-driver-cpu::install
+		dra-driver-cpu::install "$cluster_name"
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
-		dra-example-driver::install
+		dra-example-driver::install "$cluster_name"
 	fi
 	if $OPT_BRIDGE; then
 		slurm-bridge::install

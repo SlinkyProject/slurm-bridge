@@ -69,36 +69,47 @@ push-charts: build-chart ## Push OCI packages.
 
 ##@ Demo
 
-EXISTING_KIND := $(shell kind get clusters 2>/dev/null | head -1)
-KIND_CLUSTER_NAME ?= $(if $(EXISTING_KIND),$(EXISTING_KIND),slurm-bridge-demo)
+# Use a fixed cluster name for the demo; do not run on an existing cluster we did not create.
+KIND_CLUSTER_NAME ?= slurm-bridge-demo
+KIND_DEMO_CONTEXT := kind-$(KIND_CLUSTER_NAME)
+# Require current kubectl context to be the demo cluster.
+define check_demo_context
+	@ctx=$$(kubectl config current-context 2>/dev/null); \
+	[ "$$ctx" = "$(KIND_DEMO_CONTEXT)" ] || { echo "error: need context $(KIND_DEMO_CONTEXT), have $$ctx. Run: make create-demo-cluster"; exit 1; }
+endef
 
 .PHONY: create-demo-cluster
-create-demo-cluster: ## Spin up a kind cluster and install slurm-bridge using hack/kind.sh.
-	@if [ -z "$(EXISTING_KIND)" ]; then ./hack/kind.sh $(KIND_CLUSTER_NAME); fi
+create-demo-cluster: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
+	@if ! kind get clusters 2>/dev/null | grep -q "^$(KIND_CLUSTER_NAME)$$"; then ./hack/kind.sh $(KIND_CLUSTER_NAME); fi
 	./hack/kind.sh --bridge $(KIND_CLUSTER_NAME)
 
 .PHONY: delete-demo-cluster
 delete-demo-cluster: ## Delete the kind cluster.
 	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
 
-.PHONY: demo-dra
-demo-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
+.PHONY: install-dra
+install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
 	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
 
-.PHONY: demo-setup-keys
-demo-setup-keys: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
-	./hack/demo-setup-keys.sh
+.PHONY: setup-system-params
+setup-system-params: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
+	./hack/setup-sys-params.sh
 
-HACK_EXAMPLES ?= $(sort $(wildcard hack/examples/*/*.yaml))
+# Exclude LWS (long-running) and DRA examples from main demo; DRA has its own demo-dra target.
+HACK_EXAMPLES ?= $(sort $(filter-out hack/examples/lws/lws.yaml $(wildcard hack/examples/dra/*.yaml),$(wildcard hack/examples/*/*.yaml)))
+HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/*.yaml))
 
 .PHONY: demo-examples
-demo-examples: ## Run all hack/examples YAMLs and watch (apply then observe; Ctrl+C to stop watch).
-	@if ! kubectl get namespace slurm-bridge >/dev/null 2>&1; then \
-		./hack/kind.sh --bridge $(KIND_CLUSTER_NAME); \
-	fi; \
-	./hack/bridge_watch.sh & WATCH_PID=$$!; \
+demo-examples: create-demo-cluster ## Run hack/examples YAMLs (except lws and dra) and watch (apply then observe; Ctrl+C to stop watch).
+	@./hack/bridge_watch.sh & WATCH_PID=$$!; \
 	for f in $(HACK_EXAMPLES); do kubectl apply -f "$$f"; done; \
-	wait $$WATCH_PID
+	wait $$WATCH_PID || true
+
+.PHONY: demo-dra
+demo-dra: create-demo-cluster install-dra ## Install DRA drivers and run only the DRA example pods; then watch (Ctrl+C to stop).
+	@./hack/bridge_watch.sh & WATCH_PID=$$!; \
+	for f in $(HACK_EXAMPLES_DRA); do kubectl apply -f "$$f"; done; \
+	wait $$WATCH_PID || true
 
 ##@ Deployment
 
