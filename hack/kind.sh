@@ -208,11 +208,14 @@ function slurm::install() {
 		if $OPT_EXTERNAL; then
 			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
-				--set "nodesets.slinky.enabled=false"
+				--set "nodesets.slinky.enabled=false" \
+				--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
 		else
 			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
-				-f "${SCRIPT_DIR}/slurm-bridge-nodes.yaml"
+				-f "${SCRIPT_DIR}/slurm-bridge-nodes.yaml" \
+				--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
+
 		fi
 	fi
 }
