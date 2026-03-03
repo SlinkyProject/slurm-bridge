@@ -1,11 +1,9 @@
 module github.com/SlinkyProject/slurm-bridge
 
-go 1.26
-
-toolchain go1.26.0
+go 1.26.1
 
 require (
-	github.com/SlinkyProject/slurm-client v1.0.2
+	github.com/SlinkyProject/slurm-client v1.0.0-rc1.0.20260309212414-4578dfd9f073
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -88,7 +86,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oapi-codegen/runtime v1.1.2 // indirect
+	github.com/oapi-codegen/runtime v1.2.0 // indirect
 	github.com/oasdiff/yaml v0.0.0-20250309154309-f31be36b4037 // indirect
 	github.com/oasdiff/yaml3 v0.0.0-20250309153720-d2182401db90 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
