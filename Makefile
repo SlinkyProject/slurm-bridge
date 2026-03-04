@@ -67,6 +67,50 @@ push-images: build-images ## Push container images.
 push-charts: build-chart ## Push OCI packages.
 	$(foreach chart, $(wildcard ./*.tgz), helm push ${chart} oci://$(REGISTRY)/charts ;)
 
+##@ Demo
+
+# Use a fixed cluster name for the demo; do not run on an existing cluster we did not create.
+KIND_CLUSTER_NAME ?= slurm-bridge-demo
+
+.PHONY: demo-cluster-create
+demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
+	@if ! kind get clusters 2>/dev/null | grep -q "^$(KIND_CLUSTER_NAME)$$"; then ./hack/kind.sh $(KIND_CLUSTER_NAME); fi
+	./hack/kind.sh --bridge $(KIND_CLUSTER_NAME)
+
+.PHONY: demo-cluster-delete
+demo-cluster-delete: ## Delete the kind cluster.
+	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
+
+.PHONY: install-dra
+install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
+	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
+
+.PHONY: setup-sysctl
+setup-sysctl: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
+	./hack/sysctl.sh
+
+# Exclude LWS (long-running) and DRA examples from main demo; DRA has its own demo-dra target.
+HACK_EXAMPLES ?= $(sort $(filter-out hack/examples/lws/lws.yaml $(wildcard hack/examples/dra/*.yaml),$(wildcard hack/examples/*/*.yaml)))
+HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/*.yaml))
+
+.PHONY: install-examples
+install-examples: ## run examples only-no cluster setup
+	for f in $(HACK_EXAMPLES); do $(KUBECTL) delete -f "$$f" || true; done; \
+    for f in $(HACK_EXAMPLES); do $(KUBECTL) apply -f "$$f"; done;
+
+.PHONY: demo-examples
+demo-examples: demo-cluster-create install-examples ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
+
+.PHONY: install-examples-dra
+install-examples-dra: ## install dra examples only-no cluster setup
+	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) delete -f "$$f" || true; done; \
+	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) apply -f "$$f"; done;
+
+.PHONY: demo-examples-dra
+demo-examples-dra: demo-cluster-create install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
+
 ##@ Deployment
 
 # Get the OS to set platform specific commands
@@ -82,10 +126,6 @@ endif
 .PHONY: values-dev
 values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
 	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | xargs -n2 cp $(CP_FLAGS)
-
-ifndef ignore-not-found
-  ignore-not-found = false
-endif
 
 ##@ Build Dependencies
 

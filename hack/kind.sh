@@ -39,26 +39,32 @@ function sys::check() {
 	if ! command -v kubectl >/dev/null 2>&1; then
 		echo "'kubectl' is recommended: https://kubernetes.io/docs/reference/kubectl/"
 	fi
-	if [[ $OSTYPE == 'linux'* ]]; then
+	if [[ $OSTYPE == "linux"* ]]; then
 		if [ "$(/usr/sbin/sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
 			echo "Recommended to increase 'kernel.keys.maxkeys':"
 			echo "  $ sudo sysctl -w kernel.keys.maxkeys=2000"
-			echo "  $ echo 'kernel.keys.maxkeys=2000' | sudo tee --append /etc/sysctl.d/kernel"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.file-max)" -lt 10000000 ]; then
 			echo "Recommended to increase 'fs.file-max':"
 			echo "  $ sudo sysctl -w fs.file-max=10000000"
-			echo "  $ echo 'fs.file-max=10000000' | sudo tee --append /etc/sysctl.d/fs"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_instances':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_instances=65535"
-			echo "  $ echo 'fs.inotify.max_user_instances=65535' | sudo tee --append /etc/sysctl.d/fs"
 		fi
 		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_watches':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_watches=1048576"
-			echo "  $ echo 'fs.inotify.max_user_watches=1048576' | sudo tee --append /etc/sysctl.d/fs"
+		fi
+	elif [[ $OSTYPE == "darwin"* ]]; then
+		# macOS: host file limits (Kind runs in a Linux VM; these affect host-side tooling).
+		if [ "$(sysctl -n kern.maxfiles 2>/dev/null)" -lt 65536 ] 2>/dev/null; then
+			echo "Recommended to increase 'kern.maxfiles':"
+			echo "  $ sudo sysctl -w kern.maxfiles=65536"
+		fi
+		if [ "$(sysctl -n kern.maxfilesperproc 2>/dev/null)" -lt 65536 ] 2>/dev/null; then
+			echo "Recommended to increase 'kern.maxfilesperproc':"
+			echo "  $ sudo sysctl -w kern.maxfilesperproc=65536"
 		fi
 	fi
 
@@ -72,7 +78,7 @@ function kind::start() {
 	kind::prerequisites
 	local cluster_name="${1:-"kind"}"
 	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
-	if [ "$(kind get clusters | grep -oc kind)" -eq 0 ]; then
+	if ! kind get clusters 2>/dev/null | grep -Fxq "$cluster_name"; then
 		if [ "$(command -v systemd-run)" ]; then
 			CMD="systemd-run --scope --user"
 		else
@@ -84,6 +90,7 @@ function kind::start() {
 }
 
 function kind::delete() {
+	local cluster_name="${1:-kind}"
 	kind delete cluster --name "$cluster_name"
 }
 
@@ -100,6 +107,7 @@ function helm::find() {
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	slurm-bridge::nodes
+	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
 		skaffold run
@@ -112,6 +120,7 @@ function slurm-bridge::prerequisites() {
 	# enables podgroup
 	chartName="scheduler-plugins"
 	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing scheduler-plugins..."
 		helm install --repo https://scheduler-plugins.sigs.k8s.io "$chartName" "$chartName" \
 			--namespace "$chartName" --create-namespace \
 			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
@@ -119,6 +128,7 @@ function slurm-bridge::prerequisites() {
 
 	chartName="jobset"
 	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing jobset..."
 		local version="v0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
 			--namespace "${chartName}-system" --create-namespace
@@ -126,17 +136,22 @@ function slurm-bridge::prerequisites() {
 
 	chartName="lws"
 	if ! helm::find "$chartName"; then
-		local version="v0.6.2"
-		helm install "$chartName" https://github.com/kubernetes-sigs/lws/releases/download/$version/lws-chart-$version.tgz \
+		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
+		local version="0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
+			--version "$version" \
 			--namespace "${chartName}-system" --create-namespace
 	fi
 
+	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm::install
+	echo "[slurm-bridge] Creating slurm-bridge secret and namespace..."
 	slurm-bridge::secret
 	kubectl create namespace slurm-bridge || true
 }
 
 function slurm-bridge::nodes() {
+	echo "[slurm-bridge] Waiting for slurm-controller-0 and configuring partition..."
 
 	# Wait for slurm-controller-0 to be ready and give the pod
 	# additional time to wait out a reconfigure restart.
@@ -152,13 +167,23 @@ function slurm-bridge::nodes() {
 		local bridge_nodes
 		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
 		echo "$bridge_nodes" | while IFS= read -r node; do
-			local cpus memory
+			local cpus memory memory_mb
 			cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
 			memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
+			# Convert node capacity (Ki/Mi/Gi) to MB for scontrol realmemory
+			case "$memory" in
+			*Ki) memory_mb=$((${memory%Ki} / 1024)) ;;
+			*Mi) memory_mb=${memory%Mi} ;;
+			*Gi) memory_mb=$((${memory%Gi} * 1024)) ;;
+			*)
+				memory_mb=${memory%%[!0-9]*}
+				[ -z "$memory_mb" ] && memory_mb=0
+				;;
+			esac
 			if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
 				kubectl exec -n slurm pods/slurm-controller-0 -- \
 					scontrol create nodename="$node" state=external \
-					cpus="$cpus" realmemory="${memory%Ki}" \
+					cpus="$cpus" realmemory="$memory_mb" \
 					gres="gpu:gpu.example.com:8" \
 					gresconf=count=8,name=gpu,type=gpu.example.com,file=/home/dev/gpu0
 			fi
@@ -185,6 +210,7 @@ function slurm::prerequisites() {
 
 	chartName="cert-manager"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing cert-manager..."
 		helm install "$chartName" jetstack/cert-manager \
 			--namespace "$chartName" --create-namespace --set crds.enabled=true
 	fi
@@ -198,13 +224,18 @@ function slurm::install() {
 
 	chartName="slurm-operator"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing slurm-operator..."
 		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
 			--version="$version" --namespace=slinky --create-namespace --wait \
 			--set 'crds.enabled=true'
 	fi
+	# Wait for webhook to be ready so slurm chart install does not hit "connection refused"
+	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null || true
+	sleep 5
 
 	chartName="slurm"
 	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing slurm chart..."
 		if $OPT_EXTERNAL; then
 			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
 				--version="$version" --namespace=slurm --create-namespace --wait \
@@ -270,6 +301,7 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
+	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
@@ -278,7 +310,7 @@ function dra-example-driver::install() {
 		cd "$dra_path"
 
 		# Build DRA images and load them into kind cluster.
-		export KIND_CLUSTER_NAME="kind"
+		export KIND_CLUSTER_NAME="$cluster_name"
 		./demo/build-driver.sh
 
 		# Install with selectors and tolerations for slurm-bridge.
@@ -301,13 +333,14 @@ EOF
 }
 
 function dra-driver-cpu::install() {
+	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
 	dra_path=$(mktemp -d)
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
 	(
 		cd "$dra_path"
-		make kind-install-cpu-dra CLUSTER_NAME=kind
+		make kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
 	)
 	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
@@ -360,10 +393,10 @@ function main() {
 		extras::install
 	fi
 	if $OPT_DRA_DRIVER_CPU; then
-		dra-driver-cpu::install
+		dra-driver-cpu::install "$cluster_name"
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
-		dra-example-driver::install
+		dra-example-driver::install "$cluster_name"
 	fi
 	if $OPT_BRIDGE; then
 		slurm-bridge::install
