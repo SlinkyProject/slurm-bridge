@@ -166,10 +166,13 @@ function slurm-bridge::nodes() {
 			memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
 			# Convert node capacity (Ki/Mi/Gi) to MB for scontrol realmemory
 			case "$memory" in
-				*Ki) memory_mb=$((${memory%Ki} / 1024)) ;;
-				*Mi) memory_mb=${memory%Mi} ;;
-				*Gi) memory_mb=$((${memory%Gi} * 1024)) ;;
-				*)   memory_mb=${memory%%[!0-9]*}; [ -z "$memory_mb" ] && memory_mb=0 ;;
+			*Ki) memory_mb=$((${memory%Ki} / 1024)) ;;
+			*Mi) memory_mb=${memory%Mi} ;;
+			*Gi) memory_mb=$((${memory%Gi} * 1024)) ;;
+			*)
+				memory_mb=${memory%%[!0-9]*}
+				[ -z "$memory_mb" ] && memory_mb=0
+				;;
 			esac
 			if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
 				kubectl exec -n slurm pods/slurm-controller-0 -- \

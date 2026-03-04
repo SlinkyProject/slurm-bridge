@@ -71,12 +71,6 @@ push-charts: build-chart ## Push OCI packages.
 
 # Use a fixed cluster name for the demo; do not run on an existing cluster we did not create.
 KIND_CLUSTER_NAME ?= slurm-bridge-demo
-KIND_DEMO_CONTEXT := kind-$(KIND_CLUSTER_NAME)
-# Require current kubectl context to be the demo cluster.
-define check_demo_context
-	@ctx=$$(kubectl config current-context 2>/dev/null); \
-	[ "$$ctx" = "$(KIND_DEMO_CONTEXT)" ] || { echo "error: need context $(KIND_DEMO_CONTEXT), have $$ctx. Run: make create-demo-cluster"; exit 1; }
-endef
 
 .PHONY: create-demo-cluster
 create-demo-cluster: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
@@ -99,17 +93,23 @@ setup-system-params: ## Set kernel/sysctl values recommended for kind/demo (requ
 HACK_EXAMPLES ?= $(sort $(filter-out hack/examples/lws/lws.yaml $(wildcard hack/examples/dra/*.yaml),$(wildcard hack/examples/*/*.yaml)))
 HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/*.yaml))
 
+.PHONY: run-demo
+run-demo: ## run examples only-no cluster setup
+	for f in $(HACK_EXAMPLES); do $(KUBECTL) delete -f "$$f" || true; done; \
+        for f in $(HACK_EXAMPLES); do $(KUBECTL) apply -f "$$f"; done;
+
 .PHONY: demo-examples
-demo-examples: create-demo-cluster ## Run hack/examples YAMLs (except lws and dra) and watch (apply then observe; Ctrl+C to stop watch).
-	@./hack/bridge_watch.sh & WATCH_PID=$$!; \
-	for f in $(HACK_EXAMPLES); do kubectl apply -f "$$f"; done; \
-	wait $$WATCH_PID || true
+demo-examples: create-demo-cluster run-demo ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
+
+.PHONY: run-demo-dra
+run-demo-dra: ## run dra examples only-no cluster setup
+	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) delete -f "$$f" || true; done; \
+	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) apply -f "$$f"; done;
 
 .PHONY: demo-dra
-demo-dra: create-demo-cluster install-dra ## Install DRA drivers and run only the DRA example pods; then watch (Ctrl+C to stop).
-	@./hack/bridge_watch.sh & WATCH_PID=$$!; \
-	for f in $(HACK_EXAMPLES_DRA); do kubectl apply -f "$$f"; done; \
-	wait $$WATCH_PID || true
+demo-dra: create-demo-cluster install-dra run-demo-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
 
 ##@ Deployment
 
@@ -126,10 +126,6 @@ endif
 .PHONY: values-dev
 values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
 	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | xargs -n2 cp $(CP_FLAGS)
-
-ifndef ignore-not-found
-  ignore-not-found = false
-endif
 
 ##@ Build Dependencies
 
