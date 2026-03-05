@@ -187,4 +187,5 @@ limitations under the License.
     quickstart.md
     scheduler.md
     testing.md
+    usermanagement.md
     workload.md
