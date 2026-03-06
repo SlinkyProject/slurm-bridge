@@ -46,6 +46,15 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil
 	}
+
+	// On create, unset spec.nodeName so the pod is scheduled by slurm-bridge.
+	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
+		if pod.Spec.NodeName != "" {
+			logger.V(1).Info("Unsetting spec.nodeName on create so slurm scheduling will occur", "pod", klog.KObj(pod), "previousNodeName", pod.Spec.NodeName)
+			pod.Spec.NodeName = ""
+		}
+	}
+
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
 		pod.Spec.SchedulerName = r.SchedulerName
 	}

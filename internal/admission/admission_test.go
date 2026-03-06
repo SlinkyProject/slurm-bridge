@@ -89,10 +89,11 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 		pod *corev1.Pod
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		sched   string
+		name         string
+		args         args
+		wantErr      bool
+		sched        string
+		wantNodeName string
 	}{
 		{
 			name: "PodWithDefaultNamespace",
@@ -250,6 +251,52 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			wantErr: false,
 			sched:   corev1.DefaultSchedulerName,
 		},
+		{
+			name: "PodWithNodeNameOnCreateInManagedNamespace_unsetsNodeName",
+			args: args{
+				ctx: contextWithAdmissionOperation("CREATE"),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels:    map[string]string{"app": "test-app"},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: corev1.DefaultSchedulerName,
+						NodeName:      "some-node",
+						Containers: []corev1.Container{
+							{Name: "test-container", Image: "test-image"},
+						},
+					},
+				},
+			},
+			wantErr:      false,
+			sched:        SchedulerName,
+			wantNodeName: "",
+		},
+		{
+			name: "PodWithNodeNameOnUpdateInManagedNamespace_preservesNodeName",
+			args: args{
+				ctx: contextWithAdmissionOperation("UPDATE"),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels:    map[string]string{"app": "test-app"},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: corev1.DefaultSchedulerName,
+						NodeName:      "some-node",
+						Containers: []corev1.Container{
+							{Name: "test-container", Image: "test-image"},
+						},
+					},
+				},
+			},
+			wantErr:      false,
+			sched:        SchedulerName,
+			wantNodeName: "some-node",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,8 +313,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			if tt.args.pod.Spec.SchedulerName != tt.sched {
 				t.Errorf("PodAdmission.Default() scheduler = %s, want scheduler %s", tt.args.pod.Spec.SchedulerName, tt.sched)
 			}
+			if tt.args.pod.Spec.NodeName != tt.wantNodeName {
+				t.Errorf("PodAdmission.Default() nodeName = %q, want %q", tt.args.pod.Spec.NodeName, tt.wantNodeName)
+			}
 		})
 	}
+}
+
+// contextWithAdmissionOperation returns a context with an admission request for the given operation.
+func contextWithAdmissionOperation(op string) context.Context {
+	req := admission.Request{}
+	reflect.ValueOf(&req).Elem().FieldByName("Operation").SetString(op)
+	return admission.NewContextWithRequest(context.TODO(), req)
 }
 
 func TestPodAdmission_ValidateCreate(t *testing.T) {
