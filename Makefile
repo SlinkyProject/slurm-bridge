@@ -105,7 +105,11 @@ install-examples: ## run examples only-no cluster setup
 
 .PHONY: demo-examples
 demo-examples: demo-cluster-create install-examples ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --demo || true; fi
+
+.PHONY: demo-example-explainer
+demo-example-explainer: demo-cluster-create install-examples ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --explain || true; fi
 
 .PHONY: install-examples-dra
 install-examples-dra: ## install dra examples only-no cluster setup
@@ -114,7 +118,11 @@ install-examples-dra: ## install dra examples only-no cluster setup
 
 .PHONY: demo-examples-dra
 demo-examples-dra: install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --demo || true; fi
+
+.PHONY: demo-examples-dra-explainer
+demo-examples-dra-explainer: demo-cluster-create install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
+	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --explain || true; fi
 
 ##@ Deployment
 
