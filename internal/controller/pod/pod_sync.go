@@ -132,6 +132,14 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	}
 	if activePods == 0 {
 		jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelPlaceholderJobId])
+		isPendingOrRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
+		if err != nil {
+			logger.Error(err, "failed to check if job is pending or running", "jobId", jobId)
+			return err
+		}
+		if !isPendingOrRunning {
+			return nil
+		}
 		logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
 		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
 			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
@@ -186,12 +194,15 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 		}
 		var claim resourcev1.ResourceClaim
 		if err := r.Get(ctx, claimKey, &claim); err != nil {
-			logger.Error(err, "failed to get resource claim", "claimKey", claimKey)
-			return err
-		}
-		if err := r.Delete(ctx, &claim); err != nil {
-			logger.Error(err, "failed to delete resource claim", "claim", claim)
-			return err
+			if !apierrors.IsNotFound(err) {
+				logger.Error(err, "failed to get resource claim", "claimKey", claimKey)
+				return err
+			}
+		} else {
+			if err := r.Delete(ctx, &claim); err != nil {
+				logger.Error(err, "failed to delete resource claim", "claim", claim)
+				return err
+			}
 		}
 	}
 

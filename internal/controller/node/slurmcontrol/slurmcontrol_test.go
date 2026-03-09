@@ -350,6 +350,13 @@ func Test_tolerateError(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "wrapped Not Found (e.g. slurm-client cache sync)",
+			args: args{
+				err: errors.New("failed to wait on type V0044JobInfo object 69 cache sync: [Not Found, Invalid job id specified]"),
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -152,8 +152,9 @@ func tolerateError(err error) bool {
 		return true
 	}
 	errText := err.Error()
-	if errText == http.StatusText(http.StatusNotFound) ||
-		errText == http.StatusText(http.StatusNoContent) {
+	notFound := http.StatusText(http.StatusNotFound)
+	noContent := http.StatusText(http.StatusNoContent)
+	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
 		return true
 	}
 	return false
