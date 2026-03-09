@@ -8,6 +8,7 @@
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Node Controller](#node-controller)
+    - [Node Registration and Partition Assignment](#node-registration-and-partition-assignment)
   - [Workload Controller](#workload-controller)
 
 <!-- mdformat-toc end -->
@@ -40,6 +41,47 @@ purposes. Slurm becomes the source of truth for scheduling among managed nodes.
 
 A managed node is defined as a node that has a colocated `kubelet` and `slurmd`
 on the same physical host, and the slurm-bridge can schedule on.
+
+### Node Registration and Partition Assignment
+
+The node controller supports dynamic node registration in Slurm through
+Kubernetes node labels:
+
+- **Node Registration Label**
+  (`scheduler.slinky.slurm.net/slurm-bridge-external-node`): When this label is
+  present on a Kubernetes node, the node controller will automatically register
+  the node in Slurm with the correct CPU and memory resources. When the label is
+  removed, the node will be removed from Slurm.
+
+- **Node Partitions Annotation**
+  (`scheduler.slinky.slurm.net/external-node-partitions`): Specifies the Slurm
+  partition(s) the node should be assigned to. The value is a comma-separated
+  list of partition names. When this annotation is set, the node controller
+  will:
+
+  1. Validate that all specified partitions exist in Slurm
+  1. Register the node with node features matching the partition names
+  1. Allow Slurm's NodeSet configuration in `slurm.conf` to assign the node to
+     those partitions
+
+  **Example:**
+
+  ```yaml
+  apiVersion: v1
+  kind: Node
+  metadata:
+    name: worker-1
+    labels:
+      scheduler.slinky.slurm.net/external-node: "true"
+    annotations:
+      scheduler.slinky.slurm.net/external-node-partitions: "slurm-bridge,gpu"
+  ```
+
+  This will register the node with features `slurm-bridge,gpu`, allowing it to
+  be assigned to those partitions in `slurm.conf` using NodeSet features.
+
+  **Note:** The controller will error if any specified partition does not exist
+  in Slurm. Partitions must be pre-configured in Slurm's configuration.
 
 ```mermaid
 sequenceDiagram

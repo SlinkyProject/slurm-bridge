@@ -11,4 +11,10 @@ const (
 	// LabelPlaceholderJobId indicates the Slurm JobId which corresponds to the
 	// the pod's placeholder job.
 	LabelPlaceholderJobId = SchedulerPrefix + "slurm-jobid"
+
+	// LabelExternalNode indicates that the labeled Kubernetes node should be
+	// registered in Slurm as an external node. When this label is present, the
+	// node controller will add the node to Slurm. If the label is removed, the
+	// node will be removed from Slurm.
+	LabelExternalNode = SchedulerPrefix + "external-node"
 )

@@ -6,6 +6,7 @@ package nodeinfo
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -168,6 +169,37 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 	}
 
 	return nodeInfo, nil
+}
+
+// GetGresAndGresConf returns Slurm GRES and GresConf strings for this node's devices.
+// GRES and GresConf are derived from DRA ResourceSlices (e.g. GPU devices); CPU is not included.
+// Returns ("", "") when the node has no GRES devices.
+func (n *NodeInfo) GetGresAndGresConf() (gres, gresConf string) {
+	if len(n.gpuMap.GPUInfoMap) == 0 {
+		return "", ""
+	}
+	// Build gres: "gpu:driver:count"
+	count := len(n.gpuMap.GPUInfoMap)
+	gres = fmt.Sprintf("gpu:%s:%d", n.gpuMap.Driver, count)
+
+	// Build gresConf: count=N,name=gpu,type=driver,file=name0,file=name1,...
+	// Slurm requires count= and one file= per device for create node to succeed.
+	indices := make([]int, 0, count)
+	for idx := range n.gpuMap.GPUInfoMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	fileParts := make([]string, 0, count)
+	for _, idx := range indices {
+		info := n.gpuMap.GPUInfoMap[idx]
+		deviceName := fmt.Sprintf("gpu-%d", idx)
+		if info != nil && info.Name != "" {
+			deviceName = info.Name
+		}
+		fileParts = append(fileParts, "file="+deviceName)
+	}
+	gresConf = fmt.Sprintf("count=%d,name=gpu,type=%s,%s", count, n.gpuMap.Driver, strings.Join(fileParts, ","))
+	return gres, gresConf
 }
 
 func hasDeviceClass(ctx context.Context, kubeclient client.Client, deviceClassName string) bool {

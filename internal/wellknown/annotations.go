@@ -7,6 +7,13 @@ const (
 	// AnnotationPlaceholderNode indicates the Node which corresponds to the
 	// the pod's placeholder job.
 	AnnotationPlaceholderNode = SlinkyPrefix + "slurm-node"
+
+	// AnnotationExternalNodePartitions specifies the Slurm partition(s) that this
+	// Kubernetes node should be added to. The annotation value is a comma-separated
+	// list of partition names. The node will be registered with node features
+	// matching these partition names. The controller will error if any partition
+	// does not exist.
+	AnnotationExternalNodePartitions = SchedulerPrefix + "external-node-partitions"
 )
 
 const (
