@@ -14,6 +14,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
@@ -145,13 +146,15 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 
 func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string) (*NodeInfo, error) {
 	resourceSliceList := &resourcev1.ResourceSliceList{}
-	nodeNameOpt := client.MatchingFields{resourcev1.ResourceSliceSelectorNodeName: nodeName}
-	if err := kubeclient.List(ctx, resourceSliceList, nodeNameOpt); err != nil {
+	if err := kubeclient.List(ctx, resourceSliceList); err != nil {
 		return nil, err
 	}
 
 	nodeInfo := &NodeInfo{}
 	for _, resourceSlice := range resourceSliceList.Items {
+		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
+			continue
+		}
 		switch resourceSlice.Spec.Driver {
 		case DraDriverCpu:
 			cpuInfos := NewCPUInfos(&resourceSlice)
