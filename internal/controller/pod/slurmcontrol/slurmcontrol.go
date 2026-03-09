@@ -19,18 +19,18 @@ import (
 )
 
 type SlurmControlInterface interface {
-	// GetJob returns a Slurm Job from a pod annotation
+	// IsJobRunning returns true if the Slurm job is running, false if not.
 	IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
 }
 
-// RealPodControl is the default implementation of SlurmControlInterface.
+// RealSlurmControl is the default implementation of SlurmControlInterface.
 type realSlurmControl struct {
 	client.Client
 }
 
-// GetJob implements SlurmControlInterface.
+// IsJobRunning implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	job := &types.V0044JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
