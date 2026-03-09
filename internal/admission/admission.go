@@ -11,12 +11,10 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -30,8 +28,7 @@ type PodAdmission struct {
 }
 
 func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&corev1.Pod{}).
+	return ctrl.NewWebhookManagedBy(mgr, &corev1.Pod{}).
 		WithDefaulter(r).
 		WithValidator(r).
 		Complete()
@@ -39,14 +36,10 @@ func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomDefaulter = &PodAdmission{}
+var _ admission.Defaulter[*corev1.Pod] = &PodAdmission{}
 
-func (r *PodAdmission) Default(ctx context.Context, obj runtime.Object) error {
+func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 	logger := log.FromContext(ctx)
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		return fmt.Errorf("expected a Pod but got a %T", obj)
-	}
 	logger.V(1).Info("Defaulting", "pod", klog.KObj(pod), "pod.Spec.SchedulerName", pod.Spec.SchedulerName)
 	isManaged, err := r.isManagedNamespace(ctx, pod.Namespace)
 	if err != nil {
@@ -55,6 +48,15 @@ func (r *PodAdmission) Default(ctx context.Context, obj runtime.Object) error {
 	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil
 	}
+
+	// On create, unset spec.nodeName so the pod is scheduled by slurm-bridge.
+	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
+		if pod.Spec.NodeName != "" {
+			logger.V(1).Info("Unsetting spec.nodeName on create so slurm scheduling will occur", "pod", klog.KObj(pod), "previousNodeName", pod.Spec.NodeName)
+			pod.Spec.NodeName = ""
+		}
+	}
+
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
 		pod.Spec.SchedulerName = r.SchedulerName
 	}
@@ -63,14 +65,10 @@ func (r *PodAdmission) Default(ctx context.Context, obj runtime.Object) error {
 
 // +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &PodAdmission{}
+var _ admission.Validator[*corev1.Pod] = &PodAdmission{}
 
-func (r *PodAdmission) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (admission.Warnings, error) {
 	logger := log.FromContext(ctx)
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		return nil, fmt.Errorf("expected a Pod but got a %T", obj)
-	}
 	logger.V(1).Info("ValidateCreate", "pod", klog.KObj(pod))
 	isManaged, err := r.isManagedNamespace(ctx, pod.Namespace)
 	if err != nil {
@@ -94,10 +92,8 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, obj runtime.Object) (
 	return nil, nil
 }
 
-func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
+func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
 	logger := log.FromContext(ctx)
-	newPod := newObj.(*corev1.Pod)
-	oldPod := oldObj.(*corev1.Pod)
 	logger.V(1).Info("ValidateUpdate", "newPod", klog.KObj(newPod), "oldPod", klog.KObj(oldPod))
 	isManaged, err := r.isManagedNamespace(ctx, newPod.Namespace)
 	if err != nil {
@@ -132,7 +128,7 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldObj runtime.Object
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
-func (r *PodAdmission) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+func (r *PodAdmission) ValidateDelete(ctx context.Context, pod *corev1.Pod) (admission.Warnings, error) {
 	return nil, nil
 }
 

@@ -13,7 +13,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -43,7 +42,7 @@ var _ = Describe("Pod Controller", func() {
 func TestPodAdmission_Default(t *testing.T) {
 	type args struct {
 		ctx context.Context
-		obj runtime.Object
+		pod *corev1.Pod
 	}
 	tests := []struct {
 		name    string
@@ -54,23 +53,15 @@ func TestPodAdmission_Default(t *testing.T) {
 			name: "Pod",
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{},
+				pod: &corev1.Pod{},
 			},
 			wantErr: false,
-		},
-		{
-			name: "Not Pod",
-			args: args{
-				ctx: context.TODO(),
-				obj: &corev1.Node{},
-			},
-			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &PodAdmission{}
-			if err := r.Default(tt.args.ctx, tt.args.obj); (err != nil) != tt.wantErr {
+			if err := r.Default(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.Default() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -100,10 +91,11 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 		pod *corev1.Pod
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		sched   string
+		name         string
+		args         args
+		wantErr      bool
+		sched        string
+		wantNodeName string
 	}{
 		{
 			name: "PodWithDefaultNamespace",
@@ -261,6 +253,52 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			wantErr: false,
 			sched:   corev1.DefaultSchedulerName,
 		},
+		{
+			name: "PodWithNodeNameOnCreateInManagedNamespace_unsetsNodeName",
+			args: args{
+				ctx: contextWithAdmissionOperation("CREATE"),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels:    map[string]string{"app": "test-app"},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: corev1.DefaultSchedulerName,
+						NodeName:      "some-node",
+						Containers: []corev1.Container{
+							{Name: "test-container", Image: "test-image"},
+						},
+					},
+				},
+			},
+			wantErr:      false,
+			sched:        SchedulerName,
+			wantNodeName: "",
+		},
+		{
+			name: "PodWithNodeNameOnUpdateInManagedNamespace_preservesNodeName",
+			args: args{
+				ctx: contextWithAdmissionOperation("UPDATE"),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod",
+						Namespace: namespace,
+						Labels:    map[string]string{"app": "test-app"},
+					},
+					Spec: corev1.PodSpec{
+						SchedulerName: corev1.DefaultSchedulerName,
+						NodeName:      "some-node",
+						Containers: []corev1.Container{
+							{Name: "test-container", Image: "test-image"},
+						},
+					},
+				},
+			},
+			wantErr:      false,
+			sched:        SchedulerName,
+			wantNodeName: "some-node",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -277,8 +315,18 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			if tt.args.pod.Spec.SchedulerName != tt.sched {
 				t.Errorf("PodAdmission.Default() scheduler = %s, want scheduler %s", tt.args.pod.Spec.SchedulerName, tt.sched)
 			}
+			if tt.args.pod.Spec.NodeName != tt.wantNodeName {
+				t.Errorf("PodAdmission.Default() nodeName = %q, want %q", tt.args.pod.Spec.NodeName, tt.wantNodeName)
+			}
 		})
 	}
+}
+
+// contextWithAdmissionOperation returns a context with an admission request for the given operation.
+func contextWithAdmissionOperation(op string) context.Context {
+	req := admission.Request{}
+	reflect.ValueOf(&req).Elem().FieldByName("Operation").SetString(op)
+	return admission.NewContextWithRequest(context.TODO(), req)
 }
 
 func TestPodAdmission_ValidateCreate(t *testing.T) {
@@ -288,7 +336,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 	}
 	type args struct {
 		ctx context.Context
-		obj runtime.Object
+		pod *corev1.Pod
 	}
 	tests := []struct {
 		name    string
@@ -298,25 +346,13 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "NotAPod",
-			fields: fields{
-				ManagedNamespaces: []string{namespace},
-			},
-			args: args{
-				ctx: context.TODO(),
-				obj: &corev1.Node{},
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
 			name: "PodWithDefaultNamespace is ignored",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: metav1.NamespaceDefault,
 					},
@@ -332,7 +368,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
@@ -351,7 +387,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Annotations: map[string]string{
@@ -370,15 +406,13 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 					},
 					Spec: corev1.PodSpec{
 						ResourceClaims: []corev1.PodResourceClaim{
-							corev1.PodResourceClaim{
-								Name: "gpu",
-							},
+							{Name: "gpu"},
 						},
 					},
 				},
@@ -393,7 +427,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 					},
@@ -492,7 +526,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 					},
@@ -512,7 +546,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
@@ -535,7 +569,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 					},
@@ -560,7 +594,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				obj: &corev1.Pod{
+				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
@@ -582,7 +616,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 				SchedulerName:     tt.fields.SchedulerName,
 				ManagedNamespaces: tt.fields.ManagedNamespaces,
 			}
-			got, err := r.ValidateCreate(tt.args.ctx, tt.args.obj)
+			got, err := r.ValidateCreate(tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -601,8 +635,8 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 	}
 	type args struct {
 		ctx    context.Context
-		oldObj runtime.Object
-		newObj runtime.Object
+		oldPod *corev1.Pod
+		newPod *corev1.Pod
 	}
 	tests := []struct {
 		name    string
@@ -618,12 +652,12 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: metav1.NamespaceDefault,
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: metav1.NamespaceDefault,
 					},
@@ -639,12 +673,12 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodPending,
 					},
@@ -666,7 +700,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
@@ -674,7 +708,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						},
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodRunning,
 					},
@@ -696,7 +730,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Annotations: map[string]string{
@@ -704,7 +738,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						},
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodRunning,
 					},
@@ -898,7 +932,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
@@ -909,7 +943,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						SchedulerName: SchedulerName,
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodRunning,
 					},
@@ -935,7 +969,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Annotations: map[string]string{
@@ -946,7 +980,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						SchedulerName: SchedulerName,
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodRunning,
 					},
@@ -972,7 +1006,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			args: args{
 				ctx: context.TODO(),
-				oldObj: &corev1.Pod{
+				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
@@ -983,7 +1017,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 						SchedulerName: "other-scheduler",
 					},
 				},
-				newObj: &corev1.Pod{
+				newPod: &corev1.Pod{
 					Status: corev1.PodStatus{
 						Phase: corev1.PodRunning,
 					},
@@ -1008,7 +1042,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				SchedulerName:     tt.fields.SchedulerName,
 				ManagedNamespaces: tt.fields.ManagedNamespaces,
 			}
-			got, err := r.ValidateUpdate(tt.args.ctx, tt.args.oldObj, tt.args.newObj)
+			got, err := r.ValidateUpdate(tt.args.ctx, tt.args.oldPod, tt.args.newPod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.ValidateUpdate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1027,7 +1061,7 @@ func TestPodAdmission_ValidateDelete(t *testing.T) {
 	}
 	type args struct {
 		ctx context.Context
-		obj runtime.Object
+		pod *corev1.Pod
 	}
 	tests := []struct {
 		name    string
@@ -1048,7 +1082,7 @@ func TestPodAdmission_ValidateDelete(t *testing.T) {
 				SchedulerName:     tt.fields.SchedulerName,
 				ManagedNamespaces: tt.fields.ManagedNamespaces,
 			}
-			got, err := r.ValidateDelete(tt.args.ctx, tt.args.obj)
+			got, err := r.ValidateDelete(tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.ValidateDelete() error = %v, wantErr %v", err, tt.wantErr)
 				return

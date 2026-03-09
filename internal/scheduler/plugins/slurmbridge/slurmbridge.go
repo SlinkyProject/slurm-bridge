@@ -22,11 +22,9 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
@@ -44,8 +42,6 @@ import (
 )
 
 var (
-	scheme = runtime.NewScheme()
-
 	ErrorNoKubeNode           = errors.New("no more placeholder nodes to annotate pods")
 	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed      = errors.New("failed to update pod")
@@ -55,11 +51,11 @@ var (
 )
 
 func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(sched.AddToScheme(scheme))
-	utilruntime.Must(batchv1.AddToScheme(scheme))
-	utilruntime.Must(jobset.AddToScheme(scheme))
-	utilruntime.Must(lws.AddToScheme(scheme))
+	utilruntime.Must(scheme.AddToScheme(scheme.Scheme))
+	utilruntime.Must(sched.AddToScheme(scheme.Scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme.Scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme.Scheme))
+	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
 }
 
 // Slurmbridge is a plugin that schedules pods in a group.
@@ -67,14 +63,14 @@ type SlurmBridge struct {
 	client.Client
 	schedulerName string
 	slurmControl  slurmcontrol.SlurmControlInterface
-	handle        framework.Handle
+	handle        fwk.Handle
 }
 
-var _ framework.PreEnqueuePlugin = &SlurmBridge{}
-var _ framework.PreFilterPlugin = &SlurmBridge{}
-var _ framework.FilterPlugin = &SlurmBridge{}
-var _ framework.PostFilterPlugin = &SlurmBridge{}
-var _ framework.PreBindPlugin = &SlurmBridge{}
+var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
+var _ fwk.PreFilterPlugin = &SlurmBridge{}
+var _ fwk.FilterPlugin = &SlurmBridge{}
+var _ fwk.PostFilterPlugin = &SlurmBridge{}
+var _ fwk.PreBindPlugin = &SlurmBridge{}
 
 const (
 	Name                  = "SlurmBridge"
@@ -107,7 +103,7 @@ func getStateData(cs fwk.CycleState) (*stateData, error) {
 }
 
 // New initializes and returns a new Slurmbridge plugin.
-func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (framework.Plugin, error) {
+func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin, error) {
 
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("creating new SlurmBridge plugin")
@@ -124,7 +120,7 @@ func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (fram
 	}
 	cfg := config.UnmarshalOrDie(data)
 
-	client, err := client.New(handle.KubeConfig(), client.Options{Scheme: scheme})
+	client, err := client.New(handle.KubeConfig(), client.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +150,7 @@ func New(ctx context.Context, obj runtime.Object, handle framework.Handle) (fram
 func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Status {
 
 	logger := klog.FromContext(ctx)
-	logger.V(5).Info("adding toleration to pod", pod)
+	logger.V(5).Info("adding toleration to pod", "pod", klog.KObj(pod))
 
 	toUpdate := pod.DeepCopy()
 	toleration := utils.NewTolerationNodeBridged(sb.schedulerName)
@@ -175,7 +171,7 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 // queue.
 // If a placeholder job is found, determine which node(s) have been assigned to the
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
-func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*framework.PreFilterResult, *fwk.Status) {
+func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 	var err error
 
@@ -207,7 +203,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		node != "" {
 		phNode := make(sets.Set[string])
 		phNode.Insert(node)
-		return &framework.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
+		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
 	}
 
 	// Determine if a placeholder job for the pod exists in Slurm
@@ -266,7 +262,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		// By passing the list of nodes in the placeholder job as PreFilterResult,
 		// Filter plugins will only run for nodes in the Slurm job. This is the final
 		// PreFilter step that must occur before pods are allowed to run.
-		return &framework.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
+		return &fwk.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
 	}
 }
 
@@ -274,7 +270,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 // processed by the PreFilter and Filter plugins. This allows the rest of
 // the kubernetes plugins to have a say in which pods would be feasible for
 // Slurm to schedule the pod(s) on.
-func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m framework.NodeToStatusReader) (*framework.PostFilterResult, *fwk.Status) {
+func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m fwk.NodeToStatusReader) (*fwk.PostFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 
 	s, err := getStateData(state)
@@ -339,7 +335,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 			logger.Error(err, "error submitting Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		logger.V(5).Info("submitted placeholder to slurm", klog.KObj(pod))
+		logger.V(5).Info("submitted placeholder to slurm", "pod", klog.KObj(pod))
 		err = sb.labelPodsWithJobId(ctx, jobid, s.slurmJobIR)
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
@@ -382,25 +378,15 @@ func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, 
 // be skipped.
 func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
 
-	s, err := getStateData(state)
-	if err != nil {
-		return fwk.NewStatus(fwk.Error, err.Error())
-	}
-
-	// Only run PreBind if a GRES resource was reserved by Slurm.
-	// Note that whole node allocations in slurm will look like
-	// GRES devices were requested, but that doesn't mean the pod
+	// Note that whole node allocations in slurm will look like all
+	// resources were requested, but that doesn't mean the pod
 	// intended to use them.
-	if ptr.Deref(s.slurmJobIR.JobInfo.Gres, "") == "" {
-		return nil
-	}
-
 	resources, err := sb.slurmControl.GetResources(ctx, pod, nodeName)
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	err = sb.createResourceClaim(ctx, pod, nodeName, resources)
+	err = sb.manageResourceClaim(ctx, pod, nodeName, resources)
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
@@ -533,7 +519,7 @@ func (sb *SlurmBridge) deletePlaceholderJob(ctx context.Context, pod *corev1.Pod
 }
 
 // PreFilterExtensions returns a PreFilterExtensions interface if the plugin implements one.
-func (sb *SlurmBridge) PreFilterExtensions() framework.PreFilterExtensions {
+func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 	return nil
 }
 
