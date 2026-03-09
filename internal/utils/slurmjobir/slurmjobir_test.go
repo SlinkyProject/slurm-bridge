@@ -487,6 +487,36 @@ func Test_parseAnnotations(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "SharedSetToUser",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationShared: "user",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					Shared: ptr.To("user"),
+				},
+			},
+		},
+		{
+			name: "SharedSetToNone",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationShared: "none",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					Shared: ptr.To("none"),
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

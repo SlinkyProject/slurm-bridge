@@ -76,7 +76,7 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Limitations
 
-- Exclusive, whole node allocations are made for each pod.
+- Exclusive, whole node allocations are made for each pod when using group workloads (PodGroups, LeaderWorkerSet).
 - Only supports the following DRA drivers:
   - [DRA Driver CPU][dra-driver-cpu] for CPUs.
   - [DRA Example Driver][dra-example-driver] for GPUs.
