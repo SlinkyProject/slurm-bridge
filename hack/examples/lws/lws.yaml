@@ -21,6 +21,7 @@ spec:
             command: [sh, -c, sleep infinite]
     workerTemplate:
       spec:
+        schedulerName: slurm-bridge-scheduler
         containers:
           - name: worker
             image: busybox:stable
