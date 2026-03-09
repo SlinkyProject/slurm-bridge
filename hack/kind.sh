@@ -86,6 +86,10 @@ function kind::start() {
 		fi
 		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
+	kubectl config use-context kind-"$cluster_name"
+	# Annotate external nodes with partition list (Kind node config does not support annotations).
+	kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
+		scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
