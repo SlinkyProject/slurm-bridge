@@ -37,6 +37,12 @@ nodes:
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
       scheduler.slinky.slurm.net/external-node: 'true'
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            register-with-taints: "slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute"
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
