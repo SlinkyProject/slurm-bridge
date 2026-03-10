@@ -214,6 +214,49 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "node already in DRAIN state skips update",
+			fields: func() fields {
+				node := &types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
+					},
+				}
+				return fields{
+					Client: fake.NewClientBuilder().WithObjects(node).Build(),
+				}
+			}(),
+			args: args{
+				ctx:  context.TODO(),
+				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "update fails",
+			fields: func() fields {
+				node := &types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
+					},
+				}
+				f := interceptor.Funcs{
+					Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
+						return errors.New("update failed")
+					},
+				}
+				return fields{
+					Client: fake.NewClientBuilder().WithObjects(node).WithInterceptorFuncs(f).Build(),
+				}
+			}(),
+			args: args{
+				ctx:  context.TODO(),
+				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -362,6 +405,97 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("realSlurmControl.IsNodeDrain() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
+	ctx := context.Background()
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}}
+	tests := []struct {
+		name    string
+		client  slurmclient.Client
+		want    bool
+		wantErr bool
+	}{
+		{
+			name:    "node not found",
+			client:  fake.NewFakeClient(),
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name: "not drained - node idle",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
+					},
+				},
+			).Build(),
+			want: false,
+		},
+		{
+			name: "drained and idle - eligible for removal",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
+					},
+				},
+			).Build(),
+			want: true,
+		},
+		{
+			name: "drained but busy - has ALLOCATED",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateALLOCATED}),
+					},
+				},
+			).Build(),
+			want: false,
+		},
+		{
+			name: "drained but busy - has MIXED",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateMIXED}),
+					},
+				},
+			).Build(),
+			want: false,
+		},
+		{
+			name: "drain with undrain - not considered drained",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateUNDRAIN}),
+					},
+				},
+			).Build(),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{Client: tt.client}
+			got, err := r.IsNodeDrained(ctx, node)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("IsNodeDrained() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("IsNodeDrained() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -516,6 +650,83 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("NodeNeedsRecreate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_RemoveNode(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name    string
+		client  slurmclient.Client
+		node    *corev1.Node
+		wantErr bool
+	}{
+		{
+			name:   "node does not exist - tolerated",
+			client: fake.NewFakeClient(),
+			node:   &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-0"}},
+		},
+		{
+			name: "node exists - removed",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{Name: ptr.To("worker-0")},
+				},
+			).Build(),
+			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-0"}},
+		},
+		{
+			name: "get error",
+			client: func() slurmclient.Client {
+				f := interceptor.Funcs{
+					Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+						return errors.New("get failed")
+					},
+				}
+				return fake.NewClientBuilder().WithInterceptorFuncs(f).Build()
+			}(),
+			node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-0"}},
+			wantErr: true,
+		},
+		{
+			name: "delete error",
+			client: func() slurmclient.Client {
+				f := interceptor.Funcs{
+					Delete: func(ctx context.Context, obj object.Object, opts ...slurmclient.DeleteOption) error {
+						return errors.New("delete failed")
+					},
+				}
+				return fake.NewClientBuilder().
+					WithObjects(&types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("worker-0")}}).
+					WithInterceptorFuncs(f).
+					Build()
+			}(),
+			node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-0"}},
+			wantErr: true,
+		},
+		{
+			name: "node uses slurm node name label",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{Name: ptr.To("slurm-worker-0")},
+				},
+			).Build(),
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "k8s-worker-0",
+					Labels: map[string]string{wellknown.LabelSlurmNodeName: "slurm-worker-0"},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{Client: tt.client}
+			err := r.RemoveNode(ctx, tt.node)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("RemoveNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -826,6 +1037,56 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "node already in Slurm with different features reconfigure Get fails",
+			fields: func() fields {
+				partition := &types.V0044PartitionInfo{
+					V0044PartitionInfo: api.V0044PartitionInfo{
+						Name: ptr.To("slurm-bridge"),
+					},
+				}
+				existingNode := &types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("test-node"),
+						Features:   ptr.To(api.V0044CsvString{"old-partition"}),
+						Partitions: ptr.To(api.V0044CsvString{"old-partition"}),
+					},
+				}
+				reconfigureKey := (&types.V0044Reconfigure{}).GetKey()
+				f := interceptor.Funcs{
+					Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+						if key == reconfigureKey {
+							return errors.New("reconfigure failed")
+						}
+						return nil
+					},
+				}
+				return fields{
+					Client: fake.NewClientBuilder().
+						WithObjects(partition, existingNode).
+						WithInterceptorFuncs(f).
+						Build(),
+				}
+			}(),
+			args: args{
+				ctx: context.TODO(),
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-node",
+						Annotations: map[string]string{
+							wellknown.AnnotationExternalNodePartitions: "slurm-bridge",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+					},
+				},
+			},
+			wantErr: true,
 		},
 		{
 			name: "add node with nodeInfo from NewNodeInfo (GRES)",
