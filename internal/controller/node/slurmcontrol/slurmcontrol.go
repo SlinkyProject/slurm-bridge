@@ -40,6 +40,10 @@ type SlurmControlInterface interface {
 	IsNodeDrained(ctx context.Context, node *corev1.Node) (bool, error)
 	// AddNode registers a Kubernetes node in Slurm with the correct CPUs and memory.
 	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) error
+	// NodeNeedsRecreate returns true if the Slurm node exists and its cpu, memory, or gres
+	// differ from the desired values (from the Kubernetes node and nodeInfo). Such a node
+	// must be drained, removed, and re-added to apply the change.
+	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) (bool, error)
 	// RemoveNode removes a Kubernetes node from Slurm.
 	RemoveNode(ctx context.Context, node *corev1.Node) error
 }
@@ -176,6 +180,34 @@ func (r *realSlurmControl) IsNodeDrained(ctx context.Context, node *corev1.Node)
 	isDrain := state.Has(api.V0044NodeStateDRAIN) && !state.Has(api.V0044NodeStateUNDRAIN)
 	isBusy := state.HasAny(api.V0044NodeStateALLOCATED, api.V0044NodeStateMIXED, api.V0044NodeStateCOMPLETING)
 	return isDrain && !isBusy, nil
+}
+
+// NodeNeedsRecreate implements SlurmControlInterface.
+func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) (bool, error) {
+	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
+	slurmNode := &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, key, slurmNode); err != nil {
+		if tolerateError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	desiredCpus := node.Status.Capacity.Cpu().Value()
+	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
+	desiredGres := ""
+	if nodeInfo != nil {
+		desiredGres, _ = nodeInfo.GetGresAndGresConf()
+	}
+
+	currentCpus := int64(ptr.Deref(slurmNode.Cpus, 0))
+	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
+	currentGres := ptr.Deref(slurmNode.Gres, "")
+
+	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGres != currentGres {
+		return true, nil
+	}
+	return false, nil
 }
 
 // AddNode implements SlurmControlInterface.

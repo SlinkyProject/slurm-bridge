@@ -226,6 +226,21 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		if err != nil {
 			return err
 		}
+		exists, err := r.slurmControl.NodeExists(ctx, node)
+		if err != nil {
+			return err
+		}
+		if exists {
+			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo)
+			if err != nil {
+				return err
+			}
+			if needsRecreate {
+				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+					return err
+				}
+			}
+		}
 		if err := r.slurmControl.AddNode(ctx, node, nodeInfo); err != nil {
 			return err
 		}

@@ -367,6 +367,160 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 	}
 }
 
+func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
+	ctx := context.Background()
+
+	makeNode := func(name string, cpu, memoryGi int64) *corev1.Node {
+		return &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Status: corev1.NodeStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    *resource.NewQuantity(cpu, resource.DecimalSI),
+					corev1.ResourceMemory: *resource.NewQuantity(memoryGi*1024*1024*1024, resource.BinarySI),
+				},
+			},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		client   slurmclient.Client
+		node     *corev1.Node
+		nodeInfo *nodeinfo.NodeInfo
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name:   "node does not exist in Slurm",
+			client: fake.NewFakeClient(),
+			node:   makeNode("worker-0", 4, 8),
+			want:   false,
+		},
+		{
+			name: "node exists, same cpu memory gres",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       nil,
+					},
+				},
+			).Build(),
+			node: makeNode("worker-0", 4, 8),
+			want: false,
+		},
+		{
+			name: "node exists, different cpus",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       nil,
+					},
+				},
+			).Build(),
+			node: makeNode("worker-0", 8, 8),
+			want: true,
+		},
+		{
+			name: "node exists, different memory",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       nil,
+					},
+				},
+			).Build(),
+			node: makeNode("worker-0", 4, 16),
+			want: true,
+		},
+		{
+			name: "node exists, different gres (slurm has gres, desired empty)",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:driver:1"),
+					},
+				},
+			).Build(),
+			node: makeNode("worker-0", 4, 8),
+			want: true,
+		},
+		{
+			name: "node exists, desired gres empty (nodeInfo no GPUs) slurm has gres",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:driver:1"),
+					},
+				},
+			).Build(),
+			node:     makeNode("worker-0", 4, 8),
+			nodeInfo: &nodeinfo.NodeInfo{},
+			want:     true,
+		},
+		{
+			name: "get error",
+			client: func() slurmclient.Client {
+				f := interceptor.Funcs{
+					Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+						return errors.New("get failed")
+					},
+				}
+				return fake.NewClientBuilder().WithInterceptorFuncs(f).Build()
+			}(),
+			node:    makeNode("worker-0", 4, 8),
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name: "node uses slurm node name label",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("slurm-worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       nil,
+					},
+				},
+			).Build(),
+			node: func() *corev1.Node {
+				n := makeNode("k8s-worker-0", 4, 8)
+				n.Labels = map[string]string{wellknown.LabelSlurmNodeName: "slurm-worker-0"}
+				return n
+			}(),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{Client: tt.client}
+			got, err := r.NodeNeedsRecreate(ctx, tt.node, tt.nodeInfo)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NodeNeedsRecreate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("NodeNeedsRecreate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_tolerateError(t *testing.T) {
 	type args struct {
 		err error
