@@ -74,7 +74,6 @@ KIND_CLUSTER_NAME ?= slurm-bridge-demo
 
 .PHONY: demo-cluster-create
 demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
-	@if ! kind get clusters 2>/dev/null | grep -q "^$(KIND_CLUSTER_NAME)$$"; then ./hack/kind.sh $(KIND_CLUSTER_NAME); fi
 	./hack/kind.sh --bridge $(KIND_CLUSTER_NAME)
 
 .PHONY: demo-cluster-delete
@@ -83,7 +82,7 @@ demo-cluster-delete: ## Delete the kind cluster.
 
 .PHONY: install-dra
 install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
-	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
+	./hack/kind.sh --dra-driver-cpu --dra-example-driver --bridge $(KIND_CLUSTER_NAME)
 
 .PHONY: setup-sysctl
 setup-sysctl: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
@@ -108,7 +107,7 @@ install-examples-dra: ## install dra examples only-no cluster setup
 	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) apply -f "$$f"; done;
 
 .PHONY: demo-examples-dra
-demo-examples-dra: demo-cluster-create install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
+demo-examples-dra: install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
 	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/demo_watch.sh || true; fi
 
 ##@ Deployment
