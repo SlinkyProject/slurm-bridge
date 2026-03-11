@@ -183,6 +183,7 @@ limitations under the License.
 
     admission.md
     architecture.md
+    config.md
     controllers.md
     quickstart.md
     scheduler.md

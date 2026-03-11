@@ -33,23 +33,6 @@ started.
 
 ## Pre-requisites
 
-- A functional Slurm cluster with:
-
-  - A set of hosts within the cluster that are running both a [kubelet] and
-    [slurmd]
-
-  - At least one partition consisting solely of nodes with the above
-    configuration
-
-  - MCS labels enabled:
-
-    ```conf
-    # slurm.conf
-    ...
-    MCSPlugin=mcs/label
-    MCSParameters=ondemand,ondemandselect
-    ```
-
 - A functional Kubernetes cluster that includes the hosts running colocated
   [kubelet] and [slurmd]
 
