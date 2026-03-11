@@ -37,36 +37,36 @@ started.
 
 1. Install [Kind](https://kind.sigs.k8s.io/) using `go install`:
 
-```bash
-go install sigs.k8s.io/kind@v0.29.0
-```
+   ```bash
+   go install sigs.k8s.io/kind@v0.29.0
+   ```
 
-If you get `kind: command not found` when running the next step, you may need to
-add GOPATH to your PATH:
+   If you get `kind: command not found` when running the next step, you may need
+   to add GOPATH to your PATH:
 
-```sh
-export GOPATH=$HOME/go
-export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
-```
+   ```sh
+   export GOPATH=$HOME/go
+   export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
+   ```
 
-2. Confirm that kind is working properly by running the following commands:
+1. Confirm that kind is working properly by running the following commands:
 
-```bash
-kind create cluster
+   ```bash
+   kind create cluster
 
-kubectl get nodes --all-namespaces
+   kubectl get nodes --all-namespaces
 
-kind delete cluster
-```
+   kind delete cluster
+   ```
 
-3. Clone the
+1. Clone the
    [`slurm-bridge`](https://github.com/SlinkyProject/slurm-bridge/tree/main)
    repo and enter it:
 
-```bash
-git clone git@github.com:SlinkyProject/slurm-bridge.git
-cd slurm-bridge
-```
+   ```bash
+   git clone git@github.com:SlinkyProject/slurm-bridge.git
+   cd slurm-bridge
+   ```
 
 ## Installing `slurm-bridge` within your environment
 
@@ -75,17 +75,17 @@ kind to deploy the `slurm-bridge` helm chart within your local environment.
 
 1. Create your cluster using `hack/kind.sh`:
 
-```bash
-hack/kind.sh --bridge
-```
+   ```bash
+   hack/kind.sh --bridge
+   ```
 
-2. Familiarize yourself with and use your test environment:
+1. Familiarize yourself with and use your test environment:
 
-```bash
-kubectl get pods --namespace=slurm-bridge
-kubectl get pods --namespace=slurm
-kubectl get pods --namespace=slinky
-```
+   ```bash
+   kubectl get pods --namespace=slurm-bridge
+   kubectl get pods --namespace=slurm
+   kubectl get pods --namespace=slinky
+   ```
 
 At this point, you should have a kind cluster running `slurm-bridge`.
 
