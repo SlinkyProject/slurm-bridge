@@ -41,8 +41,8 @@ Alternatively, a pod can specify `Pod.Spec.schedulerName=slurm-bridge-scheduler`
 from any namespace to indicate that it should be scheduler using the
 `slurm-bridge-scheduler`.
 
-You can learn more about the `slurm-bridge` admission controller
-[here](../../concepts/admission).
+Please review [`slurm-bridge` admission controller](./admission.md) to learn
+more.
 
 ## Annotations
 

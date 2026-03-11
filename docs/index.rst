@@ -142,8 +142,8 @@ Documentation
 Project documentation is located in the `docs <./docs/>`__ directory of
 this repository.
 
-Slinky documentation can be found
-`here <https://slinky.schedmd.com/>`__.
+`Slinky documentation <https://slinky.schedmd.com/>`__ is hosted on the
+web.
 
 Support and Development
 -----------------------

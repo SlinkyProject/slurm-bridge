@@ -104,7 +104,7 @@ For additional instructions, see the [quickstart] guide.
 
 Project documentation is located in the [docs] directory of this repository.
 
-Slinky documentation can be found [here][slinky-docs].
+[Slinky documentation][slinky-docs] is hosted on the web.
 
 ## Support and Development
 

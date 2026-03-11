@@ -164,8 +164,9 @@ Kubernetes workload in the form of a [Jobs][job], [JobSets][jobset],
 [Pods][pod], and [PodGroups][podgroup] into a representative Slurm job, which is
 used for scheduling purposes. Once a workload is allocated resources, the
 Kubelet binds the Kubernetes workload to the allocated resources and executes
-it. There are sample workload definitions in the `slurm-bridge` repo
-[here](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples).
+it. There are
+[example workload](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples)
+definitions in the `slurm-bridge` repo.
 
 Here's an example of a simple job, found in `hack/examples/single.yaml`:
 
