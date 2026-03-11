@@ -1,14 +1,20 @@
 # Running slurm-bridge locally
 
+## Table of Contents
+
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
 
 - [Running slurm-bridge locally](#running-slurm-bridge-locally)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
   - [Pre-requisites](#pre-requisites)
   - [Setting up your environment](#setting-up-your-environment)
   - [Installing `slurm-bridge` within your environment](#installing-slurm-bridge-within-your-environment)
   - [Cleaning up](#cleaning-up)
 
 <!-- mdformat-toc end -->
+
+## Overview
 
 You may want to run `slurm-bridge` on a single machine in order to test the
 software or familiarize yourself with it prior to installing it on your cluster.

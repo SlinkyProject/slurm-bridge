@@ -1,8 +1,12 @@
 # Workloads
 
+## Table of Contents
+
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
 
 - [Workloads](#workloads)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
   - [Using the `slurm-bridge` Scheduler](#using-the-slurm-bridge-scheduler)
   - [Annotations](#annotations)
   - [JobSets](#jobsets)
@@ -10,6 +14,8 @@
   - [LeaderWorkerSet](#leaderworkerset)
 
 <!-- mdformat-toc end -->
+
+## Overview
 
 In Slurm, all workloads are represented by jobs. In `slurm-bridge`, however,
 there are a number of forms that workloads can take. While workloads can still
