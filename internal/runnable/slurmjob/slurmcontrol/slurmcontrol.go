@@ -7,12 +7,14 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
+	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
@@ -26,6 +28,8 @@ type SlurmControlInterface interface {
 	ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error)
 	// GetPodsFromJob returns a list of pod keys associated to the Slurm job.
 	GetPodsFromJob(ctx context.Context, jobId int32) ([]kubetypes.NamespacedName, error)
+	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
+	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
 }
@@ -48,6 +52,21 @@ func (r *realSlurmControl) RefreshJobCache(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// IsJobPendingOrRunning implements SlurmControlInterface.
+func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error) {
+	job := &types.V0044JobInfo{}
+	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
+	err := r.Get(ctx, key, job)
+	if err != nil {
+		if tolerateError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	state := job.GetStateAsSet()
+	return state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING), nil
 }
 
 // ListPodsFromJobs implements SlurmControlInterface.
@@ -132,8 +151,9 @@ func tolerateError(err error) bool {
 		return true
 	}
 	errText := err.Error()
-	if errText == http.StatusText(http.StatusNotFound) ||
-		errText == http.StatusText(http.StatusNoContent) {
+	notFound := http.StatusText(http.StatusNotFound)
+	noContent := http.StatusText(http.StatusNoContent)
+	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
 		return true
 	}
 	return false

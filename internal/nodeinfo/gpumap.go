@@ -6,12 +6,13 @@ package nodeinfo
 import "sort"
 
 type GPUMap struct {
+	Driver string `json:"driver"`
 	// GPUInfoMap stores the raw GPUInfos as a map,
 	// where the index is the GPU index, and the value is the GPUInfo.
 	GPUInfoMap map[int]*GPUInfo `json:"gpuInfoMap"`
 }
 
-func NewGPUMap(gpuInfos []*GPUInfo) GPUMap {
+func NewGPUMap(driver string, gpuInfos []*GPUInfo) GPUMap {
 	sort.SliceStable(gpuInfos, func(i, j int) bool {
 		return gpuInfos[i].Index < gpuInfos[j].Index
 	})
@@ -21,6 +22,7 @@ func NewGPUMap(gpuInfos []*GPUInfo) GPUMap {
 		gpuInfoMap[gpuInfo.Index] = gpuInfo
 	}
 	return GPUMap{
+		Driver:     driver,
 		GPUInfoMap: gpuInfoMap,
 	}
 }

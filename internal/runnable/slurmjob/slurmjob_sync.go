@@ -67,7 +67,12 @@ func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) er
 		break
 	}
 
-	if !hasPods {
+	isPendingOrRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
+	if err != nil {
+		return fmt.Errorf("failed to check if job is pending or running: %w", err)
+	}
+
+	if !hasPods && isPendingOrRunning {
 		logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
 		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
 			return fmt.Errorf("failed to terminate jobId(%d): %w", jobId, err)

@@ -5,7 +5,9 @@ package slurmcontrol
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -19,18 +21,20 @@ import (
 )
 
 type SlurmControlInterface interface {
-	// GetJob returns a Slurm Job from a pod annotation
+	// IsJobRunning returns true if the Slurm job is running, false if not.
 	IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error)
+	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
+	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
 }
 
-// RealPodControl is the default implementation of SlurmControlInterface.
+// RealSlurmControl is the default implementation of SlurmControlInterface.
 type realSlurmControl struct {
 	client.Client
 }
 
-// GetJob implements SlurmControlInterface.
+// IsJobRunning implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	job := &types.V0044JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
@@ -48,6 +52,21 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 		return true, nil
 	}
 	return false, nil
+}
+
+// IsJobPendingOrRunning implements SlurmControlInterface.
+func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error) {
+	job := &types.V0044JobInfo{}
+	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
+	err := r.Get(ctx, key, job)
+	if err != nil {
+		if tolerateError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	state := job.GetStateAsSet()
+	return state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING), nil
 }
 
 // TerminateJob implements SlurmControlInterface.
@@ -79,8 +98,9 @@ func tolerateError(err error) bool {
 		return true
 	}
 	errText := err.Error()
-	if errText == http.StatusText(http.StatusNotFound) ||
-		errText == http.StatusText(http.StatusNoContent) {
+	notFound := http.StatusText(http.StatusNotFound)
+	noContent := http.StatusText(http.StatusNoContent)
+	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
 		return true
 	}
 	return false

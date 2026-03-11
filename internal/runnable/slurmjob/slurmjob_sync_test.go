@@ -254,7 +254,8 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 					Items: []slurmtypes.V0044JobInfo{
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](1),
+								JobState: ptr.To([]slurmapi.V0044JobInfoJobState{slurmapi.V0044JobInfoJobStatePENDING}),
+								JobId:    ptr.To[int32](1),
 								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
 									Pods: []string{"default/foo-1", "default/foo-2"},
 								}).ToString()),

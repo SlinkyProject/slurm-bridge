@@ -20,11 +20,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error {
 	var errs []error
+
+	if err := r.syncNodeRegistration(ctx, req); err != nil {
+		errs = append(errs, err)
+	}
 
 	if err := r.syncTaint(ctx, req); err != nil {
 		errs = append(errs, err)
@@ -193,4 +199,89 @@ func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request) e
 	}
 
 	return nil
+}
+
+// syncNodeRegistration will handle registering and unregistering Kubernetes nodes in Slurm.
+//   - If the k8s node has the LabelExternalNode label, register it in Slurm.
+//   - If the k8s node does not have the label (or it was removed): drain the node in Slurm
+//     first; only after the Slurm node has finished draining do we remove it from Slurm.
+func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile.Request) error {
+
+	node := &corev1.Node{}
+	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	labels := node.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	_, hasLabel := labels[wellknown.LabelExternalNode]
+
+	if hasLabel {
+		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, r.Client, node.Name)
+		if err != nil {
+			return err
+		}
+		exists, err := r.slurmControl.NodeExists(ctx, node)
+		if err != nil {
+			return err
+		}
+		if exists {
+			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo)
+			if err != nil {
+				return err
+			}
+			if needsRecreate {
+				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+					return err
+				}
+			}
+		}
+		if err := r.slurmControl.AddNode(ctx, node, nodeInfo); err != nil {
+			return err
+		}
+	} else {
+		if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) error {
+	logger := log.FromContext(ctx)
+
+	slurmNodeName := nodeutils.GetSlurmNodeName(node)
+	exists, err := r.slurmControl.NodeExists(ctx, node)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	reason := fmt.Sprintf("slurm-bridge: removing external node %s", slurmNodeName)
+	if err := r.slurmControl.MakeNodeDrain(ctx, node, reason); err != nil {
+		return err
+	}
+
+	drained, err := r.slurmControl.IsNodeDrained(ctx, node)
+	if err != nil {
+		return err
+	}
+	if !drained {
+		logger.V(2).Info("Slurm node is draining, waiting before removal",
+			"node", klog.KObj(node), "slurmNode", slurmNodeName)
+		durationStore.Push(req.String(), 30*time.Second)
+		return nil
+	}
+
+	logger.Info("Slurm node drained, removing from Slurm",
+		"node", klog.KObj(node), "slurmNode", slurmNodeName)
+	return r.slurmControl.RemoveNode(ctx, node)
 }

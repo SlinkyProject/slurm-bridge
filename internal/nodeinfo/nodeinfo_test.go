@@ -392,3 +392,143 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 		})
 	}
 }
+
+func TestNodeInfo_GetGresAndGresConf(t *testing.T) {
+	tests := []struct {
+		name       string
+		kubeclient client.Client
+		nodeName   string
+		wantGres   string
+		wantConf   string
+	}{
+		{
+			name: "no GRES when node has no GPU ResourceSlice",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}},
+				).
+				Build(),
+			nodeName: "node",
+			wantGres: "",
+			wantConf: "",
+		},
+		{
+			name: "no GRES when node has only CPU ResourceSlice",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-cpu"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraDriverCpu,
+							Devices: []resourcev1.Device{
+								{
+									Name: "cpu0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](0)},
+										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
+										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
+										nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+									},
+								},
+							},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			wantGres: "",
+			wantConf: "",
+		},
+		{
+			name: "example driver with single GPU",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-gpu"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraExampleDriver,
+							Devices: []resourcev1.Device{
+								{
+									Name: "gpu-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+									},
+								},
+							},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			wantGres: "gpu:gpu.example.com:1",
+			wantConf: "count=1,name=gpu,type=gpu.example.com,file=gpu-0",
+		},
+		{
+			name: "example driver with four GPUs",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-gpu"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraExampleDriver,
+							Devices: []resourcev1.Device{
+								{
+									Name: "gpu-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+									},
+								},
+								{
+									Name: "gpu-1",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](1)},
+									},
+								},
+								{
+									Name: "gpu-2",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](2)},
+									},
+								},
+								{
+									Name: "gpu-3",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](3)},
+									},
+								},
+							},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			wantGres: "gpu:gpu.example.com:4",
+			wantConf: "count=4,name=gpu,type=gpu.example.com,file=gpu-0,file=gpu-1,file=gpu-2,file=gpu-3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, err := nodeinfo.NewNodeInfo(context.Background(), tt.kubeclient, tt.nodeName)
+			if err != nil {
+				t.Fatalf("NewNodeInfo() failed: %v", err)
+			}
+			gotGres, gotConf := n.GetGresAndGresConf()
+			if gotGres != tt.wantGres {
+				t.Errorf("GetGresAndGresConf() gres = %q, want %q", gotGres, tt.wantGres)
+			}
+			if gotConf != tt.wantConf {
+				t.Errorf("GetGresAndGresConf() gresConf = %q, want %q", gotConf, tt.wantConf)
+			}
+		})
+	}
+}

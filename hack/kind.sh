@@ -86,6 +86,10 @@ function kind::start() {
 		fi
 		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
+	kubectl config use-context kind-"$cluster_name"
+	# Annotate external nodes with partition list (Kind node config does not support annotations).
+	kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
+		scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -106,7 +110,6 @@ function helm::find() {
 
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
-	slurm-bridge::nodes
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
@@ -150,58 +153,6 @@ function slurm-bridge::prerequisites() {
 	kubectl create namespace slurm-bridge || true
 }
 
-function slurm-bridge::nodes() {
-	echo "[slurm-bridge] Waiting for slurm-controller-0 and configuring partition..."
-
-	# Wait for slurm-controller-0 to be ready and give the pod
-	# additional time to wait out a reconfigure restart.
-	kubectl wait --for=condition=Ready -n slurm pod/slurm-controller-0 --timeout=120s
-	sleep 10
-
-	local partition="slurm-bridge"
-	if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show partition=$partition >/dev/null 2>&1; then
-		kubectl exec -n slurm pods/slurm-controller-0 -- \
-			scontrol create partition="$partition"
-	fi
-	if $OPT_EXTERNAL; then
-		local bridge_nodes
-		bridge_nodes=$(kubectl get nodes -o json | jq -r '.items[] | select(.spec.taints[]? | select(.key == "slinky.slurm.net/managed-node")) | .metadata.name')
-		echo "$bridge_nodes" | while IFS= read -r node; do
-			local cpus memory memory_mb
-			cpus=$(kubectl get node "$node" -o jsonpath='{.status.capacity.cpu}')
-			memory=$(kubectl get node "$node" -o jsonpath='{.status.capacity.memory}')
-			# Convert node capacity (Ki/Mi/Gi) to MB for scontrol realmemory
-			case "$memory" in
-			*Ki) memory_mb=$((${memory%Ki} / 1024)) ;;
-			*Mi) memory_mb=${memory%Mi} ;;
-			*Gi) memory_mb=$((${memory%Gi} * 1024)) ;;
-			*)
-				memory_mb=${memory%%[!0-9]*}
-				[ -z "$memory_mb" ] && memory_mb=0
-				;;
-			esac
-			if ! kubectl exec -n slurm pods/slurm-controller-0 -- scontrol show node="$node" >/dev/null 2>&1; then
-				kubectl exec -n slurm pods/slurm-controller-0 -- \
-					scontrol create nodename="$node" state=external \
-					cpus="$cpus" realmemory="$memory_mb" \
-					gres="gpu:gpu.example.com:8" \
-					gresconf=count=8,name=gpu,type=gpu.example.com,file=/home/dev/gpu0
-			fi
-		done
-		kubectl exec -n slurm pods/slurm-controller-0 -- \
-			scontrol update partitionname="$partition" nodes="$(echo "$bridge_nodes" | paste -sd, -)"
-	else
-		kubectl get pods -n slurm -l nodeset.slinky.slurm.net/name=slurm-worker-slurm-bridge \
-			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}" | while read -r node hostname; do
-			if [[ -n $node && -n $hostname ]]; then
-				kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname"
-			else
-				echo "Skipping node as one or both of 'node'/'hostname' is not set" >&2
-			fi
-		done
-	fi
-}
-
 function slurm::prerequisites() {
 	helm repo add jetstack https://charts.jetstack.io
 	helm repo update
@@ -235,19 +186,11 @@ function slurm::install() {
 
 	chartName="slurm"
 	if ! helm::find "$chartName"; then
-		echo "[slurm] Installing slurm chart..."
-		if $OPT_EXTERNAL; then
-			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
-				--version="$version" --namespace=slurm --create-namespace --wait \
-				--set "nodesets.slinky.enabled=false" \
-				--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
-		else
-			helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
-				--version="$version" --namespace=slurm --create-namespace --wait \
-				-f "${SCRIPT_DIR}/slurm-bridge-nodes.yaml" \
-				--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
-
-		fi
+		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
+			--version="$version" --namespace=slurm --create-namespace --wait \
+			--set "nodesets.slinky.enabled=false" \
+			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
+			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
 	fi
 }
 
@@ -415,7 +358,6 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
-OPT_EXTERNAL=true
 
 SHORT="+h"
 LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,help"

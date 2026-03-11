@@ -265,6 +265,135 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 	}
 }
 
+func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
+	ctx := context.Background()
+	type fields struct {
+		Client client.Client
+	}
+	type args struct {
+		ctx   context.Context
+		jobId int32
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "job not found",
+			fields: fields{
+				Client: fake.NewFakeClient(),
+			},
+			args: args{
+				ctx:   ctx,
+				jobId: 1,
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "job pending",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:    ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+						},
+					}
+					return fake.NewClientBuilder().WithObjects(obj).Build()
+				}(),
+			},
+			args: args{ctx: ctx, jobId: 1},
+			want: true,
+		},
+		{
+			name: "job running",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:    ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+						},
+					}
+					return fake.NewClientBuilder().WithObjects(obj).Build()
+				}(),
+			},
+			args: args{ctx: ctx, jobId: 1},
+			want: true,
+		},
+		{
+			name: "job pending and running (multiple states)",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId: ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStatePENDING,
+								api.V0044JobInfoJobStateRUNNING,
+							},
+						},
+					}
+					return fake.NewClientBuilder().WithObjects(obj).Build()
+				}(),
+			},
+			args: args{ctx: ctx, jobId: 1},
+			want: true,
+		},
+		{
+			name: "job completed",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:    ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED},
+						},
+					}
+					return fake.NewClientBuilder().WithObjects(obj).Build()
+				}(),
+			},
+			args: args{ctx: ctx, jobId: 1},
+			want: false,
+		},
+		{
+			name: "job cancelled",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:    ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
+						},
+					}
+					return fake.NewClientBuilder().WithObjects(obj).Build()
+				}(),
+			},
+			args: args{ctx: ctx, jobId: 1},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{
+				Client: tt.fields.Client,
+			}
+			got, err := r.IsJobPendingOrRunning(tt.args.ctx, tt.args.jobId)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("realSlurmControl.IsJobPendingOrRunning() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("realSlurmControl.IsJobPendingOrRunning() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_TerminateJob(t *testing.T) {
 	ctx := context.Background()
 	type args struct {
@@ -356,6 +485,13 @@ func Test_tolerateError(t *testing.T) {
 				err: errors.New(http.StatusText(http.StatusForbidden)),
 			},
 			want: false,
+		},
+		{
+			name: "wrapped Not Found (e.g. slurm-client cache sync)",
+			args: args{
+				err: errors.New("failed to wait on type V0044JobInfo object 69 cache sync: [Not Found, Invalid job id specified]"),
+			},
+			want: true,
 		},
 	}
 	for _, tt := range tests {
