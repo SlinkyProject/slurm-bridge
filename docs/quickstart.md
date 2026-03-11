@@ -142,7 +142,7 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 > [!NOTE]
 > `slurm-bridge` must be able to communicate with Slurm REST API. By default, it
 > assumes a default Slurm chart installation and uses
-> http://slurm-restapi.slurm:6820.
+> `http://slurm-restapi.slurm:6820`.
 
 You can check if your cluster deployed successfully with:
 
