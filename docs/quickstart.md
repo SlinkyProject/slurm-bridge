@@ -152,7 +152,7 @@ kubectl --namespace=slinky get pods
 
 Your output should be similar to:
 
-```sh
+```console
 NAME                                        READY   STATUS    RESTARTS      AGE
 slurm-bridge-admission-85f89cf884-8c9jt     1/1     Running   0             1m0s
 slurm-bridge-controllers-757f64b875-bsfnf   1/1     Running   0             1m0s
@@ -211,7 +211,7 @@ spec:
 
 Let's run this job:
 
-```bash
+```console
 ❯ kubectl apply -f hack/examples/job/single.yaml
 job.batch/job-sleep-single created
 ```
@@ -224,7 +224,7 @@ our workload.
 
 First, look at the job STATUS in Kubernetes:
 
-```bash
+```console
 $ kubectl get jobs -n slurm-bridge
 NAME                 STATUS     COMPLETIONS   DURATION   AGE
 job-sleep-single     Complete   1/1           8s         8m
@@ -233,7 +233,7 @@ job-sleep-single     Complete   1/1           8s         8m
 Next, describe the job. Under the `Events` section, note the name of the pod on
 which the job executed. Describe that pod:
 
-```bash
+```console
 $ kubectl describe job -n slurm-bridge job-sleep-single
 Name:             job-sleep-single
 Namespace:        slurm-bridge
@@ -283,7 +283,7 @@ Events:
 Use the `kubectl get pod` command to get the labels for the pod in which the job
 executed:
 
-```bash
+```console
 $ kubectl get pod -n slurm-bridge --show-labels
 NAME                     READY   STATUS      RESTARTS   AGE   LABELS
 job-sleep-single-w4dfl   0/1     Completed   0          31m   batch.kubernetes.io/controller-uid=7cf47949-0099-4c1a-ab7e-d6e288283c82,batch.kubernetes.io/job-name=job-sleep-single,controller-uid=7cf47949-0099-4c1a-ab7e-d6e288283c82,job-name=job-sleep-single,scheduler.slinky.slurm.net/slurm-jobid=1
@@ -292,11 +292,11 @@ job-sleep-single-w4dfl   0/1     Completed   0          31m   batch.kubernetes.i
 The `scheduler.slinky.slurm.net/slurm-jobid` label tells us that the Slurm JobID
 for our job was 1:
 
-```bash
+```txt
 scheduler.slinky.slurm.net/slurm-jobid=1
 ```
 
-```bash
+```console
 slurm@slurm-controller-0:/tmp$ scontrol show job 1
 JobId=1 JobName=job-sleep-single
    UserId=slurm(401) GroupId=slurm(401) MCS_label=kubernetes
@@ -334,7 +334,7 @@ selected node(s) for the duration of the job.
 
 We can also look at this job using `kubectl`:
 
-```bash
+```console
 ❯ kubectl describe job --namespace=slurm-bridge job-sleep-single
 Name:             job-sleep-single
 Namespace:        slurm-bridge
