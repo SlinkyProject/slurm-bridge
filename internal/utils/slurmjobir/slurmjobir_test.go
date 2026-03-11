@@ -487,6 +487,36 @@ func Test_parseAnnotations(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "Exclusive annotation false",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationExclusive: "false",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					Exclusive: ptr.To(false),
+				},
+			},
+		},
+		{
+			name: "Exclusive annotation true",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationExclusive: "true",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					Exclusive: ptr.To(true),
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -61,6 +61,17 @@ type GresLayout struct {
 	Type  string
 }
 
+func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V0044JobDescMsgShared {
+	exclusive := true
+	if slurmJobIR != nil && slurmJobIR.JobInfo.Exclusive != nil {
+		exclusive = *slurmJobIR.JobInfo.Exclusive
+	}
+	if exclusive {
+		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
+	}
+	return &[]api.V0044JobDescMsgShared{}
+}
+
 // DeleteSlurmJob will delete a placeholder job
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
@@ -188,11 +199,9 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 					return slurmJobIR.JobInfo.Partition
 				}
 			}(),
-			Qos:         slurmJobIR.JobInfo.QOS,
-			Reservation: slurmJobIR.JobInfo.Reservation,
-			Shared: &[]api.V0044JobDescMsgShared{
-				api.V0044JobDescMsgSharedNone, // SharedNone is Exclusive
-			},
+			Qos:          slurmJobIR.JobInfo.QOS,
+			Reservation:  slurmJobIR.JobInfo.Reservation,
+			Shared:       sharedFromExclusiveAnnotation(slurmJobIR),
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
 			TimeLimit: func() *api.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {

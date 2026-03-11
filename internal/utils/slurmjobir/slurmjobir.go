@@ -30,6 +30,7 @@ type SlurmJobIRJobInfo struct {
 	Account      *string
 	CpuPerTask   *int32
 	Constraints  *string
+	Exclusive    *bool
 	Gres         *string
 	GroupId      *string
 	JobName      *string
@@ -194,6 +195,10 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			}
 			val := int32(rs.Value()) //nolint:gosec // disable G115
 			slurmJobIR.JobInfo.CpuPerTask = &val
+		case wellknown.AnnotationExclusive:
+			v := strings.TrimSpace(strings.ToLower(value))
+			exclusive := v != "false"
+			slurmJobIR.JobInfo.Exclusive = &exclusive
 		case wellknown.AnnotationJobName:
 			slurmJobIR.JobInfo.JobName = &value
 		case wellknown.AnnotationLicenses:
