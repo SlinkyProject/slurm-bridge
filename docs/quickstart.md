@@ -153,18 +153,18 @@ slurm-bridge-scheduler-5484467f55-wtspk     1/1     Running   0             1m0s
 
 ## Running Your First Job
 
-`slurm-bridge` has specific scheduling support for [JobSet](#jobsets) and
-[PodGroup](#podgroups) resources and their pods. If your workload requires or
-benefits from co-scheduled pod launch (e.g. MPI, multi-node), consider
-representing your workload as a [JobSet](#jobsets) or [PodGroup](#podgroups).
+`slurm-bridge` has specific scheduling support for [JobSet] and [PodGroup]
+resources and their pods. If your workload requires or benefits from
+co-scheduled pod launch (e.g. MPI, multi-node), consider representing your
+workload as a [JobSet] or [PodGroup].
 
 Now that `slurm-bridge` is configured, we can write a workload. `slurm-bridge`
 schedules Kubernetes workloads using the Slurm scheduler by translating a
-Kubernetes workload in the form of a [Jobs], [JobSets], [Pods], and [PodGroups]
-into a representative Slurm job, which is used for scheduling purposes. Once a
-workload is allocated resources, the Kubelet binds the Kubernetes workload to
-the allocated resources and executes it. There are sample workload definitions
-in the `slurm-bridge` repo
+Kubernetes workload in the form of a [Jobs][job], [JobSets][jobset],
+[Pods][pod], and [PodGroups][podgroup] into a representative Slurm job, which is
+used for scheduling purposes. Once a workload is allocated resources, the
+Kubelet binds the Kubernetes workload to the allocated resources and executes
+it. There are sample workload definitions in the `slurm-bridge` repo
 [here](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples).
 
 Here's an example of a simple job, found in `hack/examples/single.yaml`:
@@ -381,7 +381,10 @@ running jobs. Recommended next steps involve reviewing our documentation on
 
 <!-- Links -->
 
-[jobsets]: https://jobset.sigs.k8s.io/
+[job]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
+[jobset]: https://jobset.sigs.k8s.io/
 [kubelet]: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet
+[pod]: https://kubernetes.io/docs/concepts/workloads/pods/
+[podgroup]: https://scheduler-plugins.sigs.k8s.io/docs/kep/42-podgroup-coscheduling
 [slurmd]: https://slurm.schedmd.com/slurmd.html
 [workloads]: workload.md

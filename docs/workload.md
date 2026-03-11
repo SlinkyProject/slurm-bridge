@@ -22,7 +22,7 @@ At this time, `slurm-bridge` has scheduling support for [Jobs],
 [JobSets](#jobsets), [Pods], [PodGroups](#podgroups), and [LeaderWorkerSets]. If
 your workload requires or benefits from co-scheduled pod launch (e.g. MPI,
 multi-node), consider representing your workload as a [PodGroup](#podgroups) or
-[LeaderWorkerSets](#leaderworkersets).
+[LeaderWorkerSets](#leaderworkerset).
 
 ## Using the `slurm-bridge` Scheduler
 
