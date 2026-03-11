@@ -134,7 +134,7 @@ Pod interactions once marked as completed.
 
 ## LeaderWorkerSet
 
-This section assumes [LeaderWorkerSet] is installed.
+This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 
 LeaderWorkerSet groups will be co-scheduled so pods of each group will be
 guaranteed to launch together.
@@ -147,7 +147,6 @@ guaranteed to launch together.
 
 [jobs]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
 [jobsets]: https://jobset.sigs.k8s.io/
-[leaderworkerset]: https://lws.sigs.k8s.io/
 [leaderworkersets]: https://lws.sigs.k8s.io/
 [podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [pods]: https://kubernetes.io/docs/concepts/workloads/pods/
