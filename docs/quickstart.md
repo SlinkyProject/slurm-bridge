@@ -9,10 +9,10 @@
   - [Overview](#overview)
   - [Pre-requisites](#pre-requisites)
   - [Installation](#installation)
-    - [1. Install the required helm charts:](#1-install-the-required-helm-charts)
-    - [2. Create a secret for `slurm-bridge`:](#2-create-a-secret-for-slurm-bridge)
+    - [1. Install the required helm charts](#1-install-the-required-helm-charts)
+    - [2. Create a secret for `slurm-bridge`](#2-create-a-secret-for-slurm-bridge)
     - [2. Download and configure `values.yaml` for the `slurm-bridge` helm chart](#2-download-and-configure-valuesyaml-for-the-slurm-bridge-helm-chart)
-    - [3. Install the `slurm-bridge` Helm Chart:](#3-install-the-slurm-bridge-helm-chart)
+    - [3. Install the `slurm-bridge` Helm Chart](#3-install-the-slurm-bridge-helm-chart)
   - [Running Your First Job](#running-your-first-job)
 
 <!-- mdformat-toc end -->
@@ -65,7 +65,7 @@ started.
 
 ## Installation
 
-##### 1. Install the required helm charts:
+### 1. Install the required helm charts
 
 ```bash
 helm repo update
@@ -73,7 +73,7 @@ helm install cert-manager jetstack/cert-manager \
   --namespace cert-manager --create-namespace --set crds.enabled=true
 ```
 
-##### 2. Create a secret for `slurm-bridge`:
+### 2. Create a secret for `slurm-bridge`
 
 Create a secret for slurm-bridge to communicate with Slurm.
 
@@ -113,7 +113,7 @@ kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
-##### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
+### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
 
 The helm chart used by `slurm-bridge` has a number of parameters in
 [values.yaml](https://github.com/SlinkyProject/slurm-bridge/blob/main/helm/slurm-bridge/values.yaml)
@@ -132,7 +132,7 @@ variables:
   API on a different URL or port. The default value of this variable is
   `http://slurm-restapi.slurm:6820`
 
-##### 3. Install the `slurm-bridge` Helm Chart:
+### 3. Install the `slurm-bridge` Helm Chart
 
 ```bash
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
