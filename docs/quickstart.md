@@ -9,10 +9,10 @@
   - [Overview](#overview)
   - [Pre-requisites](#pre-requisites)
   - [Installation](#installation)
-    - [1. Install the required helm charts:](#1-install-the-required-helm-charts)
-    - [2. Create a secret for `slurm-bridge`:](#2-create-a-secret-for-slurm-bridge)
+    - [1. Install the required helm charts](#1-install-the-required-helm-charts)
+    - [2. Create a secret for `slurm-bridge`](#2-create-a-secret-for-slurm-bridge)
     - [2. Download and configure `values.yaml` for the `slurm-bridge` helm chart](#2-download-and-configure-valuesyaml-for-the-slurm-bridge-helm-chart)
-    - [3. Install the `slurm-bridge` Helm Chart:](#3-install-the-slurm-bridge-helm-chart)
+    - [3. Install the `slurm-bridge` Helm Chart](#3-install-the-slurm-bridge-helm-chart)
   - [Running Your First Job](#running-your-first-job)
 
 <!-- mdformat-toc end -->
@@ -33,39 +33,30 @@ started.
 
 ## Pre-requisites
 
-- A functional Slurm cluster with:
-  - A set of hosts within the cluster that are running both a [kubelet] and
-    [slurmd]
-  - At least one partition consisting solely of nodes with the above
-    configuration
-  - MCS labels enabled:
-    ```conf
-    # slurm.conf
-    ...
-    MCSPlugin=mcs/label
-    MCSParameters=ondemand,ondemandselect
-    ```
 - A functional Kubernetes cluster that includes the hosts running colocated
   [kubelet] and [slurmd]
+
 - Matching NodeNames in Slurm and Kubernetes for all overlapping nodes
+
   - In the event that the colocated node's Slurm NodeName does not match the
     Kubernetes Node name, you should patch the Kubernetes node with a label to
     allow `slurm-bridge` to map the colocated Kubernetes and Slurm node.
+
     ```bash
     kubectl patch node $KUBERNETES_NODENAME -p "{\"metadata\":{\"labels\":{\"slinky.slurm.net/slurm-nodename\":\"$SLURM_NODENAME\"}}}"
     ```
 
 ## Installation
 
-##### 1. Install the required helm charts:
+### 1. Install the required helm charts
 
 ```bash
 helm repo update
 helm install cert-manager jetstack/cert-manager \
-	--namespace cert-manager --create-namespace --set crds.enabled=true
+  --namespace cert-manager --create-namespace --set crds.enabled=true
 ```
 
-##### 2. Create a secret for `slurm-bridge`:
+### 2. Create a secret for `slurm-bridge`
 
 Create a secret for slurm-bridge to communicate with Slurm.
 
@@ -105,7 +96,7 @@ kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
-##### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
+### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
 
 The helm chart used by `slurm-bridge` has a number of parameters in
 [values.yaml](https://github.com/SlinkyProject/slurm-bridge/blob/main/helm/slurm-bridge/values.yaml)
@@ -124,7 +115,7 @@ variables:
   API on a different URL or port. The default value of this variable is
   `http://slurm-restapi.slurm:6820`
 
-##### 3. Install the `slurm-bridge` Helm Chart:
+### 3. Install the `slurm-bridge` Helm Chart
 
 ```bash
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
@@ -134,7 +125,7 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 > [!NOTE]
 > `slurm-bridge` must be able to communicate with Slurm REST API. By default, it
 > assumes a default Slurm chart installation and uses
-> http://slurm-restapi.slurm:6820.
+> `http://slurm-restapi.slurm:6820`.
 
 You can check if your cluster deployed successfully with:
 
@@ -144,7 +135,7 @@ kubectl --namespace=slinky get pods
 
 Your output should be similar to:
 
-```sh
+```console
 NAME                                        READY   STATUS    RESTARTS      AGE
 slurm-bridge-admission-85f89cf884-8c9jt     1/1     Running   0             1m0s
 slurm-bridge-controllers-757f64b875-bsfnf   1/1     Running   0             1m0s
@@ -153,19 +144,20 @@ slurm-bridge-scheduler-5484467f55-wtspk     1/1     Running   0             1m0s
 
 ## Running Your First Job
 
-`slurm-bridge` has specific scheduling support for [JobSet](#jobsets) and
-[PodGroup](#podgroups) resources and their pods. If your workload requires or
-benefits from co-scheduled pod launch (e.g. MPI, multi-node), consider
-representing your workload as a [JobSet](#jobsets) or [PodGroup](#podgroups).
+`slurm-bridge` has specific scheduling support for [JobSet] and [PodGroup]
+resources and their pods. If your workload requires or benefits from
+co-scheduled pod launch (e.g. MPI, multi-node), consider representing your
+workload as a [JobSet] or [PodGroup].
 
 Now that `slurm-bridge` is configured, we can write a workload. `slurm-bridge`
 schedules Kubernetes workloads using the Slurm scheduler by translating a
-Kubernetes workload in the form of a [Jobs], [JobSets], [Pods], and [PodGroups]
-into a representative Slurm job, which is used for scheduling purposes. Once a
-workload is allocated resources, the Kubelet binds the Kubernetes workload to
-the allocated resources and executes it. There are sample workload definitions
-in the `slurm-bridge` repo
-[here](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples).
+Kubernetes workload in the form of a [Jobs][job], [JobSets][jobset],
+[Pods][pod], and [PodGroups][podgroup] into a representative Slurm job, which is
+used for scheduling purposes. Once a workload is allocated resources, the
+Kubelet binds the Kubernetes workload to the allocated resources and executes
+it. There are
+[example workload](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples)
+definitions in the `slurm-bridge` repo.
 
 Here's an example of a simple job, found in `hack/examples/single.yaml`:
 
@@ -202,7 +194,7 @@ spec:
 
 Let's run this job:
 
-```bash
+```console
 ❯ kubectl apply -f hack/examples/job/single.yaml
 job.batch/job-sleep-single created
 ```
@@ -215,7 +207,7 @@ our workload.
 
 First, look at the job STATUS in Kubernetes:
 
-```bash
+```console
 $ kubectl get jobs -n slurm-bridge
 NAME                 STATUS     COMPLETIONS   DURATION   AGE
 job-sleep-single     Complete   1/1           8s         8m
@@ -224,7 +216,7 @@ job-sleep-single     Complete   1/1           8s         8m
 Next, describe the job. Under the `Events` section, note the name of the pod on
 which the job executed. Describe that pod:
 
-```bash
+```console
 $ kubectl describe job -n slurm-bridge job-sleep-single
 Name:             job-sleep-single
 Namespace:        slurm-bridge
@@ -274,7 +266,7 @@ Events:
 Use the `kubectl get pod` command to get the labels for the pod in which the job
 executed:
 
-```bash
+```console
 $ kubectl get pod -n slurm-bridge --show-labels
 NAME                     READY   STATUS      RESTARTS   AGE   LABELS
 job-sleep-single-w4dfl   0/1     Completed   0          31m   batch.kubernetes.io/controller-uid=7cf47949-0099-4c1a-ab7e-d6e288283c82,batch.kubernetes.io/job-name=job-sleep-single,controller-uid=7cf47949-0099-4c1a-ab7e-d6e288283c82,job-name=job-sleep-single,scheduler.slinky.slurm.net/slurm-jobid=1
@@ -283,11 +275,11 @@ job-sleep-single-w4dfl   0/1     Completed   0          31m   batch.kubernetes.i
 The `scheduler.slinky.slurm.net/slurm-jobid` label tells us that the Slurm JobID
 for our job was 1:
 
-```bash
+```txt
 scheduler.slinky.slurm.net/slurm-jobid=1
 ```
 
-```bash
+```console
 slurm@slurm-controller-0:/tmp$ scontrol show job 1
 JobId=1 JobName=job-sleep-single
    UserId=slurm(401) GroupId=slurm(401) MCS_label=kubernetes
@@ -325,7 +317,7 @@ selected node(s) for the duration of the job.
 
 We can also look at this job using `kubectl`:
 
-```bash
+```console
 ❯ kubectl describe job --namespace=slurm-bridge job-sleep-single
 Name:             job-sleep-single
 Namespace:        slurm-bridge
@@ -381,7 +373,10 @@ running jobs. Recommended next steps involve reviewing our documentation on
 
 <!-- Links -->
 
-[jobsets]: https://jobset.sigs.k8s.io/
+[job]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
+[jobset]: https://jobset.sigs.k8s.io/
 [kubelet]: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet
+[pod]: https://kubernetes.io/docs/concepts/workloads/pods/
+[podgroup]: https://scheduler-plugins.sigs.k8s.io/docs/kep/42-podgroup-coscheduling
 [slurmd]: https://slurm.schedmd.com/slurmd.html
 [workloads]: workload.md

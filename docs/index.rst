@@ -100,7 +100,7 @@ Compatibility
 +============+=============================================================================+
 | Kubernetes | `v1.35 <https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/>`__ |
 +------------+-----------------------------------------------------------------------------+
-| Slurm      | `25.05 <https://www.schedmd.com/slurm-version-25-05-0-is-now-available/>`__ |
+| Slurm      | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__ |
 +------------+-----------------------------------------------------------------------------+
 
 Limitations
@@ -142,8 +142,8 @@ Documentation
 Project documentation is located in the `docs <./docs/>`__ directory of
 this repository.
 
-Slinky documentation can be found
-`here <https://slinky.schedmd.com/>`__.
+`Slinky documentation <https://slinky.schedmd.com/>`__ is hosted on the
+web.
 
 Support and Development
 -----------------------
@@ -183,6 +183,7 @@ limitations under the License.
 
     admission.md
     architecture.md
+    config.md
     controllers.md
     quickstart.md
     scheduler.md

@@ -1,8 +1,12 @@
 # Workloads
 
+## Table of Contents
+
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
 
 - [Workloads](#workloads)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
   - [Using the `slurm-bridge` Scheduler](#using-the-slurm-bridge-scheduler)
   - [Annotations](#annotations)
   - [JobSets](#jobsets)
@@ -10,6 +14,8 @@
   - [LeaderWorkerSet](#leaderworkerset)
 
 <!-- mdformat-toc end -->
+
+## Overview
 
 In Slurm, all workloads are represented by jobs. In `slurm-bridge`, however,
 there are a number of forms that workloads can take. While workloads can still
@@ -22,7 +28,7 @@ At this time, `slurm-bridge` has scheduling support for [Jobs],
 [JobSets](#jobsets), [Pods], [PodGroups](#podgroups), and [LeaderWorkerSets]. If
 your workload requires or benefits from co-scheduled pod launch (e.g. MPI,
 multi-node), consider representing your workload as a [PodGroup](#podgroups) or
-[LeaderWorkerSets](#leaderworkersets).
+[LeaderWorkerSets](#leaderworkerset).
 
 ## Using the `slurm-bridge` Scheduler
 
@@ -41,8 +47,8 @@ Alternatively, a pod can specify `Pod.Spec.schedulerName=slurm-bridge-scheduler`
 from any namespace to indicate that it should be scheduler using the
 `slurm-bridge-scheduler`.
 
-You can learn more about the `slurm-bridge` admission controller
-[here](../../concepts/admission).
+Please review [`slurm-bridge` admission controller](./admission.md) to learn
+more.
 
 ## Annotations
 
@@ -118,8 +124,8 @@ kube-scheduler controller for CoScheduling is installed.
 
 ```sh
 helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins scheduler-plugins \
-			--namespace scheduler-plugins --create-namespace \
-			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
+  --namespace scheduler-plugins --create-namespace \
+  --set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
 ```
 
 Pods contained within a PodGroup will be co-scheduled and launched together. The
@@ -128,7 +134,7 @@ Pod interactions once marked as completed.
 
 ## LeaderWorkerSet
 
-This section assumes [LeaderWorkerSet] is installed.
+This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 
 LeaderWorkerSet groups will be co-scheduled so pods of each group will be
 guaranteed to launch together.
@@ -141,7 +147,6 @@ guaranteed to launch together.
 
 [jobs]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
 [jobsets]: https://jobset.sigs.k8s.io/
-[leaderworkerset]: https://lws.sigs.k8s.io/
 [leaderworkersets]: https://lws.sigs.k8s.io/
 [podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [pods]: https://kubernetes.io/docs/concepts/workloads/pods/

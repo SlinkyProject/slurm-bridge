@@ -72,7 +72,7 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 | Software   |                             Minimum Version                              |
 | :--------- | :----------------------------------------------------------------------: |
 | Kubernetes | [v1.35](https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/) |
-| Slurm      | [25.05](https://www.schedmd.com/slurm-version-25-05-0-is-now-available/) |
+| Slurm      | [25.11](https://www.schedmd.com/slurm-version-25-11-0-is-now-available/) |
 
 ## Limitations
 
@@ -104,7 +104,7 @@ For additional instructions, see the [quickstart] guide.
 
 Project documentation is located in the [docs] directory of this repository.
 
-Slinky documentation can be found [here][slinky-docs].
+[Slinky documentation][slinky-docs] is hosted on the web.
 
 ## Support and Development
 
