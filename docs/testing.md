@@ -44,7 +44,7 @@ go install sigs.k8s.io/kind@v0.29.0
 If you get `kind: command not found` when running the next step, you may need to
 add GOPATH to your PATH:
 
-```
+```sh
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
 ```
@@ -95,7 +95,7 @@ At this point, you should have a kind cluster running `slurm-bridge`.
 
 Run:
 
-```
+```sh
 hack/kind.sh --delete
 ```
 

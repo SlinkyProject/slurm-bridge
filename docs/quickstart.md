@@ -34,23 +34,31 @@ started.
 ## Pre-requisites
 
 - A functional Slurm cluster with:
+
   - A set of hosts within the cluster that are running both a [kubelet] and
     [slurmd]
+
   - At least one partition consisting solely of nodes with the above
     configuration
+
   - MCS labels enabled:
+
     ```conf
     # slurm.conf
     ...
     MCSPlugin=mcs/label
     MCSParameters=ondemand,ondemandselect
     ```
+
 - A functional Kubernetes cluster that includes the hosts running colocated
   [kubelet] and [slurmd]
+
 - Matching NodeNames in Slurm and Kubernetes for all overlapping nodes
+
   - In the event that the colocated node's Slurm NodeName does not match the
     Kubernetes Node name, you should patch the Kubernetes node with a label to
     allow `slurm-bridge` to map the colocated Kubernetes and Slurm node.
+
     ```bash
     kubectl patch node $KUBERNETES_NODENAME -p "{\"metadata\":{\"labels\":{\"slinky.slurm.net/slurm-nodename\":\"$SLURM_NODENAME\"}}}"
     ```
