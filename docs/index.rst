@@ -100,7 +100,7 @@ Compatibility
 +============+=============================================================================+
 | Kubernetes | `v1.35 <https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/>`__ |
 +------------+-----------------------------------------------------------------------------+
-| Slurm      | `25.05 <https://www.schedmd.com/slurm-version-25-05-0-is-now-available/>`__ |
+| Slurm      | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__ |
 +------------+-----------------------------------------------------------------------------+
 
 Limitations
