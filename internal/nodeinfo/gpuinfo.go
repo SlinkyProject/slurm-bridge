@@ -31,11 +31,11 @@ func NewGPUInfos(rSlice *resourcev1.ResourceSlice) []*GPUInfo {
 	switch rSlice.Spec.Driver {
 	case DraExampleDriver:
 		for _, device := range rSlice.Spec.Devices {
-			cpuInfo := &GPUInfo{
+			gpuInfo := &GPUInfo{
 				Name:  device.Name,
 				Index: int(ptr.Deref(device.Attributes[DraExampleDriver_Index].IntValue, -1)),
 			}
-			gpuInfos = append(gpuInfos, cpuInfo)
+			gpuInfos = append(gpuInfos, gpuInfo)
 		}
 	default:
 		panic(fmt.Errorf("unsupported resource device driver: %v", rSlice.Spec.Driver))

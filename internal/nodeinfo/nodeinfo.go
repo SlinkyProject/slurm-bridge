@@ -161,7 +161,7 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 			nodeInfo.cpuMap = NewCPUMap(cpuInfos)
 		case DraExampleDriver:
 			gpuInfos := NewGPUInfos(&resourceSlice)
-			nodeInfo.gpuMap = NewGPUMap(gpuInfos)
+			nodeInfo.gpuMap = NewGPUMap(resourceSlice.Spec.Driver, gpuInfos)
 		default:
 			// TODO: can we even default?
 		}
