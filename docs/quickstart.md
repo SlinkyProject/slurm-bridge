@@ -62,7 +62,7 @@ started.
 ```bash
 helm repo update
 helm install cert-manager jetstack/cert-manager \
-	--namespace cert-manager --create-namespace --set crds.enabled=true
+  --namespace cert-manager --create-namespace --set crds.enabled=true
 ```
 
 ##### 2. Create a secret for `slurm-bridge`:

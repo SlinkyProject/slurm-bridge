@@ -118,8 +118,8 @@ kube-scheduler controller for CoScheduling is installed.
 
 ```sh
 helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins scheduler-plugins \
-			--namespace scheduler-plugins --create-namespace \
-			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
+  --namespace scheduler-plugins --create-namespace \
+  --set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
 ```
 
 Pods contained within a PodGroup will be co-scheduled and launched together. The
