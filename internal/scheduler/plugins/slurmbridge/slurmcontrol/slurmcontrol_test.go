@@ -27,6 +27,53 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func Test_sharedFromExclusiveAnnotation(t *testing.T) {
+	tests := []struct {
+		name          string
+		slurmJobIR    *slurmjobir.SlurmJobIR
+		wantExclusive bool
+	}{
+		{
+			name:          "nil slurmJobIR defaults to exclusive",
+			slurmJobIR:    nil,
+			wantExclusive: true,
+		},
+		{
+			name:          "slurmJobIR with Exclusive nil defaults to exclusive",
+			slurmJobIR:    &slurmjobir.SlurmJobIR{},
+			wantExclusive: true,
+		},
+		{
+			name:          "slurmJobIR.Exclusive true",
+			slurmJobIR:    &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(true)}},
+			wantExclusive: true,
+		},
+		{
+			name:          "slurmJobIR.Exclusive false yields non-exclusive (empty Shared)",
+			slurmJobIR:    &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
+			wantExclusive: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sharedFromExclusiveAnnotation(tt.slurmJobIR)
+			if got == nil {
+				t.Fatalf("sharedFromExclusiveAnnotation() = nil")
+			}
+			if tt.wantExclusive {
+				if len(*got) != 1 {
+					t.Fatalf("sharedFromExclusiveAnnotation() = %v, want single element (exclusive)", got)
+				}
+				if (*got)[0] != api.V0044JobDescMsgSharedNone {
+					t.Errorf("sharedFromExclusiveAnnotation() Shared = %v, want SharedNone", (*got)[0])
+				}
+			} else if len(*got) != 0 {
+				t.Errorf("sharedFromExclusiveAnnotation() = %v, want empty (non-exclusive)", got)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_DeleteJob(t *testing.T) {
 	type fields struct {
 		Client    client.Client
@@ -428,6 +475,66 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				ctx:        context.Background(),
 				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
 				slurmJobIR: &slurmjobir.SlurmJobIR{},
+			},
+			want:    1,
+			wantErr: false,
+		},
+		{
+			name: "Submit placeholder job default exclusive SharedNone",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil || len(*jobSubmit.Job.Shared) != 1 {
+								return fmt.Errorf("expected Shared to have one element, got %v", jobSubmit.Job.Shared)
+							}
+							if (*jobSubmit.Job.Shared)[0] != api.V0044JobDescMsgSharedNone {
+								return fmt.Errorf("expected Shared SharedNone (exclusive), got %v", (*jobSubmit.Job.Shared)[0])
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
+				slurmJobIR: &slurmjobir.SlurmJobIR{},
+			},
+			want:    1,
+			wantErr: false,
+		},
+		{
+			name: "Submit placeholder job slurmJobIR.Exclusive false yields empty Shared (non-exclusive)",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil {
+								return fmt.Errorf("expected Shared to be set, got %v", jobSubmit.Job.Shared)
+							}
+							if len(*jobSubmit.Job.Shared) != 0 {
+								return fmt.Errorf("expected Shared empty (non-exclusive), got len=%d %v", len(*jobSubmit.Job.Shared), *jobSubmit.Job.Shared)
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
+				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
 			},
 			want:    1,
 			wantErr: false,
