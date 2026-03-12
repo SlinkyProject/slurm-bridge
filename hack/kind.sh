@@ -171,7 +171,7 @@ function slurm::install() {
 	slurm::prerequisites
 
 	local chartName
-	local version="1.0.x"
+	local version="~1.1.0-rc1"
 
 	chartName="slurm-operator"
 	if ! helm::find "$chartName"; then
