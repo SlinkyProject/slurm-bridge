@@ -205,6 +205,177 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "gpu.nvidia.com",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "node"},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverGpuNvidia},
+					},
+					// NVIDIA k8s-dra-driver-gpu uses device Name "gpu-<minor>" (no "index" attribute).
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-slice"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraDriverGpuNvidia,
+							Devices: []resourcev1.Device{
+								{Name: "gpu-0"},
+								{Name: "gpu-1"},
+							},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraDriverGpuNvidia,
+						Count: 2,
+						Index: "0-1",
+					},
+				},
+			},
+			want: []resourcev1.DeviceRequest{
+				{
+					Name: "gpu",
+					Exactly: &resourcev1.ExactDeviceRequest{
+						DeviceClassName: nodeinfo.DraDriverGpuNvidia,
+						AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+						Count:           2,
+						Selectors: []resourcev1.DeviceSelector{
+							{
+								CEL: &resourcev1.CELDeviceSelector{
+									Expression: "device.attributes['gpu.nvidia.com'].name in ['gpu-0','gpu-1']",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "unknown device class name is skipped",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "node"},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-slice-unknown"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   "gpu.unknown.com",
+							Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+						Index: "0",
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "unknown device class name is skipped when mixed with known",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "node"},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-slice-example"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraExampleDriver,
+							Devices: []resourcev1.Device{
+								{
+									Name: "gpu-0",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+									},
+								},
+								{
+									Name: "gpu-1",
+									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](1)},
+									},
+								},
+							},
+						},
+					},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-slice-unknown"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   "gpu.unknown.com",
+							Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraExampleDriver,
+						Count: 1,
+						Index: "0",
+					},
+					{
+						Name:  "other",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+						Index: "0",
+					},
+				},
+			},
+			want: []resourcev1.DeviceRequest{
+				{
+					Name: "gpu",
+					Exactly: &resourcev1.ExactDeviceRequest{
+						DeviceClassName: nodeinfo.DraExampleDriver,
+						AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+						Count:           1,
+						Selectors: []resourcev1.DeviceSelector{
+							{
+								CEL: &resourcev1.CELDeviceSelector{
+									Expression: "device.attributes['gpu.example.com'].index in [0]",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -367,6 +538,48 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			want: []resourcev1.DeviceRequestAllocationResult{
 				{Request: "gpu", Driver: nodeinfo.DraExampleDriver, Device: "gpu-0", Pool: "node"},
 				{Request: "gpu", Driver: nodeinfo.DraExampleDriver, Device: "gpu-1", Pool: "node"},
+			},
+		},
+		{
+			name: "gpu.nvidia.com",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "node"},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverGpuNvidia},
+					},
+					// NVIDIA driver uses device Name "gpu-<minor>" (no "index" attribute).
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "node-slice"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("node"),
+							Driver:   nodeinfo.DraDriverGpuNvidia,
+							Devices: []resourcev1.Device{
+								{Name: "gpu-0"},
+								{Name: "gpu-1"},
+							},
+						},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraDriverGpuNvidia,
+						Count: 2,
+						Index: "0-1",
+					},
+				},
+			},
+			want: []resourcev1.DeviceRequestAllocationResult{
+				{Request: "gpu", Driver: nodeinfo.DraDriverGpuNvidia, Device: "gpu-0", Pool: "node"},
+				{Request: "gpu", Driver: nodeinfo.DraDriverGpuNvidia, Device: "gpu-1", Pool: "node"},
 			},
 		},
 	}
