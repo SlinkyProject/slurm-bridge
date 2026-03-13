@@ -90,7 +90,7 @@ setup-sysctl: ## Set kernel/sysctl values recommended for kind/demo (requires su
 
 # Exclude LWS (long-running) and DRA examples from main demo; DRA has its own demo-dra target.
 HACK_EXAMPLES ?= $(sort $(filter-out hack/examples/lws/lws.yaml $(wildcard hack/examples/dra/*.yaml),$(wildcard hack/examples/*/*.yaml)))
-HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/*.yaml))
+HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/gpu-example/*.yaml))
 
 .PHONY: install-examples
 install-examples: ## run examples only-no cluster setup
