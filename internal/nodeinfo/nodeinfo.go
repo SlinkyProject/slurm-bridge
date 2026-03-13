@@ -69,7 +69,22 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		if err != nil {
 			return nil, err
 		}
-		indexListString := strings.Join(indexList, ",")
+		var celExpr string
+		switch deviceClassName {
+		case DraDriverGpuNvidia:
+			// NVIDIA k8s-dra-driver-gpu: use device.attributes['gpu.nvidia.com'].name (e.g. "gpu-0", "gpu-1").
+			names := make([]string, 0, len(indexList))
+			for _, i := range indexList {
+				names = append(names, fmt.Sprintf("'gpu-%s'", i))
+			}
+			celExpr = fmt.Sprintf("device.attributes['%s'].name in [%s]", DraDriverGpuNvidia, strings.Join(names, ","))
+		case DraExampleDriver:
+			// Example DRA driver: use device.attributes['gpu.example.com'].index (e.g. 0, 1, 2).
+			indexListString := strings.Join(indexList, ",")
+			celExpr = fmt.Sprintf("device.attributes['%s'].index in [%s]", deviceClassName, indexListString)
+		default:
+			continue
+		}
 		req := resourcev1.DeviceRequest{
 			Name: gres.Name,
 			Exactly: &resourcev1.ExactDeviceRequest{
@@ -79,7 +94,7 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 				Selectors: []resourcev1.DeviceSelector{
 					{
 						CEL: &resourcev1.CELDeviceSelector{
-							Expression: fmt.Sprintf("device.attributes['%s'].index in [%s]", deviceClassName, indexListString),
+							Expression: celExpr,
 						},
 					},
 				},
@@ -160,8 +175,8 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 		case DraDriverCpu:
 			cpuInfos := NewCPUInfos(&resourceSlice)
 			nodeInfo.cpuMap = NewCPUMap(cpuInfos)
-		case DraExampleDriver:
-			gpuInfos := NewGPUInfos(&resourceSlice)
+		case DraExampleDriver, DraDriverGpuNvidia:
+			gpuInfos := NewGPUInfos(ctx, &resourceSlice)
 			nodeInfo.gpuMap = NewGPUMap(resourceSlice.Spec.Driver, gpuInfos)
 		default:
 			// TODO: can we even default?
