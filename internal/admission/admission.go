@@ -11,6 +11,8 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -123,15 +125,18 @@ func (r *PodAdmission) isManagedNamespace(ctx context.Context, namespace string)
 		if err != nil {
 			return false, fmt.Errorf("error creating label selector: %w", err)
 		}
-		nsList := &corev1.NamespaceList{}
-		if err := r.List(ctx, nsList, &client.ListOptions{LabelSelector: selector}); err != nil {
-			return false, fmt.Errorf("error listing namespaces: %w", err)
+		ns := &corev1.Namespace{}
+		namespaceKey := types.NamespacedName{
+			Name: namespace,
 		}
-		for _, ns := range nsList.Items {
-			if ns.Name == namespace {
-				return true, nil
-			}
+
+		if err := r.Get(ctx, namespaceKey, ns); err != nil {
+			return false, fmt.Errorf("error getting namespace: %w", err)
 		}
+		if selector.Matches(labels.Set(ns.Labels)) {
+			return true, nil
+		}
+
 		return false, nil
 	}
 	return slices.Contains(r.ManagedNamespaces, namespace), nil
