@@ -283,12 +283,12 @@ function dra-driver-cpu::install() {
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
 	(
 		cd "$dra_path"
-		make kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
+		make manifests kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
 	)
 	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
 	kubectl -n kube-system patch daemonset dracpu --type='json' \
-		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
+		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
 }
 
 function main::help() {
