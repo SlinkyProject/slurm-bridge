@@ -225,7 +225,16 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		return err
 	}
 
-	cpus := node.Status.Capacity.Cpu().Value()
+	cpus := int(node.Status.Capacity.Cpu().Value())
+	cores := cpus
+	if nodeInfo != nil && len(nodeInfo.CpuMap.AbstractToMachine) > 0 {
+		cpus = len(nodeInfo.CpuMap.MachineToAbstract)
+		cores = len(nodeInfo.CpuMap.AbstractToMachine)
+	}
+	threadsPerCore := 1
+	if cores > 0 {
+		threadsPerCore = cpus / cores
+	}
 	memoryBytes := node.Status.Capacity.Memory().Value()
 	memoryMB := memoryBytes / (1024 * 1024)
 
@@ -248,8 +257,8 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 
 	// Create node configuration string
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
-	nodeConf := fmt.Sprintf("NodeName=%s CPUs=%d RealMemory=%d State=External",
-		slurmNodeName, cpus, memoryMB)
+	nodeConf := fmt.Sprintf("NodeName=%s Sockets=1 CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
+		slurmNodeName, cores, threadsPerCore, cpus, memoryMB)
 	if features != "" {
 		nodeConf += fmt.Sprintf(" Feature=%s", features)
 	}

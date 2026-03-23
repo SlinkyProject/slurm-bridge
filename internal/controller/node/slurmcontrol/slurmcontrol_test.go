@@ -37,6 +37,34 @@ func init() {
 	utilruntime.Must(resourcev1.AddToScheme(scheme.Scheme))
 }
 
+func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
+	coreType := ptr.To(int64(nodeinfo.CoreTypeStandard))
+	device := func(name string, cpuID, coreID int64) resourcev1.Device {
+		return resourcev1.Device{
+			Name: name,
+			Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To(cpuID)},
+				nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To(coreID)},
+				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
+				nodeinfo.DraDriverCpu_CoreType: {IntValue: coreType},
+			},
+		}
+	}
+	return &resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-dra-cpu"},
+		Spec: resourcev1.ResourceSliceSpec{
+			NodeName: ptr.To(nodeName),
+			Driver:   nodeinfo.DraDriverCpu,
+			Devices: []resourcev1.Device{
+				device("cpu0", 0, 0),
+				device("cpu1", 1, 0),
+				device("cpu2", 2, 1),
+				device("cpu3", 3, 1),
+			},
+		},
+	}
+}
+
 func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	ctx := context.Background()
 	type fields struct {
@@ -1089,6 +1117,35 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "node with nodeInfo but no CPU ResourceSlice (DRA CPU driver not installed)",
+			fields: fields{
+				Client: fake.NewFakeClient(),
+			},
+			args: args{
+				ctx: context.TODO(),
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+					Status: corev1.NodeStatus{
+						Capacity: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("4"),
+							corev1.ResourceMemory: resource.MustParse("8Gi"),
+						},
+					},
+				},
+				nodeInfo: func() *nodeinfo.NodeInfo {
+					kubeClient := ctrlclientfake.NewClientBuilder().
+						WithScheme(scheme.Scheme).
+						Build()
+					info, err := nodeinfo.NewNodeInfo(context.Background(), kubeClient, "test-node")
+					if err != nil {
+						t.Fatalf("NewNodeInfo: %v", err)
+					}
+					return info
+				}(),
+			},
+			wantErr: false,
+		},
+		{
 			name: "add node with nodeInfo from NewNodeInfo (GRES)",
 			fields: fields{
 				Client: fake.NewFakeClient(),
@@ -1108,6 +1165,7 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 					kubeClient := ctrlclientfake.NewClientBuilder().
 						WithScheme(scheme.Scheme).
 						WithObjects(
+							testNodeCPUResourceSlice("test-node"),
 							&resourcev1.ResourceSlice{
 								ObjectMeta: metav1.ObjectMeta{Name: "test-node-gpu-slice"},
 								Spec: resourcev1.ResourceSliceSpec{
@@ -1167,6 +1225,7 @@ func Test_realSlurmControl_AddNode_withNodeInfo_includesGRESInNodeConfig(t *test
 	kubeClient := ctrlclientfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
 		WithObjects(
+			testNodeCPUResourceSlice("test-node"),
 			&resourcev1.ResourceSlice{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-node-gpu-slice"},
 				Spec: resourcev1.ResourceSliceSpec{
