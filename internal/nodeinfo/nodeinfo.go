@@ -121,7 +121,10 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 		// Individual Mode: each CPU is enumerated
 		cpuSet := n.cpuMap.ToMachineCPUs(bitmap)
 		for _, cpuID := range cpuSet.List() {
-			cpuInfo := n.cpuMap.CPUInfoMap[cpuID]
+			cpuInfo, ok := n.cpuMap.CPUInfoMap[cpuID]
+			if !ok {
+				continue
+			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: corev1.ResourceCPU.String(),
 				Driver:  DraDriverCpu,
@@ -146,7 +149,10 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			if err != nil {
 				return nil, err
 			}
-			gpuInfo := n.gpuMap.GPUInfoMap[index]
+			gpuInfo, ok := n.gpuMap.GPUInfoMap[index]
+			if !ok {
+				continue
+			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: gres.Name,
 				Driver:  deviceClassName,
