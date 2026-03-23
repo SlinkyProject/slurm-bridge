@@ -283,7 +283,9 @@ function dra-driver-cpu::install() {
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
 	(
 		cd "$dra_path"
-		make manifests kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
+		local host_arch
+		host_arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+		make manifests kind-install-cpu-dra CLUSTER_NAME="$cluster_name" PLATFORMS="linux/${host_arch}"
 	)
 	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
