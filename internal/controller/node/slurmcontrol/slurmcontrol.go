@@ -253,12 +253,8 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	if features != "" {
 		nodeConf += fmt.Sprintf(" Feature=%s", features)
 	}
-	if gres != "" {
-		nodeConf += fmt.Sprintf(" Gres=%s", gres)
-	}
-	if gresConf != "" {
-		nodeConf += fmt.Sprintf(" GresConf=%s", gresConf)
-	}
+	nodeConf += fmt.Sprintf(" Gres=\"%s\"", gres)
+	nodeConf += fmt.Sprintf(" GresConf=\"%s\"", gresConf)
 
 	logger.Info("Adding Kubernetes node to Slurm",
 		"node", klog.KObj(node),
