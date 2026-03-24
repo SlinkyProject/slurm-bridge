@@ -261,6 +261,7 @@ function dra-example-driver::install() {
 		cd $helm_chart
 		cat <<EOF >./values-dev.yaml
 kubeletPlugin:
+  numDevices: 4
   nodeSelector:
     scheduler.slinky.slurm.net/slurm-bridge: "worker"
   tolerations:
