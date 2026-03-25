@@ -278,7 +278,7 @@ EOF
 
 function dra-driver-cpu::install() {
 	local cluster_name="${1:-kind}"
-	local version="main"
+	local version="v0.1.0"
 	local dra_path
 	dra_path=$(mktemp -d)
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
