@@ -1,3 +1,9 @@
+## v1.0.3
+
+### Fixed
+
+- Updated google.golang.org/grpc to v1.79.3 to address CVE-2026-33186.
+
 ## v1.0.2
 
 ### Fixed
