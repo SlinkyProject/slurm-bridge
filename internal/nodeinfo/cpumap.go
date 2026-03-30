@@ -41,7 +41,11 @@ func (cpuMap CPUMap) GetOnesBitmap() bitmap.Bitmap {
 func (cpuMap CPUMap) ToAbstractCPUs(macCpuSet cpuset.CPUSet) bitmap.Bitmap {
 	absCpus := []int{}
 	for _, idx := range macCpuSet.List() {
-		absCpus = append(absCpus, cpuMap.MachineToAbstract[idx])
+		absCpu, ok := cpuMap.MachineToAbstract[idx]
+		if !ok {
+			continue
+		}
+		absCpus = append(absCpus, absCpu)
 	}
 	return bitmaputil.New(absCpus...)
 }
@@ -50,6 +54,9 @@ func (cpuMap CPUMap) ToAbstractCPUs(macCpuSet cpuset.CPUSet) bitmap.Bitmap {
 func (cpuMap CPUMap) ToMachineCPUs(absBitmap bitmap.Bitmap) cpuset.CPUSet {
 	macCpus := []int{}
 	absBitmap.Range(func(idx uint32) {
+		if int(idx) < 0 || int(idx) >= len(cpuMap.AbstractToMachine) {
+			return
+		}
 		macCpus = append(macCpus, cpuMap.AbstractToMachine[idx].List()...)
 	})
 	return cpuset.New(macCpus...)

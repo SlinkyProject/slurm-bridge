@@ -10,6 +10,8 @@ import (
 	"k8s.io/utils/cpuset"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
+	"github.com/kelindar/bitmap"
 )
 
 func TestNewCPUMap(t *testing.T) {
@@ -191,6 +193,90 @@ func TestNewCPUMap(t *testing.T) {
 			got := nodeinfo.NewCPUMap(tt.cpuInfos)
 			if !equality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("NewCPUMap() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCPUMap_ToAbstractCPUs(t *testing.T) {
+	tests := []struct {
+		name      string
+		cpuInfos  []*nodeinfo.CPUInfo
+		macCpuSet cpuset.CPUSet
+		want      bitmap.Bitmap
+	}{
+		{
+			name:      "empty",
+			cpuInfos:  make([]*nodeinfo.CPUInfo, 0),
+			macCpuSet: cpuset.New(),
+			want:      bitmaputil.New(),
+		},
+		{
+			name: "within bounds",
+			cpuInfos: []*nodeinfo.CPUInfo{
+				{Name: "cpu0", CpuID: 0, SocketID: 0, CoreID: 0, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu1", CpuID: 1, SocketID: 0, CoreID: 1, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu2", CpuID: 2, SocketID: 0, CoreID: 0, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu3", CpuID: 3, SocketID: 0, CoreID: 1, CoreType: nodeinfo.CoreTypeStandard},
+			},
+			macCpuSet: cpuset.New(0),
+			want:      bitmaputil.New(0),
+		},
+		{
+			name:      "out of bounds",
+			cpuInfos:  make([]*nodeinfo.CPUInfo, 0),
+			macCpuSet: cpuset.New(0),
+			want:      bitmaputil.New(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpumap := nodeinfo.NewCPUMap(tt.cpuInfos)
+			got := cpumap.ToAbstractCPUs(tt.macCpuSet)
+			if !equality.Semantic.DeepEqual(got, tt.want) {
+				t.Errorf("ToAbstractCPUs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCPUMap_ToMachineCPUs(t *testing.T) {
+	tests := []struct {
+		name      string
+		cpuInfos  []*nodeinfo.CPUInfo
+		absBitmap bitmap.Bitmap
+		want      cpuset.CPUSet
+	}{
+		{
+			name:      "empty",
+			cpuInfos:  make([]*nodeinfo.CPUInfo, 0),
+			absBitmap: bitmaputil.New(),
+			want:      cpuset.New(),
+		},
+		{
+			name: "within bounds",
+			cpuInfos: []*nodeinfo.CPUInfo{
+				{Name: "cpu0", CpuID: 0, SocketID: 0, CoreID: 0, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu1", CpuID: 1, SocketID: 0, CoreID: 1, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu2", CpuID: 2, SocketID: 0, CoreID: 0, CoreType: nodeinfo.CoreTypeStandard},
+				{Name: "cpu3", CpuID: 3, SocketID: 0, CoreID: 1, CoreType: nodeinfo.CoreTypeStandard},
+			},
+			absBitmap: bitmaputil.New(0),
+			want:      cpuset.New(0, 2),
+		},
+		{
+			name:      "out of bounds",
+			cpuInfos:  make([]*nodeinfo.CPUInfo, 0),
+			absBitmap: bitmaputil.New(0),
+			want:      cpuset.New(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cpumap := nodeinfo.NewCPUMap(tt.cpuInfos)
+			got := cpumap.ToMachineCPUs(tt.absBitmap)
+			if !equality.Semantic.DeepEqual(got, tt.want) {
+				t.Errorf("ToMachineCPUs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

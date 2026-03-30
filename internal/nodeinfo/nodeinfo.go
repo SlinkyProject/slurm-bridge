@@ -24,8 +24,8 @@ import (
 
 // Represents a Kubernetes node for Slurm.
 type NodeInfo struct {
-	cpuMap CPUMap
-	gpuMap GPUMap
+	CpuMap CPUMap
+	GpuMap GPUMap
 }
 
 func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequest, error) {
@@ -40,7 +40,7 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		if err != nil {
 			return nil, err
 		}
-		cpuSet := n.cpuMap.ToMachineCPUs(bitmap)
+		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
 		cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
 		req := resourcev1.DeviceRequest{
 			Name: corev1.ResourceCPU.String(),
@@ -119,9 +119,12 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			return nil, err
 		}
 		// Individual Mode: each CPU is enumerated
-		cpuSet := n.cpuMap.ToMachineCPUs(bitmap)
+		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
 		for _, cpuID := range cpuSet.List() {
-			cpuInfo := n.cpuMap.CPUInfoMap[cpuID]
+			cpuInfo, ok := n.CpuMap.CPUInfoMap[cpuID]
+			if !ok {
+				continue
+			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: corev1.ResourceCPU.String(),
 				Driver:  DraDriverCpu,
@@ -146,7 +149,10 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			if err != nil {
 				return nil, err
 			}
-			gpuInfo := n.gpuMap.GPUInfoMap[index]
+			gpuInfo, ok := n.GpuMap.GPUInfoMap[index]
+			if !ok {
+				continue
+			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: gres.Name,
 				Driver:  deviceClassName,
@@ -174,10 +180,10 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 		switch resourceSlice.Spec.Driver {
 		case DraDriverCpu:
 			cpuInfos := NewCPUInfos(&resourceSlice)
-			nodeInfo.cpuMap = NewCPUMap(cpuInfos)
+			nodeInfo.CpuMap = NewCPUMap(cpuInfos)
 		case DraExampleDriver, DraDriverGpuNvidia:
 			gpuInfos := NewGPUInfos(ctx, &resourceSlice)
-			nodeInfo.gpuMap = NewGPUMap(resourceSlice.Spec.Driver, gpuInfos)
+			nodeInfo.GpuMap = NewGPUMap(resourceSlice.Spec.Driver, gpuInfos)
 		default:
 			// TODO: can we even default?
 		}
@@ -190,30 +196,30 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 // GRES and GresConf are derived from DRA ResourceSlices (e.g. GPU devices); CPU is not included.
 // Returns ("", "") when the node has no GRES devices.
 func (n *NodeInfo) GetGresAndGresConf() (gres, gresConf string) {
-	if len(n.gpuMap.GPUInfoMap) == 0 {
+	if len(n.GpuMap.GPUInfoMap) == 0 {
 		return "", ""
 	}
 	// Build gres: "gpu:driver:count"
-	count := len(n.gpuMap.GPUInfoMap)
-	gres = fmt.Sprintf("gpu:%s:%d", n.gpuMap.Driver, count)
+	count := len(n.GpuMap.GPUInfoMap)
+	gres = fmt.Sprintf("gpu:%s:%d", n.GpuMap.Driver, count)
 
 	// Build gresConf: count=N,name=gpu,type=driver,file=name0,file=name1,...
 	// Slurm requires count= and one file= per device for create node to succeed.
 	indices := make([]int, 0, count)
-	for idx := range n.gpuMap.GPUInfoMap {
+	for idx := range n.GpuMap.GPUInfoMap {
 		indices = append(indices, idx)
 	}
 	sort.Ints(indices)
 	fileParts := make([]string, 0, count)
 	for _, idx := range indices {
-		info := n.gpuMap.GPUInfoMap[idx]
+		info := n.GpuMap.GPUInfoMap[idx]
 		deviceName := fmt.Sprintf("gpu-%d", idx)
 		if info != nil && info.Name != "" {
 			deviceName = info.Name
 		}
 		fileParts = append(fileParts, "file="+deviceName)
 	}
-	gresConf = fmt.Sprintf("count=%d,name=gpu,type=%s,%s", count, n.gpuMap.Driver, strings.Join(fileParts, ","))
+	gresConf = fmt.Sprintf("count=%d,name=gpu,type=%s,%s", count, n.GpuMap.Driver, strings.Join(fileParts, ","))
 	return gres, gresConf
 }
 
