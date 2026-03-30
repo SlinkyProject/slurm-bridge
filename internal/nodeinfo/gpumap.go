@@ -6,7 +6,9 @@ package nodeinfo
 import "sort"
 
 type GPUMap struct {
+	// Driver indicates the Device Driver name.
 	Driver string `json:"driver"`
+
 	// GPUInfoMap stores the raw GPUInfos as a map,
 	// where the index is the GPU index, and the value is the GPUInfo.
 	GPUInfoMap map[int]*GPUInfo `json:"gpuInfoMap"`

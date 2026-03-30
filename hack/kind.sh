@@ -261,6 +261,7 @@ function dra-example-driver::install() {
 		cd $helm_chart
 		cat <<EOF >./values-dev.yaml
 kubeletPlugin:
+  numDevices: 4
   nodeSelector:
     scheduler.slinky.slurm.net/slurm-bridge: "worker"
   tolerations:
@@ -277,18 +278,20 @@ EOF
 
 function dra-driver-cpu::install() {
 	local cluster_name="${1:-kind}"
-	local version="main"
+	local version="v0.1.0"
 	local dra_path
 	dra_path=$(mktemp -d)
 	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
 	(
 		cd "$dra_path"
-		make kind-install-cpu-dra CLUSTER_NAME="$cluster_name"
+		local host_arch
+		host_arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+		make manifests kind-install-cpu-dra CLUSTER_NAME="$cluster_name" PLATFORMS="linux/${host_arch}"
 	)
 	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
 	kubectl -n kube-system patch daemonset dracpu --type='json' \
-		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
+		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
 }
 
 function main::help() {
