@@ -1,3 +1,12 @@
+## v1.1.0
+
+### Fixed
+
+- Updated google.golang.org/grpc to v1.79.3 to address CVE-2026-33186.
+- Fixed cases where an out of bounds panic could occur.
+- Fix external node creation with correct CPU topology.
+- Don't delete placeholder jobs for terminating pods.
+
 ## v1.1.0-rc1
 
 ### Added
