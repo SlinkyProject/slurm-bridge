@@ -49,24 +49,24 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 	}
 
 	// Ensure there are enough pods to satisfy MinMembers. Don't count pods
-	// that may already have a placeholderjob annotation.
+	// that may already have an external job annotation.
 	numPodsWaiting := 0
 	for _, p := range slurmJobIR.Pods.Items {
-		if p.Labels[wellknown.LabelPlaceholderJobId] ==
-			pod.Labels[wellknown.LabelPlaceholderJobId] {
+		if p.Labels[wellknown.LabelExternalJobId] ==
+			pod.Labels[wellknown.LabelExternalJobId] {
 			numPodsWaiting++
 		}
 	}
 
-	// If the pod has no placeholder job return an error to wait for more to be created.
-	// If the pod had a placeholder job and now MinMember can no longer be satisfied because
-	// one or more pods were deleted after submitting the placeholder job, return an error
-	// to indicate placeholder job cleanup must occur.
+	// If the pod has no external job return an error to wait for more to be created.
+	// If the pod had an external job and now MinMember can no longer be satisfied because
+	// one or more pods were deleted after submitting the external job, return an error
+	// to indicate external job cleanup must occur.
 	if numPodsWaiting < int(podGroup.Spec.MinMember) {
-		if pod.Labels[wellknown.LabelPlaceholderJobId] == "" {
+		if pod.Labels[wellknown.LabelExternalJobId] == "" {
 			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
 		} else {
-			return fwk.NewStatus(fwk.Error, ErrorPlaceholderJobInvalid.Error())
+			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
 		}
 	}
 	return fwk.NewStatus(fwk.Success)

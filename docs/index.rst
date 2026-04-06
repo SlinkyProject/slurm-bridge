@@ -58,11 +58,11 @@ Kubernetes context as a ``Pod``, ``PodGroup``, ``Job``, ``JobSet``, or
 a Slurm-only environment, using ``slurmd``. Workloads submitted from
 Kubernetes will have their resource requirements translated into a
 representative Slurm job by ``slurm-bridge``. That job will serve as a
-placeholder and will be scheduled by the Slurm controller. Upon resource
-allocation to a K8s workload by the Slurm controller, ``slurm-bridge``
-will bind the workload’s pod(s) to the allocated node(s). At that point,
-the kubelet will launch and run the pod the same as it would within a
-standard Kubernetes instance
+external job and will be scheduled by the Slurm controller. Upon
+resource allocation to a K8s workload by the Slurm controller,
+``slurm-bridge`` will bind the workload’s pod(s) to the allocated
+node(s). At that point, the kubelet will launch and run the pod the same
+as it would within a standard Kubernetes instance
 
 .. figure:: _static/images/slurm-bridge_big-picture.svg
    :alt: “Slurm Bridge Architecture”

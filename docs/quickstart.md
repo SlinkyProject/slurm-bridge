@@ -202,8 +202,8 @@ job.batch/job-sleep-single created
 At this point, Kubernetes has dispatched our job, it was scheduled by Slurm, and
 executed to completion. Let's take a look at each place that our job shows up.
 
-On the Slurm side, we can observe the placeholder job that was used to schedule
-our workload.
+On the Slurm side, we can observe the external job that was used to schedule our
+workload.
 
 First, look at the job STATUS in Kubernetes:
 
@@ -310,8 +310,8 @@ JobId=1 JobName=job-sleep-single
 ```
 
 Note that the `Command` field is equal to `(null)`, and that the `JobState`
-field is equal to `CANCELLED`. This is because this Slurm job is only a
-placeholder - no work is actually done by the placeholder. Instead, the job is
+field is equal to `CANCELLED`. This is because this Slurm job is only an
+external job - no work is actually done by the external job. Instead, the job is
 cancelled upon allocation so that the Kubelet can bind the workload to the
 selected node(s) for the duration of the job.
 

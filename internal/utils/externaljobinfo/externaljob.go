@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package placeholderinfo
+package externaljobinfo
 
 import (
 	"bytes"
@@ -10,22 +10,22 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-type PlaceholderInfo struct {
+type ExternalJobInfo struct {
 	Pods []string `json:"pods"`
 }
 
-func (phInfo *PlaceholderInfo) Equal(cmp PlaceholderInfo) bool {
-	a, _ := json.Marshal(phInfo)
+func (extInfo *ExternalJobInfo) Equal(cmp ExternalJobInfo) bool {
+	a, _ := json.Marshal(extInfo)
 	b, _ := json.Marshal(cmp)
 	return bytes.Equal(a, b)
 }
 
-func (podInfo *PlaceholderInfo) ToString() string {
+func (podInfo *ExternalJobInfo) ToString() string {
 	b, _ := json.Marshal(podInfo)
 	return string(b)
 }
 
-func ParseIntoPlaceholderInfo(str *string, out *PlaceholderInfo) error {
+func ParseIntoExternalJobInfo(str *string, out *ExternalJobInfo) error {
 	data := ptr.Deref(str, "")
 	return json.Unmarshal([]byte(data), out)
 }

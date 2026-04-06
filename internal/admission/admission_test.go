@@ -370,7 +370,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -389,7 +389,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Annotations: map[string]string{
-							wellknown.AnnotationPlaceholderNode: "foo",
+							wellknown.AnnotationExternalJobNode: "foo",
 						},
 					},
 				},
@@ -466,7 +466,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -514,7 +514,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -601,7 +601,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -620,7 +620,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -631,7 +631,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "2",
+							wellknown.LabelExternalJobId: "2",
 						},
 					},
 				},
@@ -650,7 +650,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Annotations: map[string]string{
-							wellknown.AnnotationPlaceholderNode: "node1",
+							wellknown.AnnotationExternalJobNode: "node1",
 						},
 					},
 				},
@@ -661,7 +661,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Annotations: map[string]string{
-							wellknown.AnnotationPlaceholderNode: "node2",
+							wellknown.AnnotationExternalJobNode: "node2",
 						},
 					},
 				},
@@ -681,7 +681,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -695,7 +695,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "2",
+							wellknown.LabelExternalJobId: "2",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -718,7 +718,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Annotations: map[string]string{
-							wellknown.AnnotationPlaceholderNode: "node1",
+							wellknown.AnnotationExternalJobNode: "node1",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -732,7 +732,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Annotations: map[string]string{
-							wellknown.AnnotationPlaceholderNode: "node2",
+							wellknown.AnnotationExternalJobNode: "node2",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -755,7 +755,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -769,7 +769,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "2",
+							wellknown.LabelExternalJobId: "2",
 						},
 					},
 					Spec: corev1.PodSpec{

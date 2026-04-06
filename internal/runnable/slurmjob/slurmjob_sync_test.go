@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -49,7 +49,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 							Name:      "foo-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "1",
+								wellknown.LabelExternalJobId: "1",
 							},
 						},
 					},
@@ -58,7 +58,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 							Name:      "foo-2",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "1",
+								wellknown.LabelExternalJobId: "1",
 							},
 						},
 					},
@@ -67,7 +67,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 							Name:      "bar-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "2",
+								wellknown.LabelExternalJobId: "2",
 							},
 						},
 					},
@@ -79,7 +79,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/foo-1", "default/foo-2"},
 								}).ToString()),
 							},
@@ -87,7 +87,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/bar-1"},
 								}).ToString()),
 							},
@@ -107,7 +107,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 							Name:      "bar-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "2",
+								wellknown.LabelExternalJobId: "2",
 							},
 						},
 					},
@@ -119,7 +119,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/foo-1", "default/foo-2"},
 								}).ToString()),
 							},
@@ -127,7 +127,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/bar-1"},
 								}).ToString()),
 							},
@@ -185,7 +185,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 							Name:      "foo-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "1",
+								wellknown.LabelExternalJobId: "1",
 							},
 						},
 					},
@@ -194,7 +194,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 							Name:      "foo-2",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "1",
+								wellknown.LabelExternalJobId: "1",
 							},
 						},
 					},
@@ -203,7 +203,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 							Name:      "bar-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "2",
+								wellknown.LabelExternalJobId: "2",
 							},
 						},
 					},
@@ -215,7 +215,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/foo-1", "default/foo-2"},
 								}).ToString()),
 							},
@@ -223,7 +223,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/bar-1"},
 								}).ToString()),
 							},
@@ -243,7 +243,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 							Name:      "bar-1",
 							Namespace: corev1.NamespaceDefault,
 							Labels: map[string]string{
-								wellknown.LabelPlaceholderJobId: "2",
+								wellknown.LabelExternalJobId: "2",
 							},
 						},
 					},
@@ -256,7 +256,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobState: ptr.To([]slurmapi.V0044JobInfoJobState{slurmapi.V0044JobInfoJobStatePENDING}),
 								JobId:    ptr.To[int32](1),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/foo-1", "default/foo-2"},
 								}).ToString()),
 							},
@@ -264,7 +264,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 						{
 							V0044JobInfo: slurmapi.V0044JobInfo{
 								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"default/bar-1"},
 								}).ToString()),
 							},

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package placeholderinfo
+package externaljobinfo
 
 import (
 	"testing"
@@ -10,12 +10,12 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-func TestPlaceholderInfo_Equal(t *testing.T) {
+func TestExternalJobInfo_Equal(t *testing.T) {
 	type fields struct {
 		Pods []string
 	}
 	type args struct {
-		cmp PlaceholderInfo
+		cmp ExternalJobInfo
 	}
 	tests := []struct {
 		name   string
@@ -29,7 +29,7 @@ func TestPlaceholderInfo_Equal(t *testing.T) {
 				Pods: []string{},
 			},
 			args: args{
-				cmp: PlaceholderInfo{
+				cmp: ExternalJobInfo{
 					Pods: []string{},
 				},
 			},
@@ -41,7 +41,7 @@ func TestPlaceholderInfo_Equal(t *testing.T) {
 				Pods: []string{"bar/foo"},
 			},
 			args: args{
-				cmp: PlaceholderInfo{
+				cmp: ExternalJobInfo{
 					Pods: []string{"bar/foo"},
 				},
 			},
@@ -53,7 +53,7 @@ func TestPlaceholderInfo_Equal(t *testing.T) {
 				Pods: []string{"bar/foo"},
 			},
 			args: args{
-				cmp: PlaceholderInfo{
+				cmp: ExternalJobInfo{
 					Pods: []string{"buz/biz"},
 				},
 			},
@@ -62,17 +62,17 @@ func TestPlaceholderInfo_Equal(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			phInfo := &PlaceholderInfo{
+			extInfo := &ExternalJobInfo{
 				Pods: tt.fields.Pods,
 			}
-			if got := phInfo.Equal(tt.args.cmp); got != tt.want {
-				t.Errorf("PlaceholderInfo.Equal() = %v, want %v", got, tt.want)
+			if got := extInfo.Equal(tt.args.cmp); got != tt.want {
+				t.Errorf("ExternalJobInfo.Equal() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestPlaceholderInfo_ToString(t *testing.T) {
+func TestExternalJobInfo_ToString(t *testing.T) {
 	type fields struct {
 		Pods []string
 	}
@@ -98,62 +98,62 @@ func TestPlaceholderInfo_ToString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			podInfo := &PlaceholderInfo{
+			podInfo := &ExternalJobInfo{
 				Pods: tt.fields.Pods,
 			}
 			if got := podInfo.ToString(); got != tt.want {
-				t.Errorf("PlaceholderInfo.ToString() = %v, want %v", got, tt.want)
+				t.Errorf("ExternalJobInfo.ToString() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseIntoPlaceholderInfo(t *testing.T) {
+func TestParseIntoExternalJobInfo(t *testing.T) {
 	type args struct {
 		str *string
-		out *PlaceholderInfo
+		out *ExternalJobInfo
 	}
 	tests := []struct {
 		name    string
 		args    args
-		want    *PlaceholderInfo
+		want    *ExternalJobInfo
 		wantErr bool
 	}{
 		{
 			name: "Empty string",
 			args: args{
 				str: ptr.To(""),
-				out: &PlaceholderInfo{},
+				out: &ExternalJobInfo{},
 			},
-			want:    &PlaceholderInfo{},
+			want:    &ExternalJobInfo{},
 			wantErr: true,
 		},
 		{
 			name: "Empty values",
 			args: args{
 				str: ptr.To(`{"pods":[]}`),
-				out: &PlaceholderInfo{},
+				out: &ExternalJobInfo{},
 			},
-			want:    &PlaceholderInfo{Pods: []string{}},
+			want:    &ExternalJobInfo{Pods: []string{}},
 			wantErr: false,
 		},
 		{
 			name: "Single pod",
 			args: args{
 				str: ptr.To(`{"pods":["bar/foo"]}`),
-				out: &PlaceholderInfo{},
+				out: &ExternalJobInfo{},
 			},
-			want:    &PlaceholderInfo{Pods: []string{"bar/foo"}},
+			want:    &ExternalJobInfo{Pods: []string{"bar/foo"}},
 			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := ParseIntoPlaceholderInfo(tt.args.str, tt.args.out); (err != nil) != tt.wantErr {
-				t.Errorf("ParseIntoPlaceholderInfo() error = %v, wantErr %v", err, tt.wantErr)
+			if err := ParseIntoExternalJobInfo(tt.args.str, tt.args.out); (err != nil) != tt.wantErr {
+				t.Errorf("ParseIntoExternalJobInfo() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if got := tt.args.out; !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("ParseIntoPlaceholderInfo() = %v, want %v", got, tt.want)
+				t.Errorf("ParseIntoExternalJobInfo() = %v, want %v", got, tt.want)
 			}
 		})
 	}
