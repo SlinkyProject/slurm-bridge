@@ -77,11 +77,11 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
-	if pod.Labels[wellknown.LabelPlaceholderJobId] != "" {
-		return nil, fmt.Errorf("can't create a pod with a slurm placeholder jobid label")
+	if pod.Labels[wellknown.LabelExternalJobId] != "" {
+		return nil, fmt.Errorf("can't create a pod with a slurm external jobid label")
 	}
-	if pod.Annotations[wellknown.AnnotationPlaceholderNode] != "" {
-		return nil, fmt.Errorf("can't create a pod with a slurm placeholder node annotation")
+	if pod.Annotations[wellknown.AnnotationExternalJobNode] != "" {
+		return nil, fmt.Errorf("can't create a pod with a slurm external node annotation")
 	}
 	if pod.Spec.ResourceClaims != nil {
 		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
@@ -102,13 +102,13 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
 	// node annotations should not be modified.
 	if newPod.Status.Phase == corev1.PodRunning {
-		if newPod.Labels[wellknown.LabelPlaceholderJobId] !=
-			oldPod.Labels[wellknown.LabelPlaceholderJobId] {
-			return nil, fmt.Errorf("can't update a running pod's placeholder jobid label")
+		if newPod.Labels[wellknown.LabelExternalJobId] !=
+			oldPod.Labels[wellknown.LabelExternalJobId] {
+			return nil, fmt.Errorf("can't update a running pod's external jobid label")
 		}
-		if newPod.Annotations[wellknown.AnnotationPlaceholderNode] !=
-			oldPod.Annotations[wellknown.AnnotationPlaceholderNode] {
-			return nil, fmt.Errorf("can't update a running pod's placeholder node annotation")
+		if newPod.Annotations[wellknown.AnnotationExternalJobNode] !=
+			oldPod.Annotations[wellknown.AnnotationExternalJobNode] {
+			return nil, fmt.Errorf("can't update a running pod's external node annotation")
 		}
 	}
 	return nil, nil

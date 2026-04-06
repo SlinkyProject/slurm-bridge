@@ -18,7 +18,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
 
 type SlurmControlInterface interface {
@@ -82,14 +82,14 @@ func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kub
 	jobIds := []int32{}
 	pods := []kubetypes.NamespacedName{}
 	for _, job := range jobList.Items {
-		phInfo := &placeholderinfo.PlaceholderInfo{}
-		if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
+		extInfo := &externaljobinfo.ExternalJobInfo{}
+		if err := externaljobinfo.ParseIntoExternalJobInfo(job.AdminComment, extInfo); err != nil {
 			// Assume the job was not created by slurm-bridge
 			continue
 		}
 		jobId := ptr.Deref(job.JobId, 0)
 		jobIds = append(jobIds, jobId)
-		for _, podName := range phInfo.Pods {
+		for _, podName := range extInfo.Pods {
 			pods = append(pods, utils.NamespacedNameFromString(podName))
 		}
 	}
@@ -108,14 +108,14 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]k
 		return nil, err
 	}
 
-	phInfo := &placeholderinfo.PlaceholderInfo{}
-	if err := placeholderinfo.ParseIntoPlaceholderInfo(job.AdminComment, phInfo); err != nil {
+	extInfo := &externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(job.AdminComment, extInfo); err != nil {
 		// Assume the job was not created by slurm-bridge
 		return nil, nil //nolint:nilerr
 	}
 
 	podKeys := []kubetypes.NamespacedName{}
-	for _, podName := range phInfo.Pods {
+	for _, podName := range extInfo.Pods {
 		podKeys = append(podKeys, utils.NamespacedNameFromString(podName))
 	}
 

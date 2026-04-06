@@ -46,7 +46,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -72,7 +72,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -100,7 +100,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},
@@ -128,7 +128,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 				},

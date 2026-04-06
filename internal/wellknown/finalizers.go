@@ -5,6 +5,6 @@ package wellknown
 
 const (
 	// FinalizerScheduler exists to process pod deletion events. Once a pod processes
-	// if a placeholder job can be deleted, the finalizer is removed.
+	// if an external job can be deleted, the finalizer is removed.
 	FinalizerScheduler = SchedulerPrefix + "finalizer"
 )

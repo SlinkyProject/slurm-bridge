@@ -65,7 +65,7 @@ var _ = Describe("Pod Controller", func() {
 						Name:      resourceName,
 						Namespace: corev1.NamespaceDefault,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 					},
 					Spec: corev1.PodSpec{
