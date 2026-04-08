@@ -232,7 +232,9 @@ helm-dependency-update: ## Update Helm chart dependencies.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd:generateEmbeddedObjectMeta=true webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=scheduler-role paths=./cmd/scheduler/... paths=./internal/... output:rbac:dir=config/rbac/scheduler
+	$(CONTROLLER_GEN) rbac:roleName=manager-role paths=./cmd/controllers/... paths=./internal/controller/... output:rbac:dir=config/rbac/manager
+	$(CONTROLLER_GEN) rbac:roleName=webhook-role webhook paths=./cmd/admission/... paths=./internal/admission/... output:rbac:dir=config/rbac/webhook output:webhook:dir=./config/webhook
 
 .PHONY: generate-docs
 generate-docs: pandoc-bin
