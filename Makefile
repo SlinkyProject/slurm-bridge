@@ -141,6 +141,7 @@ GOVULNCHECK ?= $(LOCALBIN)/govulncheck-$(GOVULNCHECK_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 HELM_DOCS ?= $(LOCALBIN)/helm-docs-$(HELM_DOCS_VERSION)
 PANDOC ?= $(LOCALBIN)/pandoc-$(PANDOC_VERSION)
+YQ ?= $(LOCALBIN)/yq-$(YQ_VERSION)
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
@@ -151,6 +152,7 @@ GOVULNCHECK_VERSION ?= latest
 GOLANGCI_LINT_VERSION ?= v2.11.1
 HELM_DOCS_VERSION ?= v1.14.2
 PANDOC_VERSION ?= 3.9
+YQ_VERSION ?= v4.45.1
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -193,6 +195,11 @@ $(PANDOC): $(LOCALBIN)
 		rm -f $(PANDOC).tar.gz $(PANDOC).zip ;\
 	fi
 
+.PHONY: yq-bin
+yq-bin: $(YQ) ## Download yq (mikefarah/v4) locally if necessary.
+$(YQ): $(LOCALBIN)
+	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
+
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
 # $2 - package url which can be installed
@@ -230,11 +237,19 @@ helm-lint: ## Lint Helm charts.
 helm-dependency-update: ## Update Helm chart dependencies.
 	find "helm/" -depth -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0r -n1 helm dependency update
 
+BRIDGE_CHART_DIR ?= helm/slurm-bridge
+BRIDGE_HELM_FILES ?= $(BRIDGE_CHART_DIR)/files
+
 .PHONY: manifests
-manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=scheduler-role paths=./cmd/scheduler/... paths=./internal/... output:rbac:dir=config/rbac/scheduler
+manifests: controller-gen yq-bin ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+	$(CONTROLLER_GEN) rbac:roleName=scheduler-role paths=./cmd/scheduler/... paths=./internal/scheduler/... output:rbac:dir=config/rbac/scheduler
 	$(CONTROLLER_GEN) rbac:roleName=manager-role paths=./cmd/controllers/... paths=./internal/controller/... output:rbac:dir=config/rbac/manager
 	$(CONTROLLER_GEN) rbac:roleName=webhook-role webhook paths=./cmd/admission/... paths=./internal/admission/... output:rbac:dir=config/rbac/webhook output:webhook:dir=./config/webhook
+
+	mkdir -p $(BRIDGE_HELM_FILES)
+	$(YQ) '{"rules": .rules}' config/rbac/scheduler/role.yaml > $(BRIDGE_HELM_FILES)/scheduler_rbac_rules.yaml
+	$(YQ) '{"rules": .rules}' config/rbac/manager/role.yaml > $(BRIDGE_HELM_FILES)/controllers_rbac_rules.yaml
+	$(YQ) '{"rules": .rules}' config/rbac/webhook/role.yaml > $(BRIDGE_HELM_FILES)/admission_rbac_rules.yaml
 
 .PHONY: generate-docs
 generate-docs: pandoc-bin

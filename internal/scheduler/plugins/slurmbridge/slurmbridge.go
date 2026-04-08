@@ -58,6 +58,45 @@ func init() {
 	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
 }
 
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;patch;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=delete;get;list;patch;watch
+// +kubebuilder:rbac:groups="",resources=pods/status,verbs=patch;update
+// +kubebuilder:rbac:groups="",resources=bindings,verbs=create
+// +kubebuilder:rbac:groups="",resources=pods/binding,verbs=create
+// +kubebuilder:rbac:groups="",resources=endpoints,verbs=create;get;update
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;update;watch
+// +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;update;watch
+// +kubebuilder:rbac:groups="",resources=replicationcontrollers,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
+// +kubebuilder:rbac:groups=extensions,resources=replicasets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=volumeattachments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=csinodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=csidrivers,verbs=get;list;watch
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=csistoragecapacities,verbs=get;list;watch
+// +kubebuilder:rbac:groups=topology.node.k8s.io,resources=noderesourcetopologies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims/status,verbs=patch;update
+
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=create;get;list;watch
+
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {
 	client.Client

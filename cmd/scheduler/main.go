@@ -17,6 +17,8 @@ import (
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
 )
 
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=create;get;list
+
 func main() {
 	// Register custom plugins to the scheduler framework.
 	// Later they can consist of scheduler profile(s) and hence
