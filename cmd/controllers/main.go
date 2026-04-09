@@ -30,7 +30,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
-	//+kubebuilder:scaffold:imports
+	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -41,7 +41,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	//+kubebuilder:scaffold:scheme
+	// +kubebuilder:scaffold:scheme
 }
 
 // Input flags to the command
@@ -153,7 +153,7 @@ func main() {
 		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmJob")
 		os.Exit(1)
 	}
-	//+kubebuilder:scaffold:builder
+	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
