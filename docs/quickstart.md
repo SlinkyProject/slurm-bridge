@@ -64,7 +64,7 @@ When running Slurm in `slurm-operator`:
 
 ```sh
 kubectl apply -f - <<EOF
-apiVersion: slinky.slurm.net/v1alpha1
+apiVersion: slinky.slurm.net/v1beta1
 kind: Token
 metadata:
   name: slurm-bridge-token
