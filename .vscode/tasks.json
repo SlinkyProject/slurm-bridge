@@ -2,6 +2,61 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Setup Admission Debugging",
+      "type": "shell",
+      "command": [],
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      },
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Populate Config",
+        "Scale-Down Admission Pods",
+        "Patch Admission for Local Debugging"
+      ]
+    },
+    {
+      "label": "Scale-Down Admission Pods",
+      "type": "shell",
+      "command": "kubectl -n slinky scale deployment/slurm-bridge-admission --replicas 0 || true",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Patch Admission for Local Debugging",
+      "type": "shell",
+      "command": "${workspaceFolder}/.vscode/scripts/patch-admission-local-debug.sh",
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Revert Admission Config",
+      "type": "shell",
+      "command": "${workspaceFolder}/.vscode/scripts/revert-admission-local-debug.sh",
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Revert Admission Debugging",
+      "type": "shell",
+      "command": [],
+      "presentation": {
+        "reveal": "never",
+        "panel": "shared"
+      },
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Revert Admission Config"
+      ]
+    },
+    {
       "label": "Setup Controllers",
       "type": "shell",
       "command": [
