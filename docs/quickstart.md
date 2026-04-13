@@ -70,9 +70,9 @@ metadata:
   name: slurm-bridge-token
   namespace: slinky
 spec:
-  jwtHs256KeyRef:
-    name: slurm-auth-jwths256
-    key: jwt_hs256.key
+  jwtKeyRef:
+    name: slurm-auth-jwt
+    key: jwt.key
     namespace: slurm
   secretRef:
     name: slurm-bridge-token
