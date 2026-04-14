@@ -82,7 +82,7 @@ var _ = Describe("Node Controller", func() {
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 
-		It("should successfully reconcile the resource", func() {
+		It("should fail reconcile the resource if the node is not found", func() {
 			By("Reconciling the created resource")
 			eventCh := make(chan event.TypedGenericEvent[client.Object])
 			slurmClient := slurmclientfake.NewFakeClient()
