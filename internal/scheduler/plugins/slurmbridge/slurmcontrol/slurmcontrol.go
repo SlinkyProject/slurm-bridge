@@ -17,12 +17,12 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-type PlaceholderJob struct {
+type ExternalJob struct {
 	JobId int32
 	Nodes string
 }
@@ -30,8 +30,8 @@ type PlaceholderJob struct {
 type SlurmControlInterface interface {
 	GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error)
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
-	GetJobsForPods(ctx context.Context) (*map[string]PlaceholderJob, error)
-	GetJob(ctx context.Context, pod *corev1.Pod) (*PlaceholderJob, error)
+	GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error)
+	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 	IsSlurmNode(ctx context.Context, node string) (bool, error)
@@ -72,11 +72,11 @@ func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V00
 	return &[]api.V0044JobDescMsgShared{}
 }
 
-// DeleteSlurmJob will delete a placeholder job
+// DeleteSlurmJob will delete an external job
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	job := &slurmtypes.V0044JobInfo{}
-	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelPlaceholderJobId])
+	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == 0 {
 		return nil
 	}
@@ -89,7 +89,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 }
 
 // GetJobsForPods will get a list of all slurm jobs and translate them into a podToJob
-func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]PlaceholderJob, error) {
+func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
 	jobs := &slurmtypes.V0044JobInfoList{}
@@ -99,12 +99,12 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Plac
 		logger.Error(err, "could not list jobs")
 		return nil, err
 	}
-	podToJob := make(map[string]PlaceholderJob)
+	podToJob := make(map[string]ExternalJob)
 	for _, j := range jobs.Items {
-		phInfo := placeholderinfo.PlaceholderInfo{}
-		if err := placeholderinfo.ParseIntoPlaceholderInfo(j.AdminComment, &phInfo); err == nil {
-			for _, pod := range phInfo.Pods {
-				podToJob[pod] = PlaceholderJob{
+		extInfo := externaljobinfo.ExternalJobInfo{}
+		if err := externaljobinfo.ParseIntoExternalJobInfo(j.AdminComment, &extInfo); err == nil {
+			for _, pod := range extInfo.Pods {
+				podToJob[pod] = ExternalJob{
 					JobId: *j.JobId,
 					Nodes: *j.Nodes,
 				}
@@ -115,13 +115,13 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Plac
 	return &podToJob, nil
 }
 
-// GetJob will check if a placeholder job has been created for a given pod
-func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*PlaceholderJob, error) {
+// GetJob will check if an external job has been created for a given pod
+func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error) {
 	logger := klog.FromContext(ctx)
-	jobOut := PlaceholderJob{}
+	jobOut := ExternalJob{}
 
 	job := &slurmtypes.V0044JobInfo{}
-	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
+	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
 		return &jobOut, nil
 	}
@@ -144,29 +144,29 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Placeh
 	return &jobOut, nil
 }
 
-// SubmitJob submits a placeholder job to Slurm for a node placement decision. The
-// placeholder job is later used to determine which node to bind a k8s pod to.
+// SubmitJob submits an external job to Slurm for a node placement decision. The
+// external job is later used to determine which node to bind a k8s pod to.
 func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error) {
 	return r.submitJob(ctx, pod, slurmJobIR, false)
 }
 
-// UpdateJob updates a placeholder job
+// UpdateJob updates an external job
 func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error) {
 	return r.submitJob(ctx, pod, slurmJobIR, true)
 }
 
-// submitJob will create or update a placeholder job Slurm.
+// submitJob will create or update an external job in Slurm.
 func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR, update bool) (int32, error) {
 	logger := klog.FromContext(ctx)
-	phInfo := placeholderinfo.PlaceholderInfo{}
+	extInfo := externaljobinfo.ExternalJobInfo{}
 	for _, p := range slurmJobIR.Pods.Items {
-		phInfo.Pods = append(phInfo.Pods, p.Namespace+"/"+p.Name)
+		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
 	}
 	job := &slurmtypes.V0044JobInfo{}
 	jobSubmit := api.V0044JobSubmitReq{
 		Job: &api.V0044JobDescMsg{
 			Account:                 slurmJobIR.JobInfo.Account,
-			AdminComment:            ptr.To(phInfo.ToString()),
+			AdminComment:            ptr.To(extInfo.ToString()),
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
 			Constraints:             slurmJobIR.JobInfo.Constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
@@ -221,13 +221,13 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 	}
 	if !update {
 		if err := r.Create(ctx, job, jobSubmit); err != nil {
-			logger.Error(err, "could not create placeholder job", "pod", klog.KObj(pod))
+			logger.Error(err, "could not create external job", "pod", klog.KObj(pod))
 			return 0, err
 		}
 	} else {
-		job.JobId = ptr.To(slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelPlaceholderJobId]))
+		job.JobId = ptr.To(slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]))
 		if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
-			logger.Error(err, "could not update placeholder job", "pod", klog.KObj(pod))
+			logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
 			return 0, err
 		}
 	}
@@ -256,7 +256,7 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 	logger := klog.FromContext(ctx)
 
 	nodes := &slurmtypes.V0044NodeResourceLayout{}
-	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
+	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
 		return &NodeResources{}, nil
 	}

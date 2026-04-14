@@ -19,7 +19,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
 
 func Test_realSlurmControl_RefreshJobCache(t *testing.T) {
@@ -111,7 +111,7 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 								JobState: ptr.To([]api.V0044JobInfoJobState{
 									api.V0044JobInfoJobStateRUNNING,
 								}),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"foo/bar-0"},
 								}).ToString()),
 							},
@@ -123,7 +123,7 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 									api.V0044JobInfoJobStateRUNNING,
 									api.V0044JobInfoJobStateCOMPLETING,
 								}),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"foo/bar-1"},
 								}).ToString()),
 							},
@@ -135,7 +135,7 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 									api.V0044JobInfoJobStateRUNNING,
 									api.V0044JobInfoJobStateCOMPLETING,
 								}),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"foo/bar-2", "foo/bar-3"},
 								}).ToString()),
 							},
@@ -146,7 +146,7 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 								JobState: ptr.To([]api.V0044JobInfoJobState{
 									api.V0044JobInfoJobStatePENDING,
 								}),
-								AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 									Pods: []string{"foo/bar-4"},
 								}).ToString()),
 							},
@@ -233,7 +233,7 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 				WithObjects(&types.V0044JobInfo{
 					V0044JobInfo: api.V0044JobInfo{
 						JobId: ptr.To[int32](1),
-						AdminComment: ptr.To((&placeholderinfo.PlaceholderInfo{
+						AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
 							Pods: []string{"foo/bar-123"},
 						}).ToString()),
 					},

@@ -37,7 +37,7 @@ type realSlurmControl struct {
 // IsJobRunning implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	job := &types.V0044JobInfo{}
-	jobId := object.ObjectKey(pod.Labels[wellknown.LabelPlaceholderJobId])
+	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
 		return false, nil
 	}

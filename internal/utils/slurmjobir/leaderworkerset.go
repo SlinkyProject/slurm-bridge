@@ -34,10 +34,10 @@ func (t *translator) PreFilterLWS(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.
 
 	// Determine if there are enough LWS pods for the group
 	if int32(len(slurmJobIR.Pods.Items)) < *lws.Spec.LeaderWorkerTemplate.Size { //nolint:gosec
-		if pod.Labels[wellknown.LabelPlaceholderJobId] == "" {
+		if pod.Labels[wellknown.LabelExternalJobId] == "" {
 			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
 		} else {
-			return fwk.NewStatus(fwk.Error, ErrorPlaceholderJobInvalid.Error())
+			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
 		}
 	}
 	return fwk.NewStatus(fwk.Success)

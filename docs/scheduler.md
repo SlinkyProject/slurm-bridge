@@ -9,7 +9,7 @@
   - [Overview](#overview)
   - [Design](#design)
     - [Sequence Diagram](#sequence-diagram)
-    - [Placeholder Jobs](#placeholder-jobs)
+    - [External Jobs](#external-jobs)
       - [Annotations](#annotations)
 
 <!-- mdformat-toc end -->
@@ -58,12 +58,12 @@ sequenceDiagram
     KAPI-->>SBS: Return Next Pod in Workload Queue
 
     note over SBS: Honor Slurm scheduling decision
-    critical Lookup Slurm Placeholder Job
-      SBS->>SAPI: Get Placeholder Job
-      SAPI-->>SBS: Return Placeholder Job
+    critical Lookup Slurm External Job
+      SBS->>SAPI: Get External Job
+      SAPI-->>SBS: Return External Job
     option Job is NotFound
       note over SBS: Translate Pod(s) into Slurm Job
-      SBS->>SAPI: Submit Placeholder Job
+      SBS->>SAPI: Submit External Job
       SAPI-->>SBS: Return Submit Status
     option Job is Pending
       note over SBS: Check again later...
@@ -72,24 +72,24 @@ sequenceDiagram
       note over SBS: Bind Pod(s) to Node(s) from the Slurm Job
       SBS->>KAPI: Bind Pod(s) to Node(s)
       KAPI-->>SBS: Return Bind Request Status
-    end %% Lookup Slurm Placeholder Job
+    end %% Lookup Slurm External Job
   end %% loop Scheduling Loop
 ```
 
-### Placeholder Jobs
+### External Jobs
 
 Slurm-bridge uses Slurm to schedule both Slurm and Kubernetes workloads on the
 same resources. To do this, slurm-bridge must represent Kubernetes workloads as
 a Slurm job that is submitted for the purpose of scheduling. This job is
-referred to as a "placeholder job", as it is only used for scheduling: once a
-placeholder job is allocated resources, the actual execution of the workload is
+referred to as an "external job", as it is only used for scheduling: once an
+external job is allocated resources, the actual execution of the workload is
 handled by the Kubelet.
 
 #### Annotations
 
 Slurm-bridge accepts the following workload types: Jobs, JobSets, Pods,
 PodGroups, and LeaderWorkerSets. Annotations can be set on the workload object
-to change the parameters that are used to submit a placeholder job to Slurm. The
+to change the parameters that are used to submit an external job to Slurm. The
 following table lists some of the available annotations. For a complete list,
 see the [annotations.go] source.
 

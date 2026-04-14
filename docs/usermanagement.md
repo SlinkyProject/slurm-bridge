@@ -18,11 +18,11 @@
 
 ## Overview
 
-Slurm-bridge uses [placeholder jobs](scheduler) to represent Kubernetes
-workloads in Slurm for scheduling purposes. Placeholder jobs are submitted using
-the JWT that is generated when the Slurm-bridge Helm chart is deployed. By
-default, placeholder jobs for Kubernetes workloads are submitted as `SlurmUser`,
-but they may be submitted as another user in Slurm by using the
+Slurm-bridge uses [external jobs](scheduler) to represent Kubernetes workloads
+in Slurm for scheduling purposes. External jobs are submitted using the JWT that
+is generated when the Slurm-bridge Helm chart is deployed. By default, external
+jobs for Kubernetes workloads are submitted as `SlurmUser`, but they may be
+submitted as another user in Slurm by using the
 `slurmjob.slinky.slurm.net/user-id` annotation.
 
 Kubernetes workloads scheduled by Slurm-bridge always run within the user

@@ -115,7 +115,7 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 	return slurmJobIR, err
 }
 
-/* Set CPU and Memory for the placeholder job based on the maximum Pod CPU and Memory (including overhead) */
+/* Set CPU and Memory for the external job based on the maximum Pod CPU and Memory (including overhead) */
 func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	var cpuMax resource.Quantity
 	var memMax resource.Quantity
@@ -146,7 +146,7 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	}
 }
 
-/* Set GRES for the placeholder job to the maximum quantity of GPUs requested */
+/* Set GRES for the external job to the maximum quantity of GPUs requested */
 func parseGPUDevicePlugin(slurmJobIR *SlurmJobIR) {
 	var gres string
 	var gresMax resource.Quantity

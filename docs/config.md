@@ -19,10 +19,10 @@ considerations to be made.
 
 ## Partitions
 
-Slurm bridge placeholder jobs are submitted to a default partition (e.g.
+Slurm bridge external jobs are submitted to a default partition (e.g.
 `slurm-bridge`) in Slurm, or the one specified by
 `slurmjob.slinky.slurm.net/partition` on the workload. Any partition where these
-placeholder jobs are submitted to should only consist of Slurm nodes that map to
+external jobs are submitted to should only consist of Slurm nodes that map to
 Kubernetes nodes, be them nodes with co-located kubelet and slurmd, or
 Kubernetes nodes modeled as Slurm external nodes.
 
