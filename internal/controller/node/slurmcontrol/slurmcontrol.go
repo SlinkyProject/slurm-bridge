@@ -38,6 +38,8 @@ type SlurmControlInterface interface {
 	IsNodeDrain(ctx context.Context, node *corev1.Node) (bool, error)
 	// IsNodeDrained checks if the slurm node is DRAINED and eligible for removal.
 	IsNodeDrained(ctx context.Context, node *corev1.Node) (bool, error)
+	// IsNodeExternal checks if the slurm node is an external node
+	IsNodeExternal(ctx context.Context, node *corev1.Node) (bool, error)
 	// AddNode registers a Kubernetes node in Slurm with the correct CPUs and memory.
 	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) error
 	// NodeNeedsRecreate returns true if the Slurm node exists and its cpu, memory, or gres
@@ -180,6 +182,21 @@ func (r *realSlurmControl) IsNodeDrained(ctx context.Context, node *corev1.Node)
 	isDrain := state.Has(api.V0044NodeStateDRAIN) && !state.Has(api.V0044NodeStateUNDRAIN)
 	isBusy := state.HasAny(api.V0044NodeStateALLOCATED, api.V0044NodeStateMIXED, api.V0044NodeStateCOMPLETING)
 	return isDrain && !isBusy, nil
+}
+
+// IsNodeExternal implements SlurmControlInterface.
+func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node) (bool, error) {
+	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
+	slurmNode := &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, key, slurmNode); err != nil {
+		if tolerateError(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	isNodeExternal := slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL)
+	return isNodeExternal, nil
 }
 
 // NodeNeedsRecreate implements SlurmControlInterface.
