@@ -19,7 +19,7 @@
     {
       "label": "Scale-Down Admission Pods",
       "type": "shell",
-      "command": "kubectl -n slinky scale deployment/slurm-bridge-admission --replicas 0 || true",
+      "command": "kubectl -n slurm scale deployment/slurm-bridge-admission --replicas 0 || true",
       "presentation": {
         "reveal": "always",
         "panel": "shared"
@@ -168,7 +168,7 @@
       "label": "Fetch SLURM_JWT",
       "type": "shell",
       "command": [
-        "export SLURM_JWT=\"$(kubectl --namespace=slinky get secrets slurm-bridge-token -o jsonpath=\"{.data.auth-token}\" | base64 --decode)\" &&",
+        "export SLURM_JWT=\"$(kubectl --namespace=slurm get secrets slurm-bridge-token -o jsonpath=\"{.data.auth-token}\" | base64 --decode)\" &&",
         "echo \"SLURM_JWT=$SLURM_JWT\" >/tmp/slurm-bridge.env"
       ],
       "presentation": {
