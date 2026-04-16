@@ -73,7 +73,6 @@ spec:
   jwtKeyRef:
     name: slurm-auth-jwt
     key: jwt.key
-    namespace: slurm
   secretRef:
     name: slurm-bridge-token
     key: auth-token
