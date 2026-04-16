@@ -62,6 +62,7 @@ func init() {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=delete;get;list;patch;watch
+// +kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch;update
 // +kubebuilder:rbac:groups="",resources=pods/status,verbs=patch;update
 // +kubebuilder:rbac:groups="",resources=bindings,verbs=create
 // +kubebuilder:rbac:groups="",resources=pods/binding,verbs=create
