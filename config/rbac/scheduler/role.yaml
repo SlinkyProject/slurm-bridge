@@ -165,6 +165,7 @@ rules:
 - apiGroups:
   - resource.k8s.io
   resources:
+  - resourceclaims/binding
   - resourceclaims/status
   verbs:
   - patch
