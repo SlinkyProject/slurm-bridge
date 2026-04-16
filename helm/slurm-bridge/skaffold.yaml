@@ -41,5 +41,5 @@ deploy:
           admission.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_admission}}'
           controllers.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_controllers}}'
           controllers.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_controllers}}'
-        namespace: slinky
+        namespace: slurm
         createNamespace: true

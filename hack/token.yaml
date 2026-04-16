@@ -3,7 +3,7 @@ apiVersion: slinky.slurm.net/v1beta1
 kind: Token
 metadata:
   name: slurm-bridge-token
-  namespace: slinky
+  namespace: slurm
 spec:
   jwtKeyRef:
     name: slurm-auth-jwt

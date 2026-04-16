@@ -68,7 +68,7 @@ apiVersion: slinky.slurm.net/v1beta1
 kind: Token
 metadata:
   name: slurm-bridge-token
-  namespace: slinky
+  namespace: slurm
 spec:
   jwtKeyRef:
     name: slurm-auth-jwt
@@ -93,7 +93,7 @@ When running Slurm on baremetal:
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm-bridge
-kubectl create secret generic slurm-bridge-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
 ### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
@@ -119,7 +119,7 @@ variables:
 
 ```bash
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
-  --namespace=slinky --create-namespace
+  --namespace=slurm --create-namespace
 ```
 
 > [!NOTE]
@@ -130,7 +130,7 @@ helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
 You can check if your cluster deployed successfully with:
 
 ```sh
-kubectl --namespace=slinky get pods
+kubectl --namespace=slurm get pods
 ```
 
 Your output should be similar to:
