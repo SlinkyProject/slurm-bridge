@@ -48,10 +48,10 @@ scheduler:
 schedulerConfig:
   # -- Set the name of the scheduler.
   schedulerName: slurm-bridge-scheduler
-  # -- Set the Slurm MCS Label to use for placeholder jobs.
+  # -- Set the Slurm MCS Label to use for external jobs.
   # Ref: https://slurm.schedmd.com/sbatch.html#OPT_mcs-label
   mcsLabel: kubernetes
-  # -- Set the default Slurm partition to use for placeholder jobs.
+  # -- Set the default Slurm partition to use for external jobs.
   # Ref: https://slurm.schedmd.com/sbatch.html#OPT_partition
   partition: slurm-bridge
 

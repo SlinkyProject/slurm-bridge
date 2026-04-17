@@ -435,11 +435,11 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 				},
 				pod: func() *corev1.Pod {
 					p := newPodGroupPod("foo", "foo")
-					p.Labels[wellknown.LabelPlaceholderJobId] = "123"
+					p.Labels[wellknown.LabelExternalJobId] = "123"
 					return p
 				}(),
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorPlaceholderJobInvalid.Error()),
+			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
 		},
 		{
 			name: "Enough pods for minmembers",

@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 
@@ -124,7 +124,7 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 			},
@@ -150,7 +150,7 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 			},
@@ -182,7 +182,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    *map[string]PlaceholderJob
+		want    *map[string]ExternalJob
 		wantErr bool
 	}{
 		{
@@ -196,7 +196,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 			},
-			want:    &map[string]PlaceholderJob{},
+			want:    &map[string]ExternalJob{},
 			wantErr: false,
 		},
 		{
@@ -227,7 +227,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 						Items: []slurmtypes.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -246,7 +246,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 			},
-			want: &map[string]PlaceholderJob{
+			want: &map[string]ExternalJob{
 				"slurm/pod1": {JobId: 1, Nodes: "node1, node2"},
 			},
 			wantErr: false,
@@ -281,7 +281,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    *PlaceholderJob
+		want    *ExternalJob
 		wantErr bool
 	}{
 		{
@@ -300,7 +300,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj(),
 			},
 			want:    nil,
 			wantErr: true,
@@ -313,7 +313,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 						Items: []slurmtypes.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -331,9 +331,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "3"}).Obj(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "3"}).Obj(),
 			},
-			want:    &PlaceholderJob{},
+			want:    &ExternalJob{},
 			wantErr: false,
 		},
 		{
@@ -344,7 +344,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 						Items: []slurmtypes.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -362,9 +362,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj(),
 			},
-			want:    &PlaceholderJob{},
+			want:    &ExternalJob{},
 			wantErr: false,
 		},
 		{
@@ -375,7 +375,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 						Items: []slurmtypes.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/foo"},
 									}
 									return ptr.To(pi.ToString())
@@ -393,9 +393,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			},
 			args: args{
 				ctx: context.Background(),
-				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj(),
 			},
-			want:    &PlaceholderJob{JobId: 1, Nodes: "node1"},
+			want:    &ExternalJob{JobId: 1, Nodes: "node1"},
 			wantErr: false,
 		},
 	}
@@ -435,7 +435,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "Could not submit placeholder job",
+			name: "Could not submit external job",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
@@ -457,7 +457,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "Submit placeholder job",
+			name: "Submit external job",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
@@ -480,7 +480,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Submit placeholder job default exclusive SharedNone",
+			name: "Submit external job default exclusive SharedNone",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
@@ -510,7 +510,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Submit placeholder job slurmJobIR.Exclusive false yields empty Shared (non-exclusive)",
+			name: "Submit external job slurmJobIR.Exclusive false yields empty Shared (non-exclusive)",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
@@ -739,7 +739,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: ""},
+						Labels: map[string]string{wellknown.LabelExternalJobId: ""},
 					},
 				},
 				nodeName: "",
@@ -765,7 +765,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 				nodeName: "",
@@ -791,7 +791,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 				nodeName: "node2",
@@ -827,7 +827,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 				nodeName: "node2",
@@ -875,7 +875,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				ctx: context.Background(),
 				pod: &corev1.Pod{
 					ObjectMeta: v1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelPlaceholderJobId: "1"},
+						Labels: map[string]string{wellknown.LabelExternalJobId: "1"},
 					},
 				},
 				nodeName: "node2",

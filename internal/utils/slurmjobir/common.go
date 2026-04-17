@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrorInsuffientPods        = errors.New("not enough pending pods to create placeholder job")
-	ErrorPlaceholderJobInvalid = errors.New("not enough pending pods for created placeholder job")
+	ErrorInsuffientPods     = errors.New("not enough pending pods to create external job")
+	ErrorExternalJobInvalid = errors.New("not enough pending pods for created external job")
 )
 
 func ConvStrTo32(input string) (output *int32, err error) {

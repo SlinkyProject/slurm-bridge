@@ -26,13 +26,13 @@
 This document describes the high-level architecture of the Slinky
 `slurm-bridge`.
 
-A pod scheduled by `slurm-bridge` will coordinate with Slurm to schedule a
-placeholder job to represent the pod workload. The placeholder job uses the
-external job capability in Slurm 25.05. An external Slurm job will be operate
-like any other job in Slurm, with the exception that an external job will be
-launched by something other than Slurm. In the case of `slurm-bridge`, the
-placeholder job will determine where and when a pod run, but `kubelet` will
-launch the pod instead of `slurmd`.
+A pod scheduled by `slurm-bridge` will coordinate with Slurm to schedule an
+external job to represent the pod workload. The external job uses the external
+job capability in Slurm 25.05. An external Slurm job will operate like any other
+job in Slurm, with the exception that an external job will be launched by
+something other than Slurm. In the case of `slurm-bridge`, the external job will
+determine where and when a pod runs, but `kubelet` will launch the pod instead
+of `slurmd`.
 
 ## Pod Flowchart
 
@@ -44,9 +44,9 @@ the following sequence:
 1. A pod is applied to a configured `slurm-bridge` namespace.
 1. The pod is sent to the `slurm-bridge` admission webhook.
 1. The `slurm-bridge` scheduler begins placement of pod.
-1. `slurm-bridge` coordinates with Slurm to create a “placeholder job”.
-1. The placeholder job is scheduled to `node1`.
-1. `slurm-bridge` determines the placeholder job has started on `node1`.
+1. `slurm-bridge` coordinates with Slurm to create an “external job”.
+1. The external job is scheduled to `node1`.
+1. `slurm-bridge` determines the external job has started on `node1`.
 1. The scheduler binds the pod to `node1`.
 1. kubelet starts the pod on `node1`.
 
@@ -104,7 +104,7 @@ and enforces policy on labels and annotations used by the Slurm scheduler.
 Contains the node and pod controllers.
 
 The pod controller syncs the state of pods running in Kubernetes with the
-associated placeholder job managed by Slurm, and vice versa. Similarly, the node
+associated external job managed by Slurm, and vice versa. Similarly, the node
 controller syncs node states between Kubernetes and Slurm.
 
 ### `internal/scheduler/`

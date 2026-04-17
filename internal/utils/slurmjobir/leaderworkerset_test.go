@@ -110,7 +110,7 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
 		},
 		{
-			name: "Invalid state with placeholder and insufficient pods",
+			name: "Invalid state with external job and insufficient pods",
 			fields: fields{
 				Reader: func() client.Client {
 					scheme := runtime.NewScheme()
@@ -134,13 +134,13 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							lwsv1.GroupUniqueHashLabelKey:   "lws",
-							wellknown.LabelPlaceholderJobId: "1",
+							lwsv1.GroupUniqueHashLabelKey: "lws",
+							wellknown.LabelExternalJobId:  "1",
 						},
 					},
 				},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorPlaceholderJobInvalid.Error()),
+			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
 		},
 		{
 			name: "group has enough pods",

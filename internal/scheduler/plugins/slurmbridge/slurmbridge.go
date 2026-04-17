@@ -42,7 +42,7 @@ import (
 )
 
 var (
-	ErrorNoKubeNode           = errors.New("no more placeholder nodes to annotate pods")
+	ErrorNoKubeNode           = errors.New("no more external nodes to annotate pods")
 	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed      = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
@@ -166,10 +166,10 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 	return fwk.NewStatus(fwk.Success)
 }
 
-// PreFilter will check if a Slurm placeholder job has been created for the pod.
-// If a placeholder job is not found, create one and return the pod to the scheduling
+// PreFilter will check if a Slurm external job has been created for the pod.
+// If an external job is not found, create one and return the pod to the scheduling
 // queue.
-// If a placeholder job is found, determine which node(s) have been assigned to the
+// If an external job is found, determine which node(s) have been assigned to the
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
 func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
@@ -189,25 +189,25 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	// Construct an intermediate representation of the Slurm placeholder job
+	// Construct an intermediate representation of the Slurm external job
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, ctx, pod)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	// If a placeholderJob exists and a node has been allocated, return immediately
-	// as another pod has determined the placeholder job is running and assigned
+	// If an externalJob exists and a node has been allocated, return immediately
+	// as another pod has determined the external job is running and assigned
 	// a node to this pod.
-	node := pod.Annotations[wellknown.AnnotationPlaceholderNode]
-	if pod.Labels[wellknown.LabelPlaceholderJobId] != "" &&
+	node := pod.Annotations[wellknown.AnnotationExternalJobNode]
+	if pod.Labels[wellknown.LabelExternalJobId] != "" &&
 		node != "" {
 		phNode := make(sets.Set[string])
 		phNode.Insert(node)
 		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
 	}
 
-	// Determine if a placeholder job for the pod exists in Slurm
-	placeholderJob, err := sb.slurmControl.GetJob(ctx, pod)
+	// Determine if an external job for the pod exists in Slurm
+	externalJob, err := sb.slurmControl.GetJob(ctx, pod)
 	if err != nil {
 		logger.Error(err, "error checking for Slurm job")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
@@ -216,12 +216,12 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	// Perform resource specific PreFilter
 	fs := slurmjobir.PreFilter(sb.Client, ctx, pod, s.slurmJobIR)
 	if fs.Code() != fwk.Success {
-		// If the placeholderjob is determined to no longer be valid
-		// delete the placeholder job and remove the associated annotations
+		// If the external job is determined to no longer be valid
+		// delete the external job and remove the associated annotations
 		for _, r := range fs.Reasons() {
-			if r == slurmjobir.ErrorPlaceholderJobInvalid.Error() {
-				logger.Error(err, "placeholder Job no longer valid, deleting job")
-				err := sb.deletePlaceholderJob(ctx, pod)
+			if r == slurmjobir.ErrorExternalJobInvalid.Error() {
+				logger.Error(err, "external job no longer valid, deleting job")
+				err := sb.deleteExternalJob(ctx, pod)
 				if err != nil {
 					return nil, fwk.NewStatus(fwk.Error, err.Error())
 				}
@@ -230,27 +230,27 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		return nil, fs
 	}
 
-	// If a placeholder job does not exist, this plugin should return as a success
+	// If an external job does not exist, this plugin should return as a success
 	// with no PreFilterResult. Because Filter will ultimately detect that slurm
 	// has not scheduled any nodes to the pods (no node annotation), the PostFilter
-	// plugin will be invoked. The placeholder job will then be created in the
-	// PostFilter plugin stage. If a placeholder job exists and is running, update
+	// plugin will be invoked. The external job will then be created in the
+	// PostFilter plugin stage. If an external job exists and is running, update
 	// pods with node assignments.
-	if placeholderJob.JobId == 0 {
+	if externalJob.JobId == 0 {
 		return nil, fwk.NewStatus(fwk.Success)
 	} else {
-		logger.V(4).Info("placeholder job exists")
-		if placeholderJob.Nodes == "" {
-			logger.V(4).Info("placeholder job exists but no nodes have been allocated")
+		logger.V(4).Info("external job exists")
+		if externalJob.Nodes == "" {
+			logger.V(4).Info("external job exists but no nodes have been allocated")
 			return nil, fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error())
 		}
-		// The placeholder job is running. Assign nodes to pods.
-		slurmNodes, _ := hostlist.Expand(placeholderJob.Nodes)
+		// The external job is running. Assign nodes to pods.
+		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		err = sb.annotatePodsWithNodes(ctx, placeholderJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
+		err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
@@ -259,14 +259,14 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		// By passing the list of nodes in the placeholder job as PreFilterResult,
+		// By passing the list of nodes in the external job as PreFilterResult,
 		// Filter plugins will only run for nodes in the Slurm job. This is the final
 		// PreFilter step that must occur before pods are allowed to run.
 		return &fwk.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
 	}
 }
 
-// PostFilter will create the Slurm placeholder job once the pod has been
+// PostFilter will create the Slurm external job once the pod has been
 // processed by the PreFilter and Filter plugins. This allows the rest of
 // the kubernetes plugins to have a say in which pods would be feasible for
 // Slurm to schedule the pod(s) on.
@@ -278,14 +278,14 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	// Determine if a placeholder job for the pod exists in Slurm
-	placeholderJob, err := sb.slurmControl.GetJob(ctx, pod)
+	// Determine if an external job for the pod exists in Slurm
+	externalJob, err := sb.slurmControl.GetJob(ctx, pod)
 	if err != nil {
 		logger.Error(err, "error checking for Slurm job")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 
-	// Create the Slurm placeholder job based on the nodes that have
+	// Create the Slurm external job based on the nodes that have
 	// not been filtered out by Filter plugins. Because the SlurmBridge
 	// Filter plugin runs last, and will fail if the node annotation does
 	// not match, a failure from SlurmBridge means none of the other
@@ -316,9 +316,9 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
-	// If no placeholder job exists, we should create one with the list
+	// If no external job exists, we should create one with the list
 	// of nodes that passed Filter plugins.
-	if placeholderJob.JobId == 0 {
+	if externalJob.JobId == 0 {
 		jobid, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
 			aggErrors := func() utilerrors.Aggregate {
@@ -328,14 +328,14 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 			}().Errors()
 			for _, e := range aggErrors {
 				if strings.ToLower(e.Error()) == ErrorNodeConfigInvalid.Error() {
-					logger.Error(err, "invalid node configuration for placeholder job")
+					logger.Error(err, "invalid node configuration for external job")
 					return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, e.Error())
 				}
 			}
 			logger.Error(err, "error submitting Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
-		logger.V(5).Info("submitted placeholder to slurm", "pod", klog.KObj(pod))
+		logger.V(5).Info("submitted external job to slurm", "pod", klog.KObj(pod))
 		err = sb.labelPodsWithJobId(ctx, jobid, s.slurmJobIR)
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
@@ -343,10 +343,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
-	logger.V(4).Info("placeholder job exists")
-	if placeholderJob.Nodes == "" {
-		logger.V(4).Info("placeholder job exists but no nodes have been allocated")
-		// As the placeholder job is not yet running, update to the job
+	logger.V(4).Info("external job exists")
+	if externalJob.Nodes == "" {
+		logger.V(4).Info("external job exists but no nodes have been allocated")
+		// As the external job is not yet running, update to the job
 		// to include any changes from slurmJobIR.
 		jobid, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
@@ -368,7 +368,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
-// PreBindPreFlight will check if any GRES was requested for the placeholder job
+// PreBindPreFlight will check if any GRES was requested for the external job
 func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
 	return nil
 }
@@ -402,11 +402,11 @@ func (sb *SlurmBridge) labelPodsWithJobId(ctx context.Context, jobid int32, slur
 		if p.Labels == nil {
 			p.Labels = make(map[string]string)
 		}
-		if p.Labels[wellknown.LabelPlaceholderJobId] == string(jobid) {
+		if p.Labels[wellknown.LabelExternalJobId] == string(jobid) {
 			continue
 		}
 		toUpdate := p.DeepCopy()
-		toUpdate.Labels[wellknown.LabelPlaceholderJobId] = strconv.Itoa(int(jobid))
+		toUpdate.Labels[wellknown.LabelExternalJobId] = strconv.Itoa(int(jobid))
 		toUpdate.Finalizers = append(toUpdate.Finalizers, wellknown.FinalizerScheduler)
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")
@@ -426,10 +426,10 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 			break
 		}
 		// If this pod doesn't have a JobId that matches, it should be skipped as
-		// it didn't exist when the placeholder job was created
-		podJobID := slurmjobir.ParseSlurmJobId(p.Labels[wellknown.LabelPlaceholderJobId])
+		// it didn't exist when the external job was created
+		podJobID := slurmjobir.ParseSlurmJobId(p.Labels[wellknown.LabelExternalJobId])
 		if jobid != podJobID {
-			logger.V(5).Info("pod JobID does not match placeholder JobID")
+			logger.V(5).Info("pod JobID does not match external JobID")
 			continue
 		}
 		if p.Annotations == nil {
@@ -441,7 +441,7 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 			return ErrorNoKubeNode
 		}
 		toUpdate := p.DeepCopy()
-		toUpdate.Annotations[wellknown.AnnotationPlaceholderNode] = node
+		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = node
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")
 			return ErrorPodUpdateFailed
@@ -486,29 +486,29 @@ func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string
 	return kubeNodes, nil
 }
 
-// revertPlaceholderJob will delete the placeholder job associate with the pod
+// deleteExternalJob will delete the external job associated with the pod
 // and remove any annotations for pods in slurmJobIR that have a matching JobID.
-func (sb *SlurmBridge) deletePlaceholderJob(ctx context.Context, pod *corev1.Pod) error {
+func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
-	// Construct an intermediate representation of the Slurm placeholder job
+	// Construct an intermediate representation of the Slurm external job
 	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, ctx, pod)
 	if err != nil {
 		logger.Error(err, "failed to translate to slurmjobir")
 		return err
 	}
-	jobId := pod.Labels[wellknown.LabelPlaceholderJobId]
+	jobId := pod.Labels[wellknown.LabelExternalJobId]
 	if err := sb.slurmControl.DeleteJob(ctx, pod); err != nil {
 		logger.Error(err, "failed to delete Slurm job for pod", "jobId", jobId, "pod", klog.KObj(pod))
 		return err
 	}
 	for _, p := range slurmJobIR.Pods.Items {
 		toUpdate := p.DeepCopy()
-		if toUpdate.Labels[wellknown.LabelPlaceholderJobId] == "" {
+		if toUpdate.Labels[wellknown.LabelExternalJobId] == "" {
 			continue
 		}
-		if toUpdate.Labels[wellknown.LabelPlaceholderJobId] == jobId {
-			delete(toUpdate.Labels, wellknown.LabelPlaceholderJobId)
-			delete(toUpdate.Annotations, wellknown.AnnotationPlaceholderNode)
+		if toUpdate.Labels[wellknown.LabelExternalJobId] == jobId {
+			delete(toUpdate.Labels, wellknown.LabelExternalJobId)
+			delete(toUpdate.Annotations, wellknown.AnnotationExternalJobNode)
 		}
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
 			logger.Error(err, "failed to delete jobid and node annotation")
@@ -530,7 +530,7 @@ func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo fwk.NodeInfo) *fwk.Status {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("filter func", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
-	if pod.Annotations[wellknown.AnnotationPlaceholderNode] == nodeInfo.Node().Name {
+	if pod.Annotations[wellknown.AnnotationExternalJobNode] == nodeInfo.Node().Name {
 		return fwk.NewStatus(fwk.Success, "")
 	}
 	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
@@ -551,21 +551,21 @@ func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) er
 	if val, ok := (*podToJob)[namespacedName.String()]; ok {
 		toUpdate := pod.DeepCopy()
 		// If the pod has a JobId set, validate it against podToJob
-		if pod.Labels[wellknown.LabelPlaceholderJobId] != "" &&
-			val.JobId != slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelPlaceholderJobId]) {
+		if pod.Labels[wellknown.LabelExternalJobId] != "" &&
+			val.JobId != slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]) {
 			logger.V(3).Info("Pod jobId label does not match Slurm", "pod", klog.KObj(pod),
-				"jobId label", pod.Labels[wellknown.LabelPlaceholderJobId],
+				"jobId label", pod.Labels[wellknown.LabelExternalJobId],
 				"slurm job", val)
-			toUpdate.Labels[wellknown.LabelPlaceholderJobId] = strconv.Itoa(int(val.JobId))
+			toUpdate.Labels[wellknown.LabelExternalJobId] = strconv.Itoa(int(val.JobId))
 		}
 		// If the pod has a Node set, validate it against podToJob
 		nodes, _ := hostlist.Expand(val.Nodes)
-		if pod.Annotations[wellknown.AnnotationPlaceholderNode] != "" &&
-			!slices.Contains(nodes, pod.Annotations[wellknown.AnnotationPlaceholderNode]) {
+		if pod.Annotations[wellknown.AnnotationExternalJobNode] != "" &&
+			!slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode]) {
 			logger.V(3).Info("Pod node annotation does not match Slurm nodes", "pod", klog.KObj(pod),
-				"node annotation", pod.Annotations[wellknown.AnnotationPlaceholderNode],
+				"node annotation", pod.Annotations[wellknown.AnnotationExternalJobNode],
 				"slurm job", val)
-			toUpdate.Annotations[wellknown.AnnotationPlaceholderNode] = ""
+			toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = ""
 		}
 		if !reflect.DeepEqual(pod, toUpdate) {
 			if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
@@ -573,8 +573,8 @@ func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) er
 				return ErrorPodUpdateFailed
 			}
 			// Update pod to reflect patch
-			pod.Labels[wellknown.LabelPlaceholderJobId] = toUpdate.Labels[wellknown.LabelPlaceholderJobId]
-			pod.Annotations[wellknown.AnnotationPlaceholderNode] = toUpdate.Annotations[wellknown.AnnotationPlaceholderNode]
+			pod.Labels[wellknown.LabelExternalJobId] = toUpdate.Labels[wellknown.LabelExternalJobId]
+			pod.Annotations[wellknown.AnnotationExternalJobNode] = toUpdate.Annotations[wellknown.AnnotationExternalJobNode]
 		}
 	}
 	return nil

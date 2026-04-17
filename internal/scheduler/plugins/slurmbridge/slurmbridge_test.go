@@ -10,7 +10,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -183,7 +183,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		framework.NewNodeInfo(),
 	}
 	nodeInfo[0].SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
+	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
@@ -227,7 +227,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -249,9 +249,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				ctx:   context.Background(),
 				state: framework.NewCycleState(),
 				pod: st.MakePod().Name("pod1").Annotations(map[string]string{
-					wellknown.AnnotationPlaceholderNode: "node1",
+					wellknown.AnnotationExternalJobNode: "node1",
 				}).Labels(map[string]string{
-					wellknown.LabelPlaceholderJobId: "1"}).
+					wellknown.LabelExternalJobId: "1"}).
 					Obj(),
 			},
 			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
@@ -283,7 +283,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Error, ErrorNodeConfigInvalid.Error()),
 		},
 		{
-			name: "Placeholder job exists but nodes are not assigned",
+			name: "External job exists but nodes are not assigned",
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
@@ -291,7 +291,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -318,7 +318,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error()),
 		},
 		{
-			name: "Placeholder job exists but nodes don't match",
+			name: "External job exists but nodes don't match",
 			fields: fields{
 				client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -329,7 +329,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -356,7 +356,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Error, ErrorNoKubeNodeMatch.Error()),
 		},
 		{
-			name: "Placeholder job exists",
+			name: "External job exists",
 			fields: fields{
 				client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -375,7 +375,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -427,7 +427,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 
 func TestSlurmBridge_PostFilter(t *testing.T) {
 	ctx := context.Background()
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
+	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
@@ -530,7 +530,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
-			name: "Creating a placeholder fails with invalid node config",
+			name: "Creating an external job fails with invalid node config",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -570,7 +570,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorNodeConfigInvalid.Error()),
 		},
 		{
-			name: "Creating a placeholder fails",
+			name: "Creating an external job fails",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -610,7 +610,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Error, ErrorPodUpdateFailed.Error()),
 		},
 		{
-			name: "Creating a placeholder succeeds",
+			name: "Creating an external job succeeds",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -644,7 +644,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
-			name: "Updating a placeholder succeeds",
+			name: "Updating an external job succeeds",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -658,7 +658,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 								JobId: ptr.To(int32(1)),
 								Nodes: ptr.To(""),
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -692,7 +692,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error()),
 		},
 		{
-			name: "Updating a placeholder fails",
+			name: "Updating an external job fails",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -711,7 +711,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 								JobId: ptr.To(int32(1)),
 								Nodes: ptr.To(""),
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -806,7 +806,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 	ctx := context.Background()
 	nodeInfo := framework.NewNodeInfo()
 	nodeInfo.SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
-	podWithAnnotation := st.MakePod().Name("foo").Annotations(map[string]string{wellknown.AnnotationPlaceholderNode: "node1"}).Obj()
+	podWithAnnotation := st.MakePod().Name("foo").Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
 	podWithoutAnnotation := st.MakePod().Name("foo").Obj()
 	type fields struct {
 		client       kubeclient.Client
@@ -873,10 +873,10 @@ func TestSlurmBridge_Filter(t *testing.T) {
 	}
 }
 
-func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
+func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 	pod := st.MakePod().Name("pod1").Annotations(
-		map[string]string{wellknown.AnnotationPlaceholderNode: "node1"}).Labels(
-		map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
+		map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Labels(
+		map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
@@ -921,7 +921,7 @@ func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "Placeholder job is deleted",
+			name: "External job is deleted",
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
@@ -953,15 +953,15 @@ func TestSlurmBridge_deletePlaceholderJob(t *testing.T) {
 				slurmControl: tt.fields.slurmControl,
 				handle:       tt.fields.handle,
 			}
-			if err := sb.deletePlaceholderJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
-				t.Errorf("SlurmBridge.deletePlaceholderJob() error = %v, wantErr %v", err, tt.wantErr)
+			if err := sb.deleteExternalJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
+				t.Errorf("SlurmBridge.deleteExternalJob() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
 func TestSlurmBridge_validatePodToJob(t *testing.T) {
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelPlaceholderJobId: "1"}).Obj()
+	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	type fields struct {
 		Client       kubeclient.Client
 		slurmControl slurmcontrol.SlurmControlInterface
@@ -1011,7 +1011,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -1044,7 +1044,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -1077,7 +1077,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 						Items: []types.V0044JobInfo{
 							{V0044JobInfo: api.V0044JobInfo{
 								AdminComment: func() *string {
-									pi := placeholderinfo.PlaceholderInfo{
+									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
@@ -1098,17 +1098,17 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				ctx: context.TODO(),
 				pod: func() *corev1.Pod {
 					pod.Annotations = map[string]string{
-						wellknown.AnnotationPlaceholderNode: "node2",
+						wellknown.AnnotationExternalJobNode: "node2",
 					}
 					return pod.DeepCopy()
 				}(),
 			},
 			want: func() *corev1.Pod {
 				pod.Annotations = map[string]string{
-					wellknown.AnnotationPlaceholderNode: "",
+					wellknown.AnnotationExternalJobNode: "",
 				}
 				pod.Labels = map[string]string{
-					wellknown.LabelPlaceholderJobId: "2",
+					wellknown.LabelExternalJobId: "2",
 				}
 				return pod.DeepCopy()
 			}(),

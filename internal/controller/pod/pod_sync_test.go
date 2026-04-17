@@ -26,12 +26,12 @@ import (
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-func newPlaceholderInfo(name string) *placeholderinfo.PlaceholderInfo {
-	return &placeholderinfo.PlaceholderInfo{
+func newExternalJobInfo(name string) *externaljobinfo.ExternalJobInfo {
+	return &externaljobinfo.ExternalJobInfo{
 		Pods: []string{name},
 	}
 }
@@ -44,7 +44,7 @@ func newPod(name string, jobId int32) *corev1.Pod {
 			Labels: func() map[string]string {
 				if jobId != 0 {
 					return map[string]string{
-						wellknown.LabelPlaceholderJobId: strconv.Itoa(int(jobId)),
+						wellknown.LabelExternalJobId: strconv.Itoa(int(jobId)),
 					}
 				}
 				return nil
@@ -102,14 +102,14 @@ var _ = Describe("syncKubernetes()", func() {
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To(jobId),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
+						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 					},
 				},
 				{
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
+						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 					},
 				},
 			},
@@ -177,14 +177,14 @@ var _ = Describe("syncSlurm()", func() {
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To(jobId),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
+						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 					},
 				},
 				{
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
+						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 					},
 				},
 			},
@@ -198,7 +198,7 @@ var _ = Describe("syncSlurm()", func() {
 						Namespace: metav1.NamespaceDefault,
 						Name:      "bar",
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "2",
+							wellknown.LabelExternalJobId: "2",
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -277,7 +277,7 @@ var _ = Describe("syncSlurm()", func() {
 						V0044JobInfo: api.V0044JobInfo{
 							JobId:        ptr.To(jobId),
 							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-							AdminComment: ptr.To(newPlaceholderInfo("foo-terminal").ToString()),
+							AdminComment: ptr.To(newExternalJobInfo("foo-terminal").ToString()),
 						},
 					},
 				},
@@ -344,14 +344,14 @@ var _ = Describe("Sync()", func() {
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To(jobId),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo(podName).ToString()),
+						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 					},
 				},
 				{
 					V0044JobInfo: api.V0044JobInfo{
 						JobId:        ptr.To[int32](2),
 						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newPlaceholderInfo("bar").ToString()),
+						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 					},
 				},
 			},
@@ -434,7 +434,7 @@ var _ = Describe("prepareTerminalPod()", func() {
 						Namespace: metav1.NamespaceDefault,
 						Name:      podName,
 						Labels: map[string]string{
-							wellknown.LabelPlaceholderJobId: "1",
+							wellknown.LabelExternalJobId: "1",
 						},
 						Finalizers: []string{wellknown.FinalizerScheduler},
 					},
