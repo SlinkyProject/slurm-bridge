@@ -137,3 +137,4 @@ values-*.yaml
 *debug_bin*
 *.yaml.debug
 hack/kubectl-kjob
+bake-metadata.json
