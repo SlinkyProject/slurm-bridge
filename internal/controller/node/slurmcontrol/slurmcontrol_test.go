@@ -438,6 +438,93 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 	}
 }
 
+func Test_realSlurmControl_IsNodeExternal(t *testing.T) {
+	type fields struct {
+		Client slurmclient.Client
+	}
+	type args struct {
+		ctx  context.Context
+		node *corev1.Node
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    bool
+		wantErr bool
+	}{
+		{
+			name: "not found",
+			fields: func() fields {
+				return fields{
+					Client: fake.NewFakeClient(),
+				}
+			}(),
+			args: args{
+				ctx:  context.TODO(),
+				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "not external",
+			fields: func() fields {
+				node := &types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
+					},
+				}
+				return fields{
+					Client: fake.NewClientBuilder().WithObjects(node).Build(),
+				}
+			}(),
+			args: args{
+				ctx:  context.TODO(),
+				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "is external",
+			fields: func() fields {
+				node := &types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:  ptr.To("node-0"),
+						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateEXTERNAL}),
+					},
+				}
+				return fields{
+					Client: fake.NewClientBuilder().WithObjects(node).Build(),
+				}
+			}(),
+			args: args{
+				ctx:  context.TODO(),
+				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
+			},
+			want:    true,
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &realSlurmControl{
+				Client: tt.fields.Client,
+			}
+			got, err := r.IsNodeExternal(tt.args.ctx, tt.args.node)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("realSlurmControl.IsNodeExternal() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("realSlurmControl.IsNodeExternal() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 	ctx := context.Background()
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}}

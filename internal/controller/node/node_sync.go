@@ -245,8 +245,17 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			return err
 		}
 	} else {
-		if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+		isExternal, err := r.slurmControl.IsNodeExternal(ctx, node)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
 			return err
+		}
+		if isExternal {
+			if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -257,13 +266,6 @@ func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req 
 	logger := log.FromContext(ctx)
 
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
-	exists, err := r.slurmControl.NodeExists(ctx, node)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
 
 	reason := fmt.Sprintf("slurm-bridge: removing external node %s", slurmNodeName)
 	if err := r.slurmControl.MakeNodeDrain(ctx, node, reason); err != nil {
