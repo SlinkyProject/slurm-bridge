@@ -38,7 +38,7 @@ rules:
   resources: ["bindings", "pods/binding"]
   verbs: ["create"]
 - apiGroups: [""]
-  resources: ["pods/status"]
+  resources: ["pods/finalizers", "pods/status"]
   verbs: ["patch", "update"]
 - apiGroups: [""]
   resources: ["replicationcontrollers", "services"]

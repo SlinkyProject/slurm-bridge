@@ -58,6 +58,8 @@ func init() {
 	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
 }
 
+// +kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch;update
+
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {
 	client.Client
