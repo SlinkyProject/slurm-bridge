@@ -17,6 +17,7 @@
 *.swo
 bin/*
 build-docs/*
+govulncheck-vulns.csv
 
 # Test binary, built with `go test -c`
 *.test
