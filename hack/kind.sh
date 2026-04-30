@@ -118,33 +118,9 @@ function slurm-bridge::install() {
 }
 
 function slurm-bridge::prerequisites() {
-	local chartName
-
-	# enables podgroup
-	chartName="scheduler-plugins"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing scheduler-plugins..."
-		helm install --repo https://scheduler-plugins.sigs.k8s.io "$chartName" "$chartName" \
-			--namespace "$chartName" --create-namespace \
-			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
-	fi
-
-	chartName="jobset"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing jobset..."
-		local version="v0.8.x"
-		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
-			--namespace "${chartName}-system" --create-namespace
-	fi
-
-	chartName="lws"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.8.x"
-		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
-			--version "$version" \
-			--namespace "${chartName}-system" --create-namespace
-	fi
+	scheduler-plugins::install
+	jobset::install
+	lws::install
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm::install
@@ -153,17 +129,49 @@ function slurm-bridge::prerequisites() {
 	kubectl create namespace slurm-bridge || true
 }
 
-function slurm::prerequisites() {
-	helm repo add jetstack https://charts.jetstack.io
-	helm repo update
-
+function scheduler-plugins::install() {
 	local chartName
+	chartName="scheduler-plugins"
+	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing scheduler-plugins..."
+		helm install "$chartName" "$chartName" \
+			--repo https://scheduler-plugins.sigs.k8s.io \
+			--namespace "$chartName" --create-namespace \
+			--set 'plugins.enabled={CoScheduling}' \
+			--set 'scheduler.replicaCount=0'
+	fi
+}
 
+function jobset::install() {
+	local chartName
+	chartName="jobset"
+	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing jobset..."
+		local version="v0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset \
+			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function lws::install() {
+	local chartName
+	chartName="lws"
+	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
+		local version="0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
+			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function slurm::prerequisites() {
+	local chartName
 	chartName="cert-manager"
 	if ! helm::find "$chartName"; then
 		echo "[slurm] Installing cert-manager..."
-		helm install "$chartName" jetstack/cert-manager \
-			--namespace "$chartName" --create-namespace --set crds.enabled=true
+		helm install "$chartName" oci://quay.io/jetstack/charts/cert-manager \
+			--namespace "$chartName" --create-namespace \
+			--set 'crds.enabled=true'
 	fi
 }
 
@@ -177,7 +185,8 @@ function slurm::install() {
 	if ! helm::find "$chartName"; then
 		echo "[slurm] Installing slurm-operator..."
 		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
-			--version="$version" --namespace=slinky --create-namespace --wait \
+			--version "$version" --namespace slinky --create-namespace \
+			--wait \
 			--set 'crds.enabled=true'
 	fi
 	# Wait for webhook to be ready so slurm chart install does not hit "connection refused"
@@ -187,7 +196,8 @@ function slurm::install() {
 	chartName="slurm"
 	if ! helm::find "$chartName"; then
 		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
-			--version="$version" --namespace=slurm --create-namespace --wait \
+			--version "$version" --namespace slurm --create-namespace \
+			--wait \
 			--set "nodesets.slinky.enabled=false" \
 			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
 			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
@@ -204,14 +214,15 @@ function extras::install() {
 	chartName="metrics-server"
 	if ! helm::find "$chartName"; then
 		helm install "$chartName" metrics-server/metrics-server \
-			--set args="{--kubelet-insecure-tls}" \
-			--namespace "$chartName" --create-namespace
+			--namespace "$chartName" --create-namespace \
+			--set args="{--kubelet-insecure-tls}"
 	fi
 
 	chartName="prometheus"
 	if ! helm::find "$chartName"; then
 		helm install "$chartName" prometheus-community/kube-prometheus-stack \
-			--namespace "$chartName" --create-namespace --set installCRDs=true \
+			--namespace "$chartName" --create-namespace \
+			--set installCRDs=true \
 			--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
 	fi
 
