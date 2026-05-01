@@ -123,7 +123,7 @@ function slurm-bridge::prerequisites() {
 	lws::install
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
-	slurm::install
+	slurm-stack::install
 	echo "[slurm-bridge] Creating slurm-bridge secret and namespace..."
 	slurm-bridge::secret
 	kubectl create namespace slurm-bridge || true
@@ -164,7 +164,7 @@ function lws::install() {
 	fi
 }
 
-function slurm::prerequisites() {
+function slurm-stack::prerequisites() {
 	local chartName
 	chartName="cert-manager"
 	if ! helm::find "$chartName"; then
@@ -175,32 +175,80 @@ function slurm::prerequisites() {
 	fi
 }
 
-function slurm::install() {
-	slurm::prerequisites
+function slurm-stack::install() {
+	local operator_path
+	local ref="$OPT_SLURM_OPERATOR_REF"
+	local repo="https://github.com/SlinkyProject/slurm-operator.git"
 
-	local chartName
-	local version="~1.1.0-rc1"
+	slurm-stack::prerequisites
 
-	chartName="slurm-operator"
-	if ! helm::find "$chartName"; then
-		echo "[slurm] Installing slurm-operator..."
-		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
-			--version "$version" --namespace slinky --create-namespace \
-			--wait \
-			--set 'crds.enabled=true'
+	if ! helm::find slurm-operator-crds && { helm::find slurm-operator || helm::find slurm; }; then
+		echo "[slurm] Existing OCI Slurm installs cannot be switched to source installs." >&2
+		echo "[slurm] Delete the existing slurm/slurm-operator releases or recreate the kind cluster." >&2
+		exit 1
 	fi
 
-	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null
+	operator_path="$(mktemp -d)"
+	echo "[slurm] Cloning slurm-operator ${ref} to ${operator_path}..."
+	git clone -b "$ref" "$repo" "$operator_path"
 
-	chartName="slurm"
-	if ! helm::find "$chartName"; then
-		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
-			--version "$version" --namespace slurm --create-namespace \
-			--wait \
-			--set "nodesets.slinky.enabled=false" \
-			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
-			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
-	fi
+	make -C "$operator_path" values-dev
+	slurm-operator-crds::install_from_source "$operator_path"
+	slurm-operator::install_from_source "$operator_path"
+	slurm::install_from_source "$operator_path"
+
+	slurm::configure_for_bridge "$operator_path/helm/slurm"
+}
+
+function slurm-operator-crds::install_from_source() {
+	local operator_path="$1"
+
+	echo "[slurm] Installing slurm-operator CRDs..."
+	(
+		cd "$operator_path/helm/slurm-operator-crds"
+		skaffold run
+	)
+}
+
+function slurm-operator::install_from_source() {
+	local operator_path="$1"
+	slurm-operator-crds::install_from_source "$operator_path"
+
+	echo "[slurm] Installing slurm-operator..."
+	(
+		cd "$operator_path/helm/slurm-operator"
+		skaffold run
+	)
+	slurm-operator::wait
+}
+
+function slurm-operator::wait() {
+	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
+		-n slinky --timeout=120s
+}
+
+function slurm::install_from_source() {
+	local operator_path="$1"
+
+	echo "[slurm] Installing Slurm..."
+	(
+		cd "$operator_path/helm/slurm"
+		skaffold run
+	)
+}
+
+function slurm::configure_for_bridge() {
+	local chart="$1"
+	local chartName="slurm"
+
+	echo "[slurm] Configuring Slurm for slurm-bridge..."
+	helm upgrade "$chartName" "$chart" \
+		--namespace slurm --create-namespace \
+		--reuse-values \
+		--wait \
+		--set "nodesets.slinky.enabled=false" \
+		--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
+		--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
 }
 
 function extras::install() {
@@ -310,7 +358,8 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--bridge] [--kjob] [--dra-example-driver] [--dra-driver-cpu] [--all]
+	        [--extras] [--bridge] [--slurm-operator-ref=REF] [--kjob]
+	        [--dra-example-driver] [--dra-driver-cpu] [--all]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 OPTIONS:
@@ -319,6 +368,8 @@ OPTIONS:
 	--delete            Delete the Kind cluster and exit.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--bridge            Install slurm-bridge
+	--slurm-operator-ref=REF
+	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
@@ -371,9 +422,10 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
+OPT_SLURM_OPERATOR_REF="v1.1.0"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-ref:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -397,6 +449,14 @@ while :; do
 	--bridge)
 		OPT_BRIDGE=true
 		shift
+		;;
+	--slurm-operator-ref)
+		OPT_SLURM_OPERATOR_REF="$2"
+		if [ -z "$OPT_SLURM_OPERATOR_REF" ]; then
+			echo "--slurm-operator-ref requires a non-empty REF" >&2
+			exit 1
+		fi
+		shift 2
 		;;
 	--extras)
 		OPT_EXTRAS=true
