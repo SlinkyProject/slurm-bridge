@@ -289,7 +289,7 @@ run-docs: build-docs ## Run the container image for docs development
 
 .PHONY: clean
 clean: ## Clean files.
-	@ chmod -R -f u+w bin/ || true # make test installs files without write permissions.
+	- @ chmod -R -f u+w $(LOCALBIN) || true # make test installs files without write permissions.
 	rm -rf bin/
 	rm -rf vendor/
 	rm -f cover.out cover.html cover.out.tmp
