@@ -355,7 +355,9 @@ CODECOV_PERCENT ?= 70
 .PHONY: test
 test: fmt vet envtest ## Run tests.
 	rm -f cover.out cover.html
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	$(eval ENVTEST_ASSETS := $(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path))
+	chmod -R -f u+w "$(ENVTEST_ASSETS)"
+	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" \
 		go test $$(go list ./... | grep -v /e2e) -v -coverprofile cover.out.tmp
 	cat cover.out.tmp | grep -v "_generated." > cover.out
 	go tool cover -func cover.out
