@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
+SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
 
 function kind::prerequisites() {
 	go install sigs.k8s.io/kind@latest
@@ -108,6 +109,38 @@ function helm::find() {
 	return 0
 }
 
+function git::checkout() {
+	local name="$1"
+	local repo="$2"
+	local ref="$3"
+	local path="${SLURM_BRIDGE_TMP}/${name}"
+
+	mkdir -p "$SLURM_BRIDGE_TMP"
+	if [ ! -d "$path/.git" ]; then
+		echo "[git] Cloning ${name} ${ref} to ${path}..." >&2
+		git clone -b "$ref" "$repo" "$path" >&2
+	else
+		echo "[git] Updating ${name} ${ref} in ${path}..." >&2
+		if ! (
+			git -C "$path" fetch --tags origin &&
+				git -C "$path" checkout "$ref" &&
+				{
+					# Tags leave the checkout detached, so only pull branch refs.
+					if [ -n "$(git -C "$path" branch --show-current)" ]; then
+						git -C "$path" pull --ff-only
+					fi
+				}
+		) >&2; then
+			echo "[git] Failed to update ${name} checkout at ${path}." >&2
+			echo "[git] Remove the cached checkout and retry:" >&2
+			echo "[git]   rm -rf ${path}" >&2
+			exit 1
+		fi
+	fi
+
+	echo "$path"
+}
+
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
@@ -188,10 +221,7 @@ function slurm-stack::install() {
 		exit 1
 	fi
 
-	operator_path="$(mktemp -d)"
-	echo "[slurm] Cloning slurm-operator ${ref} to ${operator_path}..."
-	git clone -b "$ref" "$repo" "$operator_path"
-
+	operator_path="$(git::checkout slurm-operator "$repo" "$ref")"
 	make -C "$operator_path" values-dev
 	slurm-operator-crds::install_from_source "$operator_path"
 	slurm-operator::install_from_source "$operator_path"
@@ -287,8 +317,8 @@ function slurm-bridge::secret() {
 function kjob::install() {
 	local version="0.1.0"
 	local kjob_path
-	kjob_path=$(mktemp -d)
-	git clone -b "v${version}" https://github.com/kubernetes-sigs/kjob.git "${kjob_path}"
+	local repo="https://github.com/kubernetes-sigs/kjob.git"
+	kjob_path="$(git::checkout kjob "$repo" "v${version}")"
 	(
 		cd "$kjob_path"
 		make install
@@ -305,8 +335,8 @@ function dra-example-driver::install() {
 	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
-	dra_path=$(mktemp -d)
-	git clone -b "$version" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
+	local repo="https://github.com/kubernetes-sigs/dra-example-driver.git"
+	dra_path="$(git::checkout dra-example-driver "$repo" "$version")"
 	(
 		cd "$dra_path"
 
@@ -338,8 +368,8 @@ function dra-driver-cpu::install() {
 	local cluster_name="${1:-kind}"
 	local version="v0.1.0"
 	local dra_path
-	dra_path=$(mktemp -d)
-	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
+	local repo="https://github.com/kubernetes-sigs/dra-driver-cpu.git"
+	dra_path="$(git::checkout dra-driver-cpu "$repo" "$version")"
 	(
 		cd "$dra_path"
 		local host_arch
