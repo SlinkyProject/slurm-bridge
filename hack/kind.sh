@@ -189,9 +189,8 @@ function slurm::install() {
 			--wait \
 			--set 'crds.enabled=true'
 	fi
-	# Wait for webhook to be ready so slurm chart install does not hit "connection refused"
-	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null || true
-	sleep 5
+
+	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null
 
 	chartName="slurm"
 	if ! helm::find "$chartName"; then
