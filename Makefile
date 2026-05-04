@@ -121,16 +121,15 @@ demo-examples-dra: install-dra install-examples-dra ## Install DRA drivers and r
 # Get the OS to set platform specific commands
 UNAME_S ?= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CP_FLAGS = -v -n
 	SED = gsed
 else
-	CP_FLAGS = -v --update=none
 	SED = sed
 endif
 
 .PHONY: values-dev
 values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
-	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | xargs -n2 cp $(CP_FLAGS)
+	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | \
+		xargs -n2 sh -c 'test -f "$$1" || cp -v "$$0" "$$1"'
 
 ##@ Build Dependencies
 
