@@ -171,7 +171,13 @@ function git::checkout() {
 	mkdir -p "$SLURM_BRIDGE_TMP"
 	if [ ! -d "$path/.git" ]; then
 		echo "[git] Cloning ${name} ${ref} to ${path}..." >&2
-		git clone -b "$ref" "$repo" "$path" >&2
+		if ! git clone -b "$ref" "$repo" "$path" >&2; then
+			echo "[git] Failed to clone ${name} ${ref} from ${repo}." >&2
+			echo "[git] Check that the ref exists in the ${name} repository." >&2
+			echo "[git] Remove any partial checkout and retry:" >&2
+			echo "[git]   rm -rf ${path}" >&2
+			exit 1
+		fi
 	else
 		echo "[git] Updating ${name} ${ref} in ${path}..." >&2
 		if ! (
@@ -308,13 +314,28 @@ function slurm::configure_for_bridge() {
 	local chartName="slurm"
 
 	echo "[slurm] Configuring Slurm for slurm-bridge..."
-	helm upgrade "$chartName" "$chart" \
-		--namespace slurm --create-namespace \
-		--reuse-values \
-		--wait \
-		--set "nodesets.slinky.enabled=false" \
-		--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
-		--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
+	case "$OPT_SLURM_NODE_MODE" in
+	"$SLURM_NODE_MODE_EXTERNAL")
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set "nodesets.slinky.enabled=false" \
+			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
+			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
+		;;
+	"$SLURM_NODE_MODE_HYBRID")
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--values "$SCRIPT_DIR/slurm-bridge-nodes.yaml"
+		;;
+	*)
+		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
+		exit 1
+		;;
+	esac
 }
 
 function extras::install() {
