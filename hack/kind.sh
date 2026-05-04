@@ -90,6 +90,7 @@ function kind::start() {
 		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
 	kubectl config use-context kind-"$cluster_name"
+	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
 	kind::configure_nodes "$OPT_SLURM_NODE_MODE"
 	kubectl cluster-info --context kind-"$cluster_name"
 }
@@ -119,6 +120,46 @@ function kind::configure_nodes() {
 		kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
 			scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
 	fi
+}
+
+function slurm-stack::installed_node_mode() {
+	if ! helm::find slurm; then
+		return 0
+	fi
+
+	if kubectl get nodesets.slinky.slurm.net -n slurm \
+		-o go-template='{{ range .items }}{{ .spec.scalingMode }} {{ index .spec.template.spec.nodeSelector "scheduler.slinky.slurm.net/slurm-bridge" }}{{ "\n" }}{{ end }}' 2>/dev/null |
+		grep -q '^DaemonSet worker$'; then
+		echo "$SLURM_NODE_MODE_HYBRID"
+		return 0
+	fi
+
+	if kubectl get nodes \
+		-l scheduler.slinky.slurm.net/slurm-bridge=worker,scheduler.slinky.slurm.net/external-node=true \
+		-o name 2>/dev/null | grep -q .; then
+		echo "$SLURM_NODE_MODE_EXTERNAL"
+		return 0
+	fi
+
+	echo "unknown"
+}
+
+function slurm-stack::check_node_mode() {
+	local mode="$1"
+	local installed_mode
+	installed_mode="$(slurm-stack::installed_node_mode)"
+
+	if [ -z "$installed_mode" ] || [ "$installed_mode" = "$mode" ]; then
+		return 0
+	fi
+	if [ "$installed_mode" = "unknown" ]; then
+		echo "[slurm] Slurm is already installed, but the slurm node mode could not be inferred." >&2
+	else
+		echo "[slurm] Existing slurm node mode is $installed_mode, requested $mode." >&2
+	fi
+	echo "[slurm] Recreate the kind cluster before switching slurm node modes." >&2
+	echo "[slurm]   $(basename "$0") --recreate --slurm-node-mode=$mode --bridge" >&2
+	exit 1
 }
 
 function git::checkout() {
