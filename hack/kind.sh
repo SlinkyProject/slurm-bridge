@@ -9,6 +9,8 @@ set -euo pipefail
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
 SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
+SLURM_NODE_MODE_EXTERNAL="external"
+SLURM_NODE_MODE_HYBRID="hybrid"
 
 function kind::prerequisites() {
 	go install sigs.k8s.io/kind@latest
@@ -88,11 +90,7 @@ function kind::start() {
 		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
 	kubectl config use-context kind-"$cluster_name"
-	kubectl label nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
-		scheduler.slinky.slurm.net/external-node=true --overwrite
-	# Annotate external nodes with partition list (Kind node config does not support annotations).
-	kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
-		scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
+	kind::configure_nodes "$OPT_SLURM_NODE_MODE"
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -109,6 +107,18 @@ function helm::find() {
 		return 1
 	fi
 	return 0
+}
+
+function kind::configure_nodes() {
+	local mode="$1"
+
+	if [ "$mode" = "$SLURM_NODE_MODE_EXTERNAL" ]; then
+		kubectl label nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+			scheduler.slinky.slurm.net/external-node=true --overwrite
+		# Annotate external nodes with partition list (Kind node config does not support annotations).
+		kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
+			scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
+	fi
 }
 
 function git::checkout() {
@@ -373,7 +383,8 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--bridge] [--slurm-operator-ref=REF] [--kjob]
+	        [--extras] [--bridge] [--slurm-node-mode=MODE]
+	        [--slurm-operator-ref=REF] [--kjob]
 	        [--dra-example-driver] [--dra-driver-cpu] [--all]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
@@ -383,6 +394,8 @@ OPTIONS:
 	--delete            Delete the Kind cluster and exit.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--bridge            Install slurm-bridge
+	--slurm-node-mode=MODE
+	                    Configure Slurm nodes as external or hybrid. Default: $OPT_SLURM_NODE_MODE.
 	--slurm-operator-ref=REF
 	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
 	--kjob              Install kjob CRDs and build kubectl-kjob
@@ -438,9 +451,10 @@ OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
 OPT_SLURM_OPERATOR_REF="v1.1.0"
+OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-ref:,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -464,6 +478,17 @@ while :; do
 	--bridge)
 		OPT_BRIDGE=true
 		shift
+		;;
+	--slurm-node-mode)
+		OPT_SLURM_NODE_MODE="$2"
+		case "$OPT_SLURM_NODE_MODE" in
+		"$SLURM_NODE_MODE_EXTERNAL" | "$SLURM_NODE_MODE_HYBRID") ;;
+		*)
+			echo "--slurm-node-mode must be one of: $SLURM_NODE_MODE_EXTERNAL, $SLURM_NODE_MODE_HYBRID" >&2
+			exit 1
+			;;
+		esac
+		shift 2
 		;;
 	--slurm-operator-ref)
 		OPT_SLURM_OPERATOR_REF="$2"
