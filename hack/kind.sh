@@ -215,38 +215,21 @@ function slurm-stack::install() {
 
 	slurm-stack::prerequisites
 
-	if ! helm::find slurm-operator-crds && { helm::find slurm-operator || helm::find slurm; }; then
-		echo "[slurm] Existing OCI Slurm installs cannot be switched to source installs." >&2
-		echo "[slurm] Delete the existing slurm/slurm-operator releases or recreate the kind cluster." >&2
-		exit 1
-	fi
-
 	operator_path="$(git::checkout slurm-operator "$repo" "$ref")"
 	make -C "$operator_path" values-dev
-	slurm-operator-crds::install_from_source "$operator_path"
 	slurm-operator::install_from_source "$operator_path"
 	slurm::install_from_source "$operator_path"
 
 	slurm::configure_for_bridge "$operator_path/helm/slurm"
 }
 
-function slurm-operator-crds::install_from_source() {
-	local operator_path="$1"
-
-	echo "[slurm] Installing slurm-operator CRDs..."
-	(
-		cd "$operator_path/helm/slurm-operator-crds"
-		skaffold run
-	)
-}
-
 function slurm-operator::install_from_source() {
 	local operator_path="$1"
-	slurm-operator-crds::install_from_source "$operator_path"
 
 	echo "[slurm] Installing slurm-operator..."
 	(
 		cd "$operator_path/helm/slurm-operator"
+		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
 		skaffold run
 	)
 	slurm-operator::wait
