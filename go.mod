@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260811152948-fb6e6598c859
+	github.com/SlinkyProject/slurm-operator v1.0.2
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -19,10 +20,18 @@ require (
 	k8s.io/kubernetes v1.36.0
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
 	sigs.k8s.io/controller-runtime v0.24.0
+	sigs.k8s.io/e2e-framework v0.6.0
 	sigs.k8s.io/jobset v0.11.1
 	sigs.k8s.io/lws v0.8.0
 	sigs.k8s.io/scheduler-plugins v0.33.5
 	sigs.k8s.io/yaml v1.6.0
+)
+
+require (
+	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/moby/spdystream v0.5.1 // indirect
+	github.com/vladimirvivien/gexe v0.4.1 // indirect
 )
 
 require (
@@ -89,6 +98,7 @@ require (
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.86.1 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect

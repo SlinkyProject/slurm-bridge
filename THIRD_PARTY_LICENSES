@@ -21,6 +21,16 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.1.0-rc1.0.20260811152948-fb6e6598c859
 - License: Apache-2.0
 
+### github.com/SlinkyProject/slurm-operator/api/v1beta1
+- Name: github.com/SlinkyProject/slurm-operator/api/v1beta1
+- Version: v1.0.2
+- License: Unknown
+
+### github.com/SlinkyProject/slurm-operator/internal/utils/domainname
+- Name: github.com/SlinkyProject/slurm-operator/internal/utils/domainname
+- Version: v1.0.2
+- License: Unknown
+
 ### github.com/antlr4-go/antlr/v4
 - Name: github.com/antlr4-go/antlr/v4
 - Version: v4.13.1
@@ -221,6 +231,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.6.0
 - License: BSD-3-Clause
 
+### github.com/gorilla/websocket
+- Name: github.com/gorilla/websocket
+- Version: v1.5.4-0.20250319132907-e064f32e3674
+- License: BSD-2-Clause
+
 ### github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
 - Name: github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
 - Version: v1.1.0
@@ -260,6 +275,21 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Name: github.com/kylelemons/godebug/diff
 - Version: v1.1.0
 - License: Apache-2.0
+
+### github.com/mailru/easyjson/jlexer
+- Name: github.com/mailru/easyjson/jlexer
+- Version: v0.9.1
+- License: MIT
+
+### github.com/moby/spdystream
+- Name: github.com/moby/spdystream
+- Version: v0.5.1
+- License: Apache-2.0
+
+### github.com/moby/spdystream/spdy
+- Name: github.com/moby/spdystream/spdy
+- Version: v0.5.1
+- License: BSD-3-Clause
 
 ### github.com/moby/term
 - Name: github.com/moby/term
@@ -311,6 +341,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.0.1-0.20181226105442-5d4384ee4fb2
 - License: BSD-3-Clause
 
+### github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring
+- Name: github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring
+- Version: v0.86.1
+- License: Apache-2.0
+
 ### github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 - Name: github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 - Version: v1.23.2
@@ -360,6 +395,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Name: github.com/spf13/pflag
 - Version: v1.0.10
 - License: BSD-3-Clause
+
+### github.com/vladimirvivien/gexe
+- Name: github.com/vladimirvivien/gexe
+- Version: v0.4.1
+- License: MIT
 
 ### github.com/x448/float16
 - Name: github.com/x448/float16
@@ -719,6 +759,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
 - Version: v0.24.0
+- License: Apache-2.0
+
+### sigs.k8s.io/e2e-framework
+- Name: sigs.k8s.io/e2e-framework
+- Version: v0.6.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/jobset/api/jobset/v1alpha2
