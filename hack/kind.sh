@@ -171,14 +171,18 @@ function git::checkout() {
 	mkdir -p "$SLURM_BRIDGE_TMP"
 	if [ ! -d "$path/.git" ]; then
 		echo "[git] Cloning ${name} ${ref} to ${path}..." >&2
-		if ! git clone -b "$ref" "$repo" "$path" >&2; then
-			echo "[git] Failed to clone ${name} ${ref} from ${repo}." >&2
-			echo "[git] Check that the ref exists in the ${name} repository." >&2
-			echo "[git] Remove any partial checkout and retry:" >&2
+		git clone -b "$ref" "$repo" "$path" >&2
+	else
+		local cached_repo
+		cached_repo="$(git -C "$path" remote get-url origin 2>/dev/null || true)"
+		if [ "$cached_repo" != "$repo" ]; then
+			echo "[git] Cached ${name} checkout at ${path} uses a different origin." >&2
+			echo "[git]   cached: ${cached_repo:-<none>}" >&2
+			echo "[git]   requested: ${repo}" >&2
+			echo "[git] Remove the cached checkout and retry:" >&2
 			echo "[git]   rm -rf ${path}" >&2
 			exit 1
 		fi
-	else
 		echo "[git] Updating ${name} ${ref} in ${path}..." >&2
 		if ! (
 			git -C "$path" fetch --tags origin &&
@@ -270,7 +274,7 @@ function slurm-stack::prerequisites() {
 function slurm-stack::install() {
 	local operator_path
 	local ref="$OPT_SLURM_OPERATOR_REF"
-	local repo="https://github.com/SlinkyProject/slurm-operator.git"
+	local repo="$OPT_SLURM_OPERATOR_REPO"
 
 	slurm-stack::prerequisites
 
@@ -446,7 +450,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
 	        [--extras] [--bridge] [--slurm-node-mode=MODE]
-	        [--slurm-operator-ref=REF] [--kjob]
+	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF] [--kjob]
 	        [--dra-example-driver] [--dra-driver-cpu] [--all]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
@@ -458,6 +462,9 @@ OPTIONS:
 	--bridge            Install slurm-bridge
 	--slurm-node-mode=MODE
 	                    Configure Slurm nodes as external or hybrid. Default: $OPT_SLURM_NODE_MODE.
+	--slurm-operator-repo=URL
+	                    Clone slurm-operator from URL. Default: $OPT_SLURM_OPERATOR_REPO.
+	                    Can also be set with SLURM_OPERATOR_REPO.
 	--slurm-operator-ref=REF
 	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
 	--kjob              Install kjob CRDs and build kubectl-kjob
@@ -512,11 +519,12 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
+OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="v1.1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -550,6 +558,14 @@ while :; do
 			exit 1
 			;;
 		esac
+		shift 2
+		;;
+	--slurm-operator-repo)
+		OPT_SLURM_OPERATOR_REPO="$2"
+		if [ -z "$OPT_SLURM_OPERATOR_REPO" ]; then
+			echo "--slurm-operator-repo requires a non-empty URL" >&2
+			exit 1
+		fi
 		shift 2
 		;;
 	--slurm-operator-ref)
