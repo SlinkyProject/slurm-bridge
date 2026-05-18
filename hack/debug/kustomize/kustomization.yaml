@@ -1,0 +1,76 @@
+---
+resources:
+  - rendered.yaml
+patches:
+  # Shared Delve wrapper settings for every slurm-bridge component.
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      labelSelector: app.kubernetes.io/instance=slurm-bridge
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/command
+        value:
+          - /dlv
+          - --listen=:40000
+          - --headless=true
+          - --api-version=2
+          - --accept-multiclient
+          - --continue=true
+          - exec
+      - op: add
+        # Each component runs in its own pod, so the in-pod debug port can be shared.
+        path: /spec/template/spec/containers/0/ports
+        value:
+          - name: debug
+            containerPort: 40000
+            protocol: TCP
+      - op: remove
+        path: /spec/template/spec/containers/0/livenessProbe
+      - op: remove
+        path: /spec/template/spec/containers/0/readinessProbe
+      - op: add
+        path: /spec/template/spec/containers/0/securityContext
+        value:
+          privileged: false
+          capabilities:
+            add:
+              - SYS_PTRACE
+          seccompProfile:
+            type: Unconfined
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: slurm-bridge-scheduler
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/command/-
+        value: /scheduler
+      - op: add
+        path: /spec/template/spec/containers/0/command/-
+        value:
+          --
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: slurm-bridge-controllers
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/command/-
+        value: /controllers
+      - op: add
+        path: /spec/template/spec/containers/0/command/-
+        value:
+          --
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: slurm-bridge-admission
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/command/-
+        value: /admission

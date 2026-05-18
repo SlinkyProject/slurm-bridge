@@ -86,6 +86,10 @@ demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install s
 demo-cluster-delete: ## Delete the kind cluster.
 	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
 
+.PHONY: debug
+debug: ## Run Delve-enabled slurm-bridge components and forward debug ports.
+	cd helm/slurm-bridge && skaffold dev -p debug --port-forward=user --tail
+
 .PHONY: install-dra
 install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
 	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
