@@ -17,7 +17,6 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
-	"k8s.io/kubernetes/test/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -66,7 +65,7 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		durationStore.Push(podKey, 30*time.Second)
 	}
 
-	if active, _ := utils.PodRunningReady(pod); !active {
+	if pod.Status.Phase != corev1.PodRunning || !podv1.IsPodReady(pod) {
 		logger.V(2).Info("Pod is not running, skipping", "pod", klog.KObj(pod))
 		return nil
 	}

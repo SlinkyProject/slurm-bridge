@@ -409,8 +409,8 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 }
 
 // PreBindPreFlight will check if any GRES was requested for the external job
-func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
-	return nil
+func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) (*fwk.PreBindPreFlightResult, *fwk.Status) {
+	return nil, nil
 }
 
 // PreBind will generate ResourceClaims for any GRES allocation in Slurm.
