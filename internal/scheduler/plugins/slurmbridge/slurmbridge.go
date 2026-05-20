@@ -15,6 +15,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,6 +57,8 @@ func init() {
 	utilruntime.Must(batchv1.AddToScheme(scheme.Scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme.Scheme))
 	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
+	// PodGroup (scheduling.k8s.io/v1alpha2)
+	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme.Scheme))
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
@@ -96,6 +99,8 @@ func init() {
 // +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups/status,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=create;get;list;watch
 
 // Slurmbridge is a plugin that schedules pods in a group.

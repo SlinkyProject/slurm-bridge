@@ -5,236 +5,69 @@ package slurmjobir
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/resource"
+	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
-func newPodGroup(name string, minMembers int32, status sched.PodGroupStatus) *sched.PodGroup {
-	return &sched.PodGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:       metav1.NamespaceDefault,
-			Name:            name,
-			ResourceVersion: "999",
-		},
-		Spec: sched.PodGroupSpec{
-			MinResources: corev1.ResourceList{
-				corev1.ResourceCPU:    *resource.NewQuantity(22, resource.DecimalSI),
-				corev1.ResourceMemory: *resource.NewQuantity(1024*1024, resource.DecimalSI),
-			},
-			MinMember: minMembers,
-		},
-		Status: status,
-	}
-}
-
-func newPodGroupPod(name, podGroupName string) *corev1.Pod {
+func podWithSchedulingGroup(ns, name, pgName string) *corev1.Pod {
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: metav1.NamespaceDefault,
-			Name:      name,
-			Labels: map[string]string{
-				sched.PodGroupLabel: podGroupName,
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Spec: corev1.PodSpec{
+			SchedulingGroup: &corev1.PodSchedulingGroup{
+				PodGroupName: ptr.To(pgName),
 			},
-			ResourceVersion: "999",
 		},
 	}
 }
 
-func Test_translator_GetPodGroup(t *testing.T) {
-	type fields struct {
-		Reader client.Reader
-		ctx    context.Context
-	}
-	type args struct {
-		pod *corev1.Pod
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   string
-		want1  *sched.PodGroup
-	}{
-		{
-			name: "No PodGroup",
-			fields: fields{
-				Reader: nil,
-				ctx:    context.Background(),
-			},
-			args: args{
-				pod: &corev1.Pod{},
-			},
-			want:  "",
-			want1: nil,
+func newPodGroup(name, ns string, policy schedulingv1alpha2.PodGroupSchedulingPolicy) *schedulingv1alpha2.PodGroup {
+	return &schedulingv1alpha2.PodGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec: schedulingv1alpha2.PodGroupSpec{
+			SchedulingPolicy: policy,
 		},
-		{
-			name: "PodGroup foo",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("foo", int32(1), sched.PodGroupStatus{}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				pod: newPodGroupPod("foo", "foo"),
-			},
-			want:  "default/foo",
-			want1: newPodGroup("foo", int32(1), sched.PodGroupStatus{}),
-		},
-		{
-			name: "PodGroup foo does not exist",
-			fields: fields{
-				Reader: fake.NewFakeClient(),
-				ctx:    context.Background(),
-			},
-			args: args{
-				pod: newPodGroupPod("foo", "foo"),
-			},
-			want:  "default/foo",
-			want1: nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tr := &translator{
-				Reader: tt.fields.Reader,
-				ctx:    tt.fields.ctx,
-			}
-			got, got1 := tr.GetPodGroup(tt.args.pod)
-			if got != tt.want {
-				t.Errorf("translator.GetPodGroup() got = %v, want %v", got, tt.want)
-			}
-			if !apiequality.Semantic.DeepEqual(got1, tt.want1) {
-				t.Errorf("translator.GetPodGroup() got1 = %v, want %v", got1, tt.want1)
-			}
-		})
 	}
 }
 
 func Test_translator_fromPodGroup(t *testing.T) {
-	type fields struct {
-		Reader client.Reader
-		ctx    context.Context
-	}
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+
 	type args struct {
 		pod     *corev1.Pod
 		rootPOM *metav1.PartialObjectMetadata
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		client  client.Client
 		args    args
-		want    *SlurmJobIR
 		wantErr bool
 	}{
 		{
-			name: "PodGroup does not exist",
-			fields: fields{
-				Reader: func() client.Reader {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					utilruntime.Must(corev1.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroupPod("foo", "foo"),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
+			name: "two pods same scheduling group",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+				newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
+					Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+				}),
+				podWithSchedulingGroup("default", "p1", "pg1"),
+				podWithSchedulingGroup("default", "p2", "pg1"),
+			).Build(),
 			args: args{
-				pod: newPodGroupPod("foo", "foo"),
+				pod: podWithSchedulingGroup("default", "p1", "pg1"),
 				rootPOM: &metav1.PartialObjectMetadata{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "foo",
-						Namespace: metav1.NamespaceDefault,
-					},
-				},
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name: "Fails to list pods",
-			fields: fields{
-				Reader: func() client.Reader {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					utilruntime.Must(corev1.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("foo", int32(1), sched.PodGroupStatus{}),
-						newPodGroupPod("foo", "foo"),
-					).WithInterceptorFuncs(interceptor.Funcs{
-						List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-							return errors.New("Failed to List")
-						},
-					}).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				pod: newPodGroupPod("foo", "foo"),
-				rootPOM: &metav1.PartialObjectMetadata{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "foo",
-						Namespace: metav1.NamespaceDefault,
-					},
-				},
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name: "Test podgroup",
-			fields: fields{
-				Reader: func() client.Reader {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					utilruntime.Must(corev1.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("foo", int32(1), sched.PodGroupStatus{}),
-						newPodGroupPod("foo", "foo"),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				pod: newPodGroupPod("foo", "foo"),
-				rootPOM: &metav1.PartialObjectMetadata{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "foo",
-						Namespace: metav1.NamespaceDefault,
-					},
-				},
-			},
-			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					CpuPerTask:   ptr.To((int32(22))),
-					MemPerNode:   ptr.To((int64(1))),
-					MinNodes:     ptr.To((int32(1))),
-					MaxNodes:     ptr.To((int32(1))),
-					TasksPerNode: ptr.To((int32(1))),
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{
-						*newPodGroupPod("foo", "foo"),
-					},
+					TypeMeta:   podgroup_v1alpha2,
+					ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pg1"},
 				},
 			},
 			wantErr: false,
@@ -242,245 +75,123 @@ func Test_translator_fromPodGroup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := &translator{
-				Reader: tt.fields.Reader,
-				ctx:    tt.fields.ctx,
-			}
+			tr := translator{Reader: tt.client, ctx: context.TODO()}
 			got, err := tr.fromPodGroup(tt.args.pod, tt.args.rootPOM)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("translator.fromPodGroup() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("fromPodGroup() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
 				return
 			}
-			if !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("translator.fromPodGroup() = %v, want %v", got, &tt.want)
+			if len(got.Pods.Items) != 2 {
+				t.Errorf("fromPodGroup() len(pods) = %d, want 2", len(got.Pods.Items))
+			}
+			if got.JobInfo.JobName == nil || *got.JobInfo.JobName != "pg1" {
+				t.Errorf("fromPodGroup() JobName = %v, want pg1", got.JobInfo.JobName)
 			}
 		})
 	}
 }
 
 func Test_translator_PreFilterPodGroup(t *testing.T) {
-	type fields struct {
-		Reader client.Reader
-		ctx    context.Context
-	}
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+
+	pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
+		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+	})
+	p1 := podWithSchedulingGroup("default", "p1", "pg1")
+	p2 := podWithSchedulingGroup("default", "p2", "pg1")
+
 	type args struct {
-		slurmJobIR *SlurmJobIR
 		pod        *corev1.Pod
+		slurmJobIR *SlurmJobIR
 	}
 	tests := []struct {
 		name   string
-		fields fields
+		client client.Client
 		args   args
 		want   *fwk.Status
 	}{
 		{
-			name: "Could not get PodGroup",
-			fields: fields{
-				Reader: fake.NewFakeClient(),
-				ctx:    context.Background(),
-			},
+			name:   "gang satisfied",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pg.DeepCopy()).Build(),
 			args: args{
+				pod: p1.DeepCopy(),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
+						TypeMeta: podgroup_v1alpha2,
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
 							Namespace: "default",
+							Name:      "pg1",
 						},
 					},
+					Pods: corev1.PodList{Items: []corev1.Pod{*p1, *p2}},
 				},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorPodGroupCouldNotGet.Error()),
+			want: fwk.NewStatus(fwk.Success),
 		},
 		{
-			name: "PodGroup phase is Failed",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{Phase: sched.PodGroupFailed}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
+			name:   "gang not enough pods",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pg.DeepCopy()).Build(),
 			args: args{
+				pod: p1.DeepCopy(),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
+						TypeMeta: podgroup_v1alpha2,
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
-							Namespace: metav1.NamespaceDefault,
-						},
-					},
-				},
-			},
-			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupFailed.Error()),
-		},
-		{
-			name: "PodGroup phase is Finished",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{Phase: sched.PodGroupFinished}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					RootPOM: metav1.PartialObjectMetadata{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
-							Namespace: metav1.NamespaceDefault,
-						},
-					},
-				},
-			},
-			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupFinished.Error()),
-		},
-		{
-			name: "PodGroup phase is Running",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{Phase: sched.PodGroupRunning}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					RootPOM: metav1.PartialObjectMetadata{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
-							Namespace: metav1.NamespaceDefault,
-						},
-					},
-				},
-			},
-			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupRunning.Error()),
-		},
-		{
-			name: "PodGroup phase is Unknown",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{Phase: sched.PodGroupUnknown}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					RootPOM: metav1.PartialObjectMetadata{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
-							Namespace: metav1.NamespaceDefault,
-						},
-					},
-				},
-			},
-			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupUnknown.Error()),
-		},
-		{
-			name: "Not enough pods for minmembers",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					RootPOM: metav1.PartialObjectMetadata{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
 							Namespace: "default",
+							Name:      "pg1",
 						},
 					},
+					Pods: corev1.PodList{Items: []corev1.Pod{*p1}},
 				},
-				pod: &corev1.Pod{},
 			},
 			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
 		},
 		{
-			name: "Not enough pods for minmembers and invalid pod",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 3, sched.PodGroupStatus{}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
+			name: "basic policy skips gang count",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+				newPodGroup("pg2", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
+					Basic: &schedulingv1alpha2.BasicSchedulingPolicy{},
+				}),
+			).Build(),
 			args: args{
+				pod: podWithSchedulingGroup("default", "p1", "pg2"),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
+						TypeMeta: podgroup_v1alpha2,
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
-							Namespace: metav1.NamespaceDefault,
-						},
-					},
-				},
-				pod: func() *corev1.Pod {
-					p := newPodGroupPod("foo", "foo")
-					p.Labels[wellknown.LabelExternalJobId] = "123"
-					return p
-				}(),
-			},
-			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
-		},
-		{
-			name: "Enough pods for minmembers",
-			fields: fields{
-				Reader: func() client.Client {
-					scheme := runtime.NewScheme()
-					utilruntime.Must(sched.AddToScheme(scheme))
-					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-						newPodGroup("pg", 1, sched.PodGroupStatus{}),
-					).Build()
-				}(),
-				ctx: context.Background(),
-			},
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					RootPOM: metav1.PartialObjectMetadata{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "pg",
 							Namespace: "default",
+							Name:      "pg2",
 						},
 					},
-					Pods: corev1.PodList{
-						Items: []corev1.Pod{
-							*newPodGroupPod("pod", "pg"),
-						},
-					},
+					Pods: corev1.PodList{Items: []corev1.Pod{*podWithSchedulingGroup("default", "p1", "pg2")}},
 				},
-				pod: &corev1.Pod{},
 			},
 			want: fwk.NewStatus(fwk.Success),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := &translator{
-				Reader: tt.fields.Reader,
-				ctx:    tt.fields.ctx,
-			}
-			if got := tr.PreFilterPodGroup(tt.args.pod, tt.args.slurmJobIR); !got.Equal(tt.want) {
-				t.Errorf("translator.PreFilterPodGroup() = %v, want %v", got, tt.want)
+			tr := translator{Reader: tt.client, ctx: context.TODO()}
+			got := tr.PreFilterPodGroup(tt.args.pod, tt.args.slurmJobIR)
+			if !got.Equal(tt.want) {
+				t.Errorf("PreFilterPodGroup() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func Test_schedulingGroupsMatch(t *testing.T) {
+	a := &corev1.PodSchedulingGroup{PodGroupName: ptr.To("pg1")}
+	b := &corev1.PodSchedulingGroup{PodGroupName: ptr.To("pg1")}
+	c := &corev1.PodSchedulingGroup{PodGroupName: ptr.To("pg2")}
+	if !schedulingGroupsMatch(a, b) {
+		t.Error("expected same group")
+	}
+	if schedulingGroupsMatch(a, c) {
+		t.Error("expected different groups not to match")
 	}
 }

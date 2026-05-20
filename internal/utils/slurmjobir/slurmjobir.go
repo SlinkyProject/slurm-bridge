@@ -63,8 +63,10 @@ type translator struct {
 func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
 	t := translator{Reader: c, ctx: ctx}
 	switch slurmJobIR.RootPOM.TypeMeta {
-	case podGroup_v1alpha1:
+	case podgroup_v1alpha2:
 		return t.PreFilterPodGroup(pod, slurmJobIR)
+	case podgroup_coscheduling_v1alpha1:
+		return t.PreFilterPodGroupCoscheduling(pod, slurmJobIR)
 	case lws_v1:
 		return t.PreFilterLWS(pod, slurmJobIR)
 	default:
@@ -80,10 +82,15 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 
 	t := translator{Reader: c, ctx: ctx}
 
-	// PodGroup does not conventionally own the Pod, rather is associated by the PodGroupLabel.
-	// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
-	if _, podGroup := t.GetPodGroup(pod); podGroup != nil {
-		rootPOM.TypeMeta = podGroup_v1alpha1
+	// PodGroup (scheduling.k8s.io/v1alpha2): pods opt in via spec.schedulingGroup.
+	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
+	if pgName, ok := podGroupName(pod); ok {
+		rootPOM.TypeMeta = podgroup_v1alpha2
+		rootPOM.Name = pgName
+	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
+		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
+		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
+		rootPOM.TypeMeta = podgroup_coscheduling_v1alpha1
 		rootPOM.Name = podGroup.Name
 	}
 
@@ -92,10 +99,12 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 	}
 
 	switch rootPOM.TypeMeta {
+	case podgroup_v1alpha2:
+		slurmJobIR, err = t.fromPodGroup(pod, rootPOM)
 	case jobSet_v1alpha2:
 		slurmJobIR, err = t.fromJobSet(pod, rootPOM)
-	case podGroup_v1alpha1:
-		slurmJobIR, err = t.fromPodGroup(pod, rootPOM)
+	case podgroup_coscheduling_v1alpha1:
+		slurmJobIR, err = t.fromPodGroupCoscheduling(pod, rootPOM)
 	case job_v1:
 		slurmJobIR, err = t.fromJob(pod, rootPOM)
 	case pod_v1:
