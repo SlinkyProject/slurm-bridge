@@ -6,6 +6,7 @@ package slurmbridge
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func init() {
@@ -302,6 +304,156 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			}
 			if len(gotClaim.Spec.Devices.Requests) != tt.wantRequests {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() len(gotClaim.Spec.Devices.Requests) = %v, want %v", len(gotClaim.Spec.Devices.Requests), tt.wantRequests)
+			}
+		})
+	}
+}
+
+func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
+	ctx := context.Background()
+	injectedErr := errors.New("injected client error")
+
+	newPod := func() *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: metav1.NamespaceDefault,
+				Name:      "foo",
+				UID:       "123",
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name: "foo",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("1"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("1"),
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	resources := &slurmcontrol.NodeResources{
+		Node: "node1",
+		Gres: []slurmcontrol.GresLayout{
+			{
+				Name:  "gpu",
+				Type:  nodeinfo.DraExampleDriver,
+				Count: 1,
+				Index: "0",
+			},
+		},
+	}
+	newClient := func(pod *corev1.Pod, funcs interceptor.Funcs) client.Client {
+		return fake.NewClientBuilder().
+			WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+			WithObjects(
+				pod,
+				&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				&resourcev1.DeviceClass{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeinfo.DraExampleDriver,
+					},
+				},
+				&resourcev1.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1-gpu",
+					},
+					Spec: resourcev1.ResourceSliceSpec{
+						NodeName: ptr.To("node1"),
+						Driver:   nodeinfo.DraExampleDriver,
+						Devices: []resourcev1.Device{
+							{
+								Name: "gpu-0",
+								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+								},
+							},
+						},
+					},
+				},
+			).
+			WithStatusSubresource(
+				pod,
+				&resourcev1.ResourceClaim{},
+			).
+			WithInterceptorFuncs(funcs).
+			Build()
+	}
+
+	tests := []struct {
+		name  string
+		funcs interceptor.Funcs
+	}{
+		{
+			name: "create claim failure",
+			funcs: interceptor.Funcs{
+				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+					if _, ok := obj.(*resourcev1.ResourceClaim); ok {
+						if err := c.Create(ctx, obj, opts...); err != nil {
+							return err
+						}
+						return injectedErr
+					}
+					return c.Create(ctx, obj, opts...)
+				},
+			},
+		},
+		{
+			name: "bind claim failure",
+			funcs: interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if subResourceName == "status" {
+						if _, ok := obj.(*resourcev1.ResourceClaim); ok {
+							return injectedErr
+						}
+					}
+					return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			},
+		},
+		{
+			name: "pod status failure",
+			funcs: interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if subResourceName == "status" {
+						if _, ok := obj.(*corev1.Pod); ok {
+							return injectedErr
+						}
+					}
+					return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := newPod()
+			kclient := newClient(pod, tt.funcs)
+			sb := &SlurmBridge{
+				Client: kclient,
+			}
+
+			gotErr := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
+			if gotErr == nil {
+				t.Fatal("SlurmBridge.manageResourceClaim() error = nil, want error")
+			}
+
+			claimList := &resourcev1.ResourceClaimList{}
+			if err := kclient.List(ctx, claimList); err != nil {
+				t.Fatalf("Client.List(ResourceClaimList) error = %v, want nil", err)
+			}
+			if len(claimList.Items) != 0 {
+				t.Fatalf("Client.List(ResourceClaimList) got %d claims, want 0", len(claimList.Items))
 			}
 		})
 	}
