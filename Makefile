@@ -121,16 +121,15 @@ demo-examples-dra: install-dra install-examples-dra ## Install DRA drivers and r
 # Get the OS to set platform specific commands
 UNAME_S ?= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CP_FLAGS = -v -n
 	SED = gsed
 else
-	CP_FLAGS = -v --update=none
 	SED = sed
 endif
 
 .PHONY: values-dev
 values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
-	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | xargs -n2 cp $(CP_FLAGS)
+	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | \
+		xargs -n2 sh -c 'test -f "$$1" || cp -v "$$0" "$$1"'
 
 ##@ Build Dependencies
 
@@ -289,7 +288,7 @@ run-docs: build-docs ## Run the container image for docs development
 
 .PHONY: clean
 clean: ## Clean files.
-	@ chmod -R -f u+w bin/ || true # make test installs files without write permissions.
+	- @ chmod -R -f u+w $(LOCALBIN) || true # make test installs files without write permissions.
 	rm -rf bin/
 	rm -rf vendor/
 	rm -f cover.out cover.html cover.out.tmp
@@ -355,7 +354,9 @@ CODECOV_PERCENT ?= 70
 .PHONY: test
 test: fmt vet envtest ## Run tests.
 	rm -f cover.out cover.html
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	$(eval ENVTEST_ASSETS := $(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path))
+	chmod -R -f u+w "$(ENVTEST_ASSETS)"
+	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" \
 		go test $$(go list ./... | grep -v /e2e) -v -coverprofile cover.out.tmp
 	cat cover.out.tmp | grep -v "_generated." > cover.out
 	go tool cover -func cover.out

@@ -8,6 +8,9 @@ set -euo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
+SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
+SLURM_NODE_MODE_EXTERNAL="external"
+SLURM_NODE_MODE_HYBRID="hybrid"
 
 function kind::prerequisites() {
 	go install sigs.k8s.io/kind@latest
@@ -87,9 +90,8 @@ function kind::start() {
 		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
 	kubectl config use-context kind-"$cluster_name"
-	# Annotate external nodes with partition list (Kind node config does not support annotations).
-	kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
-		scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
+	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	kind::configure_nodes "$OPT_SLURM_NODE_MODE"
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -108,6 +110,100 @@ function helm::find() {
 	return 0
 }
 
+function kind::configure_nodes() {
+	local mode="$1"
+
+	if [ "$mode" = "$SLURM_NODE_MODE_EXTERNAL" ]; then
+		kubectl label nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+			scheduler.slinky.slurm.net/external-node=true --overwrite
+		# Annotate external nodes with partition list (Kind node config does not support annotations).
+		kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
+			scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
+	fi
+}
+
+function slurm-stack::installed_node_mode() {
+	if ! helm::find slurm; then
+		return 0
+	fi
+
+	if kubectl get nodesets.slinky.slurm.net -n slurm \
+		-o go-template='{{ range .items }}{{ .spec.scalingMode }} {{ index .spec.template.spec.nodeSelector "scheduler.slinky.slurm.net/slurm-bridge" }}{{ "\n" }}{{ end }}' 2>/dev/null |
+		grep -q '^DaemonSet worker$'; then
+		echo "$SLURM_NODE_MODE_HYBRID"
+		return 0
+	fi
+
+	if kubectl get nodes \
+		-l scheduler.slinky.slurm.net/slurm-bridge=worker,scheduler.slinky.slurm.net/external-node=true \
+		-o name 2>/dev/null | grep -q .; then
+		echo "$SLURM_NODE_MODE_EXTERNAL"
+		return 0
+	fi
+
+	echo "unknown"
+}
+
+function slurm-stack::check_node_mode() {
+	local mode="$1"
+	local installed_mode
+	installed_mode="$(slurm-stack::installed_node_mode)"
+
+	if [ -z "$installed_mode" ] || [ "$installed_mode" = "$mode" ]; then
+		return 0
+	fi
+	if [ "$installed_mode" = "unknown" ]; then
+		echo "[slurm] Slurm is already installed, but the slurm node mode could not be inferred." >&2
+	else
+		echo "[slurm] Existing slurm node mode is $installed_mode, requested $mode." >&2
+	fi
+	echo "[slurm] Recreate the kind cluster before switching slurm node modes." >&2
+	echo "[slurm]   $(basename "$0") --recreate --slurm-node-mode=$mode --bridge" >&2
+	exit 1
+}
+
+function git::checkout() {
+	local name="$1"
+	local repo="$2"
+	local ref="$3"
+	local path="${SLURM_BRIDGE_TMP}/${name}"
+
+	mkdir -p "$SLURM_BRIDGE_TMP"
+	if [ ! -d "$path/.git" ]; then
+		echo "[git] Cloning ${name} ${ref} to ${path}..." >&2
+		git clone -b "$ref" "$repo" "$path" >&2
+	else
+		local cached_repo
+		cached_repo="$(git -C "$path" remote get-url origin 2>/dev/null || true)"
+		if [ "$cached_repo" != "$repo" ]; then
+			echo "[git] Cached ${name} checkout at ${path} uses a different origin." >&2
+			echo "[git]   cached: ${cached_repo:-<none>}" >&2
+			echo "[git]   requested: ${repo}" >&2
+			echo "[git] Remove the cached checkout and retry:" >&2
+			echo "[git]   rm -rf ${path}" >&2
+			exit 1
+		fi
+		echo "[git] Updating ${name} ${ref} in ${path}..." >&2
+		if ! (
+			git -C "$path" fetch --tags origin &&
+				git -C "$path" checkout "$ref" &&
+				{
+					# Tags leave the checkout detached, so only pull branch refs.
+					if [ -n "$(git -C "$path" branch --show-current)" ]; then
+						git -C "$path" pull --ff-only
+					fi
+				}
+		) >&2; then
+			echo "[git] Failed to update ${name} checkout at ${path}." >&2
+			echo "[git] Remove the cached checkout and retry:" >&2
+			echo "[git]   rm -rf ${path}" >&2
+			exit 1
+		fi
+	fi
+
+	echo "$path"
+}
+
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
@@ -118,80 +214,132 @@ function slurm-bridge::install() {
 }
 
 function slurm-bridge::prerequisites() {
-	local chartName
-
-	# enables podgroup
-	chartName="scheduler-plugins"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing scheduler-plugins..."
-		helm install --repo https://scheduler-plugins.sigs.k8s.io "$chartName" "$chartName" \
-			--namespace "$chartName" --create-namespace \
-			--set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
-	fi
-
-	chartName="jobset"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing jobset..."
-		local version="v0.8.x"
-		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset --version "$version" \
-			--namespace "${chartName}-system" --create-namespace
-	fi
-
-	chartName="lws"
-	if ! helm::find "$chartName"; then
-		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.8.x"
-		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
-			--version "$version" \
-			--namespace "${chartName}-system" --create-namespace
-	fi
+	scheduler-plugins::install
+	jobset::install
+	lws::install
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
-	slurm::install
+	slurm-stack::install
 	echo "[slurm-bridge] Creating slurm-bridge secret and namespace..."
 	slurm-bridge::secret
 	kubectl create namespace slurm-bridge || true
 }
 
-function slurm::prerequisites() {
-	helm repo add jetstack https://charts.jetstack.io
-	helm repo update
-
+function scheduler-plugins::install() {
 	local chartName
-
-	chartName="cert-manager"
+	chartName="scheduler-plugins"
 	if ! helm::find "$chartName"; then
-		echo "[slurm] Installing cert-manager..."
-		helm install "$chartName" jetstack/cert-manager \
-			--namespace "$chartName" --create-namespace --set crds.enabled=true
+		echo "[slurm-bridge] Installing scheduler-plugins..."
+		helm install "$chartName" "$chartName" \
+			--repo https://scheduler-plugins.sigs.k8s.io \
+			--namespace "$chartName" --create-namespace \
+			--set 'plugins.enabled={CoScheduling}' \
+			--set 'scheduler.replicaCount=0'
 	fi
 }
 
-function slurm::install() {
-	slurm::prerequisites
-
+function jobset::install() {
 	local chartName
-	local version="~1.1.0-rc1"
-
-	chartName="slurm-operator"
+	chartName="jobset"
 	if ! helm::find "$chartName"; then
-		echo "[slurm] Installing slurm-operator..."
-		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm-operator \
-			--version="$version" --namespace=slinky --create-namespace --wait \
+		echo "[slurm-bridge] Installing jobset..."
+		local version="v0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset \
+			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function lws::install() {
+	local chartName
+	chartName="lws"
+	if ! helm::find "$chartName"; then
+		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
+		local version="0.8.x"
+		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
+			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function slurm-stack::prerequisites() {
+	local chartName
+	chartName="cert-manager"
+	if ! helm::find "$chartName"; then
+		echo "[slurm] Installing cert-manager..."
+		helm install "$chartName" oci://quay.io/jetstack/charts/cert-manager \
+			--namespace "$chartName" --create-namespace \
 			--set 'crds.enabled=true'
 	fi
-	# Wait for webhook to be ready so slurm chart install does not hit "connection refused"
-	kubectl wait --for=condition=Available deployment/slurm-operator-webhook -n slinky --timeout=120s 2>/dev/null || true
-	sleep 5
+}
 
-	chartName="slurm"
-	if ! helm::find "$chartName"; then
-		helm install "$chartName" oci://ghcr.io/slinkyproject/charts/slurm \
-			--version="$version" --namespace=slurm --create-namespace --wait \
+function slurm-stack::install() {
+	local operator_path
+	local ref="$OPT_SLURM_OPERATOR_REF"
+	local repo="$OPT_SLURM_OPERATOR_REPO"
+
+	slurm-stack::prerequisites
+
+	operator_path="$(git::checkout slurm-operator "$repo" "$ref")"
+	make -C "$operator_path" values-dev
+	slurm-operator::install_from_source "$operator_path"
+	slurm::install_from_source "$operator_path"
+
+	slurm::configure_for_bridge "$operator_path/helm/slurm"
+}
+
+function slurm-operator::install_from_source() {
+	local operator_path="$1"
+
+	echo "[slurm] Installing slurm-operator..."
+	(
+		cd "$operator_path/helm/slurm-operator"
+		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
+		skaffold run
+	)
+	slurm-operator::wait
+}
+
+function slurm-operator::wait() {
+	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
+		-n slinky --timeout=120s
+}
+
+function slurm::install_from_source() {
+	local operator_path="$1"
+
+	echo "[slurm] Installing Slurm..."
+	(
+		cd "$operator_path/helm/slurm"
+		skaffold run
+	)
+}
+
+function slurm::configure_for_bridge() {
+	local chart="$1"
+	local chartName="slurm"
+
+	echo "[slurm] Configuring Slurm for slurm-bridge..."
+	case "$OPT_SLURM_NODE_MODE" in
+	"$SLURM_NODE_MODE_EXTERNAL")
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
 			--set "nodesets.slinky.enabled=false" \
 			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
 			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
-	fi
+		;;
+	"$SLURM_NODE_MODE_HYBRID")
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--values "$SCRIPT_DIR/slurm-bridge-nodes.yaml"
+		;;
+	*)
+		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
+		exit 1
+		;;
+	esac
 }
 
 function extras::install() {
@@ -204,14 +352,15 @@ function extras::install() {
 	chartName="metrics-server"
 	if ! helm::find "$chartName"; then
 		helm install "$chartName" metrics-server/metrics-server \
-			--set args="{--kubelet-insecure-tls}" \
-			--namespace "$chartName" --create-namespace
+			--namespace "$chartName" --create-namespace \
+			--set args="{--kubelet-insecure-tls}"
 	fi
 
 	chartName="prometheus"
 	if ! helm::find "$chartName"; then
 		helm install "$chartName" prometheus-community/kube-prometheus-stack \
-			--namespace "$chartName" --create-namespace --set installCRDs=true \
+			--namespace "$chartName" --create-namespace \
+			--set installCRDs=true \
 			--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
 	fi
 
@@ -229,8 +378,8 @@ function slurm-bridge::secret() {
 function kjob::install() {
 	local version="0.1.0"
 	local kjob_path
-	kjob_path=$(mktemp -d)
-	git clone -b "v${version}" https://github.com/kubernetes-sigs/kjob.git "${kjob_path}"
+	local repo="https://github.com/kubernetes-sigs/kjob.git"
+	kjob_path="$(git::checkout kjob "$repo" "v${version}")"
 	(
 		cd "$kjob_path"
 		make install
@@ -247,8 +396,8 @@ function dra-example-driver::install() {
 	local cluster_name="${1:-kind}"
 	local version="main"
 	local dra_path
-	dra_path=$(mktemp -d)
-	git clone -b "$version" https://github.com/kubernetes-sigs/dra-example-driver.git "${dra_path}"
+	local repo="https://github.com/kubernetes-sigs/dra-example-driver.git"
+	dra_path="$(git::checkout dra-example-driver "$repo" "$version")"
 	(
 		cd "$dra_path"
 
@@ -280,8 +429,8 @@ function dra-driver-cpu::install() {
 	local cluster_name="${1:-kind}"
 	local version="v0.1.0"
 	local dra_path
-	dra_path=$(mktemp -d)
-	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
+	local repo="https://github.com/kubernetes-sigs/dra-driver-cpu.git"
+	dra_path="$(git::checkout dra-driver-cpu "$repo" "$version")"
 	(
 		cd "$dra_path"
 		local host_arch
@@ -300,7 +449,9 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--bridge] [--kjob] [--dra-example-driver] [--dra-driver-cpu] [--all]
+	        [--extras] [--bridge] [--slurm-node-mode=MODE]
+	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF] [--kjob]
+	        [--dra-example-driver] [--dra-driver-cpu] [--all]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 OPTIONS:
@@ -309,6 +460,13 @@ OPTIONS:
 	--delete            Delete the Kind cluster and exit.
 	--extras            Install optional dependencies (metrics, prometheus, keda).
 	--bridge            Install slurm-bridge
+	--slurm-node-mode=MODE
+	                    Configure Slurm nodes as external or hybrid. Default: $OPT_SLURM_NODE_MODE.
+	--slurm-operator-repo=URL
+	                    Clone slurm-operator from URL. Default: $OPT_SLURM_OPERATOR_REPO.
+	                    Can also be set with SLURM_OPERATOR_REPO.
+	--slurm-operator-ref=REF
+	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
@@ -361,9 +519,12 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
+OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
+OPT_SLURM_OPERATOR_REF="v1.1.0"
+OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,help"
+LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -387,6 +548,33 @@ while :; do
 	--bridge)
 		OPT_BRIDGE=true
 		shift
+		;;
+	--slurm-node-mode)
+		OPT_SLURM_NODE_MODE="$2"
+		case "$OPT_SLURM_NODE_MODE" in
+		"$SLURM_NODE_MODE_EXTERNAL" | "$SLURM_NODE_MODE_HYBRID") ;;
+		*)
+			echo "--slurm-node-mode must be one of: $SLURM_NODE_MODE_EXTERNAL, $SLURM_NODE_MODE_HYBRID" >&2
+			exit 1
+			;;
+		esac
+		shift 2
+		;;
+	--slurm-operator-repo)
+		OPT_SLURM_OPERATOR_REPO="$2"
+		if [ -z "$OPT_SLURM_OPERATOR_REPO" ]; then
+			echo "--slurm-operator-repo requires a non-empty URL" >&2
+			exit 1
+		fi
+		shift 2
+		;;
+	--slurm-operator-ref)
+		OPT_SLURM_OPERATOR_REF="$2"
+		if [ -z "$OPT_SLURM_OPERATOR_REF" ]; then
+			echo "--slurm-operator-ref requires a non-empty REF" >&2
+			exit 1
+		fi
+		shift 2
 		;;
 	--extras)
 		OPT_EXTRAS=true
