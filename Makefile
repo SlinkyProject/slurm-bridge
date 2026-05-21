@@ -80,7 +80,7 @@ KIND_CLUSTER_NAME ?= slurm-bridge-demo
 
 .PHONY: demo-cluster-create
 demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
-	./hack/kind.sh --bridge $(KIND_CLUSTER_NAME)
+	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
 
 .PHONY: demo-cluster-delete
 demo-cluster-delete: ## Delete the kind cluster.
@@ -88,7 +88,7 @@ demo-cluster-delete: ## Delete the kind cluster.
 
 .PHONY: install-dra
 install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
-	./hack/kind.sh --dra-driver-cpu --dra-example-driver --bridge $(KIND_CLUSTER_NAME)
+	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
 
 .PHONY: setup-sysctl
 setup-sysctl: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
@@ -100,7 +100,7 @@ HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/gpu-example/*.yaml))
 
 .PHONY: install-examples
 install-examples: ## run examples only-no cluster setup
-	for f in $(HACK_EXAMPLES); do $(KUBECTL) delete -f "$$f" || true; done; \
+	for f in $(HACK_EXAMPLES); do $(KUBECTL) delete -f "$$f" --ignore-not-found; done; \
     for f in $(HACK_EXAMPLES); do $(KUBECTL) apply -f "$$f"; done;
 
 .PHONY: demo-examples
@@ -113,7 +113,7 @@ demo-example-explainer: demo-cluster-create install-examples ## Run hack/example
 
 .PHONY: install-examples-dra
 install-examples-dra: ## install dra examples only-no cluster setup
-	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) delete -f "$$f" || true; done; \
+	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) delete -f "$$f" --ignore-not-found; done; \
 	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) apply -f "$$f"; done;
 
 .PHONY: demo-examples-dra

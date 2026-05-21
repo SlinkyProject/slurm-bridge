@@ -82,7 +82,7 @@ kind to deploy the `slurm-bridge` helm chart within your local environment.
 1. Create your cluster using `hack/kind.sh`:
 
    ```bash
-   hack/kind.sh --bridge
+   hack/kind.sh --core
    ```
 
 1. Familiarize yourself with and use your test environment:

@@ -9,6 +9,8 @@ featureGates:
   DRAExtendedResource: true
   DRAResourceClaimDeviceStatus: true
   DRAConsumableCapacity: true
+  GenericWorkload: true
+  WorkloadWithJob: true
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri"]
@@ -21,15 +23,18 @@ nodes:
         controllerManager:
           extraArgs:
             v: "6"
+            feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
         scheduler:
           extraArgs:
             v: "5"
             vmodule: "allocator=6,dynamicresources=6"
+            feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
       - |
         kind: ClusterConfiguration
         apiServer:
           extraArgs:
-            runtime-config: "resource.k8s.io/v1beta1=true"
+            runtime-config: "resource.k8s.io/v1beta1=true,scheduling.k8s.io/v1alpha2=true"
+            feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
   - role: worker
   - role: worker
   - role: worker
