@@ -78,31 +78,26 @@ spec:
           memory: 100Mi
 ```
 
-Example "pause" deployment to illustrate annotations:
+Example "sleep" Job to illustrate annotations:
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: pause
+  name: sleep
   # `slurm-bridge` annotations on parent object
   annotations:
     slinky.slurm.net/timelimit: "5"
     slinky.slurm.net/account: foo
 spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: pause
   template:
-    metadata:
-      labels:
-        app: pause
     spec:
       schedulerName: slurm-bridge-scheduler
+      restartPolicy: Never
       containers:
-        - name: pause
-          image: registry.k8s.io/pause:3.6
+        - name: sleep
+          image: busybox:stable
+          command: [sh, -c, sleep 3]
           resources:
             limits:
               cpu: "1"
