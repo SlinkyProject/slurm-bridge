@@ -16,7 +16,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/util/slice"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -107,7 +106,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		}
 		// resource requests in a container is a map, their names must
 		// be sorted to determine the resource's index order.
-		slice.SortStrings(keys)
+		slices.Sort(keys)
 		for rName := range creqs {
 			ridx := 0
 			for j := range keys {
