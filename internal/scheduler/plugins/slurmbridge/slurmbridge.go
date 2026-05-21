@@ -86,8 +86,7 @@ func init() {
 // +kubebuilder:rbac:groups=topology.node.k8s.io,resources=noderesourcetopologies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch
-// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch
-// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch;delete
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims/status,verbs=patch;update
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims/binding,verbs=patch;update
 

@@ -159,6 +159,7 @@ rules:
   - resourceclaims
   verbs:
   - create
+  - delete
   - get
   - list
   - update
