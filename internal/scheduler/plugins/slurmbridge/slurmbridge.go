@@ -99,8 +99,8 @@ func init() {
 // +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups/status,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets/status,verbs=create;get;list;watch
-// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=create;get;list;watch
-// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=patch
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=workloads,verbs=get
 // +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=create;get;list;watch
 
@@ -300,6 +300,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		sb.markPodGroupScheduled(ctx, s.slurmJobIR, strconv.Itoa(int(externalJob.JobId)))
 		// Update pod after performing a Patch so subsequent plugins have
 		// accurate annotations
 		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
