@@ -192,6 +192,17 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			Name:          slurmJobIR.JobInfo.JobName,
 			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
 			RequiredNodes: ptr.To(api.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
+			Priority: func() *api.V0044Uint32NoValStruct {
+				if slurmJobIR.JobInfo.Priority != nil {
+					return &api.V0044Uint32NoValStruct{
+						Infinite: ptr.To(false),
+						Number:   slurmJobIR.JobInfo.Priority,
+						Set:      ptr.To(true),
+					}
+				} else {
+					return &api.V0044Uint32NoValStruct{Set: ptr.To(false)}
+				}
+			}(),
 			Partition: func() *string {
 				if slurmJobIR.JobInfo.Partition == nil {
 					return &r.partition
