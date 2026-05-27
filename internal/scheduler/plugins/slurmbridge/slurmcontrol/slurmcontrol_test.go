@@ -510,6 +510,39 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Submit external job with priority",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job == nil || jobSubmit.Job.Priority == nil {
+								return fmt.Errorf("expected Priority to be set, got nil")
+							}
+							if !ptr.Deref(jobSubmit.Job.Priority.Set, false) {
+								return fmt.Errorf("expected Priority.Set to be true")
+							}
+							if ptr.Deref(jobSubmit.Job.Priority.Number, 0) != 100 {
+								return fmt.Errorf("expected Priority.Number=100, got %d", ptr.Deref(jobSubmit.Job.Priority.Number, 0))
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
+				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Priority: ptr.To(int32(100))}},
+			},
+			want:    1,
+			wantErr: false,
+		},
+		{
 			name: "Submit external job slurmJobIR.Exclusive false yields empty Shared (non-exclusive)",
 			fields: fields{
 				Client: func() client.Client {
