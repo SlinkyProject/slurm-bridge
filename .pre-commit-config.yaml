@@ -42,11 +42,12 @@ repos:
       - id: mdformat
         args:
           - --wrap=80
-        exclude: (\.chglog/.*|helm/.*|.github/ISSUE_TEMPLATE/.*)\.md
         additional_dependencies:
           - mdformat-toc
-          - mdformat-tables
+          - mdformat-gfm
           - mdformat-gfm-alerts
+          - mdformat-frontmatter
+        exclude: ^helm/.*/README\.md$
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
