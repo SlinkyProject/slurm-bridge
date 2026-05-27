@@ -4,7 +4,6 @@ about: Report incorrect or needed documentation
 title: "[DOC]"
 labels: "? - Needs Triage, doc"
 assignees: ''
-
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -13,31 +12,34 @@ assignees: ''
 
 ## Report incorrect documentation
 
-**Location of incorrect documentation**
-Provide links and line numbers if applicable.
+**Location of incorrect documentation** Provide links and line numbers if
+applicable.
 
-**Describe the problems or issues found in the documentation**
-A clear and concise description of what you found to be incorrect.
+**Describe the problems or issues found in the documentation** A clear and
+concise description of what you found to be incorrect.
 
-**Steps taken to verify documentation is incorrect**
-List any steps you have taken:
+**Steps taken to verify documentation is incorrect** List any steps you have
+taken:
 
-**Suggested fix for documentation**
-Detail proposed changes to fix the documentation if you have any.
+**Suggested fix for documentation** Detail proposed changes to fix the
+documentation if you have any.
 
----
+______________________________________________________________________
 
 ## Report needed documentation
 
-**Report needed documentation**
-A clear and concise description of what documentation you believe it is needed and why.
+**Report needed documentation** A clear and concise description of what
+documentation you believe it is needed and why.
 
-**Describe the documentation you'd like**
-A clear and concise description of what you want to happen.
+**Describe the documentation you'd like** A clear and concise description of
+what you want to happen.
 
-**Steps taken to search for needed documentation**
-List any steps you have taken:
+**Steps taken to search for needed documentation** List any steps you have
+taken:
 
+______________________________________________________________________
 
------
-By submitting this issue, you agree to follow our [code of conduct](https://github.com/SlinkyProject/slurm-bridge/blob/main/CODE_OF_CONDUCT.md) and our [contributing guidelines](https://github.com/SlinkyProject/slurm-bridge/blob/main/CONTRIBUTING.md).
+By submitting this issue, you agree to follow our
+[code of conduct](https://github.com/SlinkyProject/slurm-bridge/blob/main/CODE_OF_CONDUCT.md)
+and our
+[contributing guidelines](https://github.com/SlinkyProject/slurm-bridge/blob/main/CONTRIBUTING.md).
