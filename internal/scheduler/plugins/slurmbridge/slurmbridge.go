@@ -71,6 +71,7 @@ func init() {
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;update;watch
 // +kubebuilder:rbac:groups="",resources=replicationcontrollers,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
