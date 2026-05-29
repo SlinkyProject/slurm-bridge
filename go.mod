@@ -1,8 +1,6 @@
 module github.com/SlinkyProject/slurm-bridge
 
-go 1.25.0
-
-toolchain go1.26.3
+go 1.26.3
 
 require (
 	github.com/SlinkyProject/slurm-client v1.0.3
