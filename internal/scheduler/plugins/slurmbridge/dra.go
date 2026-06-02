@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/util/slice"
 	"k8s.io/utils/ptr"
@@ -40,15 +41,36 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 	}
 
 	if err := sb.Create(ctx, claim); err != nil {
-		return fmt.Errorf("create claim for extended resources %v: %w", klog.KObj(claim), err)
+		var errs []error
+		errs = append(errs, fmt.Errorf("create claim for extended resources %v: %w", klog.KObj(claim), err))
+
+		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
+			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
+		}
+
+		return utilerrors.NewAggregate(errs)
 	}
 
 	if err := sb.bindClaim(ctx, claim, pod, nodeName, resources); err != nil {
-		return err
+		var errs []error
+		errs = append(errs, err)
+
+		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
+			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
+		}
+
+		return utilerrors.NewAggregate(errs)
 	}
 
 	if err := sb.patchPodExtendedResourceClaimStatus(ctx, pod, claim, requestMappings); err != nil {
-		return err
+		var errs []error
+		errs = append(errs, err)
+
+		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
+			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
+		}
+
+		return utilerrors.NewAggregate(errs)
 	}
 
 	return nil
