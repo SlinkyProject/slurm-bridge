@@ -3,21 +3,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # https://skaffold.dev/docs/references/yaml/
-apiVersion: skaffold/v4beta1
+apiVersion: skaffold/v4beta14
 kind: Config
 build:
   artifacts:
     - image: slinky.slurm.net/slurm-bridge-scheduler
+      runtimeType: go
       context: ../../
       docker:
         dockerfile: Dockerfile
         target: scheduler
     - image: slinky.slurm.net/slurm-bridge-admission
+      runtimeType: go
       context: ../../
       docker:
         dockerfile: Dockerfile
         target: admission
     - image: slinky.slurm.net/slurm-bridge-controllers
+      runtimeType: go
       context: ../../
       docker:
         dockerfile: Dockerfile
@@ -43,50 +46,19 @@ deploy:
           controllers.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_controllers}}'
         namespace: slurm
         createNamespace: true
-profiles:
-  - name: debug
-    patches:
-      - op: replace
-        path: /build/artifacts
-        value:
-          - image: slinky.slurm.net/slurm-bridge-debug
-            context: ../../
-            docker:
-              dockerfile: Dockerfile
-              target: debug
-      - op: replace
-        path: /deploy/helm/releases/0/setValueTemplates
-        value:
-          scheduler.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_debug}}'
-          scheduler.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_debug}}'
-          admission.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_debug}}'
-          admission.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_debug}}'
-          controllers.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_debug}}'
-          controllers.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_debug}}'
-      - op: add
-        path: /deploy/helm/flags
-        value:
-          install:
-            - --post-renderer=../../hack/debug/helm-post-renderer.sh
-          template:
-            - --post-renderer=../../hack/debug/helm-post-renderer.sh
-          upgrade:
-            - --post-renderer=../../hack/debug/helm-post-renderer.sh
-      - op: add
-        path: /portForward
-        value:
-          - resourceType: deployment
-            resourceName: slurm-bridge-scheduler
-            namespace: slinky
-            port: 40000
-            localPort: 40000
-          - resourceType: deployment
-            resourceName: slurm-bridge-controllers
-            namespace: slinky
-            port: 40000
-            localPort: 40001
-          - resourceType: deployment
-            resourceName: slurm-bridge-admission
-            namespace: slinky
-            port: 40000
-            localPort: 40002
+portForward:
+  - resourceType: deployment
+    resourceName: slurm-bridge-scheduler
+    namespace: slinky
+    port: 56268
+    localPort: 40000
+  - resourceType: deployment
+    resourceName: slurm-bridge-controllers
+    namespace: slinky
+    port: 56268
+    localPort: 40001
+  - resourceType: deployment
+    resourceName: slurm-bridge-admission
+    namespace: slinky
+    port: 56268
+    localPort: 40002

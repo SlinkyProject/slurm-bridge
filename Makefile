@@ -88,7 +88,7 @@ demo-cluster-delete: ## Delete the kind cluster.
 
 .PHONY: debug
 debug: ## Run Delve-enabled slurm-bridge components and forward debug ports.
-	cd helm/slurm-bridge && skaffold dev -p debug --port-forward=user --tail
+	cd helm/slurm-bridge && skaffold debug --auto-build=true --auto-deploy=true --cleanup=false --port-forward=user --tail
 
 .PHONY: install-dra
 install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
