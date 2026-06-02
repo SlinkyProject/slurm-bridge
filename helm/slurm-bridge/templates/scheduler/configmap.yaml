@@ -28,11 +28,13 @@ data:
         preFilter:
           enabled:
           - name: 'VolumeBinding'
+          - name: 'NodeResourcesFit'
           - name: 'SlurmBridge'
         filter:
           enabled:
           - name: 'VolumeBinding'
           - name: 'TaintToleration'
+          - name: 'NodeResourcesFit'
           - name: 'SlurmBridge'
         postFilter:
           enabled:
