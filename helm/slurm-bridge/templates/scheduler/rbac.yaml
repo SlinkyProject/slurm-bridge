@@ -84,7 +84,7 @@ rules:
   verbs: ["get", "list", "watch", "create"]
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceclaims"]
-  verbs: ["get", "list", "watch", "create", "update"]
+  verbs: ["get", "list", "watch", "create", "update", "delete"]
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceclaims/status"]
   verbs: ["patch", "update"]
