@@ -124,14 +124,14 @@ Create a secret for slurm-bridge to communicate with Slurm.
 
    export SLURM_JWT=$(scontrol token username=slurm lifespan=infinite)
    kubectl create namespace slurm-bridge
-   kubectl create secret generic slurm-bridge-jwt-token --namespace=slinky --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+   kubectl create secret generic slurm-bridge-jwt-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 
 Install the slurm-bridge scheduler:
 
 .. code:: sh
 
    helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
-     --namespace=slinky --create-namespace
+     --namespace=slurm --create-namespace
 
 For additional instructions, see the
 `quickstart <quickstart.html>`__ guide.
