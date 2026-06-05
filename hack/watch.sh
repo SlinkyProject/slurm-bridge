@@ -27,7 +27,7 @@ case "$1" in
                 echo 'These pods contain the admission controller, scheduler, and'; \
                 echo  'controllers, which are used by Slurm-bridge to interact with Kubernetes'; \
                 echo '---------------------'; \
-                kubectl get pods -o wide -n slinky -l app.kubernetes.io/instance=slurm-bridge; echo; \
+                kubectl get pods -o wide -n slurm -l app.kubernetes.io/instance=slurm-bridge; echo; \
                 echo 'SLURM PODS'; \
                 echo '====================='; \
                 echo 'These pods are pods launched by Slurm-operator, a way to run'; \
@@ -35,7 +35,7 @@ case "$1" in
                 echo 'and provide the same capabilities as a baremetal Slurm'; \
                 echo 'cluster, in a Kubernetes environment'; \
                 echo '---------------------'; \
-                kubectl get pods -o wide -n slurm -l app.kubernetes.io/name=slurmd; echo; \
+                kubectl get pods -o wide -n slurm -l app.kubernetes.io/part-of=slurm; echo; \
                 printf '\n'; \
                 echo 'USER WORKLOADS'; \
                 echo '+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'; \
@@ -81,7 +81,7 @@ case "$1" in
 "--bridge")
 	watch -n1 "\
         echo 'SLURM PODS'; \
-        kubectl get pods -o wide -n slurm -l app.kubernetes.io/name=slurmd; echo; \
+        kubectl get pods -o wide -n slurm -l app.kubernetes.io/part-of=slurm; echo; \
         echo 'SLURM BRIDGE PODS'; \
         kubectl get pods -o wide -n slurm-bridge; echo; \
         echo 'PODGROUP STATUS'; \
@@ -102,7 +102,7 @@ case "$1" in
 "--demo")
 	watch -n1 "\
             echo 'SLURM PODS'; \
-            kubectl get pods -o wide -n slurm -l app.kubernetes.io/name=slurmd; echo; \
+            kubectl get pods -o wide -n slurm -l app.kubernetes.io/part-of=slurm; echo; \
             total=\$(kubectl get pods -n slurm-bridge --field-selector='status.phase!=Succeeded,status.phase!=Failed' --no-headers 2>/dev/null | wc -l | tr -d ' '); \
             pending=\$(kubectl get pods -n slurm-bridge --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l | tr -d ' '); \
             echo \"SLURM BRIDGE PODS (\$total total, \$pending pending)\"; \
@@ -125,7 +125,7 @@ case "$1" in
 *)
 	watch -n1 "\
         echo 'SLURM PODS'; \
-        kubectl get pods -o wide -n slurm -l app.kubernetes.io/name=slurmd; echo; \
+        kubectl get pods -o wide -n slurm -l app.kubernetes.io/part-of=slurm; echo; \
         echo 'SLURM BRIDGE PODS'; \
         kubectl get pods -o wide -n slurm-bridge; echo; \
         echo 'PODGROUP STATUS'; \

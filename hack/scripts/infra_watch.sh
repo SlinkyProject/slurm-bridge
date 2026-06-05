@@ -16,7 +16,7 @@ watch -n1 "\
     echo 'These pods contain the admission controller, scheduler, and'; \
     echo  'controllers, which are used by Slurm-bridge to interact with Kubernetes'; \
     echo '---------------------'; \
-    kubectl get pods  -n slinky -l app.kubernetes.io/instance=slurm-bridge; echo; \
+    kubectl get pods  -n slurm -l app.kubernetes.io/instance=slurm-bridge; echo; \
     echo 'SLURM PODS'; \
     echo '====================='; \
     echo 'These pods are pods launched by Slurm-operator, a way to run'; \
@@ -24,5 +24,5 @@ watch -n1 "\
     echo 'and provide the same capabilities as a baremetal Slurm'; \
     echo 'cluster, in a Kubernetes environment'; \
     echo '---------------------'; \
-    kubectl get pods  -n slurm -l app.kubernetes.io/name=slurmd; echo; \
+    kubectl get pods  -n slurm -l app.kubernetes.io/part-of=slurm; echo; \
     printf '\n'; "
