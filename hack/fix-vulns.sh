@@ -38,14 +38,18 @@ EOF
 }
 
 write_commit_message() {
-	{
-		echo "ci: fix vulns identified by govulncheck"
-		echo ""
-		echo "Fixed vulnerabilities:"
-		grep -Ev "no fix exists|fixed_in_version" "$GOVULNCHECK_REPORT" | tr -d '"' | awk -F, '{print "* " $1 " via " $2 "@" $3}'
-		echo ""
-		echo "Changelog: fixed - $(grep -Ev "no fix exists|fixed_in_version" "$GOVULNCHECK_REPORT" | tr -d '"' | cut -d ',' -f 1 | tr '\n' ' ' | fold -w 60 -s | sed -e 's/^/ /')"
-	} >"$OUTPUT_FILE"
+	if ! eval "$(grep -Ev "no fix exists|fixed_in_version" "$GOVULNCHECK_REPORT" | tr -d '"' | cut -d ',' -f 1 | tr '\n' ' ' | fold -w 60 -s | sed -e 's/^/ /')"; then
+		{
+			echo "ci: fix vulns identified by govulncheck"
+			echo ""
+			echo "Fixed vulnerabilities:"
+			grep -Ev "no fix exists|fixed_in_version" "$GOVULNCHECK_REPORT" | tr -d '"' | awk -F, '{print "* " $1 " via " $2 "@" $3}'
+			echo ""
+			echo "Changelog: Fixed -$(grep -Ev "no fix exists|fixed_in_version" "$GOVULNCHECK_REPORT" | tr -d '"' | cut -d ',' -f 1 | tr '\n' ' ' | fold -w 60 -s | sed -e 's/^/ /')"
+		} >"$OUTPUT_FILE"
+	else
+		exit 0
+	fi
 }
 
 fix_vulnerabilities() {
