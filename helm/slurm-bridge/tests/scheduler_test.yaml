@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+---
+suite: test scheduler
+templates:
+  - scheduler/deployment.yaml
+  - scheduler/configmap.yaml
+  - scheduler/rbac.yaml
+  - scheduler/serviceaccount.yaml
+release:
+  name: test-release
+  namespace: test-namespace
+chart:
+  version: 1.2.3
+  appVersion: 1.2.3
+tests:
+  - it: manifests should match snapshot
+    asserts:
+      - matchSnapshot: {}

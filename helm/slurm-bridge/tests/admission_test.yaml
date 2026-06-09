@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+---
+suite: test admission
+templates:
+  - admission/deployment.yaml
+  - admission/rbac.yaml
+  - admission/service.yaml
+  - admission/webhook.yaml
+release:
+  name: test-release
+  namespace: test-namespace
+chart:
+  version: 1.2.3
+  appVersion: 1.2.3
+tests:
+  - it: manifests should match snapshot
+    set:
+      admission:
+        enabled: true
+    asserts:
+      - matchSnapshot: {}

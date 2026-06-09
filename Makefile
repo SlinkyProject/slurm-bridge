@@ -55,7 +55,7 @@ build-images: ## Build container images.
 
 .PHONY: build-chart
 build-chart: ## Build charts.
-	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), helm package --dependency-update helm/$(shell basename "$(shell dirname "${chart}")") ;)
+	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), $(HELM) package --dependency-update helm/$(shell basename "$(shell dirname "${chart}")") ;)
 
 .PHONY: push
 push: push-images push-charts ## Push OCI packages.
@@ -71,7 +71,7 @@ sign-images: push-images cosign-bin ## Sign pushed images with cosign keyless si
 
 .PHONY: push-charts
 push-charts: build-chart ## Push OCI packages.
-	$(foreach chart, $(wildcard ./*.tgz), helm push ${chart} oci://$(REGISTRY)/charts ;)
+	$(foreach chart, $(wildcard ./*.tgz), $(HELM) push ${chart} oci://$(REGISTRY)/charts ;)
 
 ##@ Demo
 
@@ -146,6 +146,36 @@ LOCALBIN ?= $(shell pwd)/bin
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
+# helm-install-plugin will 'helm plugin install' if missing or wrong version
+# $1 - plugin name
+# $2 - plugin urlgo
+# $3 - plugin version (optional)
+# verify_flag - added in the event that we are helm v4 or older due to https://helm.sh/docs/helm/helm_plugin_verify
+#   being updated to be more secure, but libraries currently do not support it.
+define helm-install-plugin
+@{ \
+set -e; \
+if [ ! -x "$(HELM)" ]; then \
+	echo "Helm binary not found at $(HELM). Run 'make helm-bin' first." ;\
+	exit 1 ;\
+fi ;\
+helm_major="$$( $(HELM) version --short 2>/dev/null | $(SED) -E 's/^v([0-9]+).*/\1/' )"; \
+if [ "$${helm_major}" = "4" ]; then \
+	verify_flag="--verify=false" ;\
+else \
+	verify_flag="" ;\
+fi ;\
+installed_version="$$( $(HELM) plugin list 2>/dev/null | awk '$$1=="$(1)" {print $$2}' )"; \
+if [ -z "$${installed_version}" ]; then \
+	if [ -n "$(3)" ]; then \
+		$(HELM) plugin install "$(2)" --version "$(3)" $${verify_flag} ;\
+	else \
+		$(HELM) plugin install "$(2)" $${verify_flag} ;\
+	fi ;\
+fi ;\
+}
+endef
+
 ## Tool Binaries
 KUBECTL ?= kubectl
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
@@ -155,7 +185,13 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 HELM_DOCS ?= $(LOCALBIN)/helm-docs-$(HELM_DOCS_VERSION)
 PANDOC ?= $(LOCALBIN)/pandoc-$(PANDOC_VERSION)
 YQ ?= $(LOCALBIN)/yq-$(YQ_VERSION)
+HELM ?= $(LOCALBIN)/helm-$(HELM_VERSION)
 COSIGN ?= $(LOCALBIN)/cosign-$(COSIGN_VERSION)
+HELM_CONFIG_HOME ?= $(LOCALBIN)/helm-config
+HELM_CACHE_HOME ?= $(LOCALBIN)/helm-cache
+HELM_DATA_HOME ?= $(LOCALBIN)/helm-data
+HELM_PLUGINS ?= $(LOCALBIN)/helm-plugins
+export HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME HELM_PLUGINS
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
@@ -170,6 +206,8 @@ GOLANGCI_LINT_VERSION ?= v2.11.1
 HELM_DOCS_VERSION ?= v1.14.2
 PANDOC_VERSION ?= 3.9
 YQ_VERSION ?= v4.45.1
+HELM_VERSION ?= v4.1.1
+HELM_UNITTEST_VERSION ?= v1.0.3
 COSIGN_VERSION ?= v2.4.1
 
 .PHONY: controller-gen
@@ -237,6 +275,18 @@ mv "$$(echo "$(1)" | $(SED) "s/-$(3)$$//")" $(1) ;\
 }
 endef
 
+.PHONY: helm-bin
+helm-bin: $(HELM) ## Download Helm locally if necessary.
+$(HELM): $(LOCALBIN)
+	@if ! [ -f "$(HELM)" ]; then \
+		tmpdir="$$(mktemp -d)" ;\
+		archive="helm-$(HELM_VERSION)-$$(go env GOOS)-$$(go env GOARCH).tar.gz" ;\
+		curl -sSLo "$${tmpdir}/$${archive}" "https://get.helm.sh/$${archive}" ;\
+		tar -xzf "$${tmpdir}/$${archive}" -C "$${tmpdir}" ;\
+		cp "$${tmpdir}/$$(go env GOOS)-$$(go env GOARCH)/helm" "$(HELM)" ;\
+		rm -rf "$${tmpdir}" ;\
+	fi
+
 ##@ Development
 
 .PHONY: install-dev
@@ -255,6 +305,19 @@ helm-docs: helm-docs-bin ## Run helm-docs.
 .PHONY: helm-lint
 helm-lint: ## Lint Helm charts.
 	find "helm/" -depth -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0r -n1 helm lint --strict
+
+.PHONY: helm-unittest
+helm-unittest: helm-unittest-bin ## Run helm-unittest.
+	find "helm/" -depth -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0r -n1 $(HELM) unittest --strict
+
+.PHONY: helm-unittest-update
+helm-unittest-update: helm-unittest-bin ## Update helm-unittest snapshots.
+	find "helm/" -depth -mindepth 1 -maxdepth 1 -type d -print0 | xargs -0r -n1 $(HELM) unittest --strict --update-snapshot
+
+.PHONY: helm-unittest-bin
+helm-unittest-bin: helm-bin ## Download helm-unittest plugin locally if necessary.
+	@mkdir -p "$(HELM_CONFIG_HOME)" "$(HELM_CACHE_HOME)" "$(HELM_DATA_HOME)" "$(HELM_PLUGINS)"
+	$(call helm-install-plugin,unittest,https://github.com/helm-unittest/helm-unittest,$(HELM_UNITTEST_VERSION))
 
 .PHONY: helm-dependency-update
 helm-dependency-update: ## Update Helm chart dependencies.
