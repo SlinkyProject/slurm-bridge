@@ -103,7 +103,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: {{ include "slurm-bridge.scheduler.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -117,4 +117,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: {{ include "slurm-bridge.scheduler.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
