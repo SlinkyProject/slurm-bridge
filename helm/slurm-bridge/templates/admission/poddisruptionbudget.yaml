@@ -1,0 +1,20 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if .Values.admission.enabled }}
+{{- if and .Values.admission.pdb .Values.admission.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "slurm-bridge.name" . }}-admission
+  namespace: {{ include "slurm-bridge.namespace" . }}
+spec:
+  maxUnavailable: {{ .Values.admission.pdb.maxUnavailable }}
+  minAvailable: {{ .Values.admission.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "slurm-bridge.admission.selectorLabels" . | nindent 6 }}
+{{- end }}{{- /* if .Values.admission.pdb && .Values.admission.pdb.enabled */}}
+{{- end }}{{- /* if .Values.admission.enabled */}}

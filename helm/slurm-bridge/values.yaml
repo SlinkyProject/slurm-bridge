@@ -18,6 +18,10 @@ scheduler:
     tag: ""
   # -- Set the number of replicas to deploy.
   replicaCount: 1
+  # -- PodDisruptionBudget for the scheduler deployment
+  pdb:
+    # -- Enable PodDisruptionBudget
+    enabled: false
   # -- Enables leader election.
   leaderElect: false
   # -- Set the priority class to use.
@@ -74,6 +78,14 @@ admission:
     renewBefore: 8760h0m0s # 1 year
   # -- Set the number of replicas to deploy.
   replicas: 1
+  # -- PodDisruptionBudget for the admission deployment
+  pdb:
+    # -- Enable PodDisruptionBudget
+    enabled: false
+     # -- Minimum pods that must remain available after eviction (int or quoted percent).
+    minAvailable: 1
+    # -- Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`.
+    maxUnavailable: null
   # -- Set the priority class to use.
   # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass
   priorityClassName: ""
@@ -115,6 +127,14 @@ controllers:
     tag: ""
   # -- Set the number of replicas to deploy.
   replicas: 1
+  # -- PodDisruptionBudget for the controllers deployment
+  pdb:
+    # -- Enable PodDisruptionBudget
+    enabled: false
+     # -- Minimum pods that must remain available after eviction (int or quoted percent).
+    minAvailable: 1
+    # -- Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`.
+    maxUnavailable: null
   # -- Set the priority class to use.
   # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass
   priorityClassName: ""

@@ -1,0 +1,17 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if and .Values.scheduler.pdb .Values.scheduler.pdb.enabled  }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "slurm-bridge.name" . }}-scheduler
+  namespace: {{ include "slurm-bridge.namespace" . }}
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "slurm-bridge.scheduler.selectorLabels" . | nindent 6 }}
+{{- end }}{{- /* if .Values.scheduler.pdb && .Values.scheduler.pdb.enabled */}}
