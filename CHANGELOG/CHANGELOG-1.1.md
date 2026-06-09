@@ -1,3 +1,32 @@
+## v1.1.1
+
+### Added
+
+- Added pods/finalizers resource to RBAC rules.
+- Use cosign to sign image artifacts.
+
+### Fixed
+
+- Update opentelemetry to resolve CVE-2026-39883.
+- Fixed reconciliation of Slurm nodes to prevent the deletion of non-external
+  nodes.
+- GO-2026-4918 GO-2026-4971 GO-2026-4976 GO-2026-4977 GO-2026-4980 GO-2026-4981
+  GO-2026-4982 GO-2026-4986.
+- GO-2026-5005 GO-2026-5006 GO-2026-5013 GO-2026-5014 GO-2026-5015 GO-2026-5016
+  GO-2026-5017 GO-2026-5018 GO-2026-5019 GO-2026-5020 GO-2026-5021 GO-2026-5023
+  GO-2026-5024 GO-2026-5025 GO-2026-5026 GO-2026-5027 GO-2026-5028 GO-2026-5029
+  GO-2026-5030 GO-2026-5033.
+- Prevent pods with non-existent resource requests from being bound by
+  slurm-bridge.
+- Fixes bug whereby multiple ResourceClaims were created after claim bind
+  failures.
+- GO-2026-5037 GO-2026-5038 GO-2026-5039.
+- Removed namespace from jwtKeyRef.
+
+### Changed
+
+- Slurm-bridge is now deployed to the slurm namespace instead of slinky.
+
 ## v1.1.0
 
 ### Fixed
