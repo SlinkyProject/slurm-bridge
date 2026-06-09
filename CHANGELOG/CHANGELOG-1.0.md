@@ -1,3 +1,28 @@
+## v1.0.4
+
+### Added
+
+- Use cosign to sign image artifacts.
+
+### Fixed
+
+- GO-2026-4918 GO-2026-4971 GO-2026-4976 GO-2026-4977 GO-2026-4980 GO-2026-4981
+  GO-2026-4982 GO-2026-4986.
+- GO-2026-5005 GO-2026-5006 GO-2026-5013 GO-2026-5014 GO-2026-5015 GO-2026-5016
+  GO-2026-5017 GO-2026-5018 GO-2026-5019 GO-2026-5020 GO-2026-5021 GO-2026-5023
+  GO-2026-5024 GO-2026-5025 GO-2026-5026 GO-2026-5027 GO-2026-5028 GO-2026-5029
+  GO-2026-5030 GO-2026-5033.
+- GO-2026-5037 GO-2026-5038 GO-2026-5039.
+- Removed namespace from jwtKeyRef.
+
+### Changed
+
+- Slurm-bridge is now deployed to the slurm namespace instead of slinky.
+
+### Miscellaneous
+
+- Update go version for branch alignment.
+
 ## v1.0.3
 
 ### Fixed
