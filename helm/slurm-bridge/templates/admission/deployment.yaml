@@ -47,12 +47,6 @@ spec:
           {{- with .Values.admission.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.admission.nodeSelector }}
-          nodeSelector: {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.admission.affinity }}
-          affinity: {{- toYaml . | nindent 12 }}
-          {{- end }}
           volumeMounts:
             - name: certificates
               mountPath: /tmp/k8s-webhook-server/serving-certs/
@@ -60,6 +54,12 @@ spec:
             - name: slurm-bridge-config
               mountPath: /etc/slurm-bridge/
               readOnly: true
+      {{- with .Values.admission.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.admission.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.admission.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
