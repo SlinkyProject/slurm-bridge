@@ -408,6 +408,7 @@ func Test_parseAnnotations(t *testing.T) {
 					wellknown.AnnotationMemPerNode:  "1Gi",
 					wellknown.AnnotationMinNodes:    "2",
 					wellknown.AnnotationPartition:   "slurm-bridge",
+					wellknown.AnnotationPriority:    "100",
 					wellknown.AnnotationQOS:         "high",
 					wellknown.AnnotationReservation: "training",
 					wellknown.AnnotationTimeLimit:   "30",
@@ -429,6 +430,7 @@ func Test_parseAnnotations(t *testing.T) {
 					MinNodes:    ptr.To(int32(2)),
 					MaxNodes:    ptr.To(int32(4)),
 					Partition:   ptr.To("slurm-bridge"),
+					Priority:    ptr.To(int32(100)),
 					QOS:         ptr.To("high"),
 					Reservation: ptr.To("training"),
 					TimeLimit:   ptr.To(int32(30)),
@@ -473,6 +475,16 @@ func Test_parseAnnotations(t *testing.T) {
 				slurmJobIR: &SlurmJobIR{},
 				anno: map[string]string{
 					wellknown.AnnotationTimeLimit: "foo",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BadPriorityAnnotation",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationPriority: "foo",
 				},
 			},
 			wantErr: true,
