@@ -1,3 +1,47 @@
+## v1.0.4
+
+### Added
+
+- Use cosign to sign image artifacts.
+
+### Fixed
+
+- GO-2026-4918 GO-2026-4971 GO-2026-4976 GO-2026-4977 GO-2026-4980 GO-2026-4981
+  GO-2026-4982 GO-2026-4986.
+- GO-2026-5005 GO-2026-5006 GO-2026-5013 GO-2026-5014 GO-2026-5015 GO-2026-5016
+  GO-2026-5017 GO-2026-5018 GO-2026-5019 GO-2026-5020 GO-2026-5021 GO-2026-5023
+  GO-2026-5024 GO-2026-5025 GO-2026-5026 GO-2026-5027 GO-2026-5028 GO-2026-5029
+  GO-2026-5030 GO-2026-5033.
+- GO-2026-5037 GO-2026-5038 GO-2026-5039.
+- Removed namespace from jwtKeyRef.
+
+### Changed
+
+- Slurm-bridge is now deployed to the slurm namespace instead of slinky.
+
+### Miscellaneous
+
+- Update go version for branch alignment.
+
+## v1.0.3
+
+### Fixed
+
+- Updated google.golang.org/grpc to v1.79.3 to address CVE-2026-33186.
+
+## v1.0.2
+
+### Fixed
+
+- Fixed edge case where the Kubernetes API drops reconcile requests such that
+  the slurm-bridge controllers are unable to use that trigger to synchronize
+  workloads, causing a desynchronized state and slurm-bridge scheduling may
+  halt.
+
+### Changed
+
+- Update slurm-client version to v1.0.2.
+
 ## v1.0.1
 
 ### Fixed
