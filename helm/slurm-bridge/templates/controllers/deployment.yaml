@@ -49,16 +49,16 @@ spec:
           {{- with .Values.admission.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.controllers.nodeSelector }}
-          nodeSelector: {{- toYaml . | nindent 12 }}
-          {{- end }}
-          {{- with .Values.controllers.affinity }}
-          affinity: {{- toYaml . | nindent 12 }}
-          {{- end }}
           volumeMounts:
             - name: slurm-bridge-config
               mountPath: /etc/slurm-bridge/
               readOnly: true
+      {{- with .Values.controllers.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controllers.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.controllers.tolerations }}
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
