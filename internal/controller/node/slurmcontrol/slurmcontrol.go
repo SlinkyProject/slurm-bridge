@@ -333,14 +333,6 @@ func (r *realSlurmControl) updateNodeFeatures(ctx context.Context, node *corev1.
 		return fmt.Errorf("could not update node features: %w", err)
 	}
 
-	// Request reconfigure so Slurm repopulates partition membership from node features
-	// This is necessary due to a bug in Slurm where node feature updates do not update
-	// partition membership. Once the issue is fixed, this will be removed.
-	reconfigureObj := &slurmtypes.V0044Reconfigure{}
-	if err := r.Get(ctx, reconfigureObj.GetKey(), reconfigureObj); err != nil {
-		return fmt.Errorf("could not request Slurm reconfigure: %w", err)
-	}
-
 	return nil
 }
 
