@@ -84,20 +84,16 @@ func init() {
 }
 
 // Scheduler Plugin Core RBAC
-// +kubebuilder:rbac:groups="",resources=endpoints,verbs=create;get;update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=delete;get;list;patch;watch
 // +kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch;update
 // +kubebuilder:rbac:groups="",resources=pods/status,verbs=patch;update
-// +kubebuilder:rbac:groups="",resources=replicationcontrollers,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=extensions,resources=replicasets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch
 
 // Delegated Auth RBAC
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=subjectaccessreviews,verbs=create

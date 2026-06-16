@@ -139,17 +139,7 @@ manifests should match snapshot:
       - apiGroups:
           - ""
         resources:
-          - endpoints
-        verbs:
-          - create
-          - get
-          - update
-      - apiGroups:
-          - ""
-        resources:
           - namespaces
-          - replicationcontrollers
-          - services
         verbs:
           - get
           - list
@@ -258,14 +248,6 @@ manifests should match snapshot:
           - leaderworkersets
         verbs:
           - create
-          - get
-          - list
-          - watch
-      - apiGroups:
-          - policy
-        resources:
-          - poddisruptionbudgets
-        verbs:
           - get
           - list
           - watch
