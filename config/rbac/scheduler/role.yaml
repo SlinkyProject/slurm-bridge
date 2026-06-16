@@ -135,7 +135,6 @@ rules:
   - resourceclaims/status
   verbs:
   - patch
-  - update
 - apiGroups:
   - scheduling.k8s.io
   resources:
