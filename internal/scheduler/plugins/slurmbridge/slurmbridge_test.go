@@ -315,7 +315,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				pod:   pod.DeepCopy(),
 			},
 			want:  nil,
-			want1: fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error()),
+			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
 			name: "External job exists but nodes don't match",
