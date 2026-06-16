@@ -47,8 +47,30 @@ var (
 	ErrorPodUpdateFailed      = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
 	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
+	ErrorJobNotPendingNoNodes = errors.New("external job is no longer pending but has no nodes assigned")
 	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
 )
+
+const slurmJobNotPending = "job is no longer pending execution"
+
+func isJobNotPendingError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var agg utilerrors.Aggregate
+	if errors.As(err, &agg) {
+		for _, e := range agg.Errors() {
+			if isJobNotPendingError(e) {
+				return true
+			}
+		}
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, slurmJobNotPending) ||
+		strings.Contains(msg, "eslurm_job_not_pending")
+}
 
 func init() {
 	utilruntime.Must(scheme.AddToScheme(scheme.Scheme))
@@ -355,6 +377,19 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		// to include any changes from slurmJobIR.
 		jobid, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
+			if isJobNotPendingError(err) {
+				logger.V(4).Info("external job started before update completed")
+				externalJob, err := sb.slurmControl.GetJob(ctx, pod)
+				if err != nil {
+					logger.Error(err, "error checking for Slurm job after update race")
+					return nil, fwk.NewStatus(fwk.Error, err.Error())
+				}
+				if externalJob.JobId != 0 && externalJob.Nodes != "" {
+					return nil, fwk.NewStatus(fwk.Success)
+				}
+				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm")
+				return nil, fwk.NewStatus(fwk.Error, ErrorJobNotPendingNoNodes.Error())
+			}
 			logger.Error(err, "error updating Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
