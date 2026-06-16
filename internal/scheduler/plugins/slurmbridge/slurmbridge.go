@@ -87,7 +87,7 @@ func init() {
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=delete;get;list;patch;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch;update
 // +kubebuilder:rbac:groups="",resources=pods/status,verbs=patch;update
 // +kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
