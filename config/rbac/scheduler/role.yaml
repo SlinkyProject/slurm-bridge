@@ -42,6 +42,11 @@ rules:
   - ""
   resources:
   - pods/finalizers
+  verbs:
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - pods/status
   verbs:
   - patch
