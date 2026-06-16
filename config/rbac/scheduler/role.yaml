@@ -7,13 +7,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - bindings
-  - pods/binding
-  verbs:
-  - create
-- apiGroups:
-  - ""
-  resources:
   - namespaces
   verbs:
   - get
@@ -48,6 +41,12 @@ rules:
   - list
   - patch
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/binding
+  verbs:
+  - create
 - apiGroups:
   - ""
   resources:
