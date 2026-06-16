@@ -210,10 +210,7 @@ manifests should match snapshot:
         resources:
           - jobs
         verbs:
-          - create
           - get
-          - list
-          - watch
       - apiGroups:
           - coordination.k8s.io
         resources:
@@ -235,19 +232,13 @@ manifests should match snapshot:
         resources:
           - jobsets
         verbs:
-          - create
           - get
-          - list
-          - watch
       - apiGroups:
           - leaderworkerset.x-k8s.io
         resources:
           - leaderworkersets
         verbs:
-          - create
           - get
-          - list
-          - watch
       - apiGroups:
           - resource.k8s.io
         resources:
@@ -284,20 +275,11 @@ manifests should match snapshot:
         verbs:
           - get
       - apiGroups:
-          - scheduling.k8s.io
-        resources:
-          - podgroups/status
-        verbs:
-          - patch
-      - apiGroups:
           - scheduling.x-k8s.io
         resources:
           - podgroups
         verbs:
-          - create
           - get
-          - list
-          - watch
       - apiGroups:
           - storage.k8s.io
         resources:
