@@ -106,7 +106,6 @@ func init() {
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=csinodes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=csistoragecapacities,verbs=get;list;watch
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
-// +kubebuilder:rbac:groups=storage.k8s.io,resources=volumeattachments,verbs=get;list;watch
 
 // RBAC for DefaultBinder Scheduler Plugin
 // +kubebuilder:rbac:groups="",resources=bindings,verbs=create

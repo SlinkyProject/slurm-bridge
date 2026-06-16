@@ -179,7 +179,6 @@ rules:
       - csinodes
       - csistoragecapacities
       - storageclasses
-      - volumeattachments
     verbs:
       - get
       - list
