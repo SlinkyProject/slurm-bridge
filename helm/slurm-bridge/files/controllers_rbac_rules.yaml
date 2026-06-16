@@ -17,7 +17,6 @@ rules:
       - get
       - list
       - patch
-      - update
       - watch
   - apiGroups:
       - resource.k8s.io
