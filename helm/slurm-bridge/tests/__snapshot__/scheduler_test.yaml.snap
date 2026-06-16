@@ -132,13 +132,6 @@ manifests should match snapshot:
       - apiGroups:
           - ""
         resources:
-          - bindings
-          - pods/binding
-        verbs:
-          - create
-      - apiGroups:
-          - ""
-        resources:
           - namespaces
         verbs:
           - get
@@ -173,6 +166,12 @@ manifests should match snapshot:
           - list
           - patch
           - watch
+      - apiGroups:
+          - ""
+        resources:
+          - pods/binding
+        verbs:
+          - create
       - apiGroups:
           - ""
         resources:

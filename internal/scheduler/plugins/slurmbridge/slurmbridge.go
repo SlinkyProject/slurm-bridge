@@ -108,7 +108,6 @@ func init() {
 // +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses,verbs=get;list;watch
 
 // RBAC for DefaultBinder Scheduler Plugin
-// +kubebuilder:rbac:groups="",resources=bindings,verbs=create
 // +kubebuilder:rbac:groups="",resources=pods/binding,verbs=create
 
 // RBAC for nodeinfo.go and dra.go
