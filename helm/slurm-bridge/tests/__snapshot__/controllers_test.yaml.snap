@@ -99,6 +99,13 @@ manifests should match snapshot:
           - patch
           - watch
       - apiGroups:
+          - ""
+        resources:
+          - pods/finalizers
+        verbs:
+          - patch
+          - update
+      - apiGroups:
           - resource.k8s.io
         resources:
           - resourceclaims
