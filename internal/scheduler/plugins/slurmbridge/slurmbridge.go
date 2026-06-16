@@ -96,7 +96,7 @@ func init() {
 // +kubebuilder:rbac:groups=extensions,resources=replicasets,verbs=get;list;watch
 
 // Delegated Auth RBAC
-// +kubebuilder:rbac:groups=authentication.k8s.io,resources=subjectaccessreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 
 // RBAC for VolumeBinding Scheduler Plugin
