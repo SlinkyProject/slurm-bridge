@@ -209,7 +209,6 @@ manifests should match snapshot:
           - batch
         resources:
           - jobs
-          - jobs/status
         verbs:
           - create
           - get
@@ -235,7 +234,6 @@ manifests should match snapshot:
           - jobset.x-k8s.io
         resources:
           - jobsets
-          - jobsets/status
         verbs:
           - create
           - get
@@ -295,7 +293,6 @@ manifests should match snapshot:
           - scheduling.x-k8s.io
         resources:
           - podgroups
-          - podgroups/status
         verbs:
           - create
           - get

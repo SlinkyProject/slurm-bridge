@@ -84,7 +84,6 @@ rules:
   - batch
   resources:
   - jobs
-  - jobs/status
   verbs:
   - create
   - get
@@ -110,7 +109,6 @@ rules:
   - jobset.x-k8s.io
   resources:
   - jobsets
-  - jobsets/status
   verbs:
   - create
   - get
@@ -161,16 +159,9 @@ rules:
   verbs:
   - get
 - apiGroups:
-  - scheduling.k8s.io
-  resources:
-  - podgroups/status
-  verbs:
-  - patch
-- apiGroups:
   - scheduling.x-k8s.io
   resources:
   - podgroups
-  - podgroups/status
   verbs:
   - create
   - get
