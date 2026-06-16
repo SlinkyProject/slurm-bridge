@@ -392,6 +392,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	logger.V(4).Info("external job exists")
 	if externalJob.Nodes == "" {
 		logger.V(4).Info("external job exists but no nodes have been allocated")
+		if !externalJob.Pending {
+			logger.V(4).Info("external job is no longer pending; waiting for allocated nodes")
+			return nil, fwk.NewStatus(fwk.Success)
+		}
 		// As the external job is not yet running, update to the job
 		// to include any changes from slurmJobIR.
 		jobid, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
