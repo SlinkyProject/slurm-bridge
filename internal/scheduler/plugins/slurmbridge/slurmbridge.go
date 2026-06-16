@@ -101,6 +101,7 @@ func init() {
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets/status,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=create;get;list;watch
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=workloads,verbs=get
 // +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=create;get;list;watch
 
 // Slurmbridge is a plugin that schedules pods in a group.

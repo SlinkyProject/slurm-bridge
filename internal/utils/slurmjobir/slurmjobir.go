@@ -120,7 +120,7 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 	slurmJobIR.RootPOM = *rootPOM
 	parsePodsCpuAndMemory(slurmJobIR)
 	parseGPUDevicePlugin(slurmJobIR)
-	err = parseAnnotations(slurmJobIR, rootPOM.Annotations)
+	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM)
 	return slurmJobIR, err
 }
 

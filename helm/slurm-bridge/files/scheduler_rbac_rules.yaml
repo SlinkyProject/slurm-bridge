@@ -178,6 +178,12 @@ rules:
       - list
       - watch
   - apiGroups:
+      - scheduling.k8s.io
+    resources:
+      - workloads
+    verbs:
+      - get
+  - apiGroups:
       - scheduling.x-k8s.io
     resources:
       - podgroups

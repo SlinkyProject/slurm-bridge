@@ -5,10 +5,14 @@ package slurmjobir
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
@@ -29,6 +33,68 @@ func podGroupName(pod *corev1.Pod) (string, bool) {
 	}
 	name := *pod.Spec.SchedulingGroup.PodGroupName
 	return name, name != ""
+}
+
+// parsePodGroupSlurmAnnotations merges Slurm annotations along the PodGroup chain.
+// On conflict, left-most (root-most) wins: Workload > controller (Job) > PodGroup.
+// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
+func (t *translator) parsePodGroupSlurmAnnotations(
+	slurmJobIR *SlurmJobIR,
+	pg *schedulingv1alpha2.PodGroup,
+	controllerPOM *metav1.PartialObjectMetadata,
+) error {
+	if err := parseAnnotations(slurmJobIR, pg.GetAnnotations()); err != nil {
+		return err
+	}
+	if controllerPOM != nil {
+		ann := controllerPOM.GetAnnotations()
+		if controllerPOM.Kind == "Job" {
+			job := &batchv1.Job{}
+			if err := t.Get(t.ctx, client.ObjectKeyFromObject(controllerPOM), job); err == nil {
+				ann = job.GetAnnotations()
+			}
+		}
+		if err := parseAnnotations(slurmJobIR, ann); err != nil {
+			return err
+		}
+	}
+	ref := pg.Spec.PodGroupTemplateRef
+	if ref == nil || ref.Workload == nil || ref.Workload.WorkloadName == "" {
+		return nil
+	}
+	wl := &schedulingv1alpha2.Workload{}
+	key := client.ObjectKey{Namespace: pg.Namespace, Name: ref.Workload.WorkloadName}
+	if err := t.Get(t.ctx, key, wl); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	return parseAnnotations(slurmJobIR, wl.GetAnnotations())
+}
+
+// applySlurmAnnotations merges Slurm job annotations for the scheduling root object.
+func (t *translator) applySlurmAnnotations(
+	slurmJobIR *SlurmJobIR,
+	pod *corev1.Pod,
+	rootPOM *metav1.PartialObjectMetadata,
+) error {
+	if slurmJobIR.RootPOM.TypeMeta != podgroup_v1alpha2 {
+		return parseAnnotations(slurmJobIR, rootPOM.Annotations)
+	}
+	pg := &schedulingv1alpha2.PodGroup{}
+	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), pg); err != nil {
+		return err
+	}
+	c, ok := t.Reader.(client.Client)
+	if !ok {
+		return fmt.Errorf("client does not support owner metadata lookup")
+	}
+	controllerPOM, err := utils.GetRootOwnerMetadata(c, t.ctx, pod)
+	if err != nil {
+		return err
+	}
+	return t.parsePodGroupSlurmAnnotations(slurmJobIR, pg, controllerPOM)
 }
 
 func schedulingGroupsMatch(a, b *corev1.PodSchedulingGroup) bool {
