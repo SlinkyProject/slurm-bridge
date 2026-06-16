@@ -118,12 +118,12 @@ func init() {
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch
 
 // RBAC for Slurm-bridge Workloads
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=create;get;list;watch
-// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=create;get;list;watch
-// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=workloads,verbs=get
-// +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=create;get;list;watch
-// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=create;get;list;watch
+// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=get
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get
+// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get
+// +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=get
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get
 
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {

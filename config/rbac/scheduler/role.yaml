@@ -85,10 +85,7 @@ rules:
   resources:
   - jobs
   verbs:
-  - create
   - get
-  - list
-  - watch
 - apiGroups:
   - coordination.k8s.io
   resources:
@@ -110,19 +107,13 @@ rules:
   resources:
   - jobsets
   verbs:
-  - create
   - get
-  - list
-  - watch
 - apiGroups:
   - leaderworkerset.x-k8s.io
   resources:
   - leaderworkersets
   verbs:
-  - create
   - get
-  - list
-  - watch
 - apiGroups:
   - resource.k8s.io
   resources:
@@ -163,10 +154,7 @@ rules:
   resources:
   - podgroups
   verbs:
-  - create
   - get
-  - list
-  - watch
 - apiGroups:
   - storage.k8s.io
   resources:
