@@ -1357,3 +1357,115 @@ func Test_realSlurmControl_AddNode_withNodeInfo_includesGRESInNodeConfig(t *test
 		t.Errorf("NodeConf missing GresConf=: %q", nodeConf)
 	}
 }
+
+func Test_realSlurmControl_AddNode_includesTopologyInNodeConfig(t *testing.T) {
+	var nodeConf string
+	f := interceptor.Funcs{
+		Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
+			if r, ok := req.(api.V0044OpenapiCreateNodeReq); ok {
+				nodeConf = r.NodeConf
+			}
+			return nil
+		},
+	}
+	r := &realSlurmControl{
+		Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				wellknown.AnnotationNodeTopologySpec: "topo-switch:s1",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+		},
+	}
+	if err := r.AddNode(context.Background(), node, nil); err != nil {
+		t.Fatalf("AddNode: %v", err)
+	}
+	if !strings.Contains(nodeConf, "Topology=topo-switch:s1") {
+		t.Errorf("NodeConf missing topology: %q", nodeConf)
+	}
+}
+
+func Test_realSlurmControl_AddNode_updatesExistingNodeTopology(t *testing.T) {
+	var gotTopology string
+	f := interceptor.Funcs{
+		Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
+			if r, ok := req.(api.V0044UpdateNodeMsg); ok && r.TopologyStr != nil {
+				gotTopology = *r.TopologyStr
+			}
+			return nil
+		},
+	}
+	existingNode := &types.V0044Node{
+		V0044Node: api.V0044Node{
+			Name:     ptr.To("test-node"),
+			Topology: ptr.To("topo-switch:s1"),
+		},
+	}
+	r := &realSlurmControl{
+		Client: fake.NewClientBuilder().WithObjects(existingNode).WithInterceptorFuncs(f).Build(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				wellknown.AnnotationNodeTopologySpec: "topo-switch:s2",
+			},
+		},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+		},
+	}
+	if err := r.AddNode(context.Background(), node, nil); err != nil {
+		t.Fatalf("AddNode: %v", err)
+	}
+	if gotTopology != "topo-switch:s2" {
+		t.Errorf("TopologyStr = %q, want %q", gotTopology, "topo-switch:s2")
+	}
+}
+
+func Test_realSlurmControl_AddNode_clearsExistingNodeTopology(t *testing.T) {
+	gotTopology := "unset"
+	f := interceptor.Funcs{
+		Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
+			if r, ok := req.(api.V0044UpdateNodeMsg); ok && r.TopologyStr != nil {
+				gotTopology = *r.TopologyStr
+			}
+			return nil
+		},
+	}
+	existingNode := &types.V0044Node{
+		V0044Node: api.V0044Node{
+			Name:     ptr.To("test-node"),
+			Topology: ptr.To("topo-switch:s1"),
+		},
+	}
+	r := &realSlurmControl{
+		Client: fake.NewClientBuilder().WithObjects(existingNode).WithInterceptorFuncs(f).Build(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			},
+		},
+	}
+	if err := r.AddNode(context.Background(), node, nil); err != nil {
+		t.Fatalf("AddNode: %v", err)
+	}
+	if gotTopology != "" {
+		t.Errorf("TopologyStr = %q, want empty string", gotTopology)
+	}
+}

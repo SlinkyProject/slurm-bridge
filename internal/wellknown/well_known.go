@@ -9,4 +9,5 @@ const (
 
 	SchedulerPrefix = "scheduler." + SlinkyPrefix
 	SlurmJobPrefix  = "slurmjob." + SlinkyPrefix
+	TopologyPrefix  = "topology." + SlinkyPrefix
 )

@@ -236,7 +236,10 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	slurmNode := &slurmtypes.V0044Node{}
 	err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true})
 	if err == nil {
-		return r.updateNodeFeatures(ctx, node, slurmNode)
+		if err := r.updateNodeFeatures(ctx, node, slurmNode); err != nil {
+			return err
+		}
+		return r.updateNodeTopology(ctx, node, slurmNode)
 	}
 	if !tolerateError(err) {
 		return err
@@ -279,6 +282,9 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	if features != "" {
 		nodeConf += fmt.Sprintf(" Feature=%s", features)
 	}
+	if topologySpec, ok := annotations[wellknown.AnnotationNodeTopologySpec]; ok && topologySpec != "" {
+		nodeConf += fmt.Sprintf(" Topology=%s", topologySpec)
+	}
 	nodeConf += fmt.Sprintf(" Gres=\"%s\"", gres)
 	nodeConf += fmt.Sprintf(" GresConf=\"%s\"", gresConf)
 
@@ -288,6 +294,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		"cpus", cpus,
 		"memoryMB", memoryMB,
 		"features", features,
+		"topology", annotations[wellknown.AnnotationNodeTopologySpec],
 		"gres", gres,
 		"gresConf", gresConf)
 
@@ -298,6 +305,28 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		logger.Error(err, "Failed to add node to Slurm", "node", klog.KObj(node),
 			"slurmNode", slurmNodeName)
 		return err
+	}
+
+	return nil
+}
+
+// updateNodeTopology updates an existing Slurm node so its dynamic topology
+// matches the Kubernetes node topology annotation.
+func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.Node, slurmNode *slurmtypes.V0044Node) error {
+	logger := log.FromContext(ctx)
+
+	topologySpec := node.GetAnnotations()[wellknown.AnnotationNodeTopologySpec]
+	if ptr.Deref(slurmNode.Topology, "") == topologySpec {
+		return nil
+	}
+
+	req := api.V0044UpdateNodeMsg{
+		TopologyStr: ptr.To(topologySpec),
+	}
+	logger.Info("Updating Slurm node topology to match annotation", "node", klog.KObj(node),
+		"slurmNode", slurmNode.GetKey(), "topology", topologySpec)
+	if err := r.Update(ctx, slurmNode, req); err != nil {
+		return fmt.Errorf("could not update node topology: %w", err)
 	}
 
 	return nil
