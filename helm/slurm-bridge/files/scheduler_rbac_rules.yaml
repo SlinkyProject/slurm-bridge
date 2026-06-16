@@ -37,15 +37,9 @@ rules:
       - ""
     resources:
       - pods/finalizers
-    verbs:
-      - patch
-  - apiGroups:
-      - ""
-    resources:
       - pods/status
     verbs:
       - patch
-      - update
   - apiGroups:
       - ""
       - events.k8s.io
