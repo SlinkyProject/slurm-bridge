@@ -309,7 +309,6 @@ manifests should match snapshot:
           - csinodes
           - csistoragecapacities
           - storageclasses
-          - volumeattachments
         verbs:
           - get
           - list
