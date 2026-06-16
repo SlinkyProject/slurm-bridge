@@ -236,6 +236,17 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1, node2"),
 							}},
+							{V0044JobInfo: api.V0044JobInfo{
+								AdminComment: func() *string {
+									pi := externaljobinfo.ExternalJobInfo{
+										Pods: []string{"slurm/pod2"},
+									}
+									return ptr.To(pi.ToString())
+								}(),
+								JobId:    ptr.To[int32](2),
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+								Nodes:    ptr.To(""),
+							}},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -247,7 +258,8 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 				ctx: context.Background(),
 			},
 			want: &map[string]ExternalJob{
-				"slurm/pod1": {JobId: 1, Nodes: "node1, node2"},
+				"slurm/pod1": {JobId: 1, Nodes: "node1, node2", Pending: false},
+				"slurm/pod2": {JobId: 2, Nodes: "", Pending: true},
 			},
 			wantErr: false,
 		},
@@ -396,6 +408,37 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj(),
 			},
 			want:    &ExternalJob{JobId: 1, Nodes: "node1"},
+			wantErr: false,
+		},
+		{
+			name: "Job found and pending",
+			fields: fields{
+				Client: func() client.Client {
+					list := &slurmtypes.V0044JobInfoList{
+						Items: []slurmtypes.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
+								AdminComment: func() *string {
+									pi := externaljobinfo.ExternalJobInfo{
+										Pods: []string{"slurm/foo"},
+									}
+									return ptr.To(pi.ToString())
+								}(),
+								JobId:    ptr.To[int32](1),
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+								Nodes:    ptr.To(""),
+							}},
+						},
+					}
+					return fake.NewClientBuilder().
+						WithLists(list).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj(),
+			},
+			want:    &ExternalJob{JobId: 1, Nodes: "", Pending: true},
 			wantErr: false,
 		},
 	}

@@ -23,8 +23,9 @@ import (
 )
 
 type ExternalJob struct {
-	JobId int32
-	Nodes string
+	JobId   int32
+	Nodes   string
+	Pending bool
 }
 
 type SlurmControlInterface interface {
@@ -105,8 +106,9 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 		if err := externaljobinfo.ParseIntoExternalJobInfo(j.AdminComment, &extInfo); err == nil {
 			for _, pod := range extInfo.Pods {
 				podToJob[pod] = ExternalJob{
-					JobId: *j.JobId,
-					Nodes: *j.Nodes,
+					JobId:   *j.JobId,
+					Nodes:   *j.Nodes,
+					Pending: j.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
 				}
 			}
 		}
@@ -141,6 +143,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	logger.V(5).Info("found matching job")
 	jobOut.JobId = *job.JobId
 	jobOut.Nodes = *job.Nodes
+	jobOut.Pending = job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING)
 	return &jobOut, nil
 }
 
