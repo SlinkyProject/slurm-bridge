@@ -88,6 +88,7 @@ manifests should match snapshot:
         resources:
           - namespaces
         verbs:
+          - get
           - list
           - watch
       - apiGroups:
