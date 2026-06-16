@@ -102,18 +102,17 @@ manifests should match snapshot:
       - apiGroups:
           - resource.k8s.io
         resources:
-          - deviceclasses
-          - resourceslices
+          - resourceclaims
         verbs:
+          - delete
           - get
           - list
           - watch
       - apiGroups:
           - resource.k8s.io
         resources:
-          - resourceclaims
+          - resourceslices
         verbs:
-          - delete
           - get
           - list
           - watch
