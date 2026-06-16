@@ -232,19 +232,18 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		return nil, fs
 	}
 
-	// If an external job does not exist, this plugin should return as a success
-	// with no PreFilterResult. Because Filter will ultimately detect that slurm
-	// has not scheduled any nodes to the pods (no node annotation), the PostFilter
-	// plugin will be invoked. The external job will then be created in the
-	// PostFilter plugin stage. If an external job exists and is running, update
-	// pods with node assignments.
+	// If no external job exists, or the external job exists but Slurm has not
+	// assigned nodes yet, return success with no PreFilterResult. Filter will
+	// detect the missing node annotation and PostFilter will create or update
+	// the external job. If the external job has nodes, annotate the pods so
+	// scheduling can continue against the Slurm allocation.
 	if externalJob.JobId == 0 {
 		return nil, fwk.NewStatus(fwk.Success)
 	} else {
 		logger.V(4).Info("external job exists")
 		if externalJob.Nodes == "" {
 			logger.V(4).Info("external job exists but no nodes have been allocated")
-			return nil, fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error())
+			return nil, fwk.NewStatus(fwk.Success)
 		}
 		// The external job is running. Assign nodes to pods.
 		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
