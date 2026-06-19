@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+---
+suite: test scheduler
+templates:
+  - scheduler/deployment.yaml
+  - scheduler/configmap.yaml
+  - scheduler/rbac.yaml
+  - scheduler/serviceaccount.yaml
+  - configmap.yaml
+release:
+  name: test-release
+  namespace: test-namespace
+chart:
+  version: 1.2.3
+  appVersion: 1.2.3
+tests:
+  - it: manifests should match snapshot
+    asserts:
+      - matchSnapshot: {}
+  - it: deployment carries config checksum annotations so configmap changes trigger a rolling restart
+    template: scheduler/deployment.yaml
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["checksum/config"]
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: ^[0-9a-f]{64}$
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["checksum/scheduler-config"]
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/scheduler-config"]
+          pattern: ^[0-9a-f]{64}$
