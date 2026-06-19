@@ -19,6 +19,9 @@ spec:
     metadata:
       labels:
         {{- include "slurm-bridge.scheduler.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/scheduler-config: {{ include (print $.Template.BasePath "/scheduler/configmap.yaml") . | sha256sum }}
     spec:
       {{- with .Values.scheduler.priorityClassName }}
       priorityClassName: {{ . }}
