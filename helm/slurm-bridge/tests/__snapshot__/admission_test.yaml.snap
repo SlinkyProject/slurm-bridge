@@ -20,6 +20,8 @@ manifests should match snapshot:
           app.kubernetes.io/name: slurm-bridge-admission
       template:
         metadata:
+          annotations:
+            checksum/config: e52364aa50203cb6d54d245f9245986ec8c42fb8d70382ecdac7012ab7cd2b63
           labels:
             app.kubernetes.io/component: admission
             app.kubernetes.io/instance: test-release
@@ -233,3 +235,21 @@ manifests should match snapshot:
               - pods
             scope: Namespaced
         sideEffects: None
+  8: |
+    apiVersion: v1
+    data:
+      config.yaml: |
+        schedulerName: slurm-bridge-scheduler
+        slurmRestApi: http://slurm-restapi.slurm:6820
+        managedNamespaces:
+          - slurm-bridge
+        mcsLabel: kubernetes
+        partition: slurm-bridge
+    kind: ConfigMap
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
+      name: slurm-bridge-config
+      namespace: test-namespace

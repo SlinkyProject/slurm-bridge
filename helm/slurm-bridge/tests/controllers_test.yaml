@@ -6,6 +6,7 @@ templates:
   - controllers/deployment.yaml
   - controllers/rbac.yaml
   - controllers/service.yaml
+  - configmap.yaml
 release:
   name: test-release
   namespace: test-namespace
@@ -16,3 +17,11 @@ tests:
   - it: manifests should match snapshot
     asserts:
       - matchSnapshot: {}
+  - it: deployment carries a config checksum annotation so configmap changes trigger a rolling restart
+    template: controllers/deployment.yaml
+    asserts:
+      - isNotNullOrEmpty:
+          path: spec.template.metadata.annotations["checksum/config"]
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: ^[0-9a-f]{64}$
