@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         {{- include "slurm-bridge.admission.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       {{- with .Values.admission.priorityClassName }}
       priorityClassName: {{ . }}
