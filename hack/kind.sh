@@ -324,16 +324,14 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--set "nodesets.slinky.enabled=false" \
-			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
-			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
+			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-nodes.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
