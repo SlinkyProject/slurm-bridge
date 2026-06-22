@@ -1,4 +1,15 @@
 ---
+configFiles:
+  topology.yaml: |
+    ---
+    - topology: topo-switch
+      cluster_default: true
+      tree:
+        switches:
+          - switch: sw_root
+            children: s[1-2]
+          - switch: s1
+          - switch: s2
 nodesets:
   slinky:
     enabled: false

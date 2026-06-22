@@ -120,6 +120,21 @@ function kind::configure_nodes() {
 		kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
 			scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
 	fi
+
+	local bridge_nodes
+	local bridge_node
+	local node_index=0
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	for bridge_node in $bridge_nodes; do
+		node_index=$((node_index + 1))
+		if [ "$node_index" -le 2 ]; then
+			kubectl annotate node "$bridge_node" \
+				topology.slinky.slurm.net/spec=topo-switch:s1 --overwrite
+		else
+			kubectl annotate node "$bridge_node" \
+				topology.slinky.slurm.net/spec=topo-switch:s2 --overwrite
+		fi
+	done
 }
 
 function slurm-stack::installed_node_mode() {
