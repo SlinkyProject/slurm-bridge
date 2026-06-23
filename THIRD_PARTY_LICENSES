@@ -196,11 +196,6 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.5.4
 - License: BSD-3-Clause
 
-### github.com/google/btree
-- Name: github.com/google/btree
-- Version: v1.1.3
-- License: Apache-2.0
-
 ### github.com/google/cel-go
 - Name: github.com/google/cel-go
 - Version: v0.27.0
@@ -226,9 +221,14 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.6.0
 - License: BSD-3-Clause
 
-### github.com/grpc-ecosystem/go-grpc-prometheus
-- Name: github.com/grpc-ecosystem/go-grpc-prometheus
-- Version: v1.2.0
+### github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
+- Name: github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
+- Version: v1.1.0
+- License: Apache-2.0
+
+### github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors
+- Name: github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors
+- Version: v2.3.3
 - License: Apache-2.0
 
 ### github.com/grpc-ecosystem/grpc-gateway/v2
@@ -578,7 +578,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### google.golang.org/protobuf
 - Name: google.golang.org/protobuf
-- Version: v1.36.11
+- Version: v1.36.12-0.20260120151049-f2248ac996af
 - License: BSD-3-Clause
 
 ### gopkg.in/evanphx/json-patch.v4
@@ -598,32 +598,32 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/api
 - Name: k8s.io/api
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/apiextensions-apiserver/pkg
 - Name: k8s.io/apiextensions-apiserver/pkg
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/apimachinery/pkg
 - Name: k8s.io/apimachinery/pkg
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/apimachinery/third_party/forked/golang
 - Name: k8s.io/apimachinery/third_party/forked/golang
-- Version: v0.35.2
+- Version: v0.36.0
 - License: BSD-3-Clause
 
 ### k8s.io/apiserver
 - Name: k8s.io/apiserver
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/client-go
 - Name: k8s.io/client-go
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/cloud-provider/volume
@@ -633,12 +633,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/component-base
 - Name: k8s.io/component-base
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/component-helpers
 - Name: k8s.io/component-helpers
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/controller-manager/pkg/features
@@ -653,7 +653,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/dynamic-resource-allocation
 - Name: k8s.io/dynamic-resource-allocation
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/klog/v2
@@ -663,57 +663,57 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/kms
 - Name: k8s.io/kms
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg
 - Name: k8s.io/kube-openapi/pkg
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/internal/third_party/go-json-experiment/json
 - Name: k8s.io/kube-openapi/pkg/internal/third_party/go-json-experiment/json
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: BSD-3-Clause
 
 ### k8s.io/kube-openapi/pkg/internal/third_party/govalidator
 - Name: k8s.io/kube-openapi/pkg/internal/third_party/govalidator
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: MIT
 
 ### k8s.io/kube-openapi/pkg/validation/errors
 - Name: k8s.io/kube-openapi/pkg/validation/errors
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/validation/spec
 - Name: k8s.io/kube-openapi/pkg/validation/spec
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/validation/strfmt
 - Name: k8s.io/kube-openapi/pkg/validation/strfmt
-- Version: v0.0.0-20260304202019-5b3e3fdb0acf
+- Version: v0.0.0-20260317180543-43fb72c5454a
 - License: Apache-2.0
 
 ### k8s.io/kube-scheduler
 - Name: k8s.io/kube-scheduler
-- Version: v0.35.2
-- License: Apache-2.0
-
-### k8s.io/kubectl/pkg/scale
-- Name: k8s.io/kubectl/pkg/scale
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/kubelet/pkg/apis
 - Name: k8s.io/kubelet/pkg/apis
-- Version: v0.35.2
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/kubernetes
 - Name: k8s.io/kubernetes
-- Version: v1.35.2
+- Version: v1.36.0
+- License: Apache-2.0
+
+### k8s.io/streaming/pkg
+- Name: k8s.io/streaming/pkg
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### k8s.io/utils
@@ -726,6 +726,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v0.0.0-20260210185600-b8788abfbbc2
 - License: BSD-3-Clause
 
+### k8s.io/utils/third_party/forked/golang/btree
+- Name: k8s.io/utils/third_party/forked/golang/btree
+- Version: v0.0.0-20260210185600-b8788abfbbc2
+- License: Apache-2.0
+
 ### sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Name: sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Version: v0.34.0
@@ -733,7 +738,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
-- Version: v0.23.3
+- Version: v0.24.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/jobset/api/jobset/v1alpha2
