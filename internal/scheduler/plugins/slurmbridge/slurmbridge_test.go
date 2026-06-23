@@ -506,11 +506,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		return slurmcontrol.NewControl(interceptor.NewClient(base, f), "kubernetes", "slurm-bridge")
 	}
 	tests := []struct {
-		name   string
-		fields fields
-		args   args
-		want   *fwk.PostFilterResult
-		want1  *fwk.Status
+		name        string
+		fields      fields
+		args        args
+		want        *fwk.PostFilterResult
+		want1       *fwk.Status
+		wantPodNode string
 	}{
 		{
 			name: "Error checking for Slurm job",
@@ -797,7 +798,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
 				),
-				slurmControl: newUpdateRaceSlurmControl("node1,node2"),
+				slurmControl: newUpdateRaceSlurmControl("node1"),
 				handle:       f,
 			},
 			args: args{
@@ -809,8 +810,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.Success),
+			want:        nil,
+			want1:       fwk.NewStatus(fwk.Success),
+			wantPodNode: "node1",
 		},
 		{
 			name: "Updating an external job races but Slurm has no allocated nodes",
@@ -911,6 +913,15 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got1.Reasons(), tt.want1.Reasons()) {
 				t.Errorf("SlurmBridge.PostFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
+			}
+			if tt.wantPodNode != "" {
+				gotPod := &corev1.Pod{}
+				if err := tt.fields.Client.Get(tt.args.ctx, kubeclient.ObjectKeyFromObject(tt.args.pod), gotPod); err != nil {
+					t.Errorf("SlurmBridge.PostFilter() failed to get pod after PostFilter = %v", err)
+				}
+				if gotPod.Annotations[wellknown.AnnotationExternalJobNode] != tt.wantPodNode {
+					t.Errorf("SlurmBridge.PostFilter() pod node annotation = %v, want %v", gotPod.Annotations[wellknown.AnnotationExternalJobNode], tt.wantPodNode)
+				}
 			}
 		})
 	}
