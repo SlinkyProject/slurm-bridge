@@ -157,6 +157,21 @@ function kind::configure_nodes() {
 		kubectl annotate nodes -l scheduler.slinky.slurm.net/external-node=true \
 			scheduler.slinky.slurm.net/external-node-partitions=slurm-bridge --overwrite
 	fi
+
+	local bridge_nodes
+	local bridge_node
+	local node_index=0
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	for bridge_node in $bridge_nodes; do
+		node_index=$((node_index + 1))
+		if [ "$node_index" -le 2 ]; then
+			kubectl annotate node "$bridge_node" \
+				topology.slinky.slurm.net/spec=topo-switch:s1 --overwrite
+		else
+			kubectl annotate node "$bridge_node" \
+				topology.slinky.slurm.net/spec=topo-switch:s2 --overwrite
+		fi
+	done
 }
 
 function slurm-stack::installed_node_mode() {
@@ -361,16 +376,14 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--set "nodesets.slinky.enabled=false" \
-			--set-string $'controller.extraConf=Nodeset=slurm-bridge Feature=slurm-bridge\nPartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO' \
-			--set "controller.extraConfMap.ReconfigFlags=KeepPartInfo"
+			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-nodes.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2

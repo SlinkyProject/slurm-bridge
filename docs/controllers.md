@@ -47,11 +47,10 @@ on the same physical host, and the slurm-bridge can schedule on.
 The node controller supports dynamic node registration in Slurm through
 Kubernetes node labels:
 
-- **Node Registration Label**
-  (`scheduler.slinky.slurm.net/slurm-bridge-external-node`): When this label is
-  present on a Kubernetes node, the node controller will automatically register
-  the node in Slurm with the correct CPU and memory resources. When the label is
-  removed, the node will be removed from Slurm.
+- **Node Registration Label** (`scheduler.slinky.slurm.net/external-node`): When
+  this label is present on a Kubernetes node, the node controller will
+  automatically register the node in Slurm with the correct CPU and memory
+  resources. When the label is removed, the node will be removed from Slurm.
 
 - **Node Partitions Annotation**
   (`scheduler.slinky.slurm.net/external-node-partitions`): Specifies the Slurm

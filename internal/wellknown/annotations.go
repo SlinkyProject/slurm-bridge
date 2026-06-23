@@ -14,6 +14,10 @@ const (
 	// matching these partition names. The controller will error if any partition
 	// does not exist.
 	AnnotationExternalNodePartitions = SchedulerPrefix + "external-node-partitions"
+
+	// AnnotationNodeTopologySpec indicates the Slurm dynamic topology line
+	// (e.g. "topo-switch:s2,topo-block:b2") for an external node.
+	AnnotationNodeTopologySpec = TopologyPrefix + "spec"
 )
 
 const (
