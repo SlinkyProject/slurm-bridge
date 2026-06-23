@@ -12,8 +12,49 @@ SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 
-function kind::prerequisites() {
-	go install sigs.k8s.io/kind@latest
+MIN_KIND_VERSION="0.32.0"
+MIN_SKAFFOLD_VERSION="2.18.0"
+
+function tool::version_ge() {
+	local have="$1"
+	local need="$2"
+	[[ "$(printf '%s\n' "$need" "$have" | sort -V | head -1)" == "$need" ]]
+}
+
+function tool::version() {
+	local name="$1"
+	case "$name" in
+	kind)
+		kind version 2>/dev/null | awk '{print $2}' | sed 's/^v//'
+		;;
+	skaffold)
+		skaffold version 2>/dev/null | sed 's/^v//'
+		;;
+	*)
+		echo "unknown tool: $name" >&2
+		return 1
+		;;
+	esac
+}
+
+function tool::require_min_version() {
+	local name="$1"
+	local min_version="$2"
+	local url="$3"
+	if ! command -v "$name" >/dev/null 2>&1; then
+		echo "'$name' is required: $url" >&2
+		return 1
+	fi
+	local have
+	have="$(tool::version "$name")"
+	if [ -z "$have" ]; then
+		echo "Could not determine '$name' version." >&2
+		return 1
+	fi
+	if ! tool::version_ge "$have" "$min_version"; then
+		echo "'$name' $have is too old (need >= $min_version): $url" >&2
+		return 1
+	fi
 }
 
 # This section will make sure you don't run into issues from insufficient resources
@@ -35,8 +76,10 @@ function sys::check() {
 		echo "'helm' is required: https://helm.sh/"
 		fail=true
 	fi
-	if ! command -v skaffold >/dev/null 2>&1; then
-		echo "'skaffold' is required: https://skaffold.dev/"
+	if ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
+		fail=true
+	fi
+	if ! tool::require_min_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
 		fail=true
 	fi
 	if ! command -v kubectl >/dev/null 2>&1; then
@@ -78,16 +121,10 @@ function sys::check() {
 
 function kind::start() {
 	sys::check
-	kind::prerequisites
 	local cluster_name="${1:-"kind"}"
 	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
 	if ! kind get clusters 2>/dev/null | grep -Fxq "$cluster_name"; then
-		if [ "$(command -v systemd-run)" ]; then
-			CMD="systemd-run --scope --user"
-		else
-			CMD=""
-		fi
-		$CMD kind create cluster --name "$cluster_name" --config "$kind_config"
+		kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
 	kubectl config use-context kind-"$cluster_name"
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
@@ -158,7 +195,7 @@ function slurm-stack::check_node_mode() {
 		echo "[slurm] Existing slurm node mode is $installed_mode, requested $mode." >&2
 	fi
 	echo "[slurm] Recreate the kind cluster before switching slurm node modes." >&2
-	echo "[slurm]   $(basename "$0") --recreate --slurm-node-mode=$mode --bridge" >&2
+	echo "[slurm]   $(basename "$0") --recreate --slurm-node-mode=$mode" >&2
 	exit 1
 }
 
@@ -449,17 +486,26 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
 	        [--recreate|--delete]
-	        [--extras] [--bridge] [--slurm-node-mode=MODE]
-	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF] [--kjob]
-	        [--dra-example-driver] [--dra-driver-cpu] [--all]
+	        [--core][--extras][--all]
+	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
+	        [--slurm-node-mode=MODE]
+	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
-OPTIONS:
+KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
-	--extras            Install optional dependencies (metrics, prometheus, keda).
-	--bridge            Install slurm-bridge
+
+HELM OPTIONS:
+	--all               Equivalent of: --core --extras
+	--extras            Install extra charts (metrics, prometheus, keda).
+	--core              Install the slurm-bridge stack.
+	--kjob              Install kjob CRDs and build kubectl-kjob
+	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
+	--dra-example-driver Install DRA driver: dra-example-driver
+
+SLURM OPTIONS:
 	--slurm-node-mode=MODE
 	                    Configure Slurm nodes as external or hybrid. Default: $OPT_SLURM_NODE_MODE.
 	--slurm-operator-repo=URL
@@ -467,10 +513,6 @@ OPTIONS:
 	                    Can also be set with SLURM_OPERATOR_REPO.
 	--slurm-operator-ref=REF
 	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
-	--kjob              Install kjob CRDs and build kubectl-kjob
-	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
-	--dra-example-driver Install DRA driver: dra-example-driver
-	--all               Install all charts for slurm-bridge
 
 HELP OPTIONS:
 	--debug             Show script debug information.
@@ -502,7 +544,7 @@ function main() {
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install "$cluster_name"
 	fi
-	if $OPT_BRIDGE; then
+	if $OPT_CORE; then
 		slurm-bridge::install
 	fi
 	if $OPT_KJOB; then
@@ -514,7 +556,7 @@ OPT_DEBUG=false
 OPT_RECREATE=false
 OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
-OPT_BRIDGE=false
+OPT_CORE=false
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -524,7 +566,7 @@ OPT_SLURM_OPERATOR_REF="v1.1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,bridge,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,core,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -545,8 +587,8 @@ while :; do
 		OPT_DELETE=true
 		shift
 		;;
-	--bridge)
-		OPT_BRIDGE=true
+	--core)
+		OPT_CORE=true
 		shift
 		;;
 	--slurm-node-mode)
@@ -593,10 +635,7 @@ while :; do
 		shift
 		;;
 	--all)
-		OPT_BRIDGE=true
-		OPT_KJOB=true
-		OPT_DRA_DRIVER_CPU=true
-		OPT_DRA_EXAMPLE_DRIVER=true
+		OPT_CORE=true
 		OPT_EXTRAS=true
 		shift
 		;;

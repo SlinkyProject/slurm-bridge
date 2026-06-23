@@ -168,6 +168,19 @@ rules:
       - patch
       - update
   - apiGroups:
+      - scheduling.k8s.io
+    resources:
+      - podgroups
+      - workloads
+    verbs:
+      - get
+  - apiGroups:
+      - scheduling.k8s.io
+    resources:
+      - podgroups/status
+    verbs:
+      - patch
+  - apiGroups:
       - scheduling.x-k8s.io
     resources:
       - podgroups

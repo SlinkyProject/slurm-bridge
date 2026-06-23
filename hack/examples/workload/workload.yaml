@@ -1,0 +1,60 @@
+---
+apiVersion: scheduling.k8s.io/v1alpha2
+kind: Workload
+metadata:
+  name: test-workload
+  namespace: slurm-bridge
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: workload-test-sleep
+    slurmjob.slinky.slurm.net/timelimit: '5'
+spec:
+  controllerRef:
+    apiGroup: batch
+    kind: Job
+    name: workload-test-sleep
+  podGroupTemplates:
+    - name: workers
+      schedulingPolicy:
+        gang:
+          minCount: 2
+---
+apiVersion: scheduling.k8s.io/v1alpha2
+kind: PodGroup
+metadata:
+  name: workload-test-sleep-workers
+  namespace: slurm-bridge
+spec:
+  podGroupTemplateRef:
+    workload:
+      workloadName: test-workload
+      podGroupTemplateName: workers
+  schedulingPolicy:
+    gang:
+      minCount: 2
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: workload-test-sleep
+  namespace: slurm-bridge
+spec:
+  parallelism: 2
+  completions: 2
+  completionMode: NonIndexed
+  template:
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      restartPolicy: Never
+      schedulingGroup:
+        podGroupName: workload-test-sleep-workers
+      containers:
+        - name: sleep
+          image: busybox:stable
+          command: [sh, -c, sleep 20]
+          resources:
+            requests:
+              cpu: '1'
+              memory: 100Mi
+            limits:
+              cpu: '1'
+              memory: 100Mi
