@@ -137,6 +137,16 @@ function kind::delete() {
 	kind delete cluster --name "$cluster_name"
 }
 
+function cluster::use_existing() {
+	sys::check
+	# This only skips kind cluster creation/context switching. It intentionally
+	# leaves Skaffold's cluster detection alone, so existing kind contexts keep
+	# Skaffold's normal behavior of loading locally built images into kind.
+	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
+	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	kubectl cluster-info
+}
+
 function helm::find() {
 	local item="$1"
 	if [ -z "$item" ]; then
@@ -494,9 +504,9 @@ function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
-	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
+	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
-	        [--core][--extras][--all]
+	        [--core|--prereqs][--extras][--all]
 	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
@@ -504,6 +514,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
+	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
 
@@ -511,6 +522,7 @@ HELM OPTIONS:
 	--all               Equivalent of: --core --extras
 	--extras            Install extra charts (metrics, prometheus, keda).
 	--core              Install the slurm-bridge stack.
+	--prereqs           Install slurm-bridge prerequisites only.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
@@ -531,17 +543,37 @@ HELP OPTIONS:
 EOF
 }
 
+function main::validate_options() {
+	if $OPT_EXISTING_CLUSTER && { $OPT_DELETE || $OPT_RECREATE; }; then
+		echo "--existing-cluster cannot be used with --delete or --recreate." >&2
+		exit 1
+	fi
+	if $OPT_EXISTING_CLUSTER && { $OPT_DRA_DRIVER_CPU || $OPT_DRA_EXAMPLE_DRIVER; }; then
+		echo "--existing-cluster cannot be used with kind-specific DRA demo installers." >&2
+		exit 1
+	fi
+	if $OPT_CORE && $OPT_PREREQS; then
+		echo "--core and --prereqs cannot be used together." >&2
+		exit 1
+	fi
+}
+
 function main() {
 	if $OPT_DEBUG; then
 		set -x
 	fi
+	main::validate_options
 	local cluster_name="${1:-"kind"}"
 	if $OPT_DELETE || $OPT_RECREATE; then
 		kind::delete "$cluster_name"
 		$OPT_DELETE && return
 	fi
 
-	kind::start "$cluster_name" "$OPT_CONFIG"
+	if $OPT_EXISTING_CLUSTER; then
+		cluster::use_existing
+	else
+		kind::start "$cluster_name" "$OPT_CONFIG"
+	fi
 
 	make -C "$ROOT_DIR" values-dev || true
 
@@ -554,7 +586,9 @@ function main() {
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install "$cluster_name"
 	fi
-	if $OPT_CORE; then
+	if $OPT_PREREQS; then
+		slurm-bridge::prerequisites
+	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
 	if $OPT_KJOB; then
@@ -566,7 +600,9 @@ OPT_DEBUG=false
 OPT_RECREATE=false
 OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
+OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
+OPT_PREREQS=false
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -576,7 +612,7 @@ OPT_SLURM_OPERATOR_REF="v1.1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,core,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -597,8 +633,16 @@ while :; do
 		OPT_DELETE=true
 		shift
 		;;
+	--existing-cluster)
+		OPT_EXISTING_CLUSTER=true
+		shift
+		;;
 	--core)
 		OPT_CORE=true
+		shift
+		;;
+	--prereqs)
+		OPT_PREREQS=true
 		shift
 		;;
 	--slurm-node-mode)
