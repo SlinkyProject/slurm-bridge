@@ -385,6 +385,15 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 					return nil, fwk.NewStatus(fwk.Error, err.Error())
 				}
 				if externalJob.JobId != 0 && externalJob.Nodes != "" {
+					slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
+					kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
+					if err != nil {
+						return nil, fwk.NewStatus(fwk.Error, err.Error())
+					}
+					err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
+					if err != nil {
+						return nil, fwk.NewStatus(fwk.Error, err.Error())
+					}
 					return nil, fwk.NewStatus(fwk.Success)
 				}
 				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm")
