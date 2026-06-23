@@ -61,6 +61,7 @@ function tool::require_min_version() {
 # and have needed installed base software
 
 function sys::check() {
+	local require_kind="${1:-true}"
 	local fail=false
 	if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
 		echo "'docker' or 'podman' is required:"
@@ -76,7 +77,7 @@ function sys::check() {
 		echo "'helm' is required: https://helm.sh/"
 		fail=true
 	fi
-	if ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
+	if $require_kind && ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
 		fail=true
 	fi
 	if ! tool::require_min_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
@@ -138,11 +139,11 @@ function kind::delete() {
 }
 
 function cluster::use_existing() {
-	sys::check
-	# This only skips kind cluster creation/context switching. It intentionally
-	# leaves Skaffold's cluster detection alone, so existing kind contexts keep
-	# Skaffold's normal behavior of loading locally built images into kind.
+	sys::check false
 	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
+	if [ -z "$OPT_REGISTRY" ]; then
+		echo "[cluster] WARNING: no --registry was provided; local images will only be available if Skaffold can load them into a kind context." >&2
+	fi
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
 	kubectl cluster-info
 }
@@ -266,12 +267,36 @@ function git::checkout() {
 	echo "$path"
 }
 
+function skaffold::run() {
+	if [ -z "$OPT_REGISTRY" ]; then
+		skaffold run
+		return
+	fi
+
+  # In order to use a remote registry we must split the build / deploy step instead of relying on
+  # skaffold run.
+  # This is because skaffold run does not allow setting --push=true. This value is set in skaffold.yaml
+	local build_artifacts
+	build_artifacts="$(mktemp "${TMPDIR:-/tmp}/slurm-bridge-skaffold.XXXXXX.json")"
+	echo "[skaffold] Building and pushing images to ${OPT_REGISTRY}..."
+	if ! skaffold build --default-repo "$OPT_REGISTRY" --push=true --file-output "$build_artifacts"; then
+		rm -f "$build_artifacts"
+		return 1
+	fi
+	echo "[skaffold] Deploying images from ${OPT_REGISTRY}..."
+	if ! skaffold deploy --default-repo "$OPT_REGISTRY" --build-artifacts "$build_artifacts"; then
+		rm -f "$build_artifacts"
+		return 1
+	fi
+	rm -f "$build_artifacts"
+}
+
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		skaffold run
+		skaffold::run
 	)
 }
 
@@ -355,7 +380,7 @@ function slurm-operator::install_from_source() {
 	(
 		cd "$operator_path/helm/slurm-operator"
 		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
-		skaffold run
+		skaffold::run
 	)
 	slurm-operator::wait
 }
@@ -506,7 +531,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
-	        [--core|--prereqs][--extras][--all]
+	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
@@ -515,6 +540,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
 	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
+	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
 
@@ -603,6 +629,7 @@ OPT_DELETE=false
 OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
 OPT_PREREQS=false
+OPT_REGISTRY=""
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -612,7 +639,7 @@ OPT_SLURM_OPERATOR_REF="v1.1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -636,6 +663,14 @@ while :; do
 	--existing-cluster)
 		OPT_EXISTING_CLUSTER=true
 		shift
+		;;
+	--registry)
+		OPT_REGISTRY="$2"
+		if [ -z "$OPT_REGISTRY" ]; then
+			echo "--registry requires a non-empty REPO" >&2
+			exit 1
+		fi
+		shift 2
 		;;
 	--core)
 		OPT_CORE=true
