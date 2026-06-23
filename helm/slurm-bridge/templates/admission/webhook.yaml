@@ -4,19 +4,19 @@ SPDX-License-Identifier: Apache-2.0
 */}}
 
 {{- if .Values.admission.enabled }}
-{{- $certNamespacedName := printf "%s/%s" .Release.Namespace (include "slurm-bridge.admission.name" .) -}}
+{{- $certNamespacedName := printf "%s/%s" (include "slurm-bridge.namespace" .) (include "slurm-bridge.admission.name" .) -}}
 {{- $durationDays := int 3650 -}}
 {{- $ca := genCA (include "slurm-bridge.admission.name" .) $durationDays -}}
 {{- if not .Values.admission.certManager.enabled }}
 {{- $cn := (include "slurm-bridge.admission.name" .) -}}
-{{- $dnsList := list (printf "%s.%s" (include "slurm-bridge.admission.name" .) .Release.Namespace) (printf "%s.%s.svc" (include "slurm-bridge.admission.name" .) .Release.Namespace) -}}
+{{- $dnsList := list (printf "%s.%s" (include "slurm-bridge.admission.name" .) (include "slurm-bridge.namespace" .)) (printf "%s.%s.svc" (include "slurm-bridge.admission.name" .) (include "slurm-bridge.namespace" .)) -}}
 {{- $cert := genSignedCert $cn nil $dnsList $durationDays $ca -}}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ include "slurm-bridge.admission.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
   labels:
     {{- include "slurm-bridge.admission.labels" . | nindent 4 }}
 type: kubernetes.io/tls
@@ -45,7 +45,7 @@ webhooks:
           operator: NotIn
           values:
             - kube-system
-            - {{ .Release.Namespace }}
+            - {{ include "slurm-bridge.namespace" . }}
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -57,7 +57,7 @@ webhooks:
       caBundle: {{ $ca.Cert | b64enc | quote }}
       {{- end }}{{- /* if not .Values.admission.certManager.enabled */}}
       service:
-        namespace: {{ .Release.Namespace }}
+        namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}
         path: /validate--v1-pod
     admissionReviewVersions: ["v1"]
@@ -82,7 +82,7 @@ webhooks:
           operator: NotIn
           values:
             - kube-system
-            - {{ .Release.Namespace }}
+            - {{ include "slurm-bridge.namespace" . }}
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -94,7 +94,7 @@ webhooks:
       caBundle: {{ $ca.Cert | b64enc | quote }}
       {{- end }}{{- /* if not .Values.admission.certManager.enabled */}}
       service:
-        namespace: {{ .Release.Namespace }}
+        namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}
         path: /mutate--v1-pod
     admissionReviewVersions: ["v1"]

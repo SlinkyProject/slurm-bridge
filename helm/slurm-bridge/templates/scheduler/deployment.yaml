@@ -9,7 +9,7 @@ metadata:
   labels:
     {{- include "slurm-bridge.scheduler.labels" . | nindent 4 }}
   name: {{ include "slurm-bridge.scheduler.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
 spec:
   selector:
     matchLabels:
