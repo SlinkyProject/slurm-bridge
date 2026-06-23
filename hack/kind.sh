@@ -11,6 +11,7 @@ SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
 SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
+LOCAL_PATH_PROVISIONER_MANIFEST="https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.34/deploy/local-path-storage.yaml"
 
 MIN_KIND_VERSION="0.32.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
@@ -142,7 +143,7 @@ function cluster::use_existing() {
 	sys::check false
 	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
 	if [ -z "$OPT_REGISTRY" ]; then
-		echo "[cluster] WARNING: no --registry was provided; local images will only be available if Skaffold can load them into a kind context." >&2
+		echo "[cluster] WARNING: no --registry or SKAFFOLD_DEFAULT_REPO was provided; local images will only be available if Skaffold can load them into a kind context." >&2
 	fi
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
 	kubectl cluster-info
@@ -273,18 +274,20 @@ function skaffold::run() {
 		return
 	fi
 
-  # In order to use a remote registry we must split the build / deploy step instead of relying on
-  # skaffold run.
-  # This is because skaffold run does not allow setting --push=true. This value is set in skaffold.yaml
+	# Registry-backed installs need an explicit push because these Skaffold
+	# configs set build.local.push=false and `skaffold run` has no --push flag.
+	# `skaffold build` does not check cluster node platforms by default, so keep
+	# parity with `skaffold run` and build images for the target cluster.
+	export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
 	local build_artifacts
 	build_artifacts="$(mktemp "${TMPDIR:-/tmp}/slurm-bridge-skaffold.XXXXXX.json")"
 	echo "[skaffold] Building and pushing images to ${OPT_REGISTRY}..."
-	if ! skaffold build --default-repo "$OPT_REGISTRY" --push=true --file-output "$build_artifacts"; then
+	if ! skaffold build --push=true --check-cluster-node-platforms=true --file-output "$build_artifacts"; then
 		rm -f "$build_artifacts"
 		return 1
 	fi
 	echo "[skaffold] Deploying images from ${OPT_REGISTRY}..."
-	if ! skaffold deploy --default-repo "$OPT_REGISTRY" --build-artifacts "$build_artifacts"; then
+	if ! skaffold deploy --build-artifacts "$build_artifacts"; then
 		rm -f "$build_artifacts"
 		return 1
 	fi
@@ -304,6 +307,7 @@ function slurm-bridge::prerequisites() {
 	scheduler-plugins::install
 	jobset::install
 	lws::install
+	storage::install_default_local_path
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm-stack::install
@@ -344,6 +348,30 @@ function lws::install() {
 		local version="0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function storage::has_default_class() {
+	kubectl get storageclass \
+		-o go-template='{{range .items}}{{if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (eq (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class") "true")}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null |
+		grep -q .
+}
+
+function storage::install_default_local_path() {
+	if storage::has_default_class; then
+		echo "[storage] Default StorageClass already exists."
+		return
+	fi
+
+	echo "[storage] No default StorageClass found; installing local-path provisioner..."
+	kubectl apply -f "$LOCAL_PATH_PROVISIONER_MANIFEST"
+	kubectl annotate storageclass local-path \
+		storageclass.kubernetes.io/is-default-class=true --overwrite
+	kubectl wait --for=condition=Available deployment/local-path-provisioner \
+		-n local-path-storage --timeout=120s
+	if ! storage::has_default_class; then
+		echo "[storage] local-path provisioner installed, but no default StorageClass was found." >&2
+		exit 1
 	fi
 }
 
@@ -541,6 +569,7 @@ KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
 	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
 	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
+	                    Can also be set with SKAFFOLD_DEFAULT_REPO.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
 
@@ -629,7 +658,7 @@ OPT_DELETE=false
 OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
 OPT_PREREQS=false
-OPT_REGISTRY=""
+OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -670,6 +699,7 @@ while :; do
 			echo "--registry requires a non-empty REPO" >&2
 			exit 1
 		fi
+		export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
 		shift 2
 		;;
 	--core)
