@@ -40,6 +40,7 @@ type SlurmJobIRJobInfo struct {
 	MaxNodes     *int32
 	Nodes        []string
 	Partition    *string
+	Priority     *int32
 	QOS          *string
 	Reservation  *string
 	TasksPerNode *int32
@@ -234,6 +235,12 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 			slurmJobIR.JobInfo.MinNodes = num
 		case wellknown.AnnotationPartition:
 			slurmJobIR.JobInfo.Partition = &value
+		case wellknown.AnnotationPriority:
+			num, err := ConvStrTo32(value)
+			if err != nil {
+				return err
+			}
+			slurmJobIR.JobInfo.Priority = num
 		case wellknown.AnnotationQOS:
 			slurmJobIR.JobInfo.QOS = &value
 		case wellknown.AnnotationReservation:

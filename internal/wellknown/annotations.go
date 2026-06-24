@@ -58,6 +58,9 @@ const (
 	// AnnotationPartitions overrides the default partition
 	// for the Slurm external job.
 	AnnotationPartition = SlurmJobPrefix + "partition"
+	// AnnotationPriority sets the priority
+	// for the Slurm external job.
+	AnnotationPriority = SlurmJobPrefix + "priority"
 	// AnnotationQOS overrides the default QOS
 	// for the Slurm external job.
 	AnnotationQOS = SlurmJobPrefix + "qos"
