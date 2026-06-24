@@ -54,7 +54,7 @@ build-images: ## Build container images.
 	REGISTRY=$(REGISTRY) VERSION=$(VERSION) $(CONTAINER_TOOL) buildx bake --builder=$(BUILDER)
 
 .PHONY: build-chart
-build-chart: ## Build charts.
+build-chart: helm-bin ## Build charts.
 	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), $(HELM) package --dependency-update helm/$(shell basename "$(shell dirname "${chart}")") ;)
 
 .PHONY: push
