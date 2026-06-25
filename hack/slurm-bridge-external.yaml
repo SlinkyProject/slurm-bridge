@@ -16,5 +16,6 @@ nodesets:
 controller:
   extraConf: |
     ReconfigFlags=KeepPartInfo
+    GresTypes=gpu
     Nodeset=slurm-bridge Feature=slurm-bridge
     PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO

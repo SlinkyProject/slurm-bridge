@@ -12,6 +12,8 @@ configFiles:
             children: s[1-2]
           - switch: s1
           - switch: s2
+controller:
+  extraConf: GresTypes=gpu
 nodesets:
   slinky:
     enabled: false
