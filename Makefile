@@ -195,8 +195,7 @@ COSIGN ?= $(LOCALBIN)/cosign-$(COSIGN_VERSION)
 HELM_CONFIG_HOME ?= $(LOCALBIN)/helm-config
 HELM_CACHE_HOME ?= $(LOCALBIN)/helm-cache
 HELM_DATA_HOME ?= $(LOCALBIN)/helm-data
-HELM_PLUGINS ?= $(LOCALBIN)/helm-plugins
-export HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME HELM_PLUGINS
+export HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
@@ -321,7 +320,7 @@ helm-unittest-update: helm-unittest-bin ## Update helm-unittest snapshots.
 
 .PHONY: helm-unittest-bin
 helm-unittest-bin: helm-bin ## Download helm-unittest plugin locally if necessary.
-	@mkdir -p "$(HELM_CONFIG_HOME)" "$(HELM_CACHE_HOME)" "$(HELM_DATA_HOME)" "$(HELM_PLUGINS)"
+	@mkdir -p "$(HELM_CONFIG_HOME)" "$(HELM_CACHE_HOME)" "$(HELM_DATA_HOME)/plugins"
 	$(call helm-install-plugin,unittest,https://github.com/helm-unittest/helm-unittest,$(HELM_UNITTEST_VERSION))
 
 .PHONY: helm-dependency-update
