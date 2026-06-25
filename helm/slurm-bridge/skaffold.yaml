@@ -49,16 +49,16 @@ deploy:
 portForward:
   - resourceType: deployment
     resourceName: slurm-bridge-scheduler
-    namespace: slinky
+    namespace: slurm
     port: 56268
     localPort: 40000
   - resourceType: deployment
     resourceName: slurm-bridge-controllers
-    namespace: slinky
+    namespace: slurm
     port: 56268
     localPort: 40001
   - resourceType: deployment
     resourceName: slurm-bridge-admission
-    namespace: slinky
+    namespace: slurm
     port: 56268
     localPort: 40002
