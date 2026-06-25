@@ -40,6 +40,39 @@
       ],
       "preLaunchTask": "Setup Scheduler",
       "envFile": "/tmp/slurm-bridge.env"
+    },
+    {
+      "name": "Debug Scheduler",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "host": "127.0.0.1",
+      "port": 40000,
+      "substitutePath": [
+        { "from": "${workspaceFolder}", "to": "/workspace" }
+      ]
+    },
+    {
+      "name": "Debug Controllers",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "host": "127.0.0.1",
+      "port": 40001,
+      "substitutePath": [
+        { "from": "${workspaceFolder}", "to": "/workspace" }
+      ]
+    },
+    {
+      "name": "Debug Admission",
+      "type": "go",
+      "request": "attach",
+      "mode": "remote",
+      "host": "127.0.0.1",
+      "port": 40002,
+      "substitutePath": [
+        { "from": "${workspaceFolder}", "to": "/workspace" }
+      ]
     }
   ]
 }
