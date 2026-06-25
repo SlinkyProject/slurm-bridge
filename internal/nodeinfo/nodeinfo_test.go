@@ -47,6 +47,7 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 		resources  *slurmcontrol.NodeResources
 		want       []resourcev1.DeviceRequest
 		wantErr    bool
+		wantErrMsg string
 	}{
 		{
 			name: "dra.cpu",
@@ -291,6 +292,29 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 			},
 		},
 		{
+			name: "gpu.example.com missing gres index",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraExampleDriver,
+						Count: 1,
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
+		},
+		{
 			name: "gpu.nvidia.com",
 			kubeclient: fake.NewClientBuilder().
 				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
@@ -473,6 +497,9 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequests() failed: %v", gotErr)
 				}
+				if tt.wantErrMsg != "" && gotErr.Error() != tt.wantErrMsg {
+					t.Errorf("GetDeviceRequests() error = %q, want %q", gotErr.Error(), tt.wantErrMsg)
+				}
 				return
 			}
 			if tt.wantErr {
@@ -493,6 +520,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 		resources  *slurmcontrol.NodeResources
 		want       []resourcev1.DeviceRequestAllocationResult
 		wantErr    bool
+		wantErrMsg string
 	}{
 		{
 			name: "dra.cpu",
@@ -726,6 +754,29 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			},
 		},
 		{
+			name: "gpu.example.com missing gres index",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraExampleDriver,
+						Count: 1,
+					},
+				},
+			},
+			wantErr:    true,
+			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
+		},
+		{
 			name: "gpu.nvidia.com",
 			kubeclient: fake.NewClientBuilder().
 				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
@@ -778,6 +829,9 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequestAllocationResult() failed: %v", gotErr)
+				}
+				if tt.wantErrMsg != "" && gotErr.Error() != tt.wantErrMsg {
+					t.Errorf("GetDeviceRequestAllocationResult() error = %q, want %q", gotErr.Error(), tt.wantErrMsg)
 				}
 				return
 			}
