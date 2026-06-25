@@ -7,6 +7,7 @@ package slurmbridge
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
@@ -182,6 +183,48 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Partial gres type does not map to device class resource",
+			fields: fields{
+				handle: f,
+				Client: fake.NewClientBuilder().
+					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+					WithObjects(
+						&resourcev1.DeviceClass{
+							ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+						},
+					).
+					Build(),
+			},
+			args: args{
+				ctx: ctx,
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: metav1.NamespaceDefault,
+						Name:      "foo",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{{
+							Name: "foo",
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("1"),
+								},
+							},
+						}},
+					},
+				},
+				nodeName: "node1",
+				resources: &slurmcontrol.NodeResources{
+					Gres: []slurmcontrol.GresLayout{{
+						Name:  "gpu",
+						Type:  "example.com",
+						Count: 1,
+						Index: "0",
+					}},
+				},
+			},
+		},
+		{
 			name: "Matching device class name",
 			fields: fields{
 				handle: f,
@@ -345,6 +388,13 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			if !tt.wantClaim {
 				if gotClaim != nil || gotMappings != nil {
 					t.Errorf("SlurmBridge.createRequestsAndMappings() = (%v, %v), want nil claim and mappings", gotClaim, gotMappings)
+				}
+				if tt.name == "Partial gres type does not map to device class resource" {
+					for _, m := range gotMappings {
+						if strings.HasPrefix(m.ResourceName, resourcev1.ResourceDeviceClassPrefix) {
+							t.Fatalf("unexpected device class mapping %q", m.ResourceName)
+						}
+					}
 				}
 				return
 			}
