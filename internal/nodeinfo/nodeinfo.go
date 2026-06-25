@@ -65,6 +65,9 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
 			continue
 		}
+		if strings.TrimSpace(gres.Index) == "" {
+			return nil, fmt.Errorf("cannot build DRA CEL selector: missing GRES index for %s:%s", gres.Name, gres.Type)
+		}
 		indexList, err := hostlist.Expand(fmt.Sprintf("[%s]", gres.Index))
 		if err != nil {
 			return nil, err
@@ -139,6 +142,9 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 		deviceClassName := gres.Type
 		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
 			continue
+		}
+		if strings.TrimSpace(gres.Index) == "" {
+			return nil, fmt.Errorf("cannot build DRA CEL selector: missing GRES index for %s:%s", gres.Name, gres.Type)
 		}
 		indexList, err := hostlist.Expand(fmt.Sprintf("[%s]", gres.Index))
 		if err != nil {
