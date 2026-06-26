@@ -295,7 +295,7 @@ function jobset::install() {
 	chartName="jobset"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing jobset..."
-		local version="v0.8.x"
+		local version="0.12.0"
 		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi

@@ -5,7 +5,6 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 featureGates:
-  DynamicResourceAllocation: true
   DRAExtendedResource: true
   DRAResourceClaimDeviceStatus: true
   DRAConsumableCapacity: true
@@ -33,7 +32,7 @@ nodes:
         kind: ClusterConfiguration
         apiServer:
           extraArgs:
-            runtime-config: "resource.k8s.io/v1beta1=true,scheduling.k8s.io/v1alpha2=true"
+            runtime-config: "scheduling.k8s.io/v1alpha2=true"
             feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
   - role: worker
   - role: worker
