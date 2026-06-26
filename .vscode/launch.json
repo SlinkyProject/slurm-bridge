@@ -22,7 +22,7 @@
       "program": "${workspaceRoot}/cmd/scheduler/main.go",
       "args": [
         "--v=5",
-        "--feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true",
+        "--feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false",
         "--config", "/tmp/scheduler-config.yaml.debug"
       ],
       "preLaunchTask": "Setup Scheduler",
