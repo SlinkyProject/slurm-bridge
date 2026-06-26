@@ -230,6 +230,28 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
 		},
 		{
+			name: "unknown device class name missing gres index is skipped",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+					},
+				},
+			},
+			want: nil,
+		},
+		{
 			name: "gpu.nvidia.com",
 			kubeclient: fake.NewClientBuilder().
 				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
@@ -590,6 +612,28 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			},
 			wantErr:    true,
 			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
+		},
+		{
+			name: "unknown device class name missing gres index is skipped",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+					},
+				},
+			},
+			want: nil,
 		},
 		{
 			name: "gpu.nvidia.com",

@@ -65,6 +65,9 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
 			continue
 		}
+		if !isSupportedDRADriver(deviceClassName) {
+			continue
+		}
 		if strings.TrimSpace(gres.Index) == "" {
 			return nil, fmt.Errorf("cannot build DRA CEL selector: missing GRES index for %s:%s", gres.Name, gres.Type)
 		}
@@ -141,6 +144,9 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 	for _, gres := range resources.Gres {
 		deviceClassName := gres.Type
 		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
+			continue
+		}
+		if !isSupportedDRADriver(deviceClassName) {
 			continue
 		}
 		if strings.TrimSpace(gres.Index) == "" {
@@ -242,4 +248,13 @@ func hasDeviceClass(ctx context.Context, kubeclient client.Client, deviceClassNa
 		return false
 	}
 	return true
+}
+
+func isSupportedDRADriver(deviceClassName string) bool {
+	switch deviceClassName {
+	case DraDriverGpuNvidia, DraExampleDriver:
+		return true
+	default:
+		return false
+	}
 }
