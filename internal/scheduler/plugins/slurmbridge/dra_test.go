@@ -362,6 +362,15 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			}) {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() mappings = %v, want CPU extended resource mapping", gotMappings)
 			}
+			if tt.name == "Matching device class name" {
+				wantResource := "deviceclass.resource.kubernetes.io/gpu.example.com"
+				for _, m := range gotMappings {
+					if m.ResourceName == wantResource {
+						return
+					}
+				}
+				t.Errorf("mapping ResourceName = %v, want %q", gotMappings, wantResource)
+			}
 		})
 	}
 }
