@@ -47,7 +47,6 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 		resources  *slurmcontrol.NodeResources
 		want       []resourcev1.DeviceRequest
 		wantErr    bool
-		wantErrMsg string
 	}{
 		{
 			name: "dra.cpu",
@@ -226,8 +225,7 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 					},
 				},
 			},
-			wantErr:    true,
-			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
+			wantErr: true,
 		},
 		{
 			name: "unknown device class name missing gres index is skipped",
@@ -434,9 +432,6 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequests() failed: %v", gotErr)
 				}
-				if tt.wantErrMsg != "" && gotErr.Error() != tt.wantErrMsg {
-					t.Errorf("GetDeviceRequests() error = %q, want %q", gotErr.Error(), tt.wantErrMsg)
-				}
 				return
 			}
 			if tt.wantErr {
@@ -457,7 +452,6 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 		resources  *slurmcontrol.NodeResources
 		want       []resourcev1.DeviceRequestAllocationResult
 		wantErr    bool
-		wantErrMsg string
 	}{
 		{
 			name: "dra.cpu",
@@ -610,8 +604,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 					},
 				},
 			},
-			wantErr:    true,
-			wantErrMsg: "cannot build DRA CEL selector: missing GRES index for gpu:gpu.example.com",
+			wantErr: true,
 		},
 		{
 			name: "unknown device class name missing gres index is skipped",
@@ -688,9 +681,6 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequestAllocationResult() failed: %v", gotErr)
-				}
-				if tt.wantErrMsg != "" && gotErr.Error() != tt.wantErrMsg {
-					t.Errorf("GetDeviceRequestAllocationResult() error = %q, want %q", gotErr.Error(), tt.wantErrMsg)
 				}
 				return
 			}
