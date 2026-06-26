@@ -126,6 +126,11 @@ func getStateData(cs fwk.CycleState) (*stateData, error) {
 	return s, nil
 }
 
+// activatePod will put the pod back into the scheduling queue.
+func (sb *SlurmBridge) activatePod(logger klog.Logger, pod *corev1.Pod) {
+	sb.handle.Activate(logger, map[string]*corev1.Pod{string(pod.UID): pod})
+}
+
 // New initializes and returns a new Slurmbridge plugin.
 func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin, error) {
 
@@ -363,6 +368,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		sb.activatePod(logger, pod)
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
@@ -371,6 +377,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		logger.V(4).Info("external job exists but no nodes have been allocated")
 		if !externalJob.Pending {
 			logger.V(4).Info("external job is no longer pending; waiting for allocated nodes")
+			sb.activatePod(logger, pod)
 			return nil, fwk.NewStatus(fwk.Success)
 		}
 		// As the external job is not yet running, update to the job
@@ -394,10 +401,12 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 					if err != nil {
 						return nil, fwk.NewStatus(fwk.Error, err.Error())
 					}
+					sb.activatePod(logger, pod)
 					return nil, fwk.NewStatus(fwk.Success)
 				}
-				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm")
-				return nil, fwk.NewStatus(fwk.Error, ErrorJobNotPendingNoNodes.Error())
+				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm but no nodes were allocated")
+				sb.activatePod(logger, pod)
+				return nil, fwk.NewStatus(fwk.Success)
 			}
 			logger.Error(err, "error updating Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
@@ -409,11 +418,13 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 			logger.Error(err, "error labeling pods after update")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		sb.activatePod(logger, pod)
 		return nil, fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error())
 	}
 
 	// If we get here, that means the job started running after PreFilter occurred.
 	// Return a success so the pod will get another PreFilter attempt.
+	sb.activatePod(logger, pod)
 	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
