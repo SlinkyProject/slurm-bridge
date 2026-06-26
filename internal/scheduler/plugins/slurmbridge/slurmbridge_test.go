@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -41,6 +42,14 @@ import (
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type activateRecorder struct {
+	pods map[string]*corev1.Pod
+}
+
+func (r *activateRecorder) Activate(_ klog.Logger, pods map[string]*corev1.Pod) {
+	r.pods = pods
+}
 
 func TestSlurmbridge_Name(t *testing.T) {
 	tests := []struct {
@@ -435,11 +444,13 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
 		tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
 	}
+	activator := &activateRecorder{}
 	f, err := tf.NewFramework(
 		ctx,
 		registeredPlugins,
 		"slurm-bridge",
 		fwkruntime.WithInformerFactory(informerFactory),
+		fwkruntime.WithPodActivator(activator),
 		fwkruntime.WithSnapshotSharedLister(internalcache.NewSnapshot(
 			[]*corev1.Pod{
 				pod,
@@ -506,12 +517,13 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		return slurmcontrol.NewControl(interceptor.NewClient(base, f), "kubernetes", "slurm-bridge")
 	}
 	tests := []struct {
-		name        string
-		fields      fields
-		args        args
-		want        *fwk.PostFilterResult
-		want1       *fwk.Status
-		wantPodNode string
+		name         string
+		fields       fields
+		args         args
+		want         *fwk.PostFilterResult
+		want1        *fwk.Status
+		wantPodNode  string
+		wantActivate bool
 	}{
 		{
 			name: "Error checking for Slurm job",
@@ -683,8 +695,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.Success),
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
 		},
 		{
 			name: "Updating an external job succeeds",
@@ -732,8 +745,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error()),
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error()),
+			wantActivate: true,
 		},
 		{
 			name: "Updating an external job fails",
@@ -810,9 +824,10 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:        nil,
-			want1:       fwk.NewStatus(fwk.Success),
-			wantPodNode: "node1",
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantPodNode:  "node1",
+			wantActivate: true,
 		},
 		{
 			name: "Updating an external job races but Slurm has no allocated nodes",
@@ -834,8 +849,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.Error, ErrorJobNotPendingNoNodes.Error()),
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
 		},
 		{
 			name: "Non-pending external job with no nodes skips update",
@@ -889,12 +905,14 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.Success),
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			activator.pods = nil
 			sb := &SlurmBridge{
 				Client:        tt.fields.Client,
 				schedulerName: tt.fields.schedulerName,
@@ -913,6 +931,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got1.Reasons(), tt.want1.Reasons()) {
 				t.Errorf("SlurmBridge.PostFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
+			}
+			if gotActivate := len(activator.pods) > 0; gotActivate != tt.wantActivate {
+				t.Errorf("SlurmBridge.PostFilter() activated pod = %v, want %v", gotActivate, tt.wantActivate)
 			}
 			if tt.wantPodNode != "" {
 				gotPod := &corev1.Pod{}
