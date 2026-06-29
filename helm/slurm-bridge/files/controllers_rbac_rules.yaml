@@ -7,7 +7,6 @@ rules:
       - get
       - list
       - patch
-      - update
       - watch
   - apiGroups:
       - ""
@@ -18,23 +17,28 @@ rules:
       - get
       - list
       - patch
-      - update
       - watch
   - apiGroups:
-      - resource.k8s.io
+      - ""
     resources:
-      - deviceclasses
-      - resourceslices
+      - pods/finalizers
     verbs:
-      - get
-      - list
-      - watch
+      - patch
+      - update
   - apiGroups:
       - resource.k8s.io
     resources:
       - resourceclaims
     verbs:
       - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - resource.k8s.io
+    resources:
+      - resourceslices
+    verbs:
       - get
       - list
       - watch

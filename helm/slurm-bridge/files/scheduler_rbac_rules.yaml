@@ -2,36 +2,11 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - bindings
-      - pods/binding
-    verbs:
-      - create
-  - apiGroups:
-      - ""
-    resources:
-      - endpoints
-    verbs:
-      - create
-      - get
-      - update
-  - apiGroups:
-      - ""
-    resources:
       - namespaces
-      - replicationcontrollers
-      - services
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
       - nodes
     verbs:
       - get
       - list
-      - patch
       - watch
   - apiGroups:
       - ""
@@ -48,7 +23,6 @@ rules:
     resources:
       - pods
     verbs:
-      - delete
       - get
       - list
       - patch
@@ -56,11 +30,16 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - pods/binding
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
       - pods/finalizers
       - pods/status
     verbs:
       - patch
-      - update
   - apiGroups:
       - ""
       - events.k8s.io
@@ -82,20 +61,21 @@ rules:
   - apiGroups:
       - authentication.k8s.io
     resources:
-      - subjectaccessreviews
       - tokenreviews
+    verbs:
+      - create
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
     verbs:
       - create
   - apiGroups:
       - batch
     resources:
       - jobs
-      - jobs/status
     verbs:
-      - create
       - get
-      - list
-      - watch
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -116,29 +96,14 @@ rules:
       - jobset.x-k8s.io
     resources:
       - jobsets
-      - jobsets/status
     verbs:
-      - create
       - get
-      - list
-      - watch
   - apiGroups:
       - leaderworkerset.x-k8s.io
     resources:
       - leaderworkersets
     verbs:
-      - create
       - get
-      - list
-      - watch
-  - apiGroups:
-      - policy
-    resources:
-      - poddisruptionbudgets
-    verbs:
-      - get
-      - list
-      - watch
   - apiGroups:
       - resource.k8s.io
     resources:
@@ -162,11 +127,9 @@ rules:
   - apiGroups:
       - resource.k8s.io
     resources:
-      - resourceclaims/binding
       - resourceclaims/status
     verbs:
       - patch
-      - update
   - apiGroups:
       - scheduling.k8s.io
     resources:
@@ -175,21 +138,11 @@ rules:
     verbs:
       - get
   - apiGroups:
-      - scheduling.k8s.io
-    resources:
-      - podgroups/status
-    verbs:
-      - patch
-  - apiGroups:
       - scheduling.x-k8s.io
     resources:
       - podgroups
-      - podgroups/status
     verbs:
-      - create
       - get
-      - list
-      - watch
   - apiGroups:
       - storage.k8s.io
     resources:
@@ -197,15 +150,6 @@ rules:
       - csinodes
       - csistoragecapacities
       - storageclasses
-      - volumeattachments
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - topology.node.k8s.io
-    resources:
-      - noderesourcetopologies
     verbs:
       - get
       - list
