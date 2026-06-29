@@ -88,17 +88,8 @@ manifests should match snapshot:
         resources:
           - namespaces
         verbs:
-          - list
-          - watch
-      - apiGroups:
-          - ""
-        resources:
-          - pods
-        verbs:
           - get
           - list
-          - patch
-          - update
           - watch
   4: |
     apiVersion: rbac.authorization.k8s.io/v1
