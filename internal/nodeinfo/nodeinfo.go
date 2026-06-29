@@ -35,29 +35,31 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		return requests, nil
 	}
 
-	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) {
+	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) && resources.CoreBitmap != "" {
 		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
 		}
 		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
-		cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
-		req := resourcev1.DeviceRequest{
-			Name: corev1.ResourceCPU.String(),
-			Exactly: &resourcev1.ExactDeviceRequest{
-				DeviceClassName: DraDriverCpu,
-				AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-				Count:           int64(cpuSet.Size()),
-				Selectors: []resourcev1.DeviceSelector{
-					{
-						CEL: &resourcev1.CELDeviceSelector{
-							Expression: fmt.Sprintf("device.attributes['%s'].cpuID in %s", DraDriverCpu, cpuSetString),
+		if cpuSet.Size() > 0 {
+			cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
+			req := resourcev1.DeviceRequest{
+				Name: corev1.ResourceCPU.String(),
+				Exactly: &resourcev1.ExactDeviceRequest{
+					DeviceClassName: DraDriverCpu,
+					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+					Count:           int64(cpuSet.Size()),
+					Selectors: []resourcev1.DeviceSelector{
+						{
+							CEL: &resourcev1.CELDeviceSelector{
+								Expression: fmt.Sprintf("device.attributes['%s'].cpuID in %s", DraDriverCpu, cpuSetString),
+							},
 						},
 					},
 				},
-			},
+			}
+			requests = append(requests, req)
 		}
-		requests = append(requests, req)
 	}
 
 	for _, gres := range resources.Gres {
@@ -113,7 +115,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 		return devices, nil
 	}
 
-	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) {
+	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) && resources.CoreBitmap != "" {
 		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
@@ -123,7 +125,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 		for _, cpuID := range cpuSet.List() {
 			cpuInfo, ok := n.CpuMap.CPUInfoMap[cpuID]
 			if !ok {
-				continue
+				return nil, fmt.Errorf("cpu ID %d from Slurm allocation not found on node", cpuID)
 			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: corev1.ResourceCPU.String(),
@@ -151,7 +153,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			}
 			gpuInfo, ok := n.GpuMap.GPUInfoMap[index]
 			if !ok {
-				continue
+				return nil, fmt.Errorf("gpu index %d from Slurm allocation not found on node", index)
 			}
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: gres.Name,
