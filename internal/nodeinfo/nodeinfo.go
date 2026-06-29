@@ -128,7 +128,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: corev1.ResourceCPU.String(),
 				Driver:  DraDriverCpu,
-				Pool:    resources.Node,
+				Pool:    n.CpuMap.Pool,
 				Device:  cpuInfo.Name,
 			}
 			devices = append(devices, dev)
@@ -156,7 +156,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 			dev := resourcev1.DeviceRequestAllocationResult{
 				Request: gres.Name,
 				Driver:  deviceClassName,
-				Pool:    resources.Node,
+				Pool:    n.GpuMap.Pool,
 				Device:  gpuInfo.Name,
 			}
 			devices = append(devices, dev)
@@ -177,13 +177,14 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
 			continue
 		}
+		pool := resourceSlice.Spec.Pool.Name
 		switch resourceSlice.Spec.Driver {
 		case DraDriverCpu:
 			cpuInfos := NewCPUInfos(&resourceSlice)
-			nodeInfo.CpuMap = NewCPUMap(cpuInfos)
+			nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
 		case DraExampleDriver, DraDriverGpuNvidia:
 			gpuInfos := NewGPUInfos(ctx, &resourceSlice)
-			nodeInfo.GpuMap = NewGPUMap(resourceSlice.Spec.Driver, gpuInfos)
+			nodeInfo.GpuMap = NewGPUMap(pool, resourceSlice.Spec.Driver, gpuInfos)
 		default:
 			// TODO: can we even default?
 		}

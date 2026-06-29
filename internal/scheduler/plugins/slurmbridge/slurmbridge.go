@@ -475,7 +475,11 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	// Note that whole node allocations in slurm will look like all
 	// resources were requested, but that doesn't mean the pod
 	// intended to use them.
-	resources, err := sb.slurmControl.GetResources(ctx, pod, nodeName)
+	node := &corev1.Node{}
+	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	resources, err := sb.slurmControl.GetResources(ctx, pod, nodecontrollerutils.GetSlurmNodeName(node))
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}

@@ -424,6 +424,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{Name: "node-slice"},
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node"),
+							Pool:     resourcev1.ResourcePool{Name: "node"},
 							Driver:   nodeinfo.DraDriverCpu,
 							Devices: []resourcev1.Device{
 								{
@@ -492,6 +493,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{Name: "node-slice"},
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node"),
+							Pool:     resourcev1.ResourcePool{Name: "node"},
 							Driver:   nodeinfo.DraExampleDriver,
 							Devices: []resourcev1.Device{
 								{
@@ -556,6 +558,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{Name: "node-slice"},
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node"),
+							Pool:     resourcev1.ResourcePool{Name: "node"},
 							Driver:   nodeinfo.DraDriverGpuNvidia,
 							Devices: []resourcev1.Device{
 								{Name: "gpu-0"},
@@ -581,6 +584,50 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 				{Request: "gpu", Driver: nodeinfo.DraDriverGpuNvidia, Device: "gpu-0", Pool: "node"},
 				{Request: "gpu", Driver: nodeinfo.DraDriverGpuNvidia, Device: "gpu-1", Pool: "node"},
 			},
+		},
+		{
+			name: "DRA pool name comes from ResourceSlice, not node name",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithObjects(
+					&corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: "kube-worker-1"},
+					},
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+					&resourcev1.ResourceSlice{
+						ObjectMeta: metav1.ObjectMeta{Name: "kube-worker-1-slice"},
+						Spec: resourcev1.ResourceSliceSpec{
+							NodeName: ptr.To("kube-worker-1"),
+							Pool:     resourcev1.ResourcePool{Name: "pool-numa0"},
+							Driver:   nodeinfo.DraExampleDriver,
+							Devices: []resourcev1.Device{{
+								Name: "gpu-0",
+								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+								},
+							}},
+						},
+					},
+				).
+				Build(),
+			nodeName: "kube-worker-1",
+			resources: &slurmcontrol.NodeResources{
+				Node: "slurm-worker-0",
+				Gres: []slurmcontrol.GresLayout{{
+					Name:  "gpu",
+					Type:  nodeinfo.DraExampleDriver,
+					Count: 1,
+					Index: "0",
+				}},
+			},
+			want: []resourcev1.DeviceRequestAllocationResult{{
+				Request: "gpu",
+				Driver:  nodeinfo.DraExampleDriver,
+				Device:  "gpu-0",
+				Pool:    "pool-numa0",
+			}},
 		},
 	}
 	for _, tt := range tests {

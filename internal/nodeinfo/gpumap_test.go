@@ -35,7 +35,7 @@ func TestNewGPUMap(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := nodeinfo.NewGPUMap(tt.driver, tt.gpuInfos)
+			got := nodeinfo.NewGPUMap("", tt.driver, tt.gpuInfos)
 			if !equality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("NewGPUMap() = %v, want %v", got, tt.want)
 			}
