@@ -6,6 +6,9 @@ package nodeinfo
 import "sort"
 
 type GPUMap struct {
+	// Pool is the DRA ResourceSlice pool name for these GPUs.
+	Pool string `json:"pool"`
+
 	// Driver indicates the Device Driver name.
 	Driver string `json:"driver"`
 
@@ -14,7 +17,7 @@ type GPUMap struct {
 	GPUInfoMap map[int]*GPUInfo `json:"gpuInfoMap"`
 }
 
-func NewGPUMap(driver string, gpuInfos []*GPUInfo) GPUMap {
+func NewGPUMap(pool, driver string, gpuInfos []*GPUInfo) GPUMap {
 	sort.SliceStable(gpuInfos, func(i, j int) bool {
 		return gpuInfos[i].Index < gpuInfos[j].Index
 	})
@@ -24,6 +27,7 @@ func NewGPUMap(driver string, gpuInfos []*GPUInfo) GPUMap {
 		gpuInfoMap[gpuInfo.Index] = gpuInfo
 	}
 	return GPUMap{
+		Pool:       pool,
 		Driver:     driver,
 		GPUInfoMap: gpuInfoMap,
 	}
