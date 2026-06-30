@@ -27,7 +27,7 @@ spec:
       containers:
       - args:
         - --config=/etc/kubernetes/scheduler-config.yaml
-        - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true
+        - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false
         {{- with .Values.scheduler.verbosity }}
         - --v={{ . }}
         {{- end }}
