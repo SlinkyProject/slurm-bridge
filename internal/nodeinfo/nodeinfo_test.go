@@ -634,6 +634,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{Name: "node-gpu-slice"},
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node"),
+							Pool:     resourcev1.ResourcePool{Name: "node"},
 							Driver:   nodeinfo.DraExampleDriver,
 							Devices: []resourcev1.Device{
 								{
