@@ -8,6 +8,7 @@
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Using the `slurm-bridge` Scheduler](#using-the-slurm-bridge-scheduler)
+  - [CPU DRA](#cpu-dra)
   - [Annotations](#annotations)
   - [PodGroup (1.36+)](#podgroup-136)
   - [JobSets](#jobsets)
@@ -52,6 +53,28 @@ from any namespace to indicate that it should be scheduler using the
 
 Please review [`slurm-bridge` admission controller](./admission.md) to learn
 more.
+
+## CPU DRA
+
+Native `cpu` requests do not activate the CPU DRA driver. To request CPUs from
+the `dra.cpu` DeviceClass, specify its extended resource explicitly:
+
+```yaml
+resources:
+  requests:
+    deviceclass.resource.kubernetes.io/dra.cpu: "2"
+  limits:
+    deviceclass.resource.kubernetes.io/dra.cpu: "2"
+```
+
+The extended resource quantity is used as the Slurm CPU count. A Pod that
+requests this resource cannot also specify native `cpu` requests or limits.
+
+CPU DRA constrains the container to Slurm's allocated CPU set. The CPU driver
+also removes DRA-allocated CPUs from the shared CPU sets of running native
+containers. Native CPU requests still reserve capacity in Slurm, but native
+containers share all CPUs not claimed through DRA; Slurm's native CPU IDs do not
+define their container CPU sets.
 
 ## Annotations
 

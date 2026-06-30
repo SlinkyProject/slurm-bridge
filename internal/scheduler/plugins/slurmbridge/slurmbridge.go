@@ -113,6 +113,7 @@ func init() {
 // RBAC for nodeinfo.go and dra.go
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=create;get;list;update;watch;delete
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims/binding,verbs=patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims/status,verbs=patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch
 

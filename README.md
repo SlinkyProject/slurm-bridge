@@ -79,6 +79,13 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 - Only supports the following DRA drivers:
   - [DRA Driver CPU][dra-driver-cpu] for CPUs.
   - [DRA Example Driver][dra-example-driver] for GPUs.
+- Native `cpu` requests do not activate CPU DRA. Pods must explicitly request
+  `deviceclass.resource.kubernetes.io/dra.cpu` and cannot combine it with native
+  `cpu` requests or limits.
+- Native CPU requests reserve CPU capacity in Slurm, but do not constrain the
+  container to Slurm's allocated CPU set. Native containers share CPUs not
+  claimed through DRA, so native Slurm allocations may overlap their effective
+  CPU sets; use CPU DRA for aligned CPU isolation.
 
 ## Installation
 
