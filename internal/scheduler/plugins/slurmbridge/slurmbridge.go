@@ -47,8 +47,30 @@ var (
 	ErrorPodUpdateFailed      = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
 	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
+	ErrorJobNotPendingNoNodes = errors.New("external job is no longer pending but has no nodes assigned")
 	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
 )
+
+const slurmJobNotPending = "job is no longer pending execution"
+
+func isJobNotPendingError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var agg utilerrors.Aggregate
+	if errors.As(err, &agg) {
+		for _, e := range agg.Errors() {
+			if isJobNotPendingError(e) {
+				return true
+			}
+		}
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, slurmJobNotPending) ||
+		strings.Contains(msg, "eslurm_job_not_pending")
+}
 
 func init() {
 	utilruntime.Must(scheme.AddToScheme(scheme.Scheme))
@@ -102,6 +124,11 @@ func getStateData(cs fwk.CycleState) (*stateData, error) {
 		return nil, errors.New("unable to convert state into stateData")
 	}
 	return s, nil
+}
+
+// activatePod will put the pod back into the scheduling queue.
+func (sb *SlurmBridge) activatePod(logger klog.Logger, pod *corev1.Pod) {
+	sb.handle.Activate(logger, map[string]*corev1.Pod{string(pod.UID): pod})
 }
 
 // New initializes and returns a new Slurmbridge plugin.
@@ -232,19 +259,18 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		return nil, fs
 	}
 
-	// If an external job does not exist, this plugin should return as a success
-	// with no PreFilterResult. Because Filter will ultimately detect that slurm
-	// has not scheduled any nodes to the pods (no node annotation), the PostFilter
-	// plugin will be invoked. The external job will then be created in the
-	// PostFilter plugin stage. If an external job exists and is running, update
-	// pods with node assignments.
+	// If no external job exists, or the external job exists but Slurm has not
+	// assigned nodes yet, return success with no PreFilterResult. Filter will
+	// detect the missing node annotation and PostFilter will create or update
+	// the external job. If the external job has nodes, annotate the pods so
+	// scheduling can continue against the Slurm allocation.
 	if externalJob.JobId == 0 {
 		return nil, fwk.NewStatus(fwk.Success)
 	} else {
 		logger.V(4).Info("external job exists")
 		if externalJob.Nodes == "" {
 			logger.V(4).Info("external job exists but no nodes have been allocated")
-			return nil, fwk.NewStatus(fwk.Pending, ErrorNoNodesAssigned.Error())
+			return nil, fwk.NewStatus(fwk.Success)
 		}
 		// The external job is running. Assign nodes to pods.
 		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
@@ -342,16 +368,46 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		if err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		sb.activatePod(logger, pod)
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
 	logger.V(4).Info("external job exists")
 	if externalJob.Nodes == "" {
 		logger.V(4).Info("external job exists but no nodes have been allocated")
+		if !externalJob.Pending {
+			logger.V(4).Info("external job is no longer pending; waiting for allocated nodes")
+			sb.activatePod(logger, pod)
+			return nil, fwk.NewStatus(fwk.Success)
+		}
 		// As the external job is not yet running, update to the job
 		// to include any changes from slurmJobIR.
 		jobid, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
+			if isJobNotPendingError(err) {
+				logger.V(4).Info("external job started before update completed")
+				externalJob, err := sb.slurmControl.GetJob(ctx, pod)
+				if err != nil {
+					logger.Error(err, "error checking for Slurm job after update race")
+					return nil, fwk.NewStatus(fwk.Error, err.Error())
+				}
+				if externalJob.JobId != 0 && externalJob.Nodes != "" {
+					slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
+					kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
+					if err != nil {
+						return nil, fwk.NewStatus(fwk.Error, err.Error())
+					}
+					err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
+					if err != nil {
+						return nil, fwk.NewStatus(fwk.Error, err.Error())
+					}
+					sb.activatePod(logger, pod)
+					return nil, fwk.NewStatus(fwk.Success)
+				}
+				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm but no nodes were allocated")
+				sb.activatePod(logger, pod)
+				return nil, fwk.NewStatus(fwk.Success)
+			}
 			logger.Error(err, "error updating Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
@@ -362,11 +418,13 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 			logger.Error(err, "error labeling pods after update")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		sb.activatePod(logger, pod)
 		return nil, fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error())
 	}
 
 	// If we get here, that means the job started running after PreFilter occurred.
 	// Return a success so the pod will get another PreFilter attempt.
+	sb.activatePod(logger, pod)
 	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
