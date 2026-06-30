@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,6 +88,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if pod.Spec.ResourceClaims != nil {
 		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
 	}
+	if err := validateCPUResources(pod); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -141,4 +145,28 @@ func (r *PodAdmission) isManagedNamespace(ctx context.Context, namespace string)
 		return false, nil
 	}
 	return slices.Contains(r.ManagedNamespaces, namespace), nil
+}
+
+func validateCPUResources(pod *corev1.Pod) error {
+	containers := slices.Clone(pod.Spec.InitContainers)
+	containers = append(containers, pod.Spec.Containers...)
+
+	var hasNativeCPU, hasCPUDRA bool
+	if pod.Spec.Resources != nil {
+		hasNativeCPU = resourceIsSet(*pod.Spec.Resources, corev1.ResourceCPU)
+	}
+	for _, container := range containers {
+		hasNativeCPU = hasNativeCPU || resourceIsSet(container.Resources, corev1.ResourceCPU)
+		hasCPUDRA = hasCPUDRA || resourceIsSet(container.Resources, corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName))
+	}
+	if hasNativeCPU && hasCPUDRA {
+		return fmt.Errorf("can't specify both native %q and CPU DRA resource %q", corev1.ResourceCPU, nodeinfo.DraDriverCpu_ExtendedResourceName)
+	}
+	return nil
+}
+
+func resourceIsSet(resources corev1.ResourceRequirements, name corev1.ResourceName) bool {
+	_, requested := resources.Requests[name]
+	_, limited := resources.Limits[name]
+	return requested || limited
 }

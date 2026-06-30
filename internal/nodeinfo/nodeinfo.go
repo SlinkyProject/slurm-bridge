@@ -28,43 +28,56 @@ type NodeInfo struct {
 	GpuMap GPUMap
 }
 
-func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequest, error) {
+func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, includeCPUDRARequest bool) ([]resourcev1.DeviceRequest, error) {
 	var requests []resourcev1.DeviceRequest
 
 	if resources == nil {
 		return requests, nil
 	}
 
-	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) && resources.CoreBitmap != "" {
-		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+	if includeCPUDRARequest {
+		exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
 		if err != nil {
 			return nil, err
 		}
-		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
-		if cpuSet.Size() > 0 {
-			cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
-			req := resourcev1.DeviceRequest{
-				Name: corev1.ResourceCPU.String(),
-				Exactly: &resourcev1.ExactDeviceRequest{
-					DeviceClassName: DraDriverCpu,
-					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-					Count:           int64(cpuSet.Size()),
-					Selectors: []resourcev1.DeviceSelector{
-						{
-							CEL: &resourcev1.CELDeviceSelector{
-								Expression: fmt.Sprintf("device.attributes['%s'].cpuID in %s", DraDriverCpu, cpuSetString),
+		if !exists {
+			return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		}
+		if resources.CoreBitmap != "" {
+			bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+			if err != nil {
+				return nil, err
+			}
+			cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
+			if cpuSet.Size() > 0 {
+				cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
+				req := resourcev1.DeviceRequest{
+					Name: corev1.ResourceCPU.String(),
+					Exactly: &resourcev1.ExactDeviceRequest{
+						DeviceClassName: DraDriverCpu,
+						AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+						Count:           int64(cpuSet.Size()),
+						Selectors: []resourcev1.DeviceSelector{
+							{
+								CEL: &resourcev1.CELDeviceSelector{
+									Expression: fmt.Sprintf("device.attributes['%s'].cpuID in %s", DraDriverCpu, cpuSetString),
+								},
 							},
 						},
 					},
-				},
+				}
+				requests = append(requests, req)
 			}
-			requests = append(requests, req)
 		}
 	}
 
 	for _, gres := range resources.Gres {
 		deviceClassName := gres.Type
-		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
+		exists, err := deviceClassExists(ctx, kubeclient, gres.Type)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
 			continue
 		}
 		indexList, err := hostlist.Expand(fmt.Sprintf("[%s]", gres.Index))
@@ -108,38 +121,51 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 	return requests, nil
 }
 
-func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequestAllocationResult, error) {
+func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, includeCPUDRARequest bool) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	var devices []resourcev1.DeviceRequestAllocationResult
 
 	if resources == nil {
 		return devices, nil
 	}
 
-	if hasDeviceClass(ctx, kubeclient, DraDriverCpu) && resources.CoreBitmap != "" {
-		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+	if includeCPUDRARequest {
+		exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
 		if err != nil {
 			return nil, err
 		}
-		// Individual Mode: each CPU is enumerated
-		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
-		for _, cpuID := range cpuSet.List() {
-			cpuInfo, ok := n.CpuMap.CPUInfoMap[cpuID]
-			if !ok {
-				return nil, fmt.Errorf("cpu ID %d from Slurm allocation not found on node", cpuID)
+		if !exists {
+			return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		}
+		if resources.CoreBitmap != "" {
+			bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+			if err != nil {
+				return nil, err
 			}
-			dev := resourcev1.DeviceRequestAllocationResult{
-				Request: corev1.ResourceCPU.String(),
-				Driver:  DraDriverCpu,
-				Pool:    n.CpuMap.Pool,
-				Device:  cpuInfo.Name,
+			// Individual Mode: each CPU is enumerated
+			cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
+			for _, cpuID := range cpuSet.List() {
+				cpuInfo, ok := n.CpuMap.CPUInfoMap[cpuID]
+				if !ok {
+					return nil, fmt.Errorf("cpu ID %d from Slurm allocation not found on node", cpuID)
+				}
+				dev := resourcev1.DeviceRequestAllocationResult{
+					Request: corev1.ResourceCPU.String(),
+					Driver:  DraDriverCpu,
+					Pool:    n.CpuMap.Pool,
+					Device:  cpuInfo.Name,
+				}
+				devices = append(devices, dev)
 			}
-			devices = append(devices, dev)
 		}
 	}
 
 	for _, gres := range resources.Gres {
 		deviceClassName := gres.Type
-		if !hasDeviceClass(ctx, kubeclient, gres.Type) {
+		exists, err := deviceClassExists(ctx, kubeclient, gres.Type)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
 			continue
 		}
 		indexList, err := hostlist.Expand(fmt.Sprintf("[%s]", gres.Index))
@@ -226,17 +252,17 @@ func (n *NodeInfo) GetGresAndGresConf() (gres, gresConf string) {
 	return gres, gresConf
 }
 
-func hasDeviceClass(ctx context.Context, kubeclient client.Client, deviceClassName string) bool {
+func deviceClassExists(ctx context.Context, kubeclient client.Client, deviceClassName string) (bool, error) {
 	if deviceClassName == "" {
-		return false
+		return false, nil
 	}
 	deviceClass := &resourcev1.DeviceClass{}
 	err := kubeclient.Get(ctx, types.NamespacedName{Name: deviceClassName}, deviceClass)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return false
+			return false, nil
 		}
-		return false
+		return false, fmt.Errorf("get DeviceClass %q: %w", deviceClassName, err)
 	}
-	return true
+	return true, nil
 }

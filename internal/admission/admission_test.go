@@ -8,10 +8,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -61,6 +63,81 @@ func TestPodAdmission_Default(t *testing.T) {
 			r := &PodAdmission{}
 			if err := r.Default(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.Default() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCPUResources(t *testing.T) {
+	cpuDRA := corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName)
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		wantErr bool
+	}{
+		{
+			name: "native CPU only",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("1"),
+				}},
+			}}}},
+		},
+		{
+			name: "CPU DRA only",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					cpuDRA: resource.MustParse("1"),
+				}},
+			}}}},
+		},
+		{
+			name: "native and DRA CPU in one container",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("1"),
+					cpuDRA:             resource.MustParse("1"),
+				}},
+			}}}},
+			wantErr: true,
+		},
+		{
+			name: "native CPU in init container and DRA CPU in app container",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						cpuDRA: resource.MustParse("1"),
+					}},
+				}},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "native pod-level CPU and container DRA CPU",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				Resources: &corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("1"),
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						cpuDRA: resource.MustParse("1"),
+					}},
+				}},
+			}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCPUResources(tt.pod)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateCPUResources() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -413,6 +490,26 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 							{Name: "gpu"},
 						},
 					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithNativeAndDRACPU",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+							corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName): resource.MustParse("1"),
+						}},
+					}}},
 				},
 			},
 			want:    nil,

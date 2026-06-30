@@ -26,10 +26,8 @@ import (
 
 // manageResourceClaim will create DRA ResourceClaims for each
 // Slurm GRES type that matches a DRA DeviceClass name. Additionally,
-// if the CPU DRA driver is installed, A ResourceClaim for CPUs will
-// be generated. The ResourceClaim is reconstructed in a similar manner
-// to the way the Kubernetes scheduler handles the DRA Extended Resource
-// Claim capability.
+// a ResourceClaim for CPUs will be generated when the pod explicitly
+// requests the CPU DRA extended resource.
 func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) error {
 	claim, requestMappings, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
 	if err != nil {
@@ -91,9 +89,14 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, err
 	}
 
-	deviceRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, resources)
+	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
+	deviceRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, resources, podRequestsCPUDRA)
 	if err != nil {
 		return nil, nil, err
+	}
+	claimIncludesCPUDRARequest := hasDeviceRequestNamed(deviceRequests, corev1.ResourceCPU.String())
+	if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
+		return nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
 	}
 
 	for containerIndex, container := range containers {
@@ -117,13 +120,19 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 			// ridx is the index of the extended resource request in the sorted all requests in the container.
 			// crq is the quantity of the extended resource request.
 			reqName := fmt.Sprintf("container-%d-request-%d", containerIndex, ridx)
-			if rName.String() == corev1.ResourceCPU.String() {
+			if rName.String() == nodeinfo.DraDriverCpu_ExtendedResourceName {
+				if !claimIncludesCPUDRARequest {
+					continue
+				}
 				reqMap := corev1.ContainerExtendedResourceRequest{
 					ContainerName: container.Name,
-					RequestName:   reqName,
-					ResourceName:  corev1.ResourceCPU.String(),
+					RequestName:   corev1.ResourceCPU.String(),
+					ResourceName:  nodeinfo.DraDriverCpu_ExtendedResourceName,
 				}
 				mappings = append(mappings, reqMap)
+				continue
+			}
+			if resources == nil {
 				continue
 			}
 			for _, gres := range resources.Gres {
@@ -138,6 +147,10 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 				mappings = append(mappings, reqMap)
 			}
 		}
+	}
+
+	if len(deviceRequests) == 0 || len(mappings) == 0 {
+		return nil, nil, nil
 	}
 
 	claim := &resourcev1.ResourceClaim{
@@ -183,7 +196,8 @@ func (sb *SlurmBridge) bindClaim(
 		return err
 	}
 
-	devices, err := nodeInfo.GetDeviceRequestAllocationResult(ctx, sb.Client, resources)
+	claimIncludesCPUDRARequest := claimRequestsCPUDRA(claim)
+	devices, err := nodeInfo.GetDeviceRequestAllocationResult(ctx, sb.Client, resources, claimIncludesCPUDRARequest)
 	if err != nil {
 		return err
 	}
@@ -225,6 +239,41 @@ func (sb *SlurmBridge) bindClaim(
 	}
 
 	return nil
+}
+
+func podRequestsCPUDRAExtendedResource(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	containers := slices.Clone(pod.Spec.InitContainers)
+	containers = append(containers, pod.Spec.Containers...)
+	for _, container := range containers {
+		if quantity, ok := container.Resources.Requests[corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName)]; ok && !quantity.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDeviceRequestNamed(requests []resourcev1.DeviceRequest, name string) bool {
+	for _, request := range requests {
+		if request.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func claimRequestsCPUDRA(claim *resourcev1.ResourceClaim) bool {
+	if claim == nil {
+		return false
+	}
+	for _, req := range claim.Spec.Devices.Requests {
+		if req.Name == corev1.ResourceCPU.String() && req.Exactly != nil && req.Exactly.DeviceClassName == nodeinfo.DraDriverCpu {
+			return true
+		}
+	}
+	return false
 }
 
 // patchPodExtendedResourceClaimStatus updates the pod's status with information about

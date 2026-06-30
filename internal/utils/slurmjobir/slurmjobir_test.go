@@ -227,6 +227,20 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 			cpuPerTask: ptr.To(int32(8)),
 			memPerNode: ptr.To(int64(400)),
 		},
+		{
+			name: "CPU DRA request sets CPUs per task",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithGPU(cpuDRADeviceClassExtendedName, "4"),
+						},
+					},
+					JobInfo: SlurmJobIRJobInfo{},
+				},
+			},
+			cpuPerTask: ptr.To(int32(4)),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -335,6 +349,19 @@ func Test_parseGPUDevicePlugin(t *testing.T) {
 				},
 			},
 			want: ptr.To("gres/gpu:gpu.nvidia.com=1"),
+		},
+		{
+			name: "CPU DRA Extended Resource Claim is ignored for GRES",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"dra.cpu", "1"),
+						},
+					},
+				},
+			},
+			want: nil,
 		},
 		{
 			name: "Multiple GPU DRA Extended Resource Claims",
