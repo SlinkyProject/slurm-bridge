@@ -1,0 +1,26 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+fullnameOverride: dracpu
+
+image:
+  repository: registry.k8s.io/dra-driver-cpu/dra-driver-cpu
+  pullPolicy: IfNotPresent
+
+podLabels:
+  app: dracpu
+
+args:
+  logLevel: 4
+  cpuDeviceMode: individual
+  # Rendered by the v0.2.0 chart, but only used by the driver in grouped mode.
+  groupBy: numanode
+  reservedCPUs: ''
+  hostnameOverride: ''
+  exposePCIeRoots: false
+
+tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Equal
+    value: slurm-bridge-scheduler
+    effect: NoExecute
