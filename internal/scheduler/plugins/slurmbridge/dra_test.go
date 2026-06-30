@@ -89,11 +89,13 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 		resources *slurmcontrol.NodeResources
 	}
 	tests := []struct {
-		name         string
-		fields       fields
-		args         args
-		wantErr      bool
-		wantRequests int
+		name           string
+		fields         fields
+		args           args
+		wantErr        bool
+		wantClaim      bool
+		wantRequests   int
+		wantCPUMapping bool
 	}{
 		{
 			name: "No matching device class name",
@@ -142,6 +144,42 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 					},
 				},
 			},
+		},
+		{
+			name: "CPU DRA request without CPU DeviceClass",
+			fields: fields{
+				Client: fake.NewClientBuilder().
+					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+					Build(),
+				handle: f,
+			},
+			args: args{
+				ctx: ctx,
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: metav1.NamespaceDefault,
+						Name:      "foo",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "foo",
+								Resources: corev1.ResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName): resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+				nodeName: "node1",
+				resources: &slurmcontrol.NodeResources{
+					Node:       "node1",
+					CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+				},
+			},
+			wantErr: true,
 		},
 		{
 			name: "Matching device class name",
@@ -260,11 +298,11 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 								Name: "foo",
 								Resources: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{
-										corev1.ResourceCPU: resource.MustParse("4"),
+										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName):           resource.MustParse("4"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 									Limits: corev1.ResourceList{
-										corev1.ResourceCPU: resource.MustParse("4"),
+										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName):           resource.MustParse("4"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 								},
@@ -286,7 +324,9 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 					},
 				},
 			},
-			wantRequests: 2,
+			wantClaim:      true,
+			wantRequests:   2,
+			wantCPUMapping: true,
 		},
 	}
 	for _, tt := range tests {
@@ -297,16 +337,42 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
 			}
-			gotClaim, _, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
+			gotClaim, gotMappings, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantClaim {
+				if gotClaim != nil || gotMappings != nil {
+					t.Errorf("SlurmBridge.createRequestsAndMappings() = (%v, %v), want nil claim and mappings", gotClaim, gotMappings)
+				}
+				return
+			}
+			if gotClaim == nil {
+				t.Fatal("SlurmBridge.createRequestsAndMappings() claim = nil, want non-nil")
 				return
 			}
 			if len(gotClaim.Spec.Devices.Requests) != tt.wantRequests {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() len(gotClaim.Spec.Devices.Requests) = %v, want %v", len(gotClaim.Spec.Devices.Requests), tt.wantRequests)
 			}
+			if tt.wantCPUMapping && !hasContainerExtendedResourceRequest(gotMappings, corev1.ContainerExtendedResourceRequest{
+				ContainerName: "foo",
+				RequestName:   corev1.ResourceCPU.String(),
+				ResourceName:  nodeinfo.DraDriverCpu_ExtendedResourceName,
+			}) {
+				t.Errorf("SlurmBridge.createRequestsAndMappings() mappings = %v, want CPU extended resource mapping", gotMappings)
+			}
 		})
 	}
+}
+
+func hasContainerExtendedResourceRequest(mappings []corev1.ContainerExtendedResourceRequest, want corev1.ContainerExtendedResourceRequest) bool {
+	for _, mapping := range mappings {
+		if mapping == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {

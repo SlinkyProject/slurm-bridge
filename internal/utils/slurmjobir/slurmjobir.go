@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	nvidiaDevicePlugin = "nvidia.com/gpu"
-	amdDevicePlugin    = "amd.com/gpu"
+	nvidiaDevicePlugin            = "nvidia.com/gpu"
+	amdDevicePlugin               = "amd.com/gpu"
+	cpuDRADeviceClassExtendedName = resourcev1.ResourceDeviceClassPrefix + "dra.cpu"
 )
 
 type SlurmJobIRJobInfo struct {
@@ -119,6 +120,7 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	var cpuMax resource.Quantity
 	var memMax resource.Quantity
+	cpuDRAResourceName := corev1.ResourceName(cpuDRADeviceClassExtendedName)
 	for _, p := range slurmJobIR.Pods.Items {
 		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
 		req := resourcehelper.PodRequests(&p, resourcehelper.PodResourcesOptions{})
@@ -127,6 +129,12 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 		}
 		if lim.Cpu().Cmp(cpuMax) == 1 {
 			cpuMax = *lim.Cpu()
+		}
+		if quantity := req[cpuDRAResourceName]; quantity.Cmp(cpuMax) == 1 {
+			cpuMax = quantity
+		}
+		if quantity := lim[cpuDRAResourceName]; quantity.Cmp(cpuMax) == 1 {
+			cpuMax = quantity
 		}
 		if req.Memory().Cmp(memMax) == 1 {
 			memMax = *req.Memory()
@@ -153,6 +161,9 @@ func parseGPUDevicePlugin(slurmJobIR *SlurmJobIR) {
 	for _, p := range slurmJobIR.Pods.Items {
 		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
 		for resourceName, quantity := range lim {
+			if resourceName.String() == cpuDRADeviceClassExtendedName {
+				continue
+			}
 			if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
 				if quantity.Cmp(gresMax) > 0 {
 					gresMax = quantity
