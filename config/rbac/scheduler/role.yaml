@@ -143,6 +143,13 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - scheduling.k8s.io
+  resources:
+  - podgroups/status
+  verbs:
+  - patch
+  - update
+- apiGroups:
   - scheduling.x-k8s.io
   resources:
   - podgroups
