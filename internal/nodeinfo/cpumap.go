@@ -15,6 +15,9 @@ import (
 
 // CPUMap holds the Slurm abstract to machine core map.
 type CPUMap struct {
+	// Pool is the DRA ResourceSlice pool name for these CPUs.
+	Pool string `json:"pool"`
+
 	// CPUInfoMap stores the raw CPUInfos as a map,
 	// where the index is the CPU ID, and the value is the CPUInfo.
 	CPUInfoMap map[int]*CPUInfo `json:"cpuInfoMap"`
@@ -62,7 +65,7 @@ func (cpuMap CPUMap) ToMachineCPUs(absBitmap bitmap.Bitmap) cpuset.CPUSet {
 	return cpuset.New(macCpus...)
 }
 
-func NewCPUMap(cpuInfos []*CPUInfo) CPUMap {
+func NewCPUMap(pool string, cpuInfos []*CPUInfo) CPUMap {
 	sort.SliceStable(cpuInfos, func(i, j int) bool {
 		// Align sockets
 		if cpuInfos[i].SocketID != cpuInfos[j].SocketID {
@@ -98,6 +101,7 @@ func NewCPUMap(cpuInfos []*CPUInfo) CPUMap {
 	}
 
 	return CPUMap{
+		Pool:              pool,
 		CPUInfoMap:        cpuInfoMap,
 		AbstractToMachine: abstractToMachine,
 		MachineToAbstract: machineToAbstract,
