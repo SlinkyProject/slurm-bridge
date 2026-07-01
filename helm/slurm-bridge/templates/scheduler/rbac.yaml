@@ -88,6 +88,7 @@ rules:
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceclaims/status"]
   verbs: ["patch", "update"]
+# Required when allocating explicit CPU DRA ResourceClaims.
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceclaims/binding"]
   verbs: ["patch", "update"]

@@ -6,6 +6,7 @@ metadata:
   namespace: slurm-bridge
   annotations:
     slurmjob.slinky.slurm.net/job-name: pod-pause-cpu
+    slurmjob.slinky.slurm.net/exclusive: 'false'
 spec:
   schedulerName: slurm-bridge-scheduler
   restartPolicy: Never
@@ -14,8 +15,8 @@ spec:
       image: registry.k8s.io/pause:3.6
       resources:
         requests:
-          cpu: '1'
+          deviceclass.resource.kubernetes.io/dra.cpu: '1'
           memory: 100Mi
         limits:
-          cpu: '1'
+          deviceclass.resource.kubernetes.io/dra.cpu: '1'
           memory: 100Mi
