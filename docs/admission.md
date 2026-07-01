@@ -27,9 +27,10 @@ It also states that:
 > controllers may modify the data for the resource being modified; validating
 > controllers may not.
 
-The `slurm-bridge` admission controller is a mutating controller. It modifies
-any pods within namespaces specified in `helm/slurm-bridge/values.yaml` to use
-the `slurm-bridge` [scheduler] instead of the default Kubernetes scheduler.
+The `slurm-bridge` admission controller is both mutating and validating. It
+modifies pods within namespaces specified in `helm/slurm-bridge/values.yaml` to
+use the `slurm-bridge` [scheduler] instead of the default Kubernetes scheduler,
+and rejects unsupported resource combinations.
 
 ## Design
 
@@ -40,6 +41,11 @@ Managed namespaces are defined as a list of namespace as configured in the
 admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
 `managedNamespaceSelector` can be used to select namespaces based on labels. If
 `managedNamespaceSelector` is set, `managedNamespaces` will be ignored.
+
+Managed pods can request either native `cpu` or the CPU DRA extended resource
+`deviceclass.resource.kubernetes.io/dra.cpu`, but cannot specify both. CPU DRA
+must be requested explicitly; native `cpu` requests are not converted to DRA
+requests by the admission controller.
 
 ### Sequence Diagram
 

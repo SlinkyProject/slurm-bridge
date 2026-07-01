@@ -5,6 +5,8 @@ package nodeinfo_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +18,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
@@ -41,12 +44,14 @@ func resourceSliceNodeIndex(obj client.Object) []string {
 
 func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 	tests := []struct {
-		name       string
-		kubeclient client.Client
-		nodeName   string
-		resources  *slurmcontrol.NodeResources
-		want       []resourcev1.DeviceRequest
-		wantErr    bool
+		name                 string
+		kubeclient           client.Client
+		nodeName             string
+		resources            *slurmcontrol.NodeResources
+		includeCPUDRARequest bool
+		want                 []resourcev1.DeviceRequest
+		wantErr              bool
+		wantErrContains      string
 	}{
 		{
 			name: "dra.cpu",
@@ -111,6 +116,7 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 				Node:       "node",
 				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
 			},
+			includeCPUDRARequest: true,
 			want: []resourcev1.DeviceRequest{
 				{
 					Name: "cpu",
@@ -213,6 +219,50 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 					},
 				},
 			},
+		},
+		{
+			name: "missing CPU DeviceClass",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node:       "node",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+			},
+			includeCPUDRARequest: true,
+			wantErr:              true,
+		},
+		{
+			name: "CPU DeviceClass lookup failure",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+						return errors.New("injected DeviceClass lookup error")
+					},
+				}).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node:       "node",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+			},
+			includeCPUDRARequest: true,
+			wantErr:              true,
+			wantErrContains:      "injected DeviceClass lookup error",
+		},
+		{
+			name: "native CPU does not require CPU DeviceClass",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node:       "node",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+			},
+			want: nil,
 		},
 		{
 			name: "gpu.example.com",
@@ -512,10 +562,13 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 			if err != nil {
 				t.Fatalf("could not construct receiver type: %v", err)
 			}
-			got, gotErr := n.GetDeviceRequests(context.Background(), tt.kubeclient, tt.resources)
+			got, gotErr := n.GetDeviceRequests(context.Background(), tt.kubeclient, tt.resources, tt.includeCPUDRARequest)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequests() failed: %v", gotErr)
+				}
+				if !strings.Contains(gotErr.Error(), tt.wantErrContains) {
+					t.Errorf("GetDeviceRequests() error = %q, want it to contain %q", gotErr, tt.wantErrContains)
 				}
 				return
 			}
@@ -531,12 +584,14 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 
 func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 	tests := []struct {
-		name       string
-		kubeclient client.Client
-		nodeName   string
-		resources  *slurmcontrol.NodeResources
-		want       []resourcev1.DeviceRequestAllocationResult
-		wantErr    bool
+		name                 string
+		kubeclient           client.Client
+		nodeName             string
+		resources            *slurmcontrol.NodeResources
+		includeCPUDRARequest bool
+		want                 []resourcev1.DeviceRequestAllocationResult
+		wantErr              bool
+		wantErrContains      string
 	}{
 		{
 			name: "dra.cpu",
@@ -602,6 +657,7 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 				Node:       "node",
 				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
 			},
+			includeCPUDRARequest: true,
 			want: []resourcev1.DeviceRequestAllocationResult{
 				{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Device: "cpu0", Pool: "node"},
 				{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Device: "cpu1", Pool: "node"},
@@ -707,6 +763,38 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			want: []resourcev1.DeviceRequestAllocationResult{
 				{Request: "gpu", Driver: nodeinfo.DraExampleDriver, Device: "gpu-0", Pool: "node"},
 			},
+		},
+		{
+			name: "missing CPU DeviceClass",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node:       "node",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+			},
+			includeCPUDRARequest: true,
+			wantErr:              true,
+		},
+		{
+			name: "CPU DeviceClass lookup failure",
+			kubeclient: fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+						return errors.New("injected DeviceClass lookup error")
+					},
+				}).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node:       "node",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
+			},
+			includeCPUDRARequest: true,
+			wantErr:              true,
+			wantErrContains:      "injected DeviceClass lookup error",
 		},
 		{
 			name: "gpu.example.com",
@@ -910,10 +998,13 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("could not construct receiver type: %v", err)
 			}
-			got, gotErr := n.GetDeviceRequestAllocationResult(context.Background(), tt.kubeclient, tt.resources)
+			got, gotErr := n.GetDeviceRequestAllocationResult(context.Background(), tt.kubeclient, tt.resources, tt.includeCPUDRARequest)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("GetDeviceRequestAllocationResult() failed: %v", gotErr)
+				}
+				if !strings.Contains(gotErr.Error(), tt.wantErrContains) {
+					t.Errorf("GetDeviceRequestAllocationResult() error = %q, want it to contain %q", gotErr, tt.wantErrContains)
 				}
 				return
 			}
