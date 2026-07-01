@@ -84,6 +84,7 @@ rules:
       - create
       - get
       - list
+      - update
   - apiGroups:
       - extensions
     resources:

@@ -235,6 +235,7 @@ manifests should match snapshot:
           - create
           - get
           - list
+          - update
       - apiGroups:
           - extensions
         resources:
