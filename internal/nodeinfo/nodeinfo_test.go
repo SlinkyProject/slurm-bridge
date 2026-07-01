@@ -292,6 +292,50 @@ func TestNodeInfo_GetDeviceRequests(t *testing.T) {
 			},
 		},
 		{
+			name: "gpu.example.com missing gres index",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraExampleDriver,
+						Count: 1,
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "unknown device class name missing gres index is skipped",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+					},
+				},
+			},
+			want: nil,
+		},
+		{
 			name: "gpu.nvidia.com",
 			kubeclient: fake.NewClientBuilder().
 				WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
@@ -728,6 +772,50 @@ func TestNodeInfo_GetDeviceRequestAllocationResult(t *testing.T) {
 				{Request: "gpu", Driver: nodeinfo.DraExampleDriver, Device: "gpu-0", Pool: "node"},
 				{Request: "gpu", Driver: nodeinfo.DraExampleDriver, Device: "gpu-1", Pool: "node"},
 			},
+		},
+		{
+			name: "gpu.example.com missing gres index",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  nodeinfo.DraExampleDriver,
+						Count: 1,
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "unknown device class name missing gres index is skipped",
+			kubeclient: fake.NewClientBuilder().
+				WithObjects(
+					&resourcev1.DeviceClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu.unknown.com"},
+					},
+				).
+				Build(),
+			nodeName: "node",
+			resources: &slurmcontrol.NodeResources{
+				Node: "node",
+				Gres: []slurmcontrol.GresLayout{
+					{
+						Name:  "gpu",
+						Type:  "gpu.unknown.com",
+						Count: 1,
+					},
+				},
+			},
+			want: nil,
 		},
 		{
 			name: "gpu.nvidia.com",
