@@ -98,9 +98,6 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
 		return nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
 	}
-	if len(deviceRequests) == 0 {
-		return nil, nil, nil
-	}
 
 	for containerIndex, container := range containers {
 		creqs := container.Resources.Requests
