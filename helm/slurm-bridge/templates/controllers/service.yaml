@@ -7,7 +7,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "slurm-bridge.controllers.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
   labels:
     {{- include "slurm-bridge.controllers.labels" . | nindent 4 }}
 spec:
