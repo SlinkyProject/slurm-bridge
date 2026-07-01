@@ -73,6 +73,7 @@ var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
 var _ fwk.PreFilterPlugin = &SlurmBridge{}
 var _ fwk.FilterPlugin = &SlurmBridge{}
 var _ fwk.PostFilterPlugin = &SlurmBridge{}
+var _ fwk.PreBindPlugin = &SlurmBridge{}
 
 const (
 	Name = "SlurmBridge"
@@ -347,8 +348,8 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 }
 
 // PreBindPreFlight will check if any GRES was requested for the placeholder job
-func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) *fwk.Status {
-	return nil
+func (sb *SlurmBridge) PreBindPreFlight(ctx context.Context, cs fwk.CycleState, pod *corev1.Pod, nodeName string) (*fwk.PreBindPreFlightResult, *fwk.Status) {
+	return nil, nil
 }
 
 // PreBind will generate ResourceClaims for any GRES allocation in Slurm.
