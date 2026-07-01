@@ -31,3 +31,21 @@ tests:
       - matchRegex:
           path: spec.template.metadata.annotations["checksum/scheduler-config"]
           pattern: ^[0-9a-f]{64}$
+  - it: scheduler can update its leader election lease
+    template: scheduler/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - coordination.k8s.io
+            resources:
+              - leases
+            verbs:
+              - create
+              - get
+              - list
+              - update
