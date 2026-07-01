@@ -1,3 +1,41 @@
+## v1.2.0
+
+### Fixed
+
+- Fixed kind.sh nodes not having the necessary GresType for the example gpu dra
+  driver.
+- Omit empty CPU DRA requests and fail on incomplete allocations.
+- Adds namespace:get RBAC to admission controller.
+- Remove pod RBAC for admission controller.
+- Remove node:update RBAC for node controller.
+- Removed deviceclasses RBAC from node controller.
+- Removed pods:update RBAC for pod controller.
+- Added pods/finalizers rbac to pod controller.
+- Removed unnecessary core RBAC.
+- Removed volumeattachment RBAC.
+- Removed RBAC for bindings.
+- Removed RBAC for NodeResourceTopologies.
+- Remove RBAC for workload status subresources.
+- Remove create/list/watch from workload RBAC.
+- Fix apigroup for SubjectAccessReviews.
+- Removed node:patch RBAC from scheduler.
+- Removed pod:delete RBAC from scheduler.
+- Removed pods/finalizers:update RBAC from scheduler.
+- Removed pods/status:update RBAC from scheduler.
+- Removed resourceclaims/binding RBAC from scheduler.
+- Removed resourceclaims/status:update RBAC from scheduler.
+- Fix pods going into unschedulable queue for situations in which they should
+  stay in the backoffq/activeq.
+- Resolved DRA prebind when kube and Slurm node names differ and allocation
+  pools do not match node names.
+- Fixed config changes not rolling out after a helm upgrade.
+- Skip empty DRA claims and use pod resource names in mappings.
+- Match DRA mappings only to full device class names.
+
+### Changed
+
+- Disabled SchedulerPopFromBackoffQ.
+
 ## v1.2.0-rc1
 
 ### Added
