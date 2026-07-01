@@ -63,6 +63,8 @@ func (c CoreType) String() string {
 
 const DraDriverCpu = "dra.cpu"
 
+const DraDriverCpu_ExtendedResourceName = resourcev1.ResourceDeviceClassPrefix + DraDriverCpu
+
 // Resource attributes
 const (
 	DraDriverCpu_CpuID    resourcev1.QualifiedName = "dra.cpu/cpuID"
