@@ -19,6 +19,8 @@ spec:
     metadata:
       labels:
         {{- include "slurm-bridge.controllers.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       {{- with .Values.controllers.priorityClassName }}
       priorityClassName: {{ . }}
