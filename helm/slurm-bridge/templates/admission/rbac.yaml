@@ -8,7 +8,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: {{ include "slurm-bridge.admission.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
   labels:
     {{- include "slurm-bridge.admission.labels" . | nindent 4 }}
 ---
@@ -16,7 +16,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "slurm-bridge.admission.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
 rules:
 - apiGroups: [""]
   resources: ["namespaces"]
@@ -34,7 +34,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: {{ include "slurm-bridge.admission.name" . }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
