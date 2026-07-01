@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -136,13 +135,14 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 				continue
 			}
 			for _, gres := range resources.Gres {
-				if !strings.HasSuffix(rName.String(), gres.Type) {
+				want := resourcev1.ResourceDeviceClassPrefix + gres.Type
+				if rName.String() != want {
 					continue
 				}
 				reqMap := corev1.ContainerExtendedResourceRequest{
 					ContainerName: container.Name,
 					RequestName:   reqName,
-					ResourceName:  resourcev1.ResourceDeviceClassPrefix + gres.Type,
+					ResourceName:  rName.String(),
 				}
 				mappings = append(mappings, reqMap)
 			}
