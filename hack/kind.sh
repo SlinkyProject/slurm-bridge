@@ -277,21 +277,18 @@ EOF
 }
 
 function dra-driver-cpu::install() {
-	local cluster_name="${1:-kind}"
-	local version="v0.1.0"
-	local dra_path
-	dra_path=$(mktemp -d)
-	git clone -b "$version" https://github.com/kubernetes-sigs/dra-driver-cpu.git "${dra_path}"
-	(
-		cd "$dra_path"
-		local host_arch
-		host_arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-		make manifests kind-install-cpu-dra CLUSTER_NAME="$cluster_name" PLATFORMS="linux/${host_arch}"
-	)
-	kubectl -n kube-system patch daemonsets.apps dracpu --type merge \
-		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"},"tolerations":[{"key":"slinky.slurm.net/managed-node","operator":"Equal","value":"slurm-bridge-scheduler","effect":"NoExecute"}]}}}}'
-	kubectl -n kube-system patch daemonset dracpu --type='json' \
-		-p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"},{"op":"replace","path":"/spec/template/spec/containers/0/args","value":["/dracpu","--v=4","--cpu-device-mode=individual"]}]'
+	local version="0.2.0"
+	local chart="https://github.com/kubernetes-sigs/dra-driver-cpu/releases/download/v${version}/dra-driver-cpu-${version}.tgz"
+	local config_dir="$SCRIPT_DIR/dra-driver-cpu"
+
+	helm upgrade --install dra-driver-cpu "$chart" \
+		--namespace kube-system \
+		--values "$config_dir/values.yaml"
+
+	# The upstream v0.2.0 chart does not expose a nodeSelector value.
+	kubectl -n kube-system patch daemonset dracpu --type merge \
+		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
 }
 
 function main::help() {
@@ -339,7 +336,7 @@ function main() {
 		extras::install
 	fi
 	if $OPT_DRA_DRIVER_CPU; then
-		dra-driver-cpu::install "$cluster_name"
+		dra-driver-cpu::install
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install "$cluster_name"
