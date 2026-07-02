@@ -86,6 +86,10 @@ demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install s
 demo-cluster-delete: ## Delete the kind cluster.
 	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
 
+.PHONY: debug
+debug: ## Run Delve-enabled slurm-bridge components and forward debug ports.
+	cd helm/slurm-bridge && skaffold debug --auto-build=true --auto-deploy=true --cleanup=false --port-forward=user --tail
+
 .PHONY: install-dra
 install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
 	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
@@ -191,8 +195,7 @@ COSIGN ?= $(LOCALBIN)/cosign-$(COSIGN_VERSION)
 HELM_CONFIG_HOME ?= $(LOCALBIN)/helm-config
 HELM_CACHE_HOME ?= $(LOCALBIN)/helm-cache
 HELM_DATA_HOME ?= $(LOCALBIN)/helm-data
-HELM_PLUGINS ?= $(LOCALBIN)/helm-plugins
-export HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME HELM_PLUGINS
+export HELM_CONFIG_HOME HELM_CACHE_HOME HELM_DATA_HOME
 
 ## Tool Versions
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
@@ -317,7 +320,7 @@ helm-unittest-update: helm-unittest-bin ## Update helm-unittest snapshots.
 
 .PHONY: helm-unittest-bin
 helm-unittest-bin: helm-bin ## Download helm-unittest plugin locally if necessary.
-	@mkdir -p "$(HELM_CONFIG_HOME)" "$(HELM_CACHE_HOME)" "$(HELM_DATA_HOME)" "$(HELM_PLUGINS)"
+	@mkdir -p "$(HELM_CONFIG_HOME)" "$(HELM_CACHE_HOME)" "$(HELM_DATA_HOME)/plugins"
 	$(call helm-install-plugin,unittest,https://github.com/helm-unittest/helm-unittest,$(HELM_UNITTEST_VERSION))
 
 .PHONY: helm-dependency-update
