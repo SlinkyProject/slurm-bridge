@@ -11,7 +11,8 @@ SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
 SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
-LOCAL_PATH_PROVISIONER_MANIFEST="https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.34/deploy/local-path-storage.yaml"
+LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
+LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 
 MIN_KIND_VERSION="0.32.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
@@ -364,11 +365,12 @@ function storage::install_default_local_path() {
 	fi
 
 	echo "[storage] No default StorageClass found; installing local-path provisioner..."
-	kubectl apply -f "$LOCAL_PATH_PROVISIONER_MANIFEST"
-	kubectl annotate storageclass local-path \
-		storageclass.kubernetes.io/is-default-class=true --overwrite
-	kubectl wait --for=condition=Available deployment/local-path-provisioner \
-		-n local-path-storage --timeout=120s
+	helm upgrade --install local-path-provisioner "$LOCAL_PATH_PROVISIONER_CHART" \
+		--version "$LOCAL_PATH_PROVISIONER_VERSION" \
+		--namespace local-path-storage --create-namespace \
+		--set storageClass.defaultClass=true \
+		--set storageClass.provisionerName=rancher.io/local-path \
+		--wait --timeout=120s
 	if ! storage::has_default_class; then
 		echo "[storage] local-path provisioner installed, but no default StorageClass was found." >&2
 		exit 1
