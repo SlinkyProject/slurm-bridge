@@ -40,13 +40,6 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 	if slurmJobIR == nil || !isPodGroupRoot(&slurmJobIR.RootPOM) || jobID == "" {
 		return
 	}
-	if err := sb.refreshSlurmJobIRPods(ctx, slurmJobIR); err != nil {
-		klog.FromContext(ctx).V(4).Info("skip PodGroup status update", "err", err)
-		return
-	}
-	if !podsHaveSlurmNodeAssignments(&slurmJobIR.Pods, jobID) {
-		return
-	}
 
 	logger := klog.FromContext(ctx)
 	pg := &schedulingv1alpha2.PodGroup{}
@@ -56,6 +49,14 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 		return
 	}
 	if cond := apimeta.FindStatusCondition(pg.Status.Conditions, schedulingv1alpha2.PodGroupScheduled); cond != nil && cond.Status == metav1.ConditionTrue {
+		return
+	}
+
+	if err := sb.refreshSlurmJobIRPods(ctx, slurmJobIR); err != nil {
+		logger.V(4).Info("skip PodGroup status update", "err", err)
+		return
+	}
+	if !podsHaveSlurmNodeAssignments(&slurmJobIR.Pods, jobID) {
 		return
 	}
 

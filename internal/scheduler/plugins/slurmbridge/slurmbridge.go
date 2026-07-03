@@ -272,8 +272,9 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	// as another pod has determined the external job is running and assigned
 	// a node to this pod.
 	node := pod.Annotations[wellknown.AnnotationExternalJobNode]
-	if pod.Labels[wellknown.LabelExternalJobId] != "" &&
-		node != "" {
+	jobID := pod.Labels[wellknown.LabelExternalJobId]
+	if jobID != "" && node != "" {
+		sb.markPodGroupScheduled(ctx, s.slurmJobIR, jobID)
 		phNode := make(sets.Set[string])
 		phNode.Insert(node)
 		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
