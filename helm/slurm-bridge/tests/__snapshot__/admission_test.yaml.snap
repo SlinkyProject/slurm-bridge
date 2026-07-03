@@ -181,6 +181,7 @@ manifests should match snapshot:
               - UPDATE
             resources:
               - pods
+              - pods/resize
             scope: Namespaced
         sideEffects: None
   7: |

@@ -404,6 +404,13 @@ func contextWithAdmissionOperation(op string) context.Context {
 	return admission.NewContextWithRequest(context.TODO(), req)
 }
 
+// contextWithAdmissionSubresource returns a context with an admission request for the given subresource.
+func contextWithAdmissionSubresource(subresource string) context.Context {
+	req := admission.Request{}
+	reflect.ValueOf(&req).Elem().FieldByName("SubResource").SetString(subresource)
+	return admission.NewContextWithRequest(context.TODO(), req)
+}
+
 func TestPodAdmission_ValidateCreate(t *testing.T) {
 	type fields struct {
 		SchedulerName     string
@@ -701,6 +708,63 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 							wellknown.LabelExternalJobId: "1",
 						},
 					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "ManagedPodCannotResize",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: contextWithAdmissionSubresource("resize"),
+				oldPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+				newPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithSchedulerNameCannotResizeInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: contextWithAdmissionSubresource("resize"),
+				oldPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec:       corev1.PodSpec{SchedulerName: SchedulerName},
+				},
+				newPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec:       corev1.PodSpec{SchedulerName: SchedulerName},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "UnmanagedPodCanResize",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: contextWithAdmissionSubresource("resize"),
+				oldPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec:       corev1.PodSpec{SchedulerName: "other-scheduler"},
+				},
+				newPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec:       corev1.PodSpec{SchedulerName: "other-scheduler"},
 				},
 			},
 			want:    nil,

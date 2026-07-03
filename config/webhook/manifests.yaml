@@ -49,4 +49,5 @@ webhooks:
     - UPDATE
     resources:
     - pods
+    - pods/resize
   sideEffects: None

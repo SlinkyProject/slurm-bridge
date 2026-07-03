@@ -65,7 +65,7 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods;pods/resize,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*corev1.Pod] = &PodAdmission{}
 
@@ -103,6 +103,9 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	}
 	if !isManaged && newPod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
+	}
+	if req, err := admission.RequestFromContext(ctx); err == nil && req.SubResource == "resize" {
+		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
 	// node annotations should not be modified.
