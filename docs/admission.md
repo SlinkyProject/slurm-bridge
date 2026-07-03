@@ -51,6 +51,13 @@ In-place resizing is not supported for managed pods. The admission controller
 rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
 diverge from the corresponding Slurm allocation.
 
+Managed pods are also validated against the supported DRA DeviceClass set.
+Unsupported DeviceClass resources in requests or limits are rejected for init
+containers and regular containers. See [Device resources] for the complete list
+of supported DRA classes and legacy device-plugin resources. Pods outside
+managed namespaces that do not select the `slurm-bridge` scheduler are not
+subject to this validation.
+
 ### Sequence Diagram
 
 ```mermaid
@@ -69,4 +76,5 @@ sequenceDiagram
 
 <!-- Links -->
 
+[device resources]: workload.md#device-resources
 [scheduler]: scheduler.md
