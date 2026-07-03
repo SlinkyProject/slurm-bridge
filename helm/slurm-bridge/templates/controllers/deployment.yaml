@@ -39,6 +39,7 @@ spec:
           args:
             - -zap-log-level
             - {{ .Values.controllers.verbosity | default "info" | quote }}
+            - --leader-elect={{ .Values.controllers.leaderElect }}
           livenessProbe:
             httpGet:
               path: /healthz

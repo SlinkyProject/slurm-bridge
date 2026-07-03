@@ -33,3 +33,45 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: leader election can be enabled
+    template: controllers/deployment.yaml
+    set:
+      controllers.leaderElect: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-elect=true
+  - it: controllers can update their leader election lease
+    template: controllers/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - coordination.k8s.io
+            resources:
+              - leases
+            verbs:
+              - create
+              - get
+              - list
+              - update
+  - it: controllers can record leader election events
+    template: controllers/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - ""
+            resources:
+              - events
+            verbs:
+              - create
+              - patch
