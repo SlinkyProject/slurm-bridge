@@ -138,8 +138,8 @@ require (
 	k8s.io/dynamic-resource-allocation v0.36.1 // indirect
 	k8s.io/kms v0.36.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20260603220949-865597e52e25 // indirect
-	k8s.io/kubectl v0.36.1 // indirect
 	k8s.io/kubelet v0.36.1 // indirect
+	k8s.io/metrics v0.36.1 // indirect
 	k8s.io/streaming v0.36.1 // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.36.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

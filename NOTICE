@@ -151,7 +151,6 @@ Third-party Dependencies:
 - k8s.io/kube-openapi/pkg/validation/spec (Apache-2.0)
 - k8s.io/kube-openapi/pkg/validation/strfmt (Apache-2.0)
 - k8s.io/kube-scheduler (Apache-2.0)
-- k8s.io/kubectl/pkg/scale (Apache-2.0)
 - k8s.io/kubelet/pkg/apis (Apache-2.0)
 - k8s.io/kubernetes (Apache-2.0)
 - k8s.io/streaming/pkg (Apache-2.0)
