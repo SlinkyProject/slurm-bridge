@@ -60,13 +60,18 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		return nil
 	}
 
-	// Requeue Pod request until terminal
-	if !podv1.IsPodTerminal(pod) {
-		durationStore.Push(podKey, 30*time.Second)
+	// Terminal pods are handled by prepareTerminalPod
+	if podv1.IsPodTerminal(pod) {
+		logger.V(2).Info("Pod is terminal, skipping", "pod", klog.KObj(pod))
+		return nil
 	}
 
-	if pod.Status.Phase != corev1.PodRunning || !podv1.IsPodReady(pod) {
-		logger.V(2).Info("Pod is not running, skipping", "pod", klog.KObj(pod))
+	// Requeue Pod request until terminal
+	durationStore.Push(podKey, 30*time.Second)
+
+	// Unbound pods must be scheduled before checking if the Slurm job is running
+	if pod.Spec.NodeName == "" {
+		logger.V(2).Info("Pod is not bound, skipping", "pod", klog.KObj(pod))
 		return nil
 	}
 
