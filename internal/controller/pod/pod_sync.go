@@ -17,7 +17,6 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
-	"k8s.io/kubernetes/test/utils"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -61,13 +60,18 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		return nil
 	}
 
-	// Requeue Pod request until terminal
-	if !podv1.IsPodTerminal(pod) {
-		durationStore.Push(podKey, 30*time.Second)
+	// Terminal pods are handled by prepareTerminalPod
+	if podv1.IsPodTerminal(pod) {
+		logger.V(2).Info("Pod is terminal, skipping", "pod", klog.KObj(pod))
+		return nil
 	}
 
-	if active, _ := utils.PodRunningReady(pod); !active {
-		logger.V(2).Info("Pod is not running, skipping", "pod", klog.KObj(pod))
+	// Requeue Pod request until terminal
+	durationStore.Push(podKey, 30*time.Second)
+
+	// Unbound pods must be scheduled before checking if the Slurm job is running
+	if pod.Spec.NodeName == "" {
+		logger.V(2).Info("Pod is not bound, skipping", "pod", klog.KObj(pod))
 		return nil
 	}
 
