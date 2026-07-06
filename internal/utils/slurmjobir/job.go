@@ -26,6 +26,14 @@ func (t *translator) fromJob(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 	slurmJobIR := &SlurmJobIR{}
 	slurmJobIR.Pods.Items = append(slurmJobIR.Pods.Items, *pod)
 	slurmJobIR.JobInfo.MinNodes = ptr.To(int32(1))
+	// Only map a strictly positive deadline: a Slurm TimeLimit of 0 means
+	// unlimited (forever), the opposite of a zero K8s deadline, so leave it
+	// unset and let Slurm apply the partition default instead.
+	if job.Spec.ActiveDeadlineSeconds != nil && *job.Spec.ActiveDeadlineSeconds > 0 {
+		// K8s deadline is seconds; Slurm TimeLimit is minutes. Round up so the
+		// job isn't cut short below its requested deadline.
+		slurmJobIR.JobInfo.TimeLimit = ptr.To(int32((*job.Spec.ActiveDeadlineSeconds + 59) / 60)) //nolint:gosec // disable G115
+	}
 	if job.Spec.Template.Spec.Resources != nil {
 		slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(job.Spec.Template.Spec.Resources.Limits.Cpu().Value())) //nolint:gosec // disable G115
 		slurmJobIR.JobInfo.MemPerNode = ptr.To(int64(GetMemoryFromQuantity(job.Spec.Template.Spec.Resources.Limits.Memory())))
