@@ -47,6 +47,10 @@ Managed pods can request either native `cpu` or the CPU DRA extended resource
 must be requested explicitly; native `cpu` requests are not converted to DRA
 requests by the admission controller.
 
+In-place resizing is not supported for managed pods. The admission controller
+rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
+diverge from the corresponding Slurm allocation.
+
 ### Sequence Diagram
 
 ```mermaid

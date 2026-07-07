@@ -49,7 +49,7 @@ webhooks:
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]
-        resources: ["pods"]
+        resources: ["pods", "pods/resize"]
         operations: ["CREATE", "UPDATE"]
         scope: Namespaced
     clientConfig:
