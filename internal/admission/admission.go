@@ -109,7 +109,11 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if !isManaged && newPod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
-	if req, err := admission.RequestFromContext(ctx); err == nil && req.SubResource == "resize" {
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get admission request from context: %w", err)
+	}
+	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and

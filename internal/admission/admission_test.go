@@ -783,7 +783,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: metav1.NamespaceDefault,
@@ -804,7 +804,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -824,6 +824,23 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			want:    nil,
 			wantErr: false,
+		},
+		{
+			name: "ManagedPodWithoutAdmissionRequestFails",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+				newPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+			},
+			want:    nil,
+			wantErr: true,
 		},
 		{
 			name: "ManagedPodCannotResize",
@@ -888,7 +905,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -918,7 +935,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -949,7 +966,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
@@ -986,7 +1003,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
