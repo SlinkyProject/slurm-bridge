@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -47,6 +48,14 @@ var _ = Describe("Node Controller", func() {
 			err = r.SetupWithManager(mgr)
 			Expect(err).ToNot(HaveOccurred())
 		})
+	})
+
+	It("maps node-local ResourceSlices to their node", func() {
+		requests := resourceSliceNode(context.Background(), &resourcev1.ResourceSlice{
+			Spec: resourcev1.ResourceSliceSpec{NodeName: ptr.To("node006")},
+		})
+		Expect(requests).To(Equal([]reconcile.Request{{NamespacedName: client.ObjectKey{Name: "node006"}}}))
+		Expect(resourceSliceNode(context.Background(), &resourcev1.ResourceSlice{})).To(BeNil())
 	})
 
 	Context("When reconciling a resource", func() {
