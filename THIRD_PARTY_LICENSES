@@ -726,11 +726,6 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v0.36.1
 - License: Apache-2.0
 
-### k8s.io/kubectl/pkg/scale
-- Name: k8s.io/kubectl/pkg/scale
-- Version: v0.36.1
-- License: Apache-2.0
-
 ### k8s.io/kubelet/pkg/apis
 - Name: k8s.io/kubelet/pkg/apis
 - Version: v0.36.1
