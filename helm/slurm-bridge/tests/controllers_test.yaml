@@ -25,3 +25,11 @@ tests:
       - matchRegex:
           path: spec.template.metadata.annotations["checksum/config"]
           pattern: ^[0-9a-f]{64}$
+  - it: image pull policy is configurable
+    template: controllers/deployment.yaml
+    set:
+      controllers.image.pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
