@@ -30,7 +30,7 @@ spec:
       containers:
         - name: {{ include "slurm-bridge.admission.name" . }}
           image: {{ include "slurm-bridge.admission.imageRef" . }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.admission.image.pullPolicy }}
           env:
             - name: SLURM_JWT
               valueFrom:
