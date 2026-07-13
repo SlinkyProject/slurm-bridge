@@ -11,6 +11,8 @@ SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
 SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
+LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
+LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 
 MIN_KIND_VERSION="0.32.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
@@ -61,6 +63,7 @@ function tool::require_min_version() {
 # and have needed installed base software
 
 function sys::check() {
+	local require_kind="${1:-true}"
 	local fail=false
 	if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
 		echo "'docker' or 'podman' is required:"
@@ -76,7 +79,7 @@ function sys::check() {
 		echo "'helm' is required: https://helm.sh/"
 		fail=true
 	fi
-	if ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
+	if $require_kind && ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
 		fail=true
 	fi
 	if ! tool::require_min_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
@@ -135,6 +138,16 @@ function kind::start() {
 function kind::delete() {
 	local cluster_name="${1:-kind}"
 	kind delete cluster --name "$cluster_name"
+}
+
+function cluster::use_existing() {
+	sys::check false
+	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
+	if [ -z "$OPT_REGISTRY" ]; then
+		echo "[cluster] WARNING: no --registry or SKAFFOLD_DEFAULT_REPO was provided; local images will only be available if Skaffold can load them into a kind context." >&2
+	fi
+	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	kubectl cluster-info
 }
 
 function helm::find() {
@@ -256,12 +269,38 @@ function git::checkout() {
 	echo "$path"
 }
 
+function skaffold::run() {
+	if [ -z "$OPT_REGISTRY" ]; then
+		skaffold run
+		return
+	fi
+
+	# Registry-backed installs need an explicit push because these Skaffold
+	# configs set build.local.push=false and `skaffold run` has no --push flag.
+	# `skaffold build` does not check cluster node platforms by default, so keep
+	# parity with `skaffold run` and build images for the target cluster.
+	export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
+	local build_artifacts
+	build_artifacts="$(mktemp "${TMPDIR:-/tmp}/slurm-bridge-skaffold.XXXXXX.json")"
+	echo "[skaffold] Building and pushing images to ${OPT_REGISTRY}..."
+	if ! skaffold build --push=true --check-cluster-node-platforms=true --file-output "$build_artifacts"; then
+		rm -f "$build_artifacts"
+		return 1
+	fi
+	echo "[skaffold] Deploying images from ${OPT_REGISTRY}..."
+	if ! skaffold deploy --build-artifacts "$build_artifacts"; then
+		rm -f "$build_artifacts"
+		return 1
+	fi
+	rm -f "$build_artifacts"
+}
+
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		skaffold run
+		skaffold::run
 	)
 }
 
@@ -269,6 +308,7 @@ function slurm-bridge::prerequisites() {
 	scheduler-plugins::install
 	jobset::install
 	lws::install
+	storage::install_default_local_path
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm-stack::install
@@ -312,6 +352,31 @@ function lws::install() {
 	fi
 }
 
+function storage::has_default_class() {
+	kubectl get storageclass \
+		-o go-template='{{range .items}}{{if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (eq (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class") "true")}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null |
+		grep -q .
+}
+
+function storage::install_default_local_path() {
+	if storage::has_default_class; then
+		echo "[storage] Default StorageClass already exists."
+		return
+	fi
+
+	echo "[storage] No default StorageClass found; installing local-path provisioner..."
+	helm upgrade --install local-path-provisioner "$LOCAL_PATH_PROVISIONER_CHART" \
+		--version "$LOCAL_PATH_PROVISIONER_VERSION" \
+		--namespace local-path-storage --create-namespace \
+		--set storageClass.defaultClass=true \
+		--set storageClass.provisionerName=rancher.io/local-path \
+		--wait --timeout=120s
+	if ! storage::has_default_class; then
+		echo "[storage] local-path provisioner installed, but no default StorageClass was found." >&2
+		exit 1
+	fi
+}
+
 function slurm-stack::prerequisites() {
 	local chartName
 	chartName="cert-manager"
@@ -345,7 +410,7 @@ function slurm-operator::install_from_source() {
 	(
 		cd "$operator_path/helm/slurm-operator"
 		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
-		skaffold run
+		skaffold::run
 	)
 	slurm-operator::wait
 }
@@ -494,9 +559,9 @@ function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
-	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
+	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
-	        [--core][--extras][--all]
+	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
@@ -504,6 +569,9 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
+	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
+	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
+	                    Can also be set with SKAFFOLD_DEFAULT_REPO.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
 
@@ -511,6 +579,7 @@ HELM OPTIONS:
 	--all               Equivalent of: --core --extras
 	--extras            Install extra charts (metrics, prometheus, keda).
 	--core              Install the slurm-bridge stack.
+	--prereqs           Install slurm-bridge prerequisites only.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
@@ -531,17 +600,37 @@ HELP OPTIONS:
 EOF
 }
 
+function main::validate_options() {
+	if $OPT_EXISTING_CLUSTER && { $OPT_DELETE || $OPT_RECREATE; }; then
+		echo "--existing-cluster cannot be used with --delete or --recreate." >&2
+		exit 1
+	fi
+	if $OPT_EXISTING_CLUSTER && { $OPT_DRA_DRIVER_CPU || $OPT_DRA_EXAMPLE_DRIVER; }; then
+		echo "--existing-cluster cannot be used with kind-specific DRA demo installers." >&2
+		exit 1
+	fi
+	if $OPT_CORE && $OPT_PREREQS; then
+		echo "--core and --prereqs cannot be used together." >&2
+		exit 1
+	fi
+}
+
 function main() {
 	if $OPT_DEBUG; then
 		set -x
 	fi
+	main::validate_options
 	local cluster_name="${1:-"kind"}"
 	if $OPT_DELETE || $OPT_RECREATE; then
 		kind::delete "$cluster_name"
 		$OPT_DELETE && return
 	fi
 
-	kind::start "$cluster_name" "$OPT_CONFIG"
+	if $OPT_EXISTING_CLUSTER; then
+		cluster::use_existing
+	else
+		kind::start "$cluster_name" "$OPT_CONFIG"
+	fi
 
 	make -C "$ROOT_DIR" values-dev || true
 
@@ -554,7 +643,9 @@ function main() {
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install "$cluster_name"
 	fi
-	if $OPT_CORE; then
+	if $OPT_PREREQS; then
+		slurm-bridge::prerequisites
+	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
 	if $OPT_KJOB; then
@@ -566,7 +657,10 @@ OPT_DEBUG=false
 OPT_RECREATE=false
 OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
+OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
+OPT_PREREQS=false
+OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -576,7 +670,7 @@ OPT_SLURM_OPERATOR_REF="v1.1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,core,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -597,8 +691,25 @@ while :; do
 		OPT_DELETE=true
 		shift
 		;;
+	--existing-cluster)
+		OPT_EXISTING_CLUSTER=true
+		shift
+		;;
+	--registry)
+		OPT_REGISTRY="$2"
+		if [ -z "$OPT_REGISTRY" ]; then
+			echo "--registry requires a non-empty REPO" >&2
+			exit 1
+		fi
+		export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
+		shift 2
+		;;
 	--core)
 		OPT_CORE=true
+		shift
+		;;
+	--prereqs)
+		OPT_PREREQS=true
 		shift
 		;;
 	--slurm-node-mode)
