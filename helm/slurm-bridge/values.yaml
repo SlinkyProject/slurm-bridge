@@ -17,6 +17,8 @@ scheduler:
   image:
     repository: ghcr.io/slinkyproject/slurm-bridge-scheduler
     tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
   # -- Set the number of replicas to deploy.
   replicaCount: 1
   # -- Enables leader election.
@@ -65,6 +67,8 @@ admission:
   image:
     repository: ghcr.io/slinkyproject/slurm-bridge-admission
     tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
   # Cert-Manager certificate configurations.
   certManager:
     # -- Enables cert-manager for certificate management.
@@ -114,6 +118,8 @@ controllers:
   image:
     repository: ghcr.io/slinkyproject/slurm-bridge-controllers
     tag: ""
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
   # -- Set the number of replicas to deploy.
   replicas: 1
   # -- Set the priority class to use.
