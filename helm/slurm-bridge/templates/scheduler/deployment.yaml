@@ -41,7 +41,7 @@ spec:
               name: {{ .Values.sharedConfig.slurmJwtSecret }}
               key: auth-token
         image: {{ include "slurm-bridge.scheduler.imageRef" . }}
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: {{ .Values.scheduler.image.pullPolicy }}
         livenessProbe:
           httpGet:
             path: /healthz
