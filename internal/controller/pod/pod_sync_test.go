@@ -22,7 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
+	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
+	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
+	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
@@ -502,6 +505,48 @@ var _ = Describe("syncSlurm()", func() {
 			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(exists).To(BeFalse())
+		})
+
+		It("Should not terminate an already cancelled job", func() {
+			By("Creating a terminal pod and cancelled Slurm job")
+			podName := "cancelled"
+			pod := newTerminalPod(podName, jobId)
+			jobList := &slurmtypes.V0044JobInfoList{
+				Items: []slurmtypes.V0044JobInfo{
+					{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:        ptr.To(jobId),
+							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
+							AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
+						},
+					},
+				},
+			}
+			terminateCalls := 0
+			c := slurmclientfake.NewClientBuilder().
+				WithLists(jobList).
+				WithInterceptorFuncs(slurminterceptor.Funcs{
+					Delete: func(context.Context, slurmobject.Object, ...slurmclient.DeleteOption) error {
+						terminateCalls++
+						return nil
+					},
+				}).
+				Build()
+			localController := &PodReconciler{
+				Client:        fake.NewFakeClient(pod),
+				Scheme:        scheme.Scheme,
+				SlurmClient:   c,
+				EventCh:       make(chan event.GenericEvent, 5),
+				slurmControl:  slurmcontrol.NewControl(c),
+				eventRecorder: record.NewFakeRecorder(10),
+			}
+
+			By("Reconciling")
+			err := localController.syncSlurm(ctx, newRequest(podName))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Check job termination was not requested")
+			Expect(terminateCalls).To(BeZero())
 		})
 	})
 })
