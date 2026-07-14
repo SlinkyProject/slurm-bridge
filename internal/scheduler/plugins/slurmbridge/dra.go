@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/puttsk/hostlist"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,11 +30,11 @@ import (
 // a ResourceClaim for CPUs will be generated when the pod explicitly
 // requests the CPU DRA extended resource.
 func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) error {
-	claim, requestMappings, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
+	claim, requestMappings, claimResources, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
 	if err != nil {
 		return err
 	}
-	if claim == nil || requestMappings == nil {
+	if claim == nil || requestMappings == nil || claimResources == nil {
 		return nil
 	}
 
@@ -48,7 +49,7 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 		return utilerrors.NewAggregate(errs)
 	}
 
-	if err := sb.bindClaim(ctx, claim, pod, nodeName, resources); err != nil {
+	if err := sb.bindClaim(ctx, claim, pod, nodeName, claimResources); err != nil {
 		var errs []error
 		errs = append(errs, err)
 
@@ -73,36 +74,49 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 	return nil
 }
 
-func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, error) {
+func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, *slurmcontrol.NodeResources, error) {
 	if pod == nil {
-		return nil, nil, errors.New("expected a pod to be given")
+		return nil, nil, nil, errors.New("expected a pod to be given")
 	}
 	if err := validateDeviceClassRequests(pod); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
-	deviceRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, resources, podRequestsCPUDRA)
+	allocatedRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, resources, podRequestsCPUDRA)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	claimIncludesCPUDRARequest := hasDeviceRequestNamed(deviceRequests, corev1.ResourceCPU.String())
+	claimIncludesCPUDRARequest := hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String())
 	if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
-		return nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
+		return nil, nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
+	}
+
+	if resources == nil {
+		return nil, nil, nil, errors.New("expected node resources")
+	}
+	claimResources, err := subsetGRESResources(*resources, deviceClassRequestCounts(pod), deviceClassNames(allocatedRequests))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	deviceRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, claimResources, podRequestsCPUDRA)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	mappings, err := createContainerRequestMappings(pod, deviceRequests)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	if len(deviceRequests) == 0 || len(mappings) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	claim := &resourcev1.ResourceClaim{
@@ -130,7 +144,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		},
 	}
 
-	return claim, mappings, nil
+	return claim, mappings, claimResources, nil
 }
 
 // bindClaim gets called for claims which are not reserved for the pod yet.
@@ -209,6 +223,54 @@ func validateDeviceClassRequests(pod *corev1.Pod) error {
 		}
 	}
 	return nil
+}
+
+func deviceClassRequestCounts(pod *corev1.Pod) map[string]int64 {
+	counts := make(map[string]int64)
+	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
+	for _, container := range containers {
+		for resourceName, quantity := range container.Resources.Requests {
+			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
+			if !ok || className == nodeinfo.DraDriverCpu || quantity.Value() <= 0 {
+				continue
+			}
+			counts[className] = quantity.Value()
+		}
+	}
+	return counts
+}
+
+func subsetGRESResources(resources slurmcontrol.NodeResources, requestedCounts map[string]int64, supportedClasses map[string]struct{}) (*slurmcontrol.NodeResources, error) {
+	claimResources := resources
+	claimResources.Gres = nil
+	for _, gres := range resources.Gres {
+		count, requested := requestedCounts[gres.Type]
+		_, supported := supportedClasses[gres.Type]
+		if !requested || !supported {
+			continue
+		}
+		indices, err := hostlist.Expand(fmt.Sprintf("[%s]", gres.Index))
+		if err != nil {
+			return nil, err
+		}
+		if count > int64(len(indices)) {
+			return nil, fmt.Errorf("not enough allocated Slurm GRES indices for DeviceClass %q: requested %d, allocated %d", gres.Type, count, len(indices))
+		}
+		gres.Count = count
+		gres.Index = strings.Join(indices[:count], ",")
+		claimResources.Gres = append(claimResources.Gres, gres)
+	}
+	return &claimResources, nil
+}
+
+func deviceClassNames(requests []resourcev1.DeviceRequest) map[string]struct{} {
+	deviceClasses := make(map[string]struct{})
+	for _, request := range requests {
+		if request.Exactly != nil && request.Exactly.DeviceClassName != nodeinfo.DraDriverCpu {
+			deviceClasses[request.Exactly.DeviceClassName] = struct{}{}
+		}
+	}
+	return deviceClasses
 }
 
 func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1.DeviceRequest) ([]corev1.ContainerExtendedResourceRequest, error) {

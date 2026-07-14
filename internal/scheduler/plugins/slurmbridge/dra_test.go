@@ -380,14 +380,14 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
 			}
-			gotClaim, gotMappings, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
+			gotClaim, gotMappings, gotResources, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantClaim {
-				if gotClaim != nil || gotMappings != nil {
-					t.Errorf("SlurmBridge.createRequestsAndMappings() = (%v, %v), want nil claim and mappings", gotClaim, gotMappings)
+				if gotClaim != nil || gotMappings != nil || gotResources != nil {
+					t.Errorf("SlurmBridge.createRequestsAndMappings() = (%v, %v, %v), want nil claim, mappings, and resources", gotClaim, gotMappings, gotResources)
 				}
 				if tt.name == "Partial gres type does not map to device class resource" {
 					for _, m := range gotMappings {
@@ -404,6 +404,9 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			}
 			if len(gotClaim.Spec.Devices.Requests) != tt.wantRequests {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() len(gotClaim.Spec.Devices.Requests) = %v, want %v", len(gotClaim.Spec.Devices.Requests), tt.wantRequests)
+			}
+			if gotResources == nil {
+				t.Fatal("SlurmBridge.createRequestsAndMappings() resources = nil, want non-nil")
 			}
 			if tt.wantCPUMapping && !hasContainerExtendedResourceRequest(gotMappings, corev1.ContainerExtendedResourceRequest{
 				ContainerName: "foo",
@@ -631,8 +634,8 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  nodeinfo.DraDriverGpuNvidia,
-			Count: 1,
-			Index: "0",
+			Count: 4,
+			Index: "0-3",
 		}},
 	}
 	kclient := fake.NewClientBuilder().
@@ -683,9 +686,15 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 	if len(claim.Spec.Devices.Requests) != 1 || claim.Spec.Devices.Requests[0].Name != wantRequestName {
 		t.Fatalf("claim device requests = %#v, want request name %q", claim.Spec.Devices.Requests, wantRequestName)
 	}
+	if claim.Spec.Devices.Requests[0].Exactly.Count != 1 {
+		t.Fatalf("claim device request count = %d, want 1", claim.Spec.Devices.Requests[0].Exactly.Count)
+	}
 	results := claim.Status.Allocation.Devices.Results
 	if len(results) != 1 || results[0].Request != wantRequestName {
 		t.Fatalf("claim allocation results = %#v, want request name %q", results, wantRequestName)
+	}
+	if resources.Gres[0].Count != 4 || resources.Gres[0].Index != "0-3" {
+		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres[0])
 	}
 }
 
