@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +76,9 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, error) {
 	if pod == nil {
 		return nil, nil, errors.New("expected a pod to be given")
+	}
+	if err := validateDeviceClassRequests(pod); err != nil {
+		return nil, nil, err
 	}
 
 	containers := slices.Clone(pod.Spec.InitContainers)
@@ -238,6 +242,24 @@ func (sb *SlurmBridge) bindClaim(
 		return fmt.Errorf("failed to get claim %s: %w", klog.KObj(claim), err)
 	}
 
+	return nil
+}
+
+func validateDeviceClassRequests(pod *corev1.Pod) error {
+	requestingContainer := make(map[string]string)
+	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
+	for _, container := range containers {
+		for resourceName, quantity := range container.Resources.Requests {
+			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
+			if !ok || className == nodeinfo.DraDriverCpu || quantity.Value() <= 0 {
+				continue
+			}
+			if existing, ok := requestingContainer[className]; ok && existing != container.Name {
+				return fmt.Errorf("DRA DeviceClass %q is requested by multiple containers %q and %q; slurm-bridge currently supports one requesting container per DeviceClass", className, existing, container.Name)
+			}
+			requestingContainer[className] = container.Name
+		}
+	}
 	return nil
 }
 
