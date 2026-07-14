@@ -3,6 +3,12 @@
 
 package dra
 
+import (
+	"fmt"
+
+	resourcev1 "k8s.io/api/resource/v1"
+)
+
 // Registry indexes supported DeviceProfiles by name and canonical selector.
 type Registry struct {
 	byName     map[string]DeviceProfile
@@ -43,4 +49,23 @@ func (r *Registry) LookupByName(name string) (DeviceProfile, bool) {
 func (r *Registry) LookupBySelector(selector string) (DeviceProfile, bool) {
 	profile, ok := r.bySelector[selector]
 	return profile, ok
+}
+
+// MatchDeviceClass validates a DeviceClass and returns its matching profile.
+func (r *Registry) MatchDeviceClass(deviceClass *resourcev1.DeviceClass) (DeviceProfile, error) {
+	if deviceClass == nil {
+		return DeviceProfile{}, fmt.Errorf("device class must not be nil")
+	}
+	if len(deviceClass.Spec.Selectors) != 1 {
+		return DeviceProfile{}, fmt.Errorf("device class %q must have exactly one selector", deviceClass.Name)
+	}
+	selector := deviceClass.Spec.Selectors[0]
+	if selector.CEL == nil {
+		return DeviceProfile{}, fmt.Errorf("device class %q selector must be a CEL selector", deviceClass.Name)
+	}
+	profile, ok := r.LookupBySelector(selector.CEL.Expression)
+	if !ok {
+		return DeviceProfile{}, fmt.Errorf("device class %q selector does not match a supported device profile", deviceClass.Name)
+	}
+	return profile, nil
 }

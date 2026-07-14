@@ -5,7 +5,11 @@ package dra
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	resourcev1 "k8s.io/api/resource/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestDefaultRegistry(t *testing.T) {
@@ -34,5 +38,91 @@ func TestRegistryLookupsAreExact(t *testing.T) {
 	}
 	if _, ok := registry.LookupBySelector(" " + selector); ok {
 		t.Fatal("Registry.LookupBySelector() accepted a non-canonical selector")
+	}
+}
+
+func TestRegistryMatchDeviceClass(t *testing.T) {
+	registry := DefaultRegistry()
+	valid := func() *resourcev1.DeviceClass {
+		return &resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "gpu.example.com",
+			},
+			Spec: resourcev1.DeviceClassSpec{
+				Selectors: []resourcev1.DeviceSelector{{
+					CEL: &resourcev1.CELDeviceSelector{
+						Expression: `device.driver == "gpu.example.com"`,
+					},
+				}},
+			},
+		}
+	}
+
+	t.Run("matching class", func(t *testing.T) {
+		got, err := registry.MatchDeviceClass(valid())
+		if err != nil {
+			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
+		}
+		want, _ := registry.LookupByName("gpu-example")
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
+		}
+	})
+
+	tests := []struct {
+		name    string
+		class   func() *resourcev1.DeviceClass
+		wantErr string
+	}{
+		{
+			name:    "nil class",
+			class:   func() *resourcev1.DeviceClass { return nil },
+			wantErr: "must not be nil",
+		},
+		{
+			name: "no selectors",
+			class: func() *resourcev1.DeviceClass {
+				class := valid()
+				class.Spec.Selectors = nil
+				return class
+			},
+			wantErr: "must have exactly one selector",
+		},
+		{
+			name: "multiple selectors",
+			class: func() *resourcev1.DeviceClass {
+				class := valid()
+				class.Spec.Selectors = append(class.Spec.Selectors, class.Spec.Selectors[0])
+				return class
+			},
+			wantErr: "must have exactly one selector",
+		},
+		{
+			name: "non-CEL selector",
+			class: func() *resourcev1.DeviceClass {
+				class := valid()
+				class.Spec.Selectors[0].CEL = nil
+				return class
+			},
+			wantErr: "must be a CEL selector",
+		},
+		{
+			name: "non-canonical selector",
+			class: func() *resourcev1.DeviceClass {
+				class := valid()
+				class.Spec.Selectors[0].CEL.Expression = ` device.driver == "gpu.example.com"`
+				return class
+			},
+			wantErr: "does not match a supported device profile",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := registry.MatchDeviceClass(tt.class())
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Registry.MatchDeviceClass() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
