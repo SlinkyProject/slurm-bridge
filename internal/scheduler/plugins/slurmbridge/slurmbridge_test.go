@@ -28,9 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
@@ -43,6 +45,7 @@ import (
 	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
 type activateRecorder struct {
@@ -230,28 +233,6 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		want   *fwk.PreFilterResult
 		want1  *fwk.Status
 	}{
-		{
-			name: "Multiple containers request the same DRA DeviceClass",
-			args: args{
-				ctx:   ctx,
-				state: framework.NewCycleState(),
-				pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
-					{
-						Name: "first",
-						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
-							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com"): resource.MustParse("1"),
-						}},
-					},
-					{
-						Name: "second",
-						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
-							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com"): resource.MustParse("1"),
-						}},
-					},
-				}}},
-			},
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, `DRA DeviceClass "gpu.example.com" is requested by multiple containers "first" and "second"; slurm-bridge currently supports one requesting container per DeviceClass`),
-		},
 		{
 			name: "JobId and Node assignment exist in annotations",
 			fields: fields{
@@ -456,6 +437,82 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				t.Errorf("SlurmBridge.PreFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
 			}
 		})
+	}
+}
+
+func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(sched.AddToScheme(scheme))
+
+	const (
+		namespace = "slurm-bridge"
+		pgName    = "podgroup"
+	)
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com")
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      pgName + "-a",
+			Labels:    map[string]string{sched.PodGroupLabel: pgName},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "valid"}},
+		},
+	}
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      pgName + "-b",
+			Labels:    map[string]string{sched.PodGroupLabel: pgName},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "first",
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuResource: resource.MustParse("1"),
+					}},
+				},
+				{
+					Name: "second",
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuResource: resource.MustParse("1"),
+					}},
+				},
+			},
+		},
+	}
+	podGroup := &sched.PodGroup{
+		TypeMeta: metav1.TypeMeta{APIVersion: sched.SchemeGroupVersion.String(), Kind: "PodGroup"},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      pgName,
+		},
+		Spec: sched.PodGroupSpec{MinMember: 2},
+	}
+
+	kubeClient := kubefake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
+		Build()
+	slurmClient := fake.NewClientBuilder().Build()
+	sb := &SlurmBridge{
+		Client:       kubeClient,
+		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
+	}
+
+	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
+	if got != nil {
+		t.Fatalf("PreFilter() result = %v, want nil", got)
+	}
+	if status.Code() != fwk.UnschedulableAndUnresolvable {
+		t.Fatalf("PreFilter() status = %v, want UnschedulableAndUnresolvable: %v", status.Code(), status.Reasons())
+	}
+	wantReason := `pod slurm-bridge/podgroup-b: DRA DeviceClass "gpu.example.com" is requested by multiple containers "first" and "second"; slurm-bridge currently supports one requesting container per DeviceClass`
+	if !apiequality.Semantic.DeepEqual(status.Reasons(), []string{wantReason}) {
+		t.Fatalf("PreFilter() reasons = %v, want %q", status.Reasons(), wantReason)
 	}
 }
 
