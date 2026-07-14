@@ -81,12 +81,6 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, err
 	}
 
-	containers := slices.Clone(pod.Spec.InitContainers)
-	containers = append(containers, pod.Spec.Containers...)
-
-	// all mappings across all containers and resource types
-	var mappings []corev1.ContainerExtendedResourceRequest
-
 	nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 	if err != nil {
 		return nil, nil, err
@@ -102,55 +96,9 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
 	}
 
-	for containerIndex, container := range containers {
-		creqs := container.Resources.Requests
-		keys := make([]string, 0, len(creqs))
-		for k := range creqs {
-			keys = append(keys, k.String())
-		}
-		// resource requests in a container is a map, their names must
-		// be sorted to determine the resource's index order.
-		slices.Sort(keys)
-		for rName := range creqs {
-			ridx := 0
-			for j := range keys {
-				if keys[j] == rName.String() {
-					ridx = j
-					break
-				}
-			}
-			// containerIndex is the index of the container in the list of initContainers + containers.
-			// ridx is the index of the extended resource request in the sorted all requests in the container.
-			// crq is the quantity of the extended resource request.
-			reqName := fmt.Sprintf("container-%d-request-%d", containerIndex, ridx)
-			if rName.String() == nodeinfo.DraDriverCpu_ExtendedResourceName {
-				if !claimIncludesCPUDRARequest {
-					continue
-				}
-				reqMap := corev1.ContainerExtendedResourceRequest{
-					ContainerName: container.Name,
-					RequestName:   corev1.ResourceCPU.String(),
-					ResourceName:  nodeinfo.DraDriverCpu_ExtendedResourceName,
-				}
-				mappings = append(mappings, reqMap)
-				continue
-			}
-			if resources == nil {
-				continue
-			}
-			for _, gres := range resources.Gres {
-				want := resourcev1.ResourceDeviceClassPrefix + gres.Type
-				if rName.String() != want {
-					continue
-				}
-				reqMap := corev1.ContainerExtendedResourceRequest{
-					ContainerName: container.Name,
-					RequestName:   reqName,
-					ResourceName:  rName.String(),
-				}
-				mappings = append(mappings, reqMap)
-			}
-		}
+	mappings, err := createContainerRequestMappings(pod, deviceRequests)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if len(deviceRequests) == 0 || len(mappings) == 0 {
@@ -261,6 +209,56 @@ func validateDeviceClassRequests(pod *corev1.Pod) error {
 		}
 	}
 	return nil
+}
+
+func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1.DeviceRequest) ([]corev1.ContainerExtendedResourceRequest, error) {
+	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
+
+	requestNames := make(map[string]string, len(deviceRequests))
+	for _, request := range deviceRequests {
+		if request.Exactly == nil {
+			continue
+		}
+		className := request.Exactly.DeviceClassName
+		if existing, ok := requestNames[className]; ok && existing != request.Name {
+			return nil, fmt.Errorf("multiple DRA requests for DeviceClass %q are not supported", className)
+		}
+		requestNames[className] = request.Name
+	}
+
+	var mappings []corev1.ContainerExtendedResourceRequest
+	for _, container := range containers {
+		keys := make([]string, 0, len(container.Resources.Requests))
+		for resourceName := range container.Resources.Requests {
+			keys = append(keys, resourceName.String())
+		}
+		slices.Sort(keys)
+		for _, resourceName := range keys {
+			quantity := container.Resources.Requests[corev1.ResourceName(resourceName)]
+			if quantity.Value() <= 0 {
+				continue
+			}
+
+			className := strings.TrimPrefix(resourceName, resourcev1.ResourceDeviceClassPrefix)
+			if resourceName == nodeinfo.DraDriverCpu_ExtendedResourceName {
+				className = nodeinfo.DraDriverCpu
+			} else if className == resourceName {
+				continue
+			}
+
+			requestName, ok := requestNames[className]
+			if !ok {
+				continue
+			}
+			mappings = append(mappings, corev1.ContainerExtendedResourceRequest{
+				ContainerName: container.Name,
+				RequestName:   requestName,
+				ResourceName:  resourceName,
+			})
+		}
+	}
+
+	return mappings, nil
 }
 
 func podRequestsCPUDRAExtendedResource(pod *corev1.Pod) bool {
