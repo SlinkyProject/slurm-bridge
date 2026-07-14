@@ -22,9 +22,11 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -232,6 +234,28 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		want   *fwk.PreFilterResult
 		want1  *fwk.Status
 	}{
+		{
+			name: "Multiple containers request the same DRA DeviceClass",
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
+					{
+						Name: "first",
+						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com"): resource.MustParse("1"),
+						}},
+					},
+					{
+						Name: "second",
+						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com"): resource.MustParse("1"),
+						}},
+					},
+				}}},
+			},
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, `DRA DeviceClass "gpu.example.com" is requested by multiple containers "first" and "second"; slurm-bridge currently supports one requesting container per DeviceClass`),
+		},
 		{
 			name: "JobId and Node assignment exist in annotations",
 			fields: fields{
