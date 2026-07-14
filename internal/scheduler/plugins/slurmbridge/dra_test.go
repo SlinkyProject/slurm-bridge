@@ -584,6 +584,27 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 	}
 }
 
+func TestValidateDeviceClassRequestsRejectsMultipleContainers(t *testing.T) {
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverGpuNvidia)
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
+		{
+			Name: "first",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				gpuResource: resource.MustParse("1"),
+			}},
+		},
+		{
+			Name: "second",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				gpuResource: resource.MustParse("1"),
+			}},
+		},
+	}}}
+	if err := validateDeviceClassRequests(pod); err == nil || !strings.Contains(err.Error(), "requested by multiple containers") {
+		t.Fatalf("validateDeviceClassRequests() error = %v, want multiple containers error", err)
+	}
+}
+
 func TestSlurmBridge_bindClaim(t *testing.T) {
 	tests := []struct {
 		name      string

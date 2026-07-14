@@ -208,6 +208,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
 		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
 	}
+	if err := validateDeviceClassRequests(pod); err != nil {
+		logger.Error(err, "unsupported DRA extended resource request")
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
 
 	s := &stateData{}
 	state.Write(stateKey, s)
