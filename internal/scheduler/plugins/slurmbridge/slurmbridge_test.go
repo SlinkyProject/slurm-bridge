@@ -22,9 +22,11 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -436,6 +438,80 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				t.Errorf("SlurmBridge.PreFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
 			}
 		})
+	}
+}
+
+func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+
+	const (
+		namespace = "slurm-bridge"
+		pgName    = "podgroup"
+	)
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.example.com")
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName + "-a"},
+		Spec: corev1.PodSpec{
+			SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(pgName)},
+			Containers:      []corev1.Container{{Name: "valid"}},
+		},
+	}
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName + "-b"},
+		Spec: corev1.PodSpec{
+			SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(pgName)},
+			Containers: []corev1.Container{
+				{
+					Name: "first",
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuResource: resource.MustParse("1"),
+					}},
+				},
+				{
+					Name: "second",
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuResource: resource.MustParse("1"),
+					}},
+				},
+			},
+		},
+	}
+	podGroup := &schedulingv1alpha2.PodGroup{
+		TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      pgName,
+		},
+		Spec: schedulingv1alpha2.PodGroupSpec{
+			SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+			},
+		},
+	}
+
+	kubeClient := kubefake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
+		Build()
+	slurmClient := fake.NewClientBuilder().Build()
+	sb := &SlurmBridge{
+		Client:       kubeClient,
+		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
+	}
+
+	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
+	if got != nil {
+		t.Fatalf("PreFilter() result = %v, want nil", got)
+	}
+	if status.Code() != fwk.UnschedulableAndUnresolvable {
+		t.Fatalf("PreFilter() status = %v, want UnschedulableAndUnresolvable: %v", status.Code(), status.Reasons())
+	}
+	wantReason := `pod slurm-bridge/podgroup-b: DRA DeviceClass "gpu.example.com" is requested by multiple containers "first" and "second"; slurm-bridge currently supports one requesting container per DeviceClass`
+	if !apiequality.Semantic.DeepEqual(status.Reasons(), []string{wantReason}) {
+		t.Fatalf("PreFilter() reasons = %v, want %q", status.Reasons(), wantReason)
 	}
 }
 
