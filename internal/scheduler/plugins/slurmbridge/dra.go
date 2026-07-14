@@ -78,9 +78,6 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	if pod == nil {
 		return nil, nil, nil, errors.New("expected a pod to be given")
 	}
-	if err := validateDeviceClassRequests(pod); err != nil {
-		return nil, nil, nil, err
-	}
 
 	nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 	if err != nil {
@@ -220,6 +217,16 @@ func validateDeviceClassRequests(pod *corev1.Pod) error {
 				return fmt.Errorf("DRA DeviceClass %q is requested by multiple containers %q and %q; slurm-bridge currently supports one requesting container per DeviceClass", className, existing, container.Name)
 			}
 			requestingContainer[className] = container.Name
+		}
+	}
+	return nil
+}
+
+func validateDeviceClassRequestsForPods(pods []corev1.Pod) error {
+	for i := range pods {
+		pod := &pods[i]
+		if err := validateDeviceClassRequests(pod); err != nil {
+			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
 	}
 	return nil

@@ -252,10 +252,6 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
 		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
 	}
-	if err := validateDeviceClassRequests(pod); err != nil {
-		logger.Error(err, "unsupported DRA extended resource request")
-		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
-	}
 
 	s := &stateData{}
 	state.Write(stateKey, s)
@@ -270,6 +266,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, ctx, pod)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	if err := validateDeviceClassRequestsForPods(s.slurmJobIR.Pods.Items); err != nil {
+		logger.Error(err, "unsupported DRA extended resource request")
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
 
 	// If an externalJob exists and a node has been allocated, return immediately
