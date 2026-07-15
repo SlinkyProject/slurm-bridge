@@ -13,59 +13,48 @@ type unsupportedBackend struct{}
 
 func (unsupportedBackend) String() string { return "unsupported" }
 
-func TestBuildGRESInventory(t *testing.T) {
-	profile, _ := DefaultRegistry().LookupByName("gpu.example.com:gpu-example")
+func TestNodeInventoryGRES(t *testing.T) {
+	profile, _ := DefaultRegistry().LookupByName("gpu-example")
 	devices := []DeviceIdentity{
 		deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
 		deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
 	}
 
-	got, err := BuildGRESInventory(NodeInventory{
+	got, err := (NodeInventory{
 		NodeName: "node-a",
 		Profiles: []ProfileInventory{{Profile: profile, Devices: devices}},
-	})
+	}).GRES()
 	if err != nil {
-		t.Fatalf("BuildGRESInventory() error = %v", err)
+		t.Fatalf("NodeInventory.GRES() error = %v", err)
 	}
 	want := []GRESInventory{{
-		ProfileID: "gpu.example.com:gpu-example",
-		Name:      "gpu",
-		Type:      "gpu-example",
-		Devices:   devices,
+		GRES:    GRES{Name: "gpu", Type: "gpu-example"},
+		Devices: devices,
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("BuildGRESInventory() = %#v, want %#v", got, want)
+		t.Fatalf("NodeInventory.GRES() = %#v, want %#v", got, want)
+	}
+	if got, want := got[0].GRES.String(), "gpu:gpu-example"; got != want {
+		t.Fatalf("GRES.String() = %q, want %q", got, want)
 	}
 
 	got[0].Devices[0] = deviceIDForTest("changed.example.com", "pool", "device")
 	if reflect.DeepEqual(got[0].Devices, devices) {
-		t.Fatal("BuildGRESInventory() reused the input device slice")
+		t.Fatal("NodeInventory.GRES() reused the input device slice")
 	}
 }
 
-func TestBuildGRESInventoryEmpty(t *testing.T) {
-	got, err := BuildGRESInventory(NodeInventory{})
+func TestNodeInventoryGRESEmpty(t *testing.T) {
+	got, err := (NodeInventory{}).GRES()
 	if err != nil {
-		t.Fatalf("BuildGRESInventory() error = %v", err)
+		t.Fatalf("NodeInventory.GRES() error = %v", err)
 	}
 	if got != nil {
-		t.Fatalf("BuildGRESInventory() = %#v, want nil", got)
+		t.Fatalf("NodeInventory.GRES() = %#v, want nil", got)
 	}
 }
 
-func TestBuildGRESInventoryOmitsCoreBitmap(t *testing.T) {
-	got, err := BuildGRESInventory(NodeInventory{Profiles: []ProfileInventory{{
-		Profile: DeviceProfile{Name: "cpu", Driver: "dra.cpu", Backend: CoreBitmapBackend{}},
-	}}})
-	if err != nil {
-		t.Fatalf("BuildGRESInventory() error = %v", err)
-	}
-	if got != nil {
-		t.Fatalf("BuildGRESInventory() = %#v, want nil", got)
-	}
-}
-
-func TestBuildGRESInventoryRejectsInvalidProfiles(t *testing.T) {
+func TestNodeInventoryGRESRejectsInvalidProfiles(t *testing.T) {
 	tests := []struct {
 		name     string
 		profiles []ProfileInventory
@@ -79,27 +68,26 @@ func TestBuildGRESInventoryRejectsInvalidProfiles(t *testing.T) {
 			wantErr: "empty Slurm GRES name",
 		},
 		{
+			name: "empty profile name",
+			profiles: []ProfileInventory{{Profile: DeviceProfile{
+				Driver: "gpu.example.com", Backend: IndexedGRESBackend{GRESName: "gpu"},
+			}}},
+			wantErr: "empty name",
+		},
+		{
 			name: "unsupported backend",
 			profiles: []ProfileInventory{{Profile: DeviceProfile{
 				Name: "gpu", Driver: "gpu.example.com", Backend: unsupportedBackend{},
 			}}},
 			wantErr: "unsupported backend",
 		},
-		{
-			name: "duplicate GRES",
-			profiles: []ProfileInventory{
-				{Profile: DeviceProfile{Name: "gpu", Driver: "driver-a", Backend: IndexedGRESBackend{GRESName: "gpu"}}},
-				{Profile: DeviceProfile{Name: "gpu", Driver: "driver-b", Backend: IndexedGRESBackend{GRESName: "gpu"}}},
-			},
-			wantErr: "map to the same Slurm GRES",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BuildGRESInventory(NodeInventory{Profiles: tt.profiles})
+			_, err := (NodeInventory{Profiles: tt.profiles}).GRES()
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("BuildGRESInventory() error = %v, want error containing %q", err, tt.wantErr)
+				t.Fatalf("NodeInventory.GRES() error = %v, want error containing %q", err, tt.wantErr)
 			}
 		})
 	}

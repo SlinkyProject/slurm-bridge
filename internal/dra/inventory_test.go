@@ -55,7 +55,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu.example.com:gpu-example")
+		profile, _ := DefaultRegistry().LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -112,7 +112,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu.example.com:gpu-example")
+		profile, _ := DefaultRegistry().LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -150,7 +150,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu.example.com:gpu-example")
+		profile, _ := DefaultRegistry().LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -192,8 +192,8 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 		registry := &Registry{
 			byName: map[string]DeviceProfile{
-				profileA.ID(): profileA,
-				profileB.ID(): profileB,
+				profileA.Name: profileA,
+				profileB.Name: profileB,
 			},
 		}
 		slice := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-b", "gpu-unsupported", "gpu-a")
@@ -237,14 +237,14 @@ func TestBuildNodeInventory(t *testing.T) {
 		profileB.Name = "gpu-b"
 		registry := &Registry{
 			byName: map[string]DeviceProfile{
-				profileA.ID(): profileA,
-				profileB.ID(): profileB,
+				profileA.Name: profileA,
+				profileB.Name: profileB,
 			},
 		}
 		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0"),
 		})
-		if err == nil || !strings.Contains(err.Error(), `matches overlapping device profiles "gpu.example.com:gpu-a" and "gpu.example.com:gpu-b"`) {
+		if err == nil || !strings.Contains(err.Error(), `matches overlapping device profiles "gpu-a" and "gpu-b"`) {
 			t.Fatalf("BuildNodeInventory() error = %v, want overlapping profile error", err)
 		}
 	})
@@ -260,7 +260,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu.example.com:gpu-example")
+		profile, _ := DefaultRegistry().LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{

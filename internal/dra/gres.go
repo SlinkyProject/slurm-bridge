@@ -8,50 +8,46 @@ import (
 	"slices"
 )
 
+// GRES identifies a Slurm generic resource by name and type.
+type GRES struct {
+	Name string
+	Type string
+}
+
+// String returns the Slurm name:type form.
+func (g GRES) String() string {
+	return g.Name + ":" + g.Type
+}
+
 // GRESInventory describes one indexed Slurm GRES and its stable DRA device
 // mapping. Devices[i] is the DRA device represented by Slurm index i.
 type GRESInventory struct {
-	ProfileID string
-	Name      string
-	Type      string
-	Devices   []DeviceIdentity
+	GRES    GRES
+	Devices []DeviceIdentity
 }
 
-// BuildGRESInventory translates the indexed-GRES profiles in a NodeInventory
-// into Slurm GRES inventory. Non-GRES profiles are omitted.
-func BuildGRESInventory(nodeInventory NodeInventory) ([]GRESInventory, error) {
-	type gresID struct {
-		name     string
-		typeName string
-	}
-
-	seen := make(map[gresID]string)
+// GRES translates indexed-GRES profiles into Slurm GRES inventory.
+func (n NodeInventory) GRES() ([]GRESInventory, error) {
 	var inventory []GRESInventory
-	for _, profileInventory := range nodeInventory.Profiles {
+	for _, profileInventory := range n.Profiles {
 		profile := profileInventory.Profile
 		switch backend := profile.Backend.(type) {
 		case IndexedGRESBackend:
 			if backend.GRESName == "" {
-				return nil, fmt.Errorf("device profile %q has an empty Slurm GRES name", profile.ID())
+				return nil, fmt.Errorf("device profile %q has an empty Slurm GRES name", profile.Name)
 			}
 			if profile.Name == "" {
 				return nil, fmt.Errorf("device profile for driver %q has an empty name", profile.Driver)
 			}
-			id := gresID{name: backend.GRESName, typeName: profile.Name}
-			if existing, ok := seen[id]; ok {
-				return nil, fmt.Errorf("device profiles %q and %q map to the same Slurm GRES %q", existing, profile.ID(), backend.GRESName+":"+profile.Name)
-			}
-			seen[id] = profile.ID()
 			inventory = append(inventory, GRESInventory{
-				ProfileID: profile.ID(),
-				Name:      backend.GRESName,
-				Type:      profile.Name,
-				Devices:   slices.Clone(profileInventory.Devices),
+				GRES: GRES{
+					Name: backend.GRESName,
+					Type: profile.Name,
+				},
+				Devices: slices.Clone(profileInventory.Devices),
 			})
-		case CoreBitmapBackend:
-			continue
 		default:
-			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.ID(), profile.Backend)
+			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
 		}
 	}
 	return inventory, nil

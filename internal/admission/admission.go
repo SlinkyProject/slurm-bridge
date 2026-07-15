@@ -223,6 +223,11 @@ func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod
 		if err := r.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
 			return fmt.Errorf("get device class %q: %w", className, err)
 		}
+		if len(deviceClass.Spec.Config) != 0 {
+			return fmt.Errorf("device class %q configuration is not supported", className)
+		}
+		// TODO: Persist the resolved DeviceProfile and verify that the live
+		// DeviceClass still maps to it when scheduling and binding the claim.
 		if _, err := registry.MatchDeviceClass(deviceClass); err != nil {
 			return err
 		}

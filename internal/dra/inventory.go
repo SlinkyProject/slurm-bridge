@@ -33,7 +33,7 @@ type ProfileInventory struct {
 
 // NodeInventory is the profile-classified device inventory computed for one
 // Kubernetes node. It does not describe current allocation availability.
-// Profiles are ordered by DeviceProfile ID.
+// Profiles are ordered by DeviceProfile name.
 type NodeInventory struct {
 	NodeName string
 	Profiles []ProfileInventory
@@ -67,7 +67,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 		return NodeInventory{}, err
 	}
 
-	profilesByID := make(map[string]DeviceProfile)
+	profilesByName := make(map[string]DeviceProfile)
 	devicesByProfile := make(map[string][]DeviceIdentity)
 	seen := make(map[DeviceIdentity]struct{})
 	for _, poolSnapshot := range poolSnapshots {
@@ -89,15 +89,15 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 					return NodeInventory{}, fmt.Errorf("duplicate DRA device identity %q", identity.String())
 				}
 				seen[identity] = struct{}{}
-				profilesByID[profile.ID()] = profile
-				devicesByProfile[profile.ID()] = append(devicesByProfile[profile.ID()], identity)
+				profilesByName[profile.Name] = profile
+				devicesByProfile[profile.Name] = append(devicesByProfile[profile.Name], identity)
 			}
 		}
 	}
 
 	return NodeInventory{
 		NodeName: node.Name,
-		Profiles: sortedProfileInventories(profilesByID, devicesByProfile),
+		Profiles: sortedProfileInventories(profilesByName, devicesByProfile),
 	}, nil
 }
 
@@ -225,7 +225,7 @@ func matchDeviceProfile(
 	for _, profile := range profiles {
 		compiled := celCache.GetOrCompile(profile.Selector)
 		if compiled.Error != nil {
-			return DeviceProfile{}, false, fmt.Errorf("compile selector for device profile %q: %w", profile.ID(), compiled.Error)
+			return DeviceProfile{}, false, fmt.Errorf("compile selector for device profile %q: %w", profile.Name, compiled.Error)
 		}
 		matches, _, err := compiled.DeviceMatches(ctx, dracel.Device{
 			Driver:                   identity.Driver.String(),
@@ -234,13 +234,13 @@ func matchDeviceProfile(
 			Capacity:                 device.Capacity,
 		})
 		if err != nil {
-			return DeviceProfile{}, false, fmt.Errorf("evaluate device profile %q for device %q: %w", profile.ID(), identity.String(), err)
+			return DeviceProfile{}, false, fmt.Errorf("evaluate device profile %q for device %q: %w", profile.Name, identity.String(), err)
 		}
 		if !matches {
 			continue
 		}
 		if matched {
-			return DeviceProfile{}, false, fmt.Errorf("DRA device %q matches overlapping device profiles %q and %q", identity.String(), matchedProfile.ID(), profile.ID())
+			return DeviceProfile{}, false, fmt.Errorf("DRA device %q matches overlapping device profiles %q and %q", identity.String(), matchedProfile.Name, profile.Name)
 		}
 		matchedProfile = profile
 		matched = true
@@ -248,16 +248,16 @@ func matchDeviceProfile(
 	return matchedProfile, matched, nil
 }
 
-func sortedProfileInventories(profilesByID map[string]DeviceProfile, devicesByProfile map[string][]DeviceIdentity) []ProfileInventory {
-	profileIDs := make([]string, 0, len(devicesByProfile))
-	for id := range devicesByProfile {
-		profileIDs = append(profileIDs, id)
+func sortedProfileInventories(profilesByName map[string]DeviceProfile, devicesByProfile map[string][]DeviceIdentity) []ProfileInventory {
+	profileNames := make([]string, 0, len(devicesByProfile))
+	for name := range devicesByProfile {
+		profileNames = append(profileNames, name)
 	}
-	slices.Sort(profileIDs)
+	slices.Sort(profileNames)
 
 	var inventories []ProfileInventory
-	for _, id := range profileIDs {
-		devices := devicesByProfile[id]
+	for _, name := range profileNames {
+		devices := devicesByProfile[name]
 		slices.SortFunc(devices, func(a, b DeviceIdentity) int {
 			if n := cmp.Compare(a.Driver.String(), b.Driver.String()); n != 0 {
 				return n
@@ -268,7 +268,7 @@ func sortedProfileInventories(profilesByID map[string]DeviceProfile, devicesByPr
 			return cmp.Compare(a.Device.String(), b.Device.String())
 		})
 		inventories = append(inventories, ProfileInventory{
-			Profile: profilesByID[id],
+			Profile: profilesByName[name],
 			Devices: devices,
 		})
 	}

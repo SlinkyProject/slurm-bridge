@@ -39,8 +39,3 @@ type DeviceProfile struct {
 	Selector string
 	Backend  Backend
 }
-
-// ID returns the stable, driver-qualified profile identity.
-func (p DeviceProfile) ID() string {
-	return p.Driver + ":" + p.Name
-}

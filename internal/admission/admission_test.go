@@ -1024,6 +1024,31 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want selector mismatch warning", warnings)
 		}
 	})
+
+	t.Run("class configuration", func(t *testing.T) {
+		class := validClass()
+		class.Spec.Config = []resourcev1.DeviceClassConfiguration{{
+			DeviceConfiguration: resourcev1.DeviceConfiguration{
+				Opaque: &resourcev1.OpaqueDeviceConfiguration{
+					Driver: "gpu.example.com",
+					Parameters: runtime.RawExtension{
+						Raw: []byte(`{"enabled":true}`),
+					},
+				},
+			},
+		}}
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		warnings, err := newAdmission(class).ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want warning", err)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "configuration is not supported") {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want unsupported configuration warning", warnings)
+		}
+	})
 }
 
 func TestPodAdmission_ValidateUpdate(t *testing.T) {

@@ -32,7 +32,7 @@ func DefaultRegistry() *Registry {
 	}
 	return &Registry{
 		byName: map[string]DeviceProfile{
-			profile.ID(): profile,
+			profile.Name: profile,
 		},
 		bySelector: map[string]DeviceProfile{
 			profile.Selector: profile,
@@ -40,7 +40,7 @@ func DefaultRegistry() *Registry {
 	}
 }
 
-// LookupByName returns the profile with the given driver-qualified name.
+// LookupByName returns the profile with the given stable profile name.
 func (r *Registry) LookupByName(name string) (DeviceProfile, bool) {
 	profile, ok := r.byName[name]
 	return profile, ok
@@ -62,7 +62,7 @@ func (r *Registry) profilesForDriver(driver string) []DeviceProfile {
 		}
 	}
 	slices.SortFunc(profiles, func(a, b DeviceProfile) int {
-		return cmp.Compare(a.ID(), b.ID())
+		return cmp.Compare(a.Name, b.Name)
 	})
 	return profiles
 }
