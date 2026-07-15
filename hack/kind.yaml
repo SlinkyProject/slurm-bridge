@@ -36,7 +36,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -46,7 +45,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -56,7 +54,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -66,7 +63,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -76,7 +72,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
@@ -86,7 +81,6 @@ nodes:
   - role: worker
     labels:
       scheduler.slinky.slurm.net/slurm-bridge: worker
-      scheduler.slinky.slurm.net/external-node: 'true'
     kubeadmConfigPatches:
       - |
         kind: JoinConfiguration
