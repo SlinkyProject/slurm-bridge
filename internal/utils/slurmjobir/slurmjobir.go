@@ -247,6 +247,10 @@ func (t *translator) podGPUResources(pod *corev1.Pod, deviceClassCache map[strin
 }
 
 func (t *translator) deviceClassGRES(className string) (dra.GRES, error) {
+	// TODO: Replace this implicit fallback with explicit, versioned legacy
+	// handling during upgrades. New jobs with a missing or non-matching
+	// DeviceClass must fail closed; only jobs created by the legacy flow may use
+	// a driver-named GRES.
 	legacyGRES := dra.GRES{Name: "gpu", Type: className}
 	deviceClass := &resourcev1.DeviceClass{}
 	if err := t.Get(t.ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
