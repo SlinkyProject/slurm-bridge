@@ -4,12 +4,15 @@
 package slurmjobir
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -18,6 +21,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -143,7 +147,9 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 	}
 	slurmJobIR.RootPOM = *rootPOM
 	parsePodsCpuAndMemory(slurmJobIR)
-	parseGPUDevicePlugin(slurmJobIR)
+	if err := t.parseGPUResources(slurmJobIR); err != nil {
+		return nil, err
+	}
 	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM)
 	return slurmJobIR, err
 }
@@ -186,34 +192,115 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	}
 }
 
-/* Set GRES for the external job to the maximum quantity of GPUs requested */
-func parseGPUDevicePlugin(slurmJobIR *SlurmJobIR) {
-	var gres string
-	var gresMax resource.Quantity
-	for _, p := range slurmJobIR.Pods.Items {
-		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
-		for resourceName, quantity := range lim {
-			if resourceName.String() == cpuDRADeviceClassExtendedName {
-				continue
-			}
-			if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
-				if quantity.Cmp(gresMax) > 0 {
-					gresMax = quantity
-					gres = fmt.Sprintf("gres/gpu=%s", quantity.String())
-				}
-			}
-			if strings.HasPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix) {
-				if quantity.Cmp(gresMax) > 0 {
-					deviceClass := strings.TrimPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
-					gres = fmt.Sprintf("gres/gpu:%s=%s", deviceClass, quantity.String())
-					gresMax = quantity
-				}
-			}
+// parseGPUResources sets each GRES requirement to the maximum per-pod quantity
+// requested across the external job. DeviceClasses which resolve to one
+// DeviceProfile are combined because they consume the same Slurm GRES.
+func (t *translator) parseGPUResources(slurmJobIR *SlurmJobIR) error {
+	maxByGRES := make(map[dra.GRES]resource.Quantity)
+	deviceClassCache := make(map[string]dra.GRES)
+	for i := range slurmJobIR.Pods.Items {
+		podGRES, err := t.podGPUResources(&slurmJobIR.Pods.Items[i], deviceClassCache)
+		if err != nil {
+			return err
 		}
+		mergeMaxGRESQuantities(maxByGRES, podGRES)
 	}
-	if gres != "" {
+
+	if gres := formatGRESResources(maxByGRES); gres != "" {
 		slurmJobIR.JobInfo.Gres = ptr.To(gres)
 	}
+	return nil
+}
+
+func (t *translator) podGPUResources(pod *corev1.Pod, deviceClassCache map[string]dra.GRES) (map[dra.GRES]resource.Quantity, error) {
+	resources := make(map[dra.GRES]resource.Quantity)
+	limits := resourcehelper.PodLimits(pod, resourcehelper.PodResourcesOptions{})
+	for resourceName, quantity := range limits {
+		if quantity.Sign() <= 0 {
+			continue
+		}
+		name := resourceName.String()
+		if name == cpuDRADeviceClassExtendedName {
+			continue
+		}
+		if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
+			addGRESQuantity(resources, dra.GRES{Name: "gpu"}, quantity)
+			continue
+		}
+
+		className, ok := strings.CutPrefix(name, resourcev1.ResourceDeviceClassPrefix)
+		if !ok {
+			continue
+		}
+		gres, ok := deviceClassCache[className]
+		if !ok {
+			var err error
+			gres, err = t.deviceClassGRES(className)
+			if err != nil {
+				return nil, err
+			}
+			deviceClassCache[className] = gres
+		}
+		addGRESQuantity(resources, gres, quantity)
+	}
+	return resources, nil
+}
+
+func (t *translator) deviceClassGRES(className string) (dra.GRES, error) {
+	legacyGRES := dra.GRES{Name: "gpu", Type: className}
+	deviceClass := &resourcev1.DeviceClass{}
+	if err := t.Get(t.ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
+		if apierrors.IsNotFound(err) {
+			return legacyGRES, nil
+		}
+		return dra.GRES{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
+	}
+
+	profile, err := dra.DefaultRegistry().MatchDeviceClass(deviceClass)
+	if err != nil {
+		return legacyGRES, nil
+	}
+	if len(deviceClass.Spec.Config) != 0 {
+		return dra.GRES{}, fmt.Errorf("DeviceClass %q configuration is not supported", className)
+	}
+	return profile.GRES()
+}
+
+func addGRESQuantity(resources map[dra.GRES]resource.Quantity, gres dra.GRES, quantity resource.Quantity) {
+	total := resources[gres]
+	total.Add(quantity)
+	resources[gres] = total
+}
+
+func mergeMaxGRESQuantities(maxByGRES, podGRES map[dra.GRES]resource.Quantity) {
+	for gres, quantity := range podGRES {
+		if current, ok := maxByGRES[gres]; !ok || quantity.Cmp(current) > 0 {
+			maxByGRES[gres] = quantity
+		}
+	}
+}
+
+func formatGRESResources(resources map[dra.GRES]resource.Quantity) string {
+	gresNames := make([]dra.GRES, 0, len(resources))
+	for gres := range resources {
+		gresNames = append(gresNames, gres)
+	}
+	slices.SortFunc(gresNames, func(a, b dra.GRES) int {
+		if n := cmp.Compare(a.Name, b.Name); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.Type, b.Type)
+	})
+	entries := make([]string, len(gresNames))
+	for i, gres := range gresNames {
+		name := "gres/" + gres.Name
+		if gres.Type != "" {
+			name += ":" + gres.Type
+		}
+		quantity := resources[gres]
+		entries[i] = name + "=" + quantity.String()
+	}
+	return strings.Join(entries, ",")
 }
 
 func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {

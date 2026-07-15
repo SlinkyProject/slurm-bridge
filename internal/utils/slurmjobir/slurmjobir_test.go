@@ -419,7 +419,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 	}
 }
 
-func Test_parseGPUDevicePlugin(t *testing.T) {
+func TestTranslatorParseGPUResources(t *testing.T) {
 	type args struct {
 		slurmJobIR *SlurmJobIR
 	}
@@ -434,6 +434,19 @@ func Test_parseGPUDevicePlugin(t *testing.T) {
 				slurmJobIR: &SlurmJobIR{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{},
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "Zero GPUs requested",
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					Pods: corev1.PodList{
+						Items: []corev1.Pod{
+							podWithGPU("nvidia.com/gpu", "0"),
+						},
 					},
 				},
 			},
@@ -520,9 +533,15 @@ func Test_parseGPUDevicePlugin(t *testing.T) {
 			want: ptr.To("gres/gpu:gpu.nvidia.com=2"),
 		},
 	}
+	translator := translator{
+		Reader: fake.NewClientBuilder().Build(),
+		ctx:    context.Background(),
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parseGPUDevicePlugin(tt.args.slurmJobIR)
+			if err := translator.parseGPUResources(tt.args.slurmJobIR); err != nil {
+				t.Fatalf("translator.parseGPUResources() error = %v", err)
+			}
 			if !apiequality.Semantic.DeepEqual(tt.want, tt.args.slurmJobIR.JobInfo.Gres) {
 				var gotGres, wantGres interface{}
 				if tt.args.slurmJobIR.JobInfo.Gres != nil {
@@ -535,9 +554,73 @@ func Test_parseGPUDevicePlugin(t *testing.T) {
 				} else {
 					wantGres = nil
 				}
-				t.Errorf("parseGPUDevicePlugin() Gres = %v, want %v", gotGres, wantGres)
+				t.Errorf("translator.parseGPUResources() Gres = %v, want %v", gotGres, wantGres)
 			}
 		})
+	}
+}
+
+func TestTranslatorParseGPUResourcesUsesDeviceProfile(t *testing.T) {
+	const className = "example-gpus"
+	deviceClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec: resourcev1.DeviceClassSpec{
+			Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "gpu.example.com"`},
+			}},
+		},
+	}
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
+	}}}
+	translator := translator{
+		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:    context.Background(),
+	}
+
+	if err := translator.parseGPUResources(ir); err != nil {
+		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	}
+	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=2" {
+		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=2")
+	}
+}
+
+func TestTranslatorParseGPUResourcesCombinesProfileAliases(t *testing.T) {
+	newClass := func(name string) *resourcev1.DeviceClass {
+		return &resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: resourcev1.DeviceClassSpec{
+				Selectors: []resourcev1.DeviceSelector{{
+					CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "gpu.example.com"`},
+				}},
+			},
+		}
+	}
+	ir := &SlurmJobIR{
+		Pods: corev1.PodList{
+			Items: []corev1.Pod{{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "class-a"): resource.MustParse("1"),
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "class-b"): resource.MustParse("2"),
+						}},
+					}},
+				},
+			}},
+		},
+	}
+	translator := translator{
+		Reader: fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
+		ctx:    context.Background(),
+	}
+
+	if err := translator.parseGPUResources(ir); err != nil {
+		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	}
+	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=3" {
+		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=3")
 	}
 }
 
