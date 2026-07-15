@@ -1,0 +1,8 @@
+---
+controller:
+  extraConf: |
+    ReconfigFlags=KeepPartInfo
+    GresTypes=gpu
+nodesets:
+  slinky:
+    enabled: false

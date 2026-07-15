@@ -88,6 +88,45 @@ push-charts: build-chart ## Push OCI packages.
 
 ##@ Deployment
 
+KIND_CLUSTER_NAME ?= slurm-bridge-dev
+
+.PHONY: kind-start
+kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack.
+	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
+
+.PHONY: kind-stop
+kind-stop: ## Delete the development Kind cluster.
+	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
+
+DEMO_WORKLOADS := \
+	hack/examples/pod/sleep.yaml \
+	hack/examples/job/single.yaml \
+	hack/examples/jobset/single.yaml \
+	hack/examples/podgroup/sleep.yaml \
+	hack/examples/dra/job.yaml
+
+.PHONY: demo-start
+demo-start: kind-start ## Create the demo stack and run example workloads.
+	./hack/kind.sh --extras $(KIND_CLUSTER_NAME)
+	@set -e; for file in $(DEMO_WORKLOADS); do \
+		$(KUBECTL) delete --ignore-not-found -f "$$file"; \
+		$(KUBECTL) apply -f "$$file"; \
+	done
+
+.PHONY: demo-stop
+demo-stop: ## Delete the demo workloads.
+	@set -e; for file in $(DEMO_WORKLOADS); do \
+		$(KUBECTL) delete --ignore-not-found -f "$$file"; \
+	done
+
+.PHONY: prereqs
+prereqs: ## Install prerequisites into the current Kubernetes context.
+	./hack/kind.sh --existing-cluster --prereqs
+
+.PHONY: deploy
+deploy: values-dev ## Build and deploy Slurm Bridge to the current Kubernetes context.
+	cd helm/slurm-bridge && skaffold run
+
 # Get the OS to set platform specific commands
 UNAME_S ?= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
