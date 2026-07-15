@@ -47,6 +47,7 @@ type realSlurmControl struct {
 
 type NodeResources struct {
 	Node           string
+	NodeComment    string
 	SocketsPerNode int32
 	CoresPerSocket int32
 	MemAlloc       int64
@@ -279,8 +280,14 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 		if n.Node != nodeName {
 			continue
 		}
+		nodeComment, err := r.getNodeComment(ctx, nodeName)
+		if err != nil {
+			logger.Error(err, "could not get Slurm node comment", "node", nodeName)
+			return nil, err
+		}
 		nodeOut := NodeResources{
 			Node:           n.Node,
+			NodeComment:    nodeComment,
 			SocketsPerNode: ptr.Deref(n.SocketsPerNode, 0),
 			CoresPerSocket: ptr.Deref(n.CoresPerSocket, 0),
 			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
@@ -299,6 +306,14 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 		return &nodeOut, nil
 	}
 	return &NodeResources{}, nil
+}
+
+func (r *realSlurmControl) getNodeComment(ctx context.Context, nodeName string) (string, error) {
+	node := &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, object.ObjectKey(nodeName), node); err != nil {
+		return "", err
+	}
+	return ptr.Deref(node.Comment, ""), nil
 }
 
 var _ SlurmControlInterface = &realSlurmControl{}
