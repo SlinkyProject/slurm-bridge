@@ -371,10 +371,21 @@ function slurm-stack::install() {
 
 	operator_path="$(git::checkout slurm-operator "$repo" "$ref")"
 	make -C "$operator_path" values-dev
+	slurm-operator-crds::install_from_source "$operator_path"
 	slurm-operator::install_from_source "$operator_path"
 	slurm::install_from_source "$operator_path"
 
 	slurm::configure_for_bridge "$operator_path/helm/slurm"
+}
+
+function slurm-operator-crds::install_from_source() {
+	local operator_path="$1"
+
+	echo "[slurm] Installing slurm-operator CRDs..."
+	(
+		cd "$operator_path/helm/slurm-operator-crds"
+		skaffold run
+	)
 }
 
 function slurm-operator::install_from_source() {
@@ -383,7 +394,6 @@ function slurm-operator::install_from_source() {
 	echo "[slurm] Installing slurm-operator..."
 	(
 		cd "$operator_path/helm/slurm-operator"
-		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
 		skaffold run -p dev
 	)
 	slurm-operator::wait
