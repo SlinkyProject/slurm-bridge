@@ -270,38 +270,12 @@ function git::checkout() {
 	echo "$path"
 }
 
-function skaffold::run() {
-	if [ -z "$OPT_REGISTRY" ]; then
-		skaffold run
-		return
-	fi
-
-	# Registry-backed installs need an explicit push because these Skaffold
-	# configs set build.local.push=false and `skaffold run` has no --push flag.
-	# `skaffold build` does not check cluster node platforms by default, so keep
-	# parity with `skaffold run` and build images for the target cluster.
-	export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
-	local build_artifacts
-	build_artifacts="$(mktemp "${TMPDIR:-/tmp}/slurm-bridge-skaffold.XXXXXX.json")"
-	echo "[skaffold] Building and pushing images to ${OPT_REGISTRY}..."
-	if ! skaffold build --push=true --check-cluster-node-platforms=true --file-output "$build_artifacts"; then
-		rm -f "$build_artifacts"
-		return 1
-	fi
-	echo "[skaffold] Deploying images from ${OPT_REGISTRY}..."
-	if ! skaffold deploy --build-artifacts "$build_artifacts"; then
-		rm -f "$build_artifacts"
-		return 1
-	fi
-	rm -f "$build_artifacts"
-}
-
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
-		skaffold::run
+		skaffold run
 	)
 }
 
@@ -411,7 +385,7 @@ function slurm-operator::install_from_source() {
 	(
 		cd "$operator_path/helm/slurm-operator"
 		sed -i.bak '/^crds:$/,/^[^[:space:]]/ s/^\([[:space:]]*enabled:[[:space:]]*\)false/\1true/' values-dev.yaml
-		skaffold::run
+		skaffold run
 	)
 	slurm-operator::wait
 }
