@@ -53,6 +53,19 @@ func (r *Registry) LookupBySelector(selector string) (DeviceProfile, bool) {
 	return profile, ok
 }
 
+// SupportsDriver reports whether the registry contains a profile for driver.
+func (r *Registry) SupportsDriver(driver string) bool {
+	if r == nil {
+		return false
+	}
+	for _, profile := range r.byName {
+		if profile.Driver == driver {
+			return true
+		}
+	}
+	return false
+}
+
 // profilesForDriver returns profiles for driver ordered by profile name.
 func (r *Registry) profilesForDriver(driver string) []DeviceProfile {
 	profiles := make([]DeviceProfile, 0)

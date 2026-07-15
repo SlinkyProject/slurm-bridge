@@ -213,6 +213,13 @@ func devicesAccessibleToNode(node *corev1.Node, resourceSlice *resourcev1.Resour
 	return devices, nil
 }
 
+// ResourceSliceMatchesNode reports whether a ResourceSlice contains at least
+// one device accessible to node.
+func ResourceSliceMatchesNode(node *corev1.Node, resourceSlice *resourcev1.ResourceSlice) (bool, error) {
+	devices, err := devicesAccessibleToNode(node, resourceSlice)
+	return len(devices) > 0, err
+}
+
 func matchDeviceProfile(
 	ctx context.Context,
 	celCache *dracel.Cache,

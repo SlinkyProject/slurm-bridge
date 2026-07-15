@@ -51,6 +51,12 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	if got := registry.profilesForDriver("unsupported.example.com"); len(got) != 0 {
 		t.Fatalf("Registry.profilesForDriver() = %#v, want no profiles", got)
 	}
+	if !registry.SupportsDriver("gpu.example.com") {
+		t.Fatal("Registry.SupportsDriver() = false for the example driver")
+	}
+	if registry.SupportsDriver("gpu.nvidia.com") {
+		t.Fatal("Registry.SupportsDriver() = true for an unregistered driver")
+	}
 }
 
 func TestRegistryMatchDeviceClass(t *testing.T) {
