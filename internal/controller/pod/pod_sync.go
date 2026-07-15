@@ -141,11 +141,20 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	}
 	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
 	if nonTerminalPods == 0 {
-		logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
-		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
-			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-				"jobId", jobId, "pod", podKey)
+		jobIsPendingOrRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
+		if err != nil {
 			return err
+		}
+
+		if jobIsPendingOrRunning {
+			logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
+			if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
+				logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
+					"jobId", jobId, "pod", podKey)
+				return err
+			}
+		} else {
+			logger.V(4).Info("Skipping termination of Slurm Job for Pod", "jobId", jobId, "pod", podKey)
 		}
 	} else if terminatingPods > 0 {
 		logger.V(4).Info("Retaining Slurm Job until non-terminating Pods complete",
