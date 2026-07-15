@@ -92,3 +92,113 @@ func TestNodeInventoryGRESRejectsInvalidProfiles(t *testing.T) {
 		})
 	}
 }
+
+func TestAppliedInventoryRoundTrip(t *testing.T) {
+	inventory := []GRESInventory{
+		{
+			GRES: GRES{Name: "gpu", Type: "gpu-example"},
+			Devices: []DeviceIdentity{
+				deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-0"),
+				deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-1"),
+			},
+		},
+	}
+
+	comment, err := EncodeAppliedInventory(inventory)
+	if err != nil {
+		t.Fatalf("EncodeAppliedInventory() error = %v", err)
+	}
+	wantComment := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/rack/pool-a/gpu-0","/dra/gpu.example.com/rack/pool-a/gpu-1"]}}`
+	if comment != wantComment {
+		t.Fatalf("EncodeAppliedInventory() = %q, want %q", comment, wantComment)
+	}
+
+	got, err := DecodeAppliedInventory(comment)
+	if err != nil {
+		t.Fatalf("DecodeAppliedInventory() error = %v", err)
+	}
+	want := AppliedInventory{
+		"gpu-example": {
+			deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-0"),
+			deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-1"),
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DecodeAppliedInventory() = %#v, want %#v", got, want)
+	}
+}
+
+func TestEncodeAppliedInventoryEmpty(t *testing.T) {
+	got, err := EncodeAppliedInventory(nil)
+	if err != nil {
+		t.Fatalf("EncodeAppliedInventory() error = %v", err)
+	}
+	want := `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`
+	if got != want {
+		t.Fatalf("EncodeAppliedInventory() = %q, want %q", got, want)
+	}
+}
+
+func TestEncodeAppliedInventoryRejectsInvalidInventory(t *testing.T) {
+	tests := []struct {
+		name      string
+		inventory []GRESInventory
+		wantErr   string
+	}{
+		{
+			name:      "empty profile",
+			inventory: []GRESInventory{{GRES: GRES{Name: "gpu"}}},
+			wantErr:   "empty device profile name",
+		},
+		{
+			name: "duplicate profile",
+			inventory: []GRESInventory{
+				{GRES: GRES{Type: "gpu-example"}},
+				{GRES: GRES{Type: "gpu-example"}},
+			},
+			wantErr: "duplicate device profile",
+		},
+		{
+			name: "incomplete identity",
+			inventory: []GRESInventory{{
+				GRES:    GRES{Type: "gpu-example"},
+				Devices: []DeviceIdentity{deviceIDForTest("gpu.example.com", "", "gpu-0")},
+			}},
+			wantErr: "must contain a driver, pool, and device name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := EncodeAppliedInventory(tt.inventory)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("EncodeAppliedInventory() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecodeAppliedInventoryRejectsInvalidComment(t *testing.T) {
+	tests := []struct {
+		name    string
+		comment string
+		wantErr string
+	}{
+		{name: "wrong prefix", comment: `{}`, wantErr: "does not contain a DRA GRES map"},
+		{name: "invalid JSON", comment: appliedInventoryCommentPrefix + `{`, wantErr: "decode applied inventory"},
+		{name: "unknown version", comment: appliedInventoryCommentPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
+		{name: "missing profiles", comment: appliedInventoryCommentPrefix + `{"v":1}`, wantErr: "has no profiles map"},
+		{name: "empty profile", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
+		{name: "invalid path prefix", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
+		{name: "incomplete path", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeAppliedInventory(tt.comment)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("DecodeAppliedInventory() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}

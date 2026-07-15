@@ -4,8 +4,20 @@
 package dra
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
+
+	"k8s.io/dynamic-resource-allocation/structured"
+)
+
+const (
+	appliedInventoryCommentPrefix = "slurm-bridge.dra-gres-map="
+	// appliedInventoryVersion records the version of the format used for storing DRA device identities in Slurm
+	// node comments. This version is required if the format changes in future.
+	appliedInventoryVersion = 1
+	devicePathPrefix        = "/dra/"
 )
 
 // GRES identifies a Slurm generic resource by name and type.
@@ -51,4 +63,119 @@ func (n NodeInventory) GRES() ([]GRESInventory, error) {
 		}
 	}
 	return inventory, nil
+}
+
+func (g GRESInventory) appliedInventoryEntry() (string, []string, error) {
+	profileName := g.GRES.Type
+	if profileName == "" {
+		return "", nil, fmt.Errorf("cannot encode applied inventory with an empty device profile name")
+	}
+	devices := make([]string, len(g.Devices))
+	for i, device := range g.Devices {
+		path, err := encodeDevicePath(device)
+		if err != nil {
+			return "", nil, fmt.Errorf("encode device profile %q index %d: %w", profileName, i, err)
+		}
+		devices[i] = path
+	}
+	return profileName, devices, nil
+}
+
+// AppliedInventory records the DRA device represented by each Slurm index,
+// keyed by stable DeviceProfile name.
+type AppliedInventory map[string][]DeviceIdentity
+
+type appliedInventoryWire struct {
+	Version int `json:"v"`
+	// The profile name is also the Slurm GRES type. The GRES name is omitted
+	// because the DeviceProfile registry supplies it.
+	Profiles map[string][]string `json:"profiles"`
+}
+
+// EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node
+// comment. Device array position is the Slurm GRES index.
+func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
+	profiles := make(map[string][]string, len(inventory))
+	for _, gres := range inventory {
+		profileName, devices, err := gres.appliedInventoryEntry()
+		if err != nil {
+			return "", err
+		}
+		if _, ok := profiles[profileName]; ok {
+			return "", fmt.Errorf("cannot encode duplicate device profile %q", profileName)
+		}
+		profiles[profileName] = devices
+	}
+
+	data, err := json.Marshal(appliedInventoryWire{
+		Version:  appliedInventoryVersion,
+		Profiles: profiles,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode applied inventory: %w", err)
+	}
+	return appliedInventoryCommentPrefix + string(data), nil
+}
+
+// DecodeAppliedInventory decodes the profile-to-index mapping stored in a
+// Slurm node comment.
+func DecodeAppliedInventory(comment string) (AppliedInventory, error) {
+	data, ok := strings.CutPrefix(comment, appliedInventoryCommentPrefix)
+	if !ok {
+		return nil, fmt.Errorf("slurm node comment does not contain a DRA GRES map")
+	}
+
+	var wire appliedInventoryWire
+	if err := json.Unmarshal([]byte(data), &wire); err != nil {
+		return nil, fmt.Errorf("decode applied inventory: %w", err)
+	}
+	if wire.Version != appliedInventoryVersion {
+		return nil, fmt.Errorf("unsupported applied inventory version %d", wire.Version)
+	}
+	if wire.Profiles == nil {
+		return nil, fmt.Errorf("applied inventory has no profiles map")
+	}
+
+	inventory := make(AppliedInventory, len(wire.Profiles))
+	for profileName, paths := range wire.Profiles {
+		if profileName == "" {
+			return nil, fmt.Errorf("applied inventory contains an empty device profile name")
+		}
+		devices := make([]DeviceIdentity, len(paths))
+		for i, path := range paths {
+			device, err := decodeDevicePath(path)
+			if err != nil {
+				return nil, fmt.Errorf("decode device profile %q index %d: %w", profileName, i, err)
+			}
+			devices[i] = device
+		}
+		inventory[profileName] = devices
+	}
+	return inventory, nil
+}
+
+func encodeDevicePath(device DeviceIdentity) (string, error) {
+	driver := device.Driver.String()
+	pool := device.Pool.String()
+	name := device.Device.String()
+	if driver == "" || pool == "" || name == "" {
+		return "", fmt.Errorf("DRA device identity must contain a driver, pool, and device name")
+	}
+	return devicePathPrefix + driver + "/" + pool + "/" + name, nil
+}
+
+func decodeDevicePath(path string) (DeviceIdentity, error) {
+	identity, ok := strings.CutPrefix(path, devicePathPrefix)
+	if !ok {
+		return DeviceIdentity{}, fmt.Errorf("device path %q must start with %q", path, devicePathPrefix)
+	}
+	driver, poolAndDevice, ok := strings.Cut(identity, "/")
+	if !ok {
+		return DeviceIdentity{}, fmt.Errorf("device path %q must contain a driver, pool, and device name", path)
+	}
+	lastSlash := strings.LastIndexByte(poolAndDevice, '/')
+	if driver == "" || lastSlash <= 0 || lastSlash == len(poolAndDevice)-1 {
+		return DeviceIdentity{}, fmt.Errorf("device path %q must contain a driver, pool, and device name", path)
+	}
+	return structured.MakeDeviceID(driver, poolAndDevice[:lastSlash], poolAndDevice[lastSlash+1:]), nil
 }
