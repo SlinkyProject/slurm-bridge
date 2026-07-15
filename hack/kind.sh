@@ -12,6 +12,8 @@ SLURM_BRIDGE_TMP="$(mktemp -d)"
 trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
+LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
+LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 
 MIN_KIND_VERSION="0.32.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
@@ -270,6 +272,7 @@ function slurm-bridge::prerequisites() {
 	scheduler-plugins::install
 	jobset::install
 	lws::install
+	storage::install_default_local_path
 
 	echo "[slurm-bridge] Installing slurm (operator + slurm chart)..."
 	slurm-stack::install
@@ -310,6 +313,31 @@ function lws::install() {
 		local version="0.8.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
+	fi
+}
+
+function storage::has_default_class() {
+	kubectl get storageclass \
+		-o go-template='{{range .items}}{{if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (eq (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class") "true")}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null |
+		grep -q .
+}
+
+function storage::install_default_local_path() {
+	if storage::has_default_class; then
+		echo "[storage] Default StorageClass already exists."
+		return
+	fi
+
+	echo "[storage] No default StorageClass found; installing local-path provisioner..."
+	helm upgrade --install local-path-provisioner "$LOCAL_PATH_PROVISIONER_CHART" \
+		--version "$LOCAL_PATH_PROVISIONER_VERSION" \
+		--namespace local-path-storage --create-namespace \
+		--set storageClass.defaultClass=true \
+		--set storageClass.provisionerName=rancher.io/local-path \
+		--wait --timeout=120s
+	if ! storage::has_default_class; then
+		echo "[storage] local-path provisioner installed, but no default StorageClass was found." >&2
+		exit 1
 	fi
 }
 
