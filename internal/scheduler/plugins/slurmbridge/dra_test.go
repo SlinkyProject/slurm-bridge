@@ -723,7 +723,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		ObjectMeta: metav1.ObjectMeta{Name: className},
 		Spec: resourcev1.DeviceClassSpec{
 			Selectors: []resourcev1.DeviceSelector{{
-				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "gpu.example.com"`},
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
 			}},
 		},
 	}

@@ -938,7 +938,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			Spec: resourcev1.DeviceClassSpec{
 				Selectors: []resourcev1.DeviceSelector{{
 					CEL: &resourcev1.CELDeviceSelector{
-						Expression: `device.driver == "gpu.example.com"`,
+						Expression: `device.driver == 'gpu.example.com'`,
 					},
 				}},
 			},
@@ -1011,7 +1011,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 
 	t.Run("non-canonical selector", func(t *testing.T) {
 		class := validClass()
-		class.Spec.Selectors[0].CEL.Expression = `device.driver == 'gpu.example.com'`
+		class.Spec.Selectors[0].CEL.Expression = `device.driver == "gpu.example.com"`
 		pod := newPod()
 		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
 			deviceResource: resource.MustParse("1"),

@@ -25,7 +25,7 @@ func DefaultRegistry() *Registry {
 	profile := DeviceProfile{
 		Name:     "gpu-example",
 		Driver:   "gpu.example.com",
-		Selector: `device.driver == "gpu.example.com"`,
+		Selector: `device.driver == 'gpu.example.com'`,
 		Backend: IndexedGRESBackend{
 			GRESName: "gpu",
 		},
