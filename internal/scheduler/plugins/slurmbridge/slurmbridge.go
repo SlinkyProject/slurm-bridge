@@ -223,6 +223,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
+	if err := validateDeviceClassRequestsForPods(s.slurmJobIR.Pods.Items); err != nil {
+		logger.Error(err, "unsupported DRA extended resource request")
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
 
 	// If an externalJob exists and a node has been allocated, return immediately
 	// as another pod has determined the external job is running and assigned
