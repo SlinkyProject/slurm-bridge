@@ -93,6 +93,29 @@ func TestNodeInventoryGRESRejectsInvalidProfiles(t *testing.T) {
 	}
 }
 
+func TestGRESInventorySlurmConfig(t *testing.T) {
+	inventory := GRESInventory{
+		GRES: GRES{Name: "gpu", Type: "gpu-example"},
+		Devices: []DeviceIdentity{
+			deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
+			deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
+		},
+	}
+
+	gres, gresConf, err := inventory.SlurmConfig()
+	if err != nil {
+		t.Fatalf("GRESInventory.SlurmConfig() error = %v", err)
+	}
+	if want := "gpu:gpu-example:2"; gres != want {
+		t.Fatalf("GRESInventory.SlurmConfig() Gres = %q, want %q", gres, want)
+	}
+	wantConf := "count=1,name=gpu,type=gpu-example,file=/dra/gpu.example.com/pool-a/gpu-0+" +
+		"count=1,name=gpu,type=gpu-example,file=/dra/gpu.example.com/pool-a/gpu-1"
+	if gresConf != wantConf {
+		t.Fatalf("GRESInventory.SlurmConfig() GresConf = %q, want %q", gresConf, wantConf)
+	}
+}
+
 func TestAppliedInventoryRoundTrip(t *testing.T) {
 	inventory := []GRESInventory{
 		{
@@ -185,12 +208,12 @@ func TestDecodeAppliedInventoryRejectsInvalidComment(t *testing.T) {
 		wantErr string
 	}{
 		{name: "wrong prefix", comment: `{}`, wantErr: "does not contain a DRA GRES map"},
-		{name: "invalid JSON", comment: appliedInventoryCommentPrefix + `{`, wantErr: "decode applied inventory"},
-		{name: "unknown version", comment: appliedInventoryCommentPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
-		{name: "missing profiles", comment: appliedInventoryCommentPrefix + `{"v":1}`, wantErr: "has no profiles map"},
-		{name: "empty profile", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
-		{name: "invalid path prefix", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
-		{name: "incomplete path", comment: appliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
+		{name: "invalid JSON", comment: AppliedInventoryCommentPrefix + `{`, wantErr: "decode applied inventory"},
+		{name: "unknown version", comment: AppliedInventoryCommentPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
+		{name: "missing profiles", comment: AppliedInventoryCommentPrefix + `{"v":1}`, wantErr: "has no profiles map"},
+		{name: "empty profile", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
+		{name: "invalid path prefix", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
+		{name: "incomplete path", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
 	}
 
 	for _, tt := range tests {

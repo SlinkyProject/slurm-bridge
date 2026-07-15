@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -222,7 +224,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 	_, hasLabel := labels[wellknown.LabelExternalNode]
 
 	if hasLabel {
-		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, r.Client, node.Name)
+		nodeInfo, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
 			return err
 		}
@@ -231,7 +233,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			return err
 		}
 		if exists {
-			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo)
+			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo, draInventory)
 			if err != nil {
 				return err
 			}
@@ -241,7 +243,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 				}
 			}
 		}
-		if err := r.slurmControl.AddNode(ctx, node, nodeInfo); err != nil {
+		if err := r.slurmControl.AddNode(ctx, node, nodeInfo, draInventory); err != nil {
 			return err
 		}
 	} else {
@@ -260,6 +262,24 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 	}
 
 	return nil
+}
+
+func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *corev1.Node) (*nodeinfo.NodeInfo, []dra.GRESInventory, error) {
+	resourceSlices := &resourcev1.ResourceSliceList{}
+	if err := r.List(ctx, resourceSlices); err != nil {
+		return nil, nil, err
+	}
+
+	legacy := nodeinfo.NewNodeInfoFromResourceSlices(ctx, node.Name, resourceSlices.Items)
+	nodeInventory, err := dra.BuildNodeInventory(ctx, r.draRegistry, node, resourceSlices.Items)
+	if err != nil {
+		return nil, nil, err
+	}
+	gresInventory, err := nodeInventory.GRES()
+	if err != nil {
+		return nil, nil, err
+	}
+	return legacy, gresInventory, nil
 }
 
 func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) error {

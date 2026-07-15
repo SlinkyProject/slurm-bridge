@@ -13,7 +13,9 @@ import (
 )
 
 const (
-	appliedInventoryCommentPrefix = "slurm-bridge.dra-gres-map="
+	// AppliedInventoryCommentPrefix identifies node comments owned by the DRA
+	// GRES inventory integration.
+	AppliedInventoryCommentPrefix = "slurm-bridge.dra-gres-map="
 	// appliedInventoryVersion records the version of the format used for storing DRA device identities in Slurm
 	// node comments. This version is required if the format changes in future.
 	appliedInventoryVersion = 1
@@ -81,6 +83,28 @@ func (g GRESInventory) appliedInventoryEntry() (string, []string, error) {
 	return profileName, devices, nil
 }
 
+// SlurmConfig returns the Gres and GresConf entries for this inventory.
+func (g GRESInventory) SlurmConfig() (string, string, error) {
+	profileName, devices, err := g.appliedInventoryEntry()
+	if err != nil {
+		return "", "", err
+	}
+	if g.GRES.Name == "" {
+		return "", "", fmt.Errorf("cannot configure device profile %q with an empty Slurm GRES name", profileName)
+	}
+	if len(devices) == 0 {
+		return "", "", fmt.Errorf("cannot configure device profile %q without devices", profileName)
+	}
+
+	gresConf := make([]string, len(devices))
+	for i, device := range devices {
+		gresConf[i] = fmt.Sprintf("count=1,name=%s,type=%s,file=%s", g.GRES.Name, profileName, device)
+	}
+	// Dynamic-node GresConf records are separated by '+'. One record per
+	// device preserves the array order as Slurm's GRES index order.
+	return fmt.Sprintf("%s:%d", g.GRES.String(), len(devices)), strings.Join(gresConf, "+"), nil
+}
+
 // AppliedInventory records the DRA device represented by each Slurm index,
 // keyed by stable DeviceProfile name.
 type AppliedInventory map[string][]DeviceIdentity
@@ -114,13 +138,13 @@ func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode applied inventory: %w", err)
 	}
-	return appliedInventoryCommentPrefix + string(data), nil
+	return AppliedInventoryCommentPrefix + string(data), nil
 }
 
 // DecodeAppliedInventory decodes the profile-to-index mapping stored in a
 // Slurm node comment.
 func DecodeAppliedInventory(comment string) (AppliedInventory, error) {
-	data, ok := strings.CutPrefix(comment, appliedInventoryCommentPrefix)
+	data, ok := strings.CutPrefix(comment, AppliedInventoryCommentPrefix)
 	if !ok {
 		return nil, fmt.Errorf("slurm node comment does not contain a DRA GRES map")
 	}

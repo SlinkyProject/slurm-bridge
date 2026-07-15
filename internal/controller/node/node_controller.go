@@ -27,6 +27,7 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
 )
 
@@ -61,6 +62,7 @@ type NodeReconciler struct {
 	EventCh       chan event.GenericEvent
 
 	slurmControl  slurmcontrol.SlurmControlInterface
+	draRegistry   *dra.Registry
 	eventRecorder record.EventRecorderLogger
 }
 
@@ -102,6 +104,9 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.draRegistry == nil {
+		r.draRegistry = dra.DefaultRegistry()
+	}
 	nodeEventHandler := &nodeEventHandler{
 		Reader: mgr.GetCache(),
 	}
@@ -135,6 +140,7 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		EventCh:       eventCh,
 		SlurmClient:   slurmClient,
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		draRegistry:   dra.DefaultRegistry(),
 		eventRecorder: eventRecorder,
 	}
 	return r

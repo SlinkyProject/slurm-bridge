@@ -22,6 +22,7 @@ import (
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -42,11 +43,11 @@ type SlurmControlInterface interface {
 	// IsNodeExternal checks if the slurm node is an external node
 	IsNodeExternal(ctx context.Context, node *corev1.Node) (bool, error)
 	// AddNode registers a Kubernetes node in Slurm with the correct CPUs and memory.
-	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) error
+	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error
 	// NodeNeedsRecreate returns true if the Slurm node exists and its cpu, memory, or gres
 	// differ from the desired values (from the Kubernetes node and nodeInfo). Such a node
 	// must be drained, removed, and re-added to apply the change.
-	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) (bool, error)
+	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error)
 	// RemoveNode removes a Kubernetes node from Slurm.
 	RemoveNode(ctx context.Context, node *corev1.Node) error
 }
@@ -201,7 +202,7 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 }
 
 // NodeNeedsRecreate implements SlurmControlInterface.
-func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) (bool, error) {
+func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
@@ -213,23 +214,26 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 
 	desiredCpus := node.Status.Capacity.Cpu().Value()
 	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
-	desiredGres := ""
-	if nodeInfo != nil {
-		desiredGres, _ = nodeInfo.GetGresAndGresConf()
+	desiredGRES, err := buildNodeGRESConfig(nodeInfo, draInventory)
+	if err != nil {
+		return false, err
 	}
 
 	currentCpus := int64(ptr.Deref(slurmNode.Cpus, 0))
 	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
 	currentGres := ptr.Deref(slurmNode.Gres, "")
+	currentComment := ptr.Deref(slurmNode.Comment, "")
+	commentChanged := desiredGRES.comment != currentComment &&
+		(desiredGRES.comment != "" || strings.HasPrefix(currentComment, dra.AppliedInventoryCommentPrefix))
 
-	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGres != currentGres {
+	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGRES.gres != currentGres || commentChanged {
 		return true, nil
 	}
 	return false, nil
 }
 
 // AddNode implements SlurmControlInterface.
-func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) error {
+func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error {
 	logger := log.FromContext(ctx)
 
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
@@ -259,9 +263,9 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	memoryBytes := node.Status.Capacity.Memory().Value()
 	memoryMB := memoryBytes / (1024 * 1024)
 
-	gres, gresConf := "", ""
-	if nodeInfo != nil {
-		gres, gresConf = nodeInfo.GetGresAndGresConf()
+	gresConfig, err := buildNodeGRESConfig(nodeInfo, draInventory)
+	if err != nil {
+		return err
 	}
 
 	annotations := node.GetAnnotations()
@@ -286,8 +290,8 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	if topologySpec, ok := annotations[wellknown.AnnotationNodeTopologySpec]; ok && topologySpec != "" {
 		nodeConf += fmt.Sprintf(" Topology=%s", topologySpec)
 	}
-	nodeConf += fmt.Sprintf(" Gres=\"%s\"", gres)
-	nodeConf += fmt.Sprintf(" GresConf=\"%s\"", gresConf)
+	nodeConf += fmt.Sprintf(" Gres=\"%s\"", gresConfig.gres)
+	nodeConf += fmt.Sprintf(" GresConf=\"%s\"", gresConfig.gresConf)
 
 	logger.Info("Adding Kubernetes node to Slurm",
 		"node", klog.KObj(node),
@@ -296,8 +300,8 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		"memoryMB", memoryMB,
 		"features", features,
 		"topology", annotations[wellknown.AnnotationNodeTopologySpec],
-		"gres", gres,
-		"gresConf", gresConf)
+		"gres", gresConfig.gres,
+		"gresConf", gresConfig.gresConf)
 
 	req := api.V0044OpenapiCreateNodeReq{
 		NodeConf: nodeConf,
@@ -307,8 +311,56 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 			"slurmNode", slurmNodeName)
 		return err
 	}
+	if gresConfig.comment != "" {
+		createdNode := &slurmtypes.V0044Node{V0044Node: api.V0044Node{Name: ptr.To(slurmNodeName)}}
+		req := api.V0044UpdateNodeMsg{Comment: ptr.To(gresConfig.comment)}
+		if err := r.Update(ctx, createdNode, req); err != nil {
+			return fmt.Errorf("could not record applied DRA inventory on Slurm node %q: %w", slurmNodeName, err)
+		}
+	}
 
 	return nil
+}
+
+type nodeGRESConfig struct {
+	gres     string
+	gresConf string
+	comment  string
+}
+
+func buildNodeGRESConfig(nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (nodeGRESConfig, error) {
+	var gresEntries, gresConfEntries []string
+	if nodeInfo != nil && (len(draInventory) == 0 || nodeInfo.GpuMap.Driver != nodeinfo.DraExampleDriver) {
+		gres, gresConf := nodeInfo.GetGresAndGresConf()
+		if gres != "" {
+			gresEntries = append(gresEntries, gres)
+		}
+		if gresConf != "" {
+			gresConfEntries = append(gresConfEntries, gresConf)
+		}
+	}
+
+	for _, inventory := range draInventory {
+		gres, gresConf, err := inventory.SlurmConfig()
+		if err != nil {
+			return nodeGRESConfig{}, err
+		}
+		gresEntries = append(gresEntries, gres)
+		gresConfEntries = append(gresConfEntries, gresConf)
+	}
+
+	config := nodeGRESConfig{
+		gres:     strings.Join(gresEntries, ","),
+		gresConf: strings.Join(gresConfEntries, "+"),
+	}
+	if len(draInventory) > 0 {
+		comment, err := dra.EncodeAppliedInventory(draInventory)
+		if err != nil {
+			return nodeGRESConfig{}, err
+		}
+		config.comment = comment
+	}
+	return config, nil
 }
 
 // updateNodeTopology updates an existing Slurm node so its dynamic topology
