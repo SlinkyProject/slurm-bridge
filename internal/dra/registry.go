@@ -4,7 +4,9 @@
 package dra
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 
 	resourcev1 "k8s.io/api/resource/v1"
 )
@@ -30,7 +32,7 @@ func DefaultRegistry() *Registry {
 	}
 	return &Registry{
 		byName: map[string]DeviceProfile{
-			profile.Name: profile,
+			profile.ID(): profile,
 		},
 		bySelector: map[string]DeviceProfile{
 			profile.Selector: profile,
@@ -38,7 +40,7 @@ func DefaultRegistry() *Registry {
 	}
 }
 
-// LookupByName returns the profile with the given stable profile name.
+// LookupByName returns the profile with the given driver-qualified name.
 func (r *Registry) LookupByName(name string) (DeviceProfile, bool) {
 	profile, ok := r.byName[name]
 	return profile, ok
@@ -49,6 +51,20 @@ func (r *Registry) LookupByName(name string) (DeviceProfile, bool) {
 func (r *Registry) LookupBySelector(selector string) (DeviceProfile, bool) {
 	profile, ok := r.bySelector[selector]
 	return profile, ok
+}
+
+// profilesForDriver returns profiles for driver ordered by profile name.
+func (r *Registry) profilesForDriver(driver string) []DeviceProfile {
+	profiles := make([]DeviceProfile, 0)
+	for _, profile := range r.byName {
+		if profile.Driver == driver {
+			profiles = append(profiles, profile)
+		}
+	}
+	slices.SortFunc(profiles, func(a, b DeviceProfile) int {
+		return cmp.Compare(a.ID(), b.ID())
+	})
+	return profiles
 }
 
 // MatchDeviceClass validates a DeviceClass and returns its matching profile.

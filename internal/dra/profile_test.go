@@ -24,3 +24,10 @@ func TestBackendString(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceProfileID(t *testing.T) {
+	profile := DeviceProfile{Driver: "gpu.example.com", Name: "gpu-example"}
+	if got, want := profile.ID(), "gpu.example.com:gpu-example"; got != want {
+		t.Fatalf("DeviceProfile.ID() = %q, want %q", got, want)
+	}
+}

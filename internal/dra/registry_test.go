@@ -21,7 +21,7 @@ func TestDefaultRegistry(t *testing.T) {
 	}
 	registry := DefaultRegistry()
 
-	if got, ok := registry.LookupByName(want.Name); !ok || !reflect.DeepEqual(got, want) {
+	if got, ok := registry.LookupByName(want.ID()); !ok || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Registry.LookupByName() = (%#v, %t), want (%#v, true)", got, ok, want)
 	}
 	if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
@@ -33,11 +33,23 @@ func TestRegistryLookupsAreExact(t *testing.T) {
 	registry := DefaultRegistry()
 	selector := `device.driver == "gpu.example.com"`
 
-	if _, ok := registry.LookupByName("GPU-example"); ok {
+	if _, ok := registry.LookupByName("gpu.example.com:GPU-example"); ok {
 		t.Fatal("Registry.LookupByName() accepted a non-canonical name")
 	}
 	if _, ok := registry.LookupBySelector(" " + selector); ok {
 		t.Fatal("Registry.LookupBySelector() accepted a non-canonical selector")
+	}
+}
+
+func TestRegistryProfilesForDriver(t *testing.T) {
+	registry := DefaultRegistry()
+	profile, _ := registry.LookupByName("gpu.example.com:gpu-example")
+
+	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{profile}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{profile})
+	}
+	if got := registry.profilesForDriver("unsupported.example.com"); len(got) != 0 {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want no profiles", got)
 	}
 }
 
@@ -63,7 +75,7 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
 		}
-		want, _ := registry.LookupByName("gpu-example")
+		want, _ := registry.LookupByName("gpu.example.com:gpu-example")
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
 		}
