@@ -249,8 +249,8 @@ the chain was successfully resolved.
 PodGroup is a built-in Kubernetes API introduced in **1.36**. This section
 applies to clusters running **1.36+** with the **`GenericWorkload`** feature
 gate and **`scheduling.k8s.io/v1alpha2`** API enabled (see
-[`hack/kind.yaml`](../hack/kind.yaml) and `make demo-examples`). After
-slurm-bridge assigns nodes to the gang, PodGroup `STATUS` becomes **Scheduled**
+[`hack/kind.yaml`](../hack/kind.yaml) and `make kind-start`). After slurm-bridge
+assigns nodes to the gang, PodGroup `STATUS` becomes **Scheduled**
 (`PodGroupScheduled=True`); it is not tied to Job completion.
 
 A [**Workload**][workload-api] defines immutable **`podGroupTemplates`** (gang
