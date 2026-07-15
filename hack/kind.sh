@@ -8,7 +8,8 @@ set -euo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
-SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
+SLURM_BRIDGE_TMP="$(mktemp -d)"
+trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 
