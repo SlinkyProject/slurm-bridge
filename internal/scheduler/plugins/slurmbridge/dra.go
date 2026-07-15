@@ -25,10 +25,10 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
-// manageResourceClaim will create DRA ResourceClaims for each
-// Slurm GRES type that matches a DRA DeviceClass name. Additionally,
-// a ResourceClaim for CPUs will be generated when the pod explicitly
-// requests the CPU DRA extended resource.
+// manageResourceClaim creates DRA ResourceClaims for Slurm GRES allocations
+// resolved through an indexed-GRES DeviceProfile or the legacy driver-specific
+// path. It also creates a CPU claim when the pod explicitly requests the CPU
+// DRA resource.
 func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) error {
 	claim, requestMappings, claimResources, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
 	if err != nil {
@@ -74,38 +74,59 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 	return nil
 }
 
-func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, *slurmcontrol.NodeResources, error) {
+func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, *claimAllocation, error) {
 	if pod == nil {
 		return nil, nil, nil, errors.New("expected a pod to be given")
 	}
-
-	nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
-	allocatedRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, resources, podRequestsCPUDRA)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	claimIncludesCPUDRARequest := hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String())
-	if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
-		return nil, nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
-	}
-
 	if resources == nil {
 		return nil, nil, nil, errors.New("expected node resources")
 	}
-	claimResources, err := subsetGRESResources(*resources, deviceClassRequestCounts(pod), deviceClassNames(allocatedRequests))
+
+	profileRequests, err := sb.deviceProfileRequests(ctx, pod)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, resources.Gres)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	legacyResources := resourcesWithoutIndexedGRESProfiles(*resources, indexedGRESAllocations)
+
+	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
+	var nodeInfo *nodeinfo.NodeInfo
+	var allocatedRequests []resourcev1.DeviceRequest
+	if podRequestsCPUDRA || len(legacyResources.Gres) > 0 {
+		nodeInfo, err = nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocatedRequests, err = nodeInfo.GetDeviceRequests(ctx, sb.Client, &legacyResources, podRequestsCPUDRA)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		claimIncludesCPUDRARequest := hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String())
+		if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
+			return nil, nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
+		}
+	}
+
+	requestedCounts := deviceClassRequestCounts(pod)
+	for _, allocation := range indexedGRESAllocations {
+		delete(requestedCounts, allocation.DeviceClassName)
+	}
+	claimResources, err := subsetGRESResources(legacyResources, requestedCounts, deviceClassNames(allocatedRequests))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	deviceRequests, err := nodeInfo.GetDeviceRequests(ctx, sb.Client, claimResources, podRequestsCPUDRA)
-	if err != nil {
-		return nil, nil, nil, err
+	var deviceRequests []resourcev1.DeviceRequest
+	if nodeInfo != nil {
+		deviceRequests, err = nodeInfo.GetDeviceRequests(ctx, sb.Client, claimResources, podRequestsCPUDRA)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
+	deviceRequests, indexedGRESAllocations = appendIndexedGRESRequests(deviceRequests, indexedGRESAllocations)
 
 	mappings, err := createContainerRequestMappings(pod, deviceRequests)
 	if err != nil {
@@ -141,7 +162,10 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		},
 	}
 
-	return claim, mappings, claimResources, nil
+	return claim, mappings, &claimAllocation{
+		NodeResources:          claimResources,
+		IndexedGRESAllocations: indexedGRESAllocations,
+	}, nil
 }
 
 // bindClaim gets called for claims which are not reserved for the pod yet.
@@ -152,18 +176,28 @@ func (sb *SlurmBridge) bindClaim(
 	claim *resourcev1.ResourceClaim,
 	pod *corev1.Pod,
 	nodeName string,
-	resources *slurmcontrol.NodeResources,
+	resources *claimAllocation,
 ) error {
-	nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
-	if err != nil {
-		return err
+	if resources == nil || resources.NodeResources == nil {
+		return errors.New("expected claim allocation resources")
 	}
-
 	claimIncludesCPUDRARequest := claimRequestsCPUDRA(claim)
-	devices, err := nodeInfo.GetDeviceRequestAllocationResult(ctx, sb.Client, resources, claimIncludesCPUDRARequest)
+	var devices []resourcev1.DeviceRequestAllocationResult
+	if claimIncludesCPUDRARequest || len(resources.NodeResources.Gres) > 0 {
+		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
+		if err != nil {
+			return err
+		}
+		devices, err = nodeInfo.GetDeviceRequestAllocationResult(ctx, sb.Client, resources.NodeResources, claimIncludesCPUDRARequest)
+		if err != nil {
+			return err
+		}
+	}
+	indexedGRESDevices, err := sb.indexedGRESAllocationResults(ctx, claim, resources)
 	if err != nil {
 		return err
 	}
+	devices = append(devices, indexedGRESDevices...)
 
 	toUpdate := claim.DeepCopy()
 
