@@ -91,16 +91,17 @@ push-charts: build-chart ## Push OCI packages.
 # Get the OS to set platform specific commands
 UNAME_S ?= $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	CP_FLAGS = -v -n
 	SED = gsed
 else
-	CP_FLAGS = -v --update=none
 	SED = sed
 endif
 
 .PHONY: values-dev
-values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
-	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | xargs -n2 cp $(CP_FLAGS)
+values-dev: ## Initialize sparse values-dev.yaml overrides for Helm charts.
+	find "helm/" -type f -name "values.yaml" | while read -r file; do \
+		dev="$${file%.yaml}-dev.yaml"; \
+		test -f "$$dev" || printf '{}\n' > "$$dev"; \
+	done
 
 ifndef ignore-not-found
   ignore-not-found = false
