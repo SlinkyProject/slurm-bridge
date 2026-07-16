@@ -49,3 +49,51 @@ func TestAllocateIndexedGRESProfilesIgnoresOtherBackends(t *testing.T) {
 		t.Fatalf("allocateIndexedGRESProfiles() = %#v, want no allocations", allocations)
 	}
 }
+
+func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
+	resources := slurmcontrol.NodeResources{
+		Node:        "node-a",
+		NodeComment: "inventory-comment",
+		Gres: []slurmcontrol.GresLayout{
+			{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
+			{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
+			{Name: "gpu", Type: "gpu.nvidia.com", Count: 1, Index: "3"},
+			{Name: "license", Type: "matlab", Count: 1},
+		},
+	}
+
+	profileResources, legacyResources, err := splitGRESResources(resources)
+	if err != nil {
+		t.Fatalf("splitGRESResources() error = %v", err)
+	}
+	wantProfile := []slurmcontrol.GresLayout{
+		{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
+	}
+	wantLegacy := []slurmcontrol.GresLayout{
+		{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
+		{Name: "gpu", Type: "gpu.nvidia.com", Count: 1, Index: "3"},
+		{Name: "license", Type: "matlab", Count: 1},
+	}
+	if !slices.Equal(profileResources.Gres, wantProfile) {
+		t.Errorf("profile resources = %#v, want %#v", profileResources.Gres, wantProfile)
+	}
+	if !slices.Equal(legacyResources.Gres, wantLegacy) {
+		t.Errorf("legacy resources = %#v, want %#v", legacyResources.Gres, wantLegacy)
+	}
+	if profileResources.Node != resources.Node || legacyResources.Node != resources.Node ||
+		profileResources.NodeComment != resources.NodeComment || legacyResources.NodeComment != resources.NodeComment {
+		t.Fatalf("split resources did not preserve node metadata: profile=%#v legacy=%#v", profileResources, legacyResources)
+	}
+	if len(resources.Gres) != 4 {
+		t.Fatalf("splitGRESResources() mutated its input: %#v", resources.Gres)
+	}
+}
+
+func TestSplitGRESResourcesRejectsWrongProfileGRESName(t *testing.T) {
+	_, _, err := splitGRESResources(slurmcontrol.NodeResources{
+		Gres: []slurmcontrol.GresLayout{{Name: "accelerator", Type: "gpu-example", Count: 1, Index: "0"}},
+	})
+	if err == nil {
+		t.Fatal("splitGRESResources() error = nil, want profile GRES name mismatch")
+	}
+}

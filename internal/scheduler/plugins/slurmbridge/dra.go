@@ -82,16 +82,19 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, nil, errors.New("expected node resources")
 	}
 
+	profileResources, legacyResources, err := splitGRESResources(*resources)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	profileRequests, err := sb.deviceProfileRequests(ctx, pod)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, resources.Gres)
+	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, profileResources.Gres)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	legacyResources := resourcesWithoutIndexedGRESProfiles(*resources, indexedGRESAllocations)
-
 	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
 	var nodeInfo *nodeinfo.NodeInfo
 	var allocatedRequests []resourcev1.DeviceRequest

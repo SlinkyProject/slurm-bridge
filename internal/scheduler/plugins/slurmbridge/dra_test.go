@@ -439,6 +439,81 @@ func hasContainerExtendedResourceRequest(mappings []corev1.ContainerExtendedReso
 	return false
 }
 
+func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *testing.T) {
+	ctx := context.Background()
+	const profileClass = "profile-gpus"
+	profileResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + profileClass)
+	legacyResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraExampleDriver)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "mixed-gpus"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "work",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				profileResource: resource.MustParse("1"),
+				legacyResource:  resource.MustParse("1"),
+			}},
+		}}},
+	}
+	resources := &slurmcontrol.NodeResources{
+		Node: "node1",
+		Gres: []slurmcontrol.GresLayout{
+			{Name: "gpu", Type: "gpu-example", Count: 1, Index: "0"},
+			{Name: "gpu", Type: nodeinfo.DraExampleDriver, Count: 1, Index: "1"},
+		},
+	}
+	kclient := fake.NewClientBuilder().WithObjects(
+		&resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: profileClass},
+			Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
+			}}},
+		},
+		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver}},
+	).Build()
+	sb := &SlurmBridge{Client: kclient}
+
+	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, resources.Node, resources)
+	if err != nil {
+		t.Fatalf("createRequestsAndMappings() error = %v", err)
+	}
+	if claim == nil || allocation == nil {
+		t.Fatalf("createRequestsAndMappings() = (%#v, %#v), want claim and allocation", claim, allocation)
+	}
+	if len(claim.Spec.Devices.Requests) != 2 {
+		t.Fatalf("claim requests = %#v, want profile and legacy requests", claim.Spec.Devices.Requests)
+	}
+
+	legacyRequest := claim.Spec.Devices.Requests[0]
+	if legacyRequest.Name != "gpu" || legacyRequest.Exactly == nil || legacyRequest.Exactly.DeviceClassName != nodeinfo.DraExampleDriver {
+		t.Errorf("legacy request = %#v, want gpu request for %q", legacyRequest, nodeinfo.DraExampleDriver)
+	}
+	profileRequest := claim.Spec.Devices.Requests[1]
+	if profileRequest.Name != "gpu-2" || profileRequest.Exactly == nil || profileRequest.Exactly.DeviceClassName != profileClass {
+		t.Errorf("profile request = %#v, want gpu-2 request for %q", profileRequest, profileClass)
+	}
+
+	if len(allocation.NodeResources.Gres) != 1 || allocation.NodeResources.Gres[0].Type != nodeinfo.DraExampleDriver {
+		t.Errorf("legacy claim resources = %#v, want only %q", allocation.NodeResources.Gres, nodeinfo.DraExampleDriver)
+	}
+	if len(allocation.IndexedGRESAllocations) != 1 ||
+		allocation.IndexedGRESAllocations[0].RequestName != "gpu-2" ||
+		!apiequality.Semantic.DeepEqual(allocation.IndexedGRESAllocations[0].Indexes, []int{0}) {
+		t.Errorf("indexed GRES allocations = %#v, want gpu-2 at index 0", allocation.IndexedGRESAllocations)
+	}
+
+	for _, want := range []corev1.ContainerExtendedResourceRequest{
+		{ContainerName: "work", RequestName: "gpu", ResourceName: string(legacyResource)},
+		{ContainerName: "work", RequestName: "gpu-2", ResourceName: string(profileResource)},
+	} {
+		if !hasContainerExtendedResourceRequest(mappings, want) {
+			t.Errorf("mappings = %#v, want %#v", mappings, want)
+		}
+	}
+	if len(resources.Gres) != 2 || resources.Gres[0].Type != "gpu-example" || resources.Gres[1].Type != nodeinfo.DraExampleDriver {
+		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres)
+	}
+}
+
 func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 	ctx := context.Background()
 	injectedErr := errors.New("injected client error")

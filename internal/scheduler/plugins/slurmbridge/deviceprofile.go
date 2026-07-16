@@ -107,8 +107,7 @@ func allocateIndexedGRESProfiles(requests []deviceProfileRequest, gresResources 
 			// TODO: Replace this implicit fallback with an explicit check for a job
 			// created by the legacy flow. A new indexed-GRES profile request without
 			// matching allocated profile GRES must fail closed.
-			// A pre-DeviceProfile Slurm node advertises the DeviceClass name as
-			// its GRES type. Leave that resource to the legacy path.
+			// A legacy-formatted allocation, if present, is handled separately.
 			continue
 		}
 		start := cursors[request.Profile.Name]
@@ -144,24 +143,42 @@ func expandGRESIndexes(gres slurmcontrol.GresLayout) ([]int, error) {
 	return indexes, nil
 }
 
-func resourcesWithoutIndexedGRESProfiles(resources slurmcontrol.NodeResources, allocations []indexedGRESAllocation) slurmcontrol.NodeResources {
-	allGRES := resources.Gres
-	allocatedGRES := make(map[dra.GRES]struct{}, len(allocations))
-	for _, allocation := range allocations {
-		gres, err := allocation.Profile.GRES()
-		if err == nil {
-			allocatedGRES[gres] = struct{}{}
-		}
-	}
+// splitGRESResources classifies allocated Slurm GRES by their actual
+// representation. A GRES type which is a registered DeviceProfile is handled
+// exclusively by the profile path, even when no request currently resolves to
+// it. All other GRES remain available to the legacy driver-specific path.
+//
+// TODO: Replace the registry-miss fallback with explicit, versioned recognition
+// of legacy driver-named GRES during upgrades. New unknown GPU GRES must fail
+// closed instead of implicitly entering the nodeinfo path.
+func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources, legacyResources slurmcontrol.NodeResources, err error) {
+	profileResources = resources
+	profileResources.Gres = nil
+	legacyResources = resources
+	legacyResources.Gres = nil
 
-	resources.Gres = nil
-	for _, resource := range allGRES {
-		if _, allocated := allocatedGRES[dra.GRES{Name: resource.Name, Type: resource.Type}]; allocated {
+	registry := dra.DefaultRegistry()
+	for _, resource := range resources.Gres {
+		profile, registered := registry.LookupByName(resource.Type)
+		if !registered {
+			legacyResources.Gres = append(legacyResources.Gres, resource)
 			continue
 		}
-		resources.Gres = append(resources.Gres, resource)
+
+		profileGRES, err := profile.GRES()
+		if err != nil {
+			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, err
+		}
+		if resource.Name != profileGRES.Name {
+			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, fmt.Errorf(
+				"allocated Slurm GRES type %q uses name %q, expected %q for DeviceProfile %q",
+				resource.Type, resource.Name, profileGRES.Name, profile.Name,
+			)
+		}
+		profileResources.Gres = append(profileResources.Gres, resource)
 	}
-	return resources
+
+	return profileResources, legacyResources, nil
 }
 
 func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations []indexedGRESAllocation) ([]resourcev1.DeviceRequest, []indexedGRESAllocation) {
