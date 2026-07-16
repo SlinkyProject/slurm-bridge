@@ -241,11 +241,25 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			want: []string{"node-a"},
 		},
 		{
-			name: "unsupported driver",
+			name: "node-local NVIDIA GPU slice",
 			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
 				Driver:   "gpu.nvidia.com",
 				NodeName: ptr.To("node-a"),
-				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+				Devices: []resourcev1.Device{{
+					Name: "gpu-0",
+					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"type": {StringValue: ptr.To("gpu")},
+					},
+				}},
+			}},
+			want: []string{"node-a"},
+		},
+		{
+			name: "unsupported driver",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "unsupported.example.com",
+				NodeName: ptr.To("node-a"),
+				Devices:  []resourcev1.Device{{Name: "device-0"}},
 			}},
 		},
 		{
@@ -283,6 +297,43 @@ func Test_resourceSliceToNodes(t *testing.T) {
 				t.Fatalf("resourceSliceToNodes() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+	resourceSlice := &resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-a-gpus"},
+		Spec: resourcev1.ResourceSliceSpec{
+			Driver:   "gpu.nvidia.com",
+			NodeName: ptr.To(node.Name),
+			Pool: resourcev1.ResourcePool{
+				Name:               node.Name,
+				Generation:         1,
+				ResourceSliceCount: 1,
+			},
+			Devices: []resourcev1.Device{{
+				Name: "gpu-0",
+				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					"type": {StringValue: ptr.To("gpu")},
+				},
+			}},
+		},
+	}
+	r := &NodeReconciler{
+		Client:      fake.NewClientBuilder().WithObjects(node, resourceSlice).Build(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	legacy, inventory, err := r.nodeRegistrationInventories(context.Background(), node)
+	if err != nil {
+		t.Fatalf("nodeRegistrationInventories() error = %v", err)
+	}
+	if len(legacy.GpuMap.GPUInfoMap) != 0 {
+		t.Fatalf("nodeRegistrationInventories() legacy GPU inventory = %#v, want none", legacy.GpuMap)
+	}
+	if len(inventory) != 1 || inventory[0].GRES != (dra.GRES{Name: "gpu", Type: "gpu-nvidia"}) {
+		t.Fatalf("nodeRegistrationInventories() profile inventory = %#v, want gpu:gpu-nvidia", inventory)
 	}
 }
 

@@ -275,6 +275,9 @@ func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *
 	if err != nil {
 		return nil, nil, err
 	}
+	if nodeInventory.HasDriver(legacy.GpuMap.Driver) {
+		legacy.GpuMap = nodeinfo.GPUMap{}
+	}
 	gresInventory, err := nodeInventory.GRES()
 	if err != nil {
 		return nil, nil, err

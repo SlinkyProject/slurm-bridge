@@ -24,6 +24,20 @@ func deviceIDForTest(driver, pool, device string) DeviceIdentity {
 	return structured.MakeDeviceID(driver, pool, device)
 }
 
+func TestNodeInventoryHasDriver(t *testing.T) {
+	inventory := NodeInventory{Profiles: []ProfileInventory{
+		{Profile: DeviceProfile{Name: "gpu-example", Driver: "gpu.example.com"}},
+		{Profile: DeviceProfile{Name: "gpu-nvidia", Driver: "gpu.nvidia.com"}},
+	}}
+
+	if !inventory.HasDriver("gpu.nvidia.com") {
+		t.Fatal("NodeInventory.HasDriver() = false for present driver")
+	}
+	if inventory.HasDriver("unsupported.example.com") {
+		t.Fatal("NodeInventory.HasDriver() = true for absent driver")
+	}
+}
+
 func TestBuildNodeInventory(t *testing.T) {
 	resourceSlice := func(nodeName, driver, pool string, devices ...string) resourcev1.ResourceSlice {
 		slice := resourcev1.ResourceSlice{
@@ -65,6 +79,35 @@ func TestBuildNodeInventory(t *testing.T) {
 					deviceIDForTest("gpu.example.com", "pool-a", "gpu-3"),
 					deviceIDForTest("gpu.example.com", "pool-b", "gpu-0"),
 					deviceIDForTest("gpu.example.com", "pool-b", "gpu-2"),
+				},
+			}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("BuildNodeInventory() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("classifies NVIDIA full GPUs", func(t *testing.T) {
+		slice := resourceSlice("node-a", "gpu.nvidia.com", "node-a", "gpu-1", "gpu-0-mig-1g.10gb-0-0", "gpu-0")
+		deviceTypes := []string{"gpu", "mig", "gpu"}
+		for i := range slice.Spec.Devices {
+			slice.Spec.Devices[i].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				"type": {StringValue: ptr.To(deviceTypes[i])},
+			}
+		}
+
+		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		profile, _ := DefaultRegistry().LookupByName("gpu-nvidia")
+		want := NodeInventory{
+			NodeName: "node-a",
+			Profiles: []ProfileInventory{{
+				Profile: profile,
+				Devices: []DeviceIdentity{
+					deviceIDForTest("gpu.nvidia.com", "node-a", "gpu-0"),
+					deviceIDForTest("gpu.nvidia.com", "node-a", "gpu-1"),
 				},
 			}},
 		}

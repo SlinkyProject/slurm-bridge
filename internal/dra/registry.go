@@ -22,7 +22,7 @@ type Registry struct {
 func DefaultRegistry() *Registry {
 	// Upstream DeviceClass:
 	// https://github.com/kubernetes-sigs/dra-example-driver/blob/v0.4.0/deployments/helm/dra-example-driver/templates/deviceclass.yaml
-	profile := DeviceProfile{
+	exampleGPU := DeviceProfile{
 		Name:     "gpu-example",
 		Driver:   "gpu.example.com",
 		Selector: `device.driver == 'gpu.example.com'`,
@@ -30,12 +30,24 @@ func DefaultRegistry() *Registry {
 			GRESName: "gpu",
 		},
 	}
+	// Upstream DeviceClass:
+	// https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.0/deployments/helm/dra-driver-nvidia-gpu/templates/deviceclass-gpu.yaml
+	nvidiaGPU := DeviceProfile{
+		Name:     "gpu-nvidia",
+		Driver:   "gpu.nvidia.com",
+		Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
+		Backend: IndexedGRESBackend{
+			GRESName: "gpu",
+		},
+	}
 	return &Registry{
 		byName: map[string]DeviceProfile{
-			profile.Name: profile,
+			exampleGPU.Name: exampleGPU,
+			nvidiaGPU.Name:  nvidiaGPU,
 		},
 		bySelector: map[string]DeviceProfile{
-			profile.Selector: profile,
+			exampleGPU.Selector: exampleGPU,
+			nvidiaGPU.Selector:  nvidiaGPU,
 		},
 	}
 }

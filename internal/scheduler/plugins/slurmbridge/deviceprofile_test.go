@@ -31,6 +31,26 @@ func TestAllocateIndexedGRESProfilesPartitionsAliases(t *testing.T) {
 	}
 }
 
+func TestAllocateIndexedGRESProfilesUsesNVIDIAProfile(t *testing.T) {
+	profile, ok := dra.DefaultRegistry().LookupByName("gpu-nvidia")
+	if !ok {
+		t.Fatal("default registry does not contain gpu-nvidia")
+	}
+	allocations, err := allocateIndexedGRESProfiles([]deviceProfileRequest{{
+		DeviceClassName: "gpu.nvidia.com",
+		Profile:         profile,
+		Count:           2,
+	}}, []slurmcontrol.GresLayout{{
+		Name: "gpu", Type: "gpu-nvidia", Count: 2, Index: "3,1",
+	}})
+	if err != nil {
+		t.Fatalf("allocateIndexedGRESProfiles() error = %v", err)
+	}
+	if len(allocations) != 1 || !slices.Equal(allocations[0].Indexes, []int{3, 1}) {
+		t.Fatalf("allocateIndexedGRESProfiles() = %#v, want indexes [3 1]", allocations)
+	}
+}
+
 func TestAllocateIndexedGRESProfilesIgnoresOtherBackends(t *testing.T) {
 	requests := []deviceProfileRequest{{
 		DeviceClassName: "cpu-class",
@@ -56,6 +76,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		NodeExtra: "inventory-extra",
 		Gres: []slurmcontrol.GresLayout{
 			{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
+			{Name: "gpu", Type: "gpu-nvidia", Count: 1, Index: "1"},
 			{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
 			{Name: "gpu", Type: "gpu.nvidia.com", Count: 1, Index: "3"},
 			{Name: "license", Type: "matlab", Count: 1},
@@ -68,6 +89,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 	}
 	wantProfile := []slurmcontrol.GresLayout{
 		{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
+		{Name: "gpu", Type: "gpu-nvidia", Count: 1, Index: "1"},
 	}
 	wantLegacy := []slurmcontrol.GresLayout{
 		{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
@@ -84,7 +106,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		profileResources.NodeExtra != resources.NodeExtra || legacyResources.NodeExtra != resources.NodeExtra {
 		t.Fatalf("split resources did not preserve node metadata: profile=%#v legacy=%#v", profileResources, legacyResources)
 	}
-	if len(resources.Gres) != 4 {
+	if len(resources.Gres) != 5 {
 		t.Fatalf("splitGRESResources() mutated its input: %#v", resources.Gres)
 	}
 }

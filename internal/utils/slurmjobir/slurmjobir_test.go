@@ -586,6 +586,32 @@ func TestTranslatorParseGPUResourcesUsesDeviceProfile(t *testing.T) {
 	}
 }
 
+func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
+	const className = "gpu.nvidia.com"
+	deviceClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec: resourcev1.DeviceClassSpec{
+			Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
+			}},
+		},
+	}
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
+	}}}
+	translator := translator{
+		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:    context.Background(),
+	}
+
+	if err := translator.parseGPUResources(ir); err != nil {
+		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	}
+	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
+		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
+	}
+}
+
 func TestTranslatorParseGPUResourcesCombinesProfileAliases(t *testing.T) {
 	newClass := func(name string) *resourcev1.DeviceClass {
 		return &resourcev1.DeviceClass{
