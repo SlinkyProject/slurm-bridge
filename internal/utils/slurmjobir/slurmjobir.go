@@ -223,6 +223,11 @@ func (t *translator) podGPUResources(pod *corev1.Pod, deviceClassCache map[strin
 		if name == cpuDRADeviceClassExtendedName {
 			continue
 		}
+		// Backend selection is deliberately resource-name based. In
+		// particular, nvidia.com/gpu remains the NVIDIA device-plugin
+		// resource even when a DeviceClass declares it as its
+		// spec.extendedResourceName. Only the implicit
+		// deviceclass.resource.kubernetes.io/<class> form selects DRA.
 		if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
 			addGRESQuantity(resources, dra.GRES{Name: "gpu"}, quantity)
 			continue

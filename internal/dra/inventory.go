@@ -39,16 +39,6 @@ type NodeInventory struct {
 	Profiles []ProfileInventory
 }
 
-// HasDriver reports whether the node inventory contains a profile for driver.
-func (n NodeInventory) HasDriver(driver string) bool {
-	for _, inventory := range n.Profiles {
-		if inventory.Profile.Driver == driver {
-			return true
-		}
-	}
-	return false
-}
-
 type resourcePoolID struct {
 	Driver string
 	Pool   string

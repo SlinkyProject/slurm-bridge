@@ -44,10 +44,10 @@ type SlurmControlInterface interface {
 	IsNodeExternal(ctx context.Context, node *corev1.Node) (bool, error)
 	// AddNode registers a Kubernetes node in Slurm with the correct CPUs and memory.
 	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error
-	// NodeNeedsRecreate returns true if the Slurm node exists and its cpu, memory, or gres
-	// differ from the desired values (from the Kubernetes node and nodeInfo). Such a node
+	// NodeNeedsRecreate returns true if the Slurm node exists and its CPU, memory, or GRES
+	// differ from the desired values. Such a node
 	// must be drained, removed, and re-added to apply the change.
-	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error)
+	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) (bool, error)
 	// RemoveNode removes a Kubernetes node from Slurm.
 	RemoveNode(ctx context.Context, node *corev1.Node) error
 }
@@ -202,7 +202,7 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 }
 
 // NodeNeedsRecreate implements SlurmControlInterface.
-func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error) {
+func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
@@ -214,7 +214,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 
 	desiredCpus := node.Status.Capacity.Cpu().Value()
 	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
-	desiredGRES, err := buildNodeGRESConfig(nodeInfo, draInventory)
+	desiredGRES, err := buildNodeGRESConfig(draInventory)
 	if err != nil {
 		return false, err
 	}
@@ -263,7 +263,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	memoryBytes := node.Status.Capacity.Memory().Value()
 	memoryMB := memoryBytes / (1024 * 1024)
 
-	gresConfig, err := buildNodeGRESConfig(nodeInfo, draInventory)
+	gresConfig, err := buildNodeGRESConfig(draInventory)
 	if err != nil {
 		return err
 	}
@@ -328,18 +328,8 @@ type nodeGRESConfig struct {
 	extra    string
 }
 
-func buildNodeGRESConfig(nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (nodeGRESConfig, error) {
+func buildNodeGRESConfig(draInventory []dra.GRESInventory) (nodeGRESConfig, error) {
 	var gresEntries, gresConfEntries []string
-	if nodeInfo != nil && (len(draInventory) == 0 || nodeInfo.GpuMap.Driver != nodeinfo.DraExampleDriver) {
-		gres, gresConf := nodeInfo.GetGresAndGresConf()
-		if gres != "" {
-			gresEntries = append(gresEntries, gres)
-		}
-		if gresConf != "" {
-			gresConfEntries = append(gresConfEntries, gresConf)
-		}
-	}
-
 	for _, inventory := range draInventory {
 		gres, gresConf, err := inventory.SlurmConfig()
 		if err != nil {

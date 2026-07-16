@@ -591,6 +591,7 @@ func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
 		Spec: resourcev1.DeviceClassSpec{
+			ExtendedResourceName: ptr.To(nvidiaDevicePlugin),
 			Selectors: []resourcev1.DeviceSelector{{
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
 			}},
@@ -609,6 +610,32 @@ func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 	}
 	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
 		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
+	}
+}
+
+func TestTranslatorParseGPUResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(t *testing.T) {
+	deviceClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu.nvidia.com"},
+		Spec: resourcev1.DeviceClassSpec{
+			ExtendedResourceName: ptr.To(nvidiaDevicePlugin),
+			Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
+			}},
+		},
+	}
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(nvidiaDevicePlugin, "2"),
+	}}}
+	translator := translator{
+		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:    context.Background(),
+	}
+
+	if err := translator.parseGPUResources(ir); err != nil {
+		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	}
+	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu=2" {
+		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu=2")
 	}
 }
 

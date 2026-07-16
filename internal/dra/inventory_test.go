@@ -24,20 +24,6 @@ func deviceIDForTest(driver, pool, device string) DeviceIdentity {
 	return structured.MakeDeviceID(driver, pool, device)
 }
 
-func TestNodeInventoryHasDriver(t *testing.T) {
-	inventory := NodeInventory{Profiles: []ProfileInventory{
-		{Profile: DeviceProfile{Name: "gpu-example", Driver: "gpu.example.com"}},
-		{Profile: DeviceProfile{Name: "gpu-nvidia", Driver: "gpu.nvidia.com"}},
-	}}
-
-	if !inventory.HasDriver("gpu.nvidia.com") {
-		t.Fatal("NodeInventory.HasDriver() = false for present driver")
-	}
-	if inventory.HasDriver("unsupported.example.com") {
-		t.Fatal("NodeInventory.HasDriver() = true for absent driver")
-	}
-}
-
 func TestBuildNodeInventory(t *testing.T) {
 	resourceSlice := func(nodeName, driver, pool string, devices ...string) resourcev1.ResourceSlice {
 		slice := resourcev1.ResourceSlice{

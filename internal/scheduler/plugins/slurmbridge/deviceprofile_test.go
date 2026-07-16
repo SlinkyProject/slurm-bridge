@@ -83,7 +83,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		},
 	}
 
-	profileResources, legacyResources, err := splitGRESResources(resources)
+	profileResources, nonProfileResources, err := splitGRESResources(resources)
 	if err != nil {
 		t.Fatalf("splitGRESResources() error = %v", err)
 	}
@@ -91,7 +91,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
 		{Name: "gpu", Type: "gpu-nvidia", Count: 1, Index: "1"},
 	}
-	wantLegacy := []slurmcontrol.GresLayout{
+	wantNonProfile := []slurmcontrol.GresLayout{
 		{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
 		{Name: "gpu", Type: "gpu.nvidia.com", Count: 1, Index: "3"},
 		{Name: "license", Type: "matlab", Count: 1},
@@ -99,12 +99,12 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 	if !slices.Equal(profileResources.Gres, wantProfile) {
 		t.Errorf("profile resources = %#v, want %#v", profileResources.Gres, wantProfile)
 	}
-	if !slices.Equal(legacyResources.Gres, wantLegacy) {
-		t.Errorf("legacy resources = %#v, want %#v", legacyResources.Gres, wantLegacy)
+	if !slices.Equal(nonProfileResources.Gres, wantNonProfile) {
+		t.Errorf("non-profile resources = %#v, want %#v", nonProfileResources.Gres, wantNonProfile)
 	}
-	if profileResources.Node != resources.Node || legacyResources.Node != resources.Node ||
-		profileResources.NodeExtra != resources.NodeExtra || legacyResources.NodeExtra != resources.NodeExtra {
-		t.Fatalf("split resources did not preserve node metadata: profile=%#v legacy=%#v", profileResources, legacyResources)
+	if profileResources.Node != resources.Node || nonProfileResources.Node != resources.Node ||
+		profileResources.NodeExtra != resources.NodeExtra || nonProfileResources.NodeExtra != resources.NodeExtra {
+		t.Fatalf("split resources did not preserve node metadata: profile=%#v non-profile=%#v", profileResources, nonProfileResources)
 	}
 	if len(resources.Gres) != 5 {
 		t.Fatalf("splitGRESResources() mutated its input: %#v", resources.Gres)
