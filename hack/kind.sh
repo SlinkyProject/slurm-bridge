@@ -421,35 +421,6 @@ function slurm::configure_for_bridge() {
 	esac
 }
 
-function extras::install() {
-	helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
-	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-	helm repo update
-
-	local chartName
-
-	chartName="metrics-server"
-	if ! helm::find "$chartName"; then
-		helm install "$chartName" metrics-server/metrics-server \
-			--namespace "$chartName" --create-namespace \
-			--set args="{--kubelet-insecure-tls}"
-	fi
-
-	chartName="prometheus"
-	if ! helm::find "$chartName"; then
-		helm install "$chartName" prometheus-community/kube-prometheus-stack \
-			--namespace "$chartName" --create-namespace \
-			--set installCRDs=true \
-			--set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-	fi
-
-	chartName="keda"
-	if ! helm::find "$chartName"; then
-		helm install "$chartName" kedacore/keda \
-			--namespace "$chartName" --create-namespace
-	fi
-}
-
 function slurm-bridge::secret() {
 	kubectl apply -f "${SCRIPT_DIR}"/token.yaml
 }
@@ -538,7 +509,7 @@ KIND OPTIONS:
 
 HELM OPTIONS:
 	--all               Equivalent of: --core --extras
-	--extras            Install extra charts (metrics, prometheus, keda).
+	--extras            Equivalent of: --kjob --dra-driver-cpu --dra-example-driver
 	--core              Install the slurm-bridge stack.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
@@ -574,9 +545,6 @@ function main() {
 
 	make -C "$ROOT_DIR" values-dev || true
 
-	if $OPT_EXTRAS; then
-		extras::install
-	fi
 	if $OPT_DRA_DRIVER_CPU; then
 		dra-driver-cpu::install
 	fi
@@ -693,4 +661,11 @@ while :; do
 		;;
 	esac
 done
+
+if $OPT_EXTRAS; then
+	OPT_KJOB=true
+	OPT_DRA_DRIVER_CPU=true
+	OPT_DRA_EXAMPLE_DRIVER=true
+fi
+
 main "$@"
