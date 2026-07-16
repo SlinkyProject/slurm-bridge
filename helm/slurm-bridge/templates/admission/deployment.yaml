@@ -44,7 +44,7 @@ spec:
             initialDelaySeconds: 15
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /readyz
               port: 8081
           {{- with .Values.admission.resources }}
           resources: {{- toYaml . | nindent 12 }}
