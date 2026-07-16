@@ -111,6 +111,8 @@ Limitations
 
   - `DRA Driver
     CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs.
+  - `NVIDIA DRA Driver <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__
+    for GPUs.
   - `DRA Example
     Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
     for GPUs.

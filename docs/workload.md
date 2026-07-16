@@ -8,6 +8,9 @@
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Using the `slurm-bridge` Scheduler](#using-the-slurm-bridge-scheduler)
+  - [Device resources](#device-resources)
+    - [Supported DRA DeviceClasses](#supported-dra-deviceclasses)
+    - [Legacy GPU device plugins](#legacy-gpu-device-plugins)
   - [CPU DRA](#cpu-dra)
   - [Annotations](#annotations)
   - [PodGroup (1.36+)](#podgroup-136)
@@ -53,6 +56,39 @@ from any namespace to indicate that it should be scheduler using the
 
 Please review [`slurm-bridge` admission controller](./admission.md) to learn
 more.
+
+## Device resources
+
+### Supported DRA DeviceClasses
+
+`slurm-bridge` supports the following DRA DeviceClass extended resources:
+
+| DeviceClass       | Extended resource                                    | Device type |
+| ----------------- | ---------------------------------------------------- | ----------- |
+| `dra.cpu`         | `deviceclass.resource.kubernetes.io/dra.cpu`         | CPU         |
+| `gpu.nvidia.com`  | `deviceclass.resource.kubernetes.io/gpu.nvidia.com`  | NVIDIA GPU  |
+| `gpu.example.com` | `deviceclass.resource.kubernetes.io/gpu.example.com` | Example GPU |
+
+For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
+ResourceClaim and records the allocated devices for the Pod. Managed Pods that
+request any other DeviceClass extended resource are rejected during admission.
+Validation covers requests and limits in both init containers and regular
+containers.
+
+### Legacy GPU device plugins
+
+The following non-DRA extended resources are also supported:
+
+| Extended resource | Device plugin |
+| ----------------- | ------------- |
+| `nvidia.com/gpu`  | NVIDIA GPU    |
+| `amd.com/gpu`     | AMD GPU       |
+
+These resources use the generic device-plugin path. Their quantities are
+translated to a generic Slurm `gres/gpu=<count>` request. Slurm selects and
+reserves the node and GPU count, while kubelet and the device plugin choose the
+physical devices. No DRA ResourceClaim is created, so Slurm and Kubernetes do
+not coordinate exact GPU identities on this path.
 
 ## CPU DRA
 

@@ -80,7 +80,7 @@ func (n *NodeInfo) GetDeviceRequests(ctx context.Context, kubeclient client.Clie
 		if !exists {
 			continue
 		}
-		if !isSupportedDRADriver(deviceClassName) {
+		if !isSupportedDRAGPUDeviceClass(deviceClassName) {
 			continue
 		}
 		if strings.TrimSpace(gres.Index) == "" {
@@ -174,7 +174,7 @@ func (n *NodeInfo) GetDeviceRequestAllocationResult(ctx context.Context, kubecli
 		if !exists {
 			continue
 		}
-		if !isSupportedDRADriver(deviceClassName) {
+		if !isSupportedDRAGPUDeviceClass(deviceClassName) {
 			continue
 		}
 		if strings.TrimSpace(gres.Index) == "" {
@@ -279,11 +279,31 @@ func deviceClassExists(ctx context.Context, kubeclient client.Client, deviceClas
 	return true, nil
 }
 
-func isSupportedDRADriver(deviceClassName string) bool {
-	switch deviceClassName {
-	case DraDriverGpuNvidia, DraExampleDriver:
-		return true
-	default:
-		return false
-	}
+type draDeviceKind string
+
+const (
+	draDeviceKindCPU draDeviceKind = "cpu"
+	draDeviceKindGPU draDeviceKind = "gpu"
+)
+
+type draDeviceClassCapabilities struct {
+	kind draDeviceKind
+}
+
+var supportedDRADeviceClasses = map[string]draDeviceClassCapabilities{
+	DraDriverCpu:       {kind: draDeviceKindCPU},
+	DraDriverGpuNvidia: {kind: draDeviceKindGPU},
+	DraExampleDriver:   {kind: draDeviceKindGPU},
+}
+
+// IsSupportedDRADeviceClass reports whether Slurm Bridge can create device
+// requests for a DRA DeviceClass.
+func IsSupportedDRADeviceClass(deviceClassName string) bool {
+	_, supported := supportedDRADeviceClasses[deviceClassName]
+	return supported
+}
+
+func isSupportedDRAGPUDeviceClass(deviceClassName string) bool {
+	capabilities, supported := supportedDRADeviceClasses[deviceClassName]
+	return supported && capabilities.kind == draDeviceKindGPU
 }

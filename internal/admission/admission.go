@@ -7,10 +7,12 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -91,6 +93,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateCPUResources(pod); err != nil {
 		return nil, err
 	}
+	if err := validateDRADeviceClasses(pod); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -104,7 +109,11 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if !isManaged && newPod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
-	if req, err := admission.RequestFromContext(ctx); err == nil && req.SubResource == "resize" {
+	req, err := admission.RequestFromContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get admission request from context: %w", err)
+	}
+	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
@@ -172,4 +181,34 @@ func resourceIsSet(resources corev1.ResourceRequirements, name corev1.ResourceNa
 	_, requested := resources.Requests[name]
 	_, limited := resources.Limits[name]
 	return requested || limited
+}
+
+func validateDRADeviceClasses(pod *corev1.Pod) error {
+	for _, container := range pod.Spec.InitContainers {
+		if err := validateContainerDRADeviceClasses(container); err != nil {
+			return err
+		}
+	}
+	for _, container := range pod.Spec.Containers {
+		if err := validateContainerDRADeviceClasses(container); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateContainerDRADeviceClasses(container corev1.Container) error {
+	resourceLists := []corev1.ResourceList{
+		container.Resources.Requests,
+		container.Resources.Limits,
+	}
+	for _, resources := range resourceLists {
+		for resourceName := range resources {
+			deviceClassName, isDRADeviceClass := strings.CutPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
+			if isDRADeviceClass && !nodeinfo.IsSupportedDRADeviceClass(deviceClassName) {
+				return fmt.Errorf("container %q uses unsupported DRA device class %q", container.Name, deviceClassName)
+			}
+		}
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ package admission
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
@@ -13,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -138,6 +140,69 @@ func TestValidateCPUResources(t *testing.T) {
 			err := validateCPUResources(tt.pod)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateCPUResources() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateDRADeviceClasses(t *testing.T) {
+	resourceName := func(deviceClassName string) corev1.ResourceName {
+		return corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + deviceClassName)
+	}
+	tests := []struct {
+		name            string
+		pod             *corev1.Pod
+		wantErrContains string
+	}{
+		{
+			name: "supported classes",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					resourceName(nodeinfo.DraDriverCpu):       resource.MustParse("1"),
+					resourceName(nodeinfo.DraDriverGpuNvidia): resource.MustParse("1"),
+					resourceName(nodeinfo.DraExampleDriver):   resource.MustParse("1"),
+				}},
+			}}}},
+		},
+		{
+			name: "unsupported class in regular container request",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					resourceName("other.gpu.example.com"): resource.MustParse("1"),
+				}},
+			}}}},
+			wantErrContains: `unsupported DRA device class "other.gpu.example.com"`,
+		},
+		{
+			name: "unsupported class in init container limit",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					resourceName("other.gpu.example.com"): resource.MustParse("1"),
+				}},
+			}}}},
+			wantErrContains: `unsupported DRA device class "other.gpu.example.com"`,
+		},
+		{
+			name: "non-DRA extended resource",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"example.com/gpu": resource.MustParse("1"),
+				}},
+			}}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDRADeviceClasses(tt.pod)
+			if tt.wantErrContains == "" {
+				if err != nil {
+					t.Fatalf("validateDRADeviceClasses() unexpected error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Fatalf("validateDRADeviceClasses() error = %v, want error containing %q", err, tt.wantErrContains)
 			}
 		})
 	}
@@ -523,6 +588,53 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "PodWithUnsupportedDRAClass",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								"deviceclass.resource.kubernetes.io/other.gpu.example.com": resource.MustParse("1"),
+							},
+							Limits: corev1.ResourceList{
+								"deviceclass.resource.kubernetes.io/other.gpu.example.com": resource.MustParse("1"),
+							},
+						},
+					}}},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "PodWithUnsupportedDRAClassInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec: corev1.PodSpec{
+						SchedulerName: "other-scheduler",
+						InitContainers: []corev1.Container{{
+							Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+								"deviceclass.resource.kubernetes.io/other.gpu.example.com": resource.MustParse("1"),
+							}},
+						}},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
 			name: "PodWithoutLabelOrAnnotation",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},
@@ -671,7 +783,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: metav1.NamespaceDefault,
@@ -692,7 +804,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -712,6 +824,23 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			},
 			want:    nil,
 			wantErr: false,
+		},
+		{
+			name: "ManagedPodWithoutAdmissionRequestFails",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				oldPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+				newPod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+				},
+			},
+			want:    nil,
+			wantErr: true,
 		},
 		{
 			name: "ManagedPodCannotResize",
@@ -776,7 +905,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -806,7 +935,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
@@ -837,7 +966,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",
@@ -874,7 +1003,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				ManagedNamespaces: []string{namespace},
 			},
 			args: args{
-				ctx: context.TODO(),
+				ctx: contextWithAdmissionSubresource(""),
 				oldPod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: "unmanaged-ns",

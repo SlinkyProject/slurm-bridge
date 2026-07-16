@@ -78,6 +78,7 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 - Exclusive, whole node allocations are made for each pod.
 - Only supports the following DRA drivers:
   - [DRA Driver CPU][dra-driver-cpu] for CPUs.
+  - [NVIDIA DRA Driver][nvidia-dra-driver] for GPUs.
   - [DRA Example Driver][dra-example-driver] for GPUs.
 - Native `cpu` requests do not activate CPU DRA. Pods must explicitly request
   `deviceclass.resource.kubernetes.io/dra.cpu` and cannot combine it with native
@@ -144,6 +145,7 @@ specific language governing permissions and limitations under the License.
 [dra-driver-cpu]: https://github.com/kubernetes-sigs/dra-driver-cpu
 [dra-example-driver]: https://github.com/kubernetes-sigs/dra-example-driver
 [kubernetes]: https://kubernetes.io/
+[nvidia-dra-driver]: https://github.com/NVIDIA/k8s-dra-driver-gpu
 [quickstart]: ./docs/quickstart.md
 [slinky]: https://slinky.ai/
 [slinky-docs]: https://slinky.schedmd.com/
