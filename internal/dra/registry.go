@@ -83,6 +83,14 @@ func mustNewRegistry(profiles ...DeviceProfile) *Registry {
 // supported by slurm-bridge.
 func DefaultRegistry() *Registry {
 	// Upstream DeviceClass:
+	// https://github.com/kubernetes-sigs/dra-driver-cpu/blob/main/deployment/helm/dra-driver-cpu/templates/deviceclass.yaml
+	cpu := DeviceProfile{
+		Name:     "cpu",
+		Driver:   "dra.cpu",
+		Selector: `device.driver == "dra.cpu"`,
+		Backend:  CoreBitmapBackend{},
+	}
+	// Upstream DeviceClass:
 	// https://github.com/kubernetes-sigs/dra-example-driver/blob/v0.4.0/deployments/helm/dra-example-driver/templates/deviceclass.yaml
 	exampleGPU := DeviceProfile{
 		Name:     "gpu-example",
@@ -102,7 +110,7 @@ func DefaultRegistry() *Registry {
 			GRESName: "gpu",
 		},
 	}
-	return mustNewRegistry(exampleGPU, nvidiaGPU)
+	return mustNewRegistry(cpu, exampleGPU, nvidiaGPU)
 }
 
 // LookupByName returns the profile with the given stable profile name.

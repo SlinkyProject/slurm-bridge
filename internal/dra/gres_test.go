@@ -15,6 +15,7 @@ func (unsupportedBackend) String() string { return "unsupported" }
 
 func TestNodeInventoryGRES(t *testing.T) {
 	profile, _ := DefaultRegistry().LookupByName("gpu-example")
+	cpuProfile, _ := DefaultRegistry().LookupByName("cpu")
 	devices := []DeviceIdentity{
 		deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
 		deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
@@ -22,7 +23,10 @@ func TestNodeInventoryGRES(t *testing.T) {
 
 	got, err := (NodeInventory{
 		NodeName: "node-a",
-		Profiles: []ProfileInventory{{Profile: profile, Devices: devices}},
+		Profiles: []ProfileInventory{
+			{Profile: cpuProfile, Devices: []DeviceIdentity{deviceIDForTest("dra.cpu", "node-a", "cpudev000")}},
+			{Profile: profile, Devices: devices},
+		},
 	}).GRES()
 	if err != nil {
 		t.Fatalf("NodeInventory.GRES() error = %v", err)

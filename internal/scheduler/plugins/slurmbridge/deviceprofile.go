@@ -143,37 +143,24 @@ func expandGRESIndexes(gres slurmcontrol.GresLayout) ([]int, error) {
 }
 
 // splitGRESResources classifies allocated Slurm GRES by their actual
-// representation. A GRES type which is a registered DeviceProfile is handled
-// exclusively by the profile path, even when no request currently resolves to
-// it. All other GRES remain available to their existing non-profile paths,
-// including classic device plugins and legacy DRA compatibility.
-//
-// TODO: Distinguish explicitly versioned legacy driver-named GPU GRES from
-// other non-profile GRES. New unknown DRA GPU GRES must fail closed instead of
-// implicitly entering the compatibility path.
-func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources, nonProfileResources slurmcontrol.NodeResources, err error) {
+// representation. A GRES type which is a registered indexed-GRES
+// DeviceProfile is handled exclusively by the profile path, even when no
+// request currently resolves to it. Profiles using other backends do not claim
+// the GRES type namespace.
+func splitGRESResources(registry *dra.Registry, resources slurmcontrol.NodeResources) (profileResources, nonProfileResources slurmcontrol.NodeResources, err error) {
 	profileResources = resources
 	profileResources.Gres = nil
 	nonProfileResources = resources
 	nonProfileResources.Gres = nil
 
-	registry := dra.DefaultRegistry()
 	for _, resource := range resources.Gres {
-		profile, registered := registry.LookupByName(resource.Type)
-		if !registered {
-			nonProfileResources.Gres = append(nonProfileResources.Gres, resource)
-			continue
-		}
-
-		profileGRES, err := profile.GRES()
+		_, owned, err := registry.MatchIndexedGRES(dra.GRES{Name: resource.Name, Type: resource.Type})
 		if err != nil {
 			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, err
 		}
-		if resource.Name != profileGRES.Name {
-			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, fmt.Errorf(
-				"allocated Slurm GRES type %q uses name %q, expected %q for DeviceProfile %q",
-				resource.Type, resource.Name, profileGRES.Name, profile.Name,
-			)
+		if !owned {
+			nonProfileResources.Gres = append(nonProfileResources.Gres, resource)
+			continue
 		}
 		profileResources.Gres = append(profileResources.Gres, resource)
 	}

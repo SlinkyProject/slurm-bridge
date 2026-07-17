@@ -83,7 +83,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		},
 	}
 
-	profileResources, nonProfileResources, err := splitGRESResources(resources)
+	profileResources, nonProfileResources, err := splitGRESResources(dra.DefaultRegistry(), resources)
 	if err != nil {
 		t.Fatalf("splitGRESResources() error = %v", err)
 	}
@@ -112,10 +112,26 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 }
 
 func TestSplitGRESResourcesRejectsWrongProfileGRESName(t *testing.T) {
-	_, _, err := splitGRESResources(slurmcontrol.NodeResources{
+	_, _, err := splitGRESResources(dra.DefaultRegistry(), slurmcontrol.NodeResources{
 		Gres: []slurmcontrol.GresLayout{{Name: "accelerator", Type: "gpu-example", Count: 1, Index: "0"}},
 	})
 	if err == nil {
 		t.Fatal("splitGRESResources() error = nil, want profile GRES name mismatch")
+	}
+}
+
+func TestSplitGRESResourcesDoesNotClaimCoreBitmapProfileName(t *testing.T) {
+	resource := slurmcontrol.GresLayout{Name: "gpu", Type: "cpu", Count: 1, Index: "0"}
+	profileResources, nonProfileResources, err := splitGRESResources(dra.DefaultRegistry(), slurmcontrol.NodeResources{
+		Gres: []slurmcontrol.GresLayout{resource},
+	})
+	if err != nil {
+		t.Fatalf("splitGRESResources() error = %v", err)
+	}
+	if len(profileResources.Gres) != 0 {
+		t.Fatalf("profile resources = %#v, want none", profileResources.Gres)
+	}
+	if !slices.Equal(nonProfileResources.Gres, []slurmcontrol.GresLayout{resource}) {
+		t.Fatalf("non-profile resources = %#v, want CPU-named GRES preserved", nonProfileResources.Gres)
 	}
 }

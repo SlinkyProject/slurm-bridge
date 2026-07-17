@@ -21,6 +21,12 @@ func (registryUnsupportedBackend) String() string {
 func TestDefaultRegistry(t *testing.T) {
 	wants := []DeviceProfile{
 		{
+			Name:     "cpu",
+			Driver:   "dra.cpu",
+			Selector: `device.driver == "dra.cpu"`,
+			Backend:  CoreBitmapBackend{},
+		},
+		{
 			Name:     "gpu-example",
 			Driver:   "gpu.example.com",
 			Selector: `device.driver == 'gpu.example.com'`,
@@ -75,6 +81,10 @@ func TestRegistryMatchIndexedGRES(t *testing.T) {
 		{
 			name: "unknown type",
 			gres: GRES{Name: "license", Type: "matlab"},
+		},
+		{
+			name: "core-bitmap profile name",
+			gres: GRES{Name: "gpu", Type: "cpu"},
 		},
 		{
 			name:      "wrong GRES name",
@@ -222,6 +232,13 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	if !registry.SupportsDriver("gpu.nvidia.com") {
 		t.Fatal("Registry.SupportsDriver() = false for the NVIDIA driver")
 	}
+	cpu, _ := registry.LookupByName("cpu")
+	if got := registry.profilesForDriver("dra.cpu"); !reflect.DeepEqual(got, []DeviceProfile{cpu}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{cpu})
+	}
+	if !registry.SupportsDriver("dra.cpu") {
+		t.Fatal("Registry.SupportsDriver() = false for the CPU driver")
+	}
 	profileB := DeviceProfile{
 		Name:     "profile-b",
 		Driver:   "shared.example.com",
@@ -281,6 +298,21 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
 		}
 		want, _ := registry.LookupByName("gpu-nvidia")
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("matching CPU class", func(t *testing.T) {
+		deviceClass := valid()
+		deviceClass.Name = "dra.cpu"
+		deviceClass.Spec.Selectors[0].CEL.Expression = `device.driver == "dra.cpu"`
+
+		got, err := registry.MatchDeviceClass(deviceClass)
+		if err != nil {
+			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
+		}
+		want, _ := registry.LookupByName("cpu")
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
 		}
