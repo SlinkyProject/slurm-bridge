@@ -246,6 +246,11 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 							Spec: resourcev1.ResourceSliceSpec{
 								NodeName: ptr.To("node1"),
 								Driver:   nodeinfo.DraDriverCpu,
+								Pool: resourcev1.ResourcePool{
+									Name:               "node1",
+									Generation:         1,
+									ResourceSliceCount: 1,
+								},
 								Devices: []resourcev1.Device{
 									{
 										Name: "cpu0",
@@ -896,6 +901,11 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node1"),
 							Driver:   nodeinfo.DraDriverCpu,
+							Pool: resourcev1.ResourcePool{
+								Name:               "node1",
+								Generation:         1,
+								ResourceSliceCount: 1,
+							},
 							Devices: []resourcev1.Device{
 								{
 									Name: "cpu0",

@@ -47,7 +47,7 @@ type SlurmControlInterface interface {
 	// NodeNeedsRecreate returns true if the Slurm node exists and its CPU, memory, or GRES
 	// differ from the desired values. Such a node
 	// must be drained, removed, and re-added to apply the change.
-	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) (bool, error)
+	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error)
 	// RemoveNode removes a Kubernetes node from Slurm.
 	RemoveNode(ctx context.Context, node *corev1.Node) error
 }
@@ -202,7 +202,7 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 }
 
 // NodeNeedsRecreate implements SlurmControlInterface.
-func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) (bool, error) {
+func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
@@ -212,21 +212,28 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 		return false, err
 	}
 
-	desiredCpus := node.Status.Capacity.Cpu().Value()
+	desiredCPU := desiredNodeCPUConfig(node, nodeInfo)
 	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
 	desiredGRES, err := buildNodeGRESConfig(draInventory)
 	if err != nil {
 		return false, err
 	}
 
-	currentCpus := int64(ptr.Deref(slurmNode.Cpus, 0))
 	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
 	currentGres := ptr.Deref(slurmNode.Gres, "")
 	currentExtra := ptr.Deref(slurmNode.Extra, "")
 	extraChanged := desiredGRES.extra != currentExtra &&
 		(desiredGRES.extra != "" || strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix))
 
-	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGRES.gres != currentGres || extraChanged {
+	cpuChanged := desiredCPU.cpus != int(ptr.Deref(slurmNode.Cpus, 0))
+	if desiredCPU.fromDRA {
+		cpuChanged = cpuChanged ||
+			desiredCPU.sockets != int(ptr.Deref(slurmNode.Sockets, 0)) ||
+			desiredCPU.coresPerSocket != int(ptr.Deref(slurmNode.Cores, 0)) ||
+			desiredCPU.threadsPerCore != int(ptr.Deref(slurmNode.Threads, 0))
+	}
+
+	if cpuChanged || desiredMemoryMB != currentMemoryMB || desiredGRES.gres != currentGres || extraChanged {
 		return true, nil
 	}
 	return false, nil
@@ -250,16 +257,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		return err
 	}
 
-	cpus := int(node.Status.Capacity.Cpu().Value())
-	cores := cpus
-	if nodeInfo != nil && len(nodeInfo.CpuMap.AbstractToMachine) > 0 {
-		cpus = len(nodeInfo.CpuMap.MachineToAbstract)
-		cores = len(nodeInfo.CpuMap.AbstractToMachine)
-	}
-	threadsPerCore := 1
-	if cores > 0 {
-		threadsPerCore = cpus / cores
-	}
+	cpuConfig := desiredNodeCPUConfig(node, nodeInfo)
 	memoryBytes := node.Status.Capacity.Memory().Value()
 	memoryMB := memoryBytes / (1024 * 1024)
 
@@ -283,7 +281,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	// Create node configuration string
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
 	nodeConf := fmt.Sprintf("NodeName=%s Sockets=1 CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
-		slurmNodeName, cores, threadsPerCore, cpus, memoryMB)
+		slurmNodeName, cpuConfig.coresPerSocket, cpuConfig.threadsPerCore, cpuConfig.cpus, memoryMB)
 	if features != "" {
 		nodeConf += fmt.Sprintf(" Feature=%s", features)
 	}
@@ -296,7 +294,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	logger.Info("Adding Kubernetes node to Slurm",
 		"node", klog.KObj(node),
 		"slurmNode", slurmNodeName,
-		"cpus", cpus,
+		"cpus", cpuConfig.cpus,
 		"memoryMB", memoryMB,
 		"features", features,
 		"topology", annotations[wellknown.AnnotationNodeTopologySpec],
@@ -320,6 +318,37 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	}
 
 	return nil
+}
+
+type nodeCPUConfig struct {
+	sockets        int
+	coresPerSocket int
+	threadsPerCore int
+	cpus           int
+	fromDRA        bool
+}
+
+func desiredNodeCPUConfig(node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) nodeCPUConfig {
+	cpus := int(node.Status.Capacity.Cpu().Value())
+	cores := cpus
+	fromDRA := nodeInfo != nil && len(nodeInfo.CpuMap.AbstractToMachine) > 0
+	if fromDRA {
+		cpus = len(nodeInfo.CpuMap.MachineToAbstract)
+		cores = len(nodeInfo.CpuMap.AbstractToMachine)
+	}
+
+	threadsPerCore := 1
+	if cores > 0 {
+		threadsPerCore = cpus / cores
+	}
+
+	return nodeCPUConfig{
+		sockets:        1,
+		coresPerSocket: cores,
+		threadsPerCore: threadsPerCore,
+		cpus:           cpus,
+		fromDRA:        fromDRA,
+	}
 }
 
 type nodeGRESConfig struct {

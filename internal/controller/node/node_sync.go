@@ -233,7 +233,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			return err
 		}
 		if exists {
-			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, draInventory)
+			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo, draInventory)
 			if err != nil {
 				return err
 			}
@@ -270,7 +270,10 @@ func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *
 		return nil, nil, err
 	}
 
-	nodeInfo := nodeinfo.NewNodeInfoFromResourceSlices(node.Name, resourceSlices.Items)
+	nodeInfo, err := nodeinfo.NewNodeInfoFromResourceSlices(node.Name, resourceSlices.Items)
+	if err != nil {
+		return nil, nil, err
+	}
 	nodeInventory, err := dra.BuildNodeInventory(ctx, r.draRegistry, node, resourceSlices.Items)
 	if err != nil {
 		return nil, nil, err

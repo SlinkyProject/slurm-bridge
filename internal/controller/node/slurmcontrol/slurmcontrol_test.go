@@ -56,6 +56,11 @@ func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 		Spec: resourcev1.ResourceSliceSpec{
 			NodeName: ptr.To(nodeName),
 			Driver:   nodeinfo.DraDriverCpu,
+			Pool: resourcev1.ResourcePool{
+				Name:               nodeName,
+				Generation:         1,
+				ResourceSliceCount: 1,
+			},
 			Devices: []resourcev1.Device{
 				device("cpu0", 0, 0),
 				device("cpu1", 1, 0),
@@ -64,6 +69,15 @@ func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 			},
 		},
 	}
+}
+
+func testNodeInfoFromResourceSlices(t *testing.T, nodeName string, resourceSlices []resourcev1.ResourceSlice) *nodeinfo.NodeInfo {
+	t.Helper()
+	info, err := nodeinfo.NewNodeInfoFromResourceSlices(nodeName, resourceSlices)
+	if err != nil {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v", err)
+	}
+	return info
 }
 
 func testExampleDRAInventory() []dra.GRESInventory {
@@ -646,6 +660,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		name         string
 		client       slurmclient.Client
 		node         *corev1.Node
+		nodeInfo     *nodeinfo.NodeInfo
 		draInventory []dra.GRESInventory
 		want         bool
 		wantErr      bool
@@ -685,6 +700,42 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			).Build(),
 			node: makeNode("worker-0", 8, 8),
 			want: true,
+		},
+		{
+			name: "node exists with matching DRA CPU topology",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Sockets:    ptr.To(int32(1)),
+						Cores:      ptr.To(int32(2)),
+						Threads:    ptr.To(int32(2)),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+					},
+				},
+			).Build(),
+			node:     makeNode("worker-0", 12, 8),
+			nodeInfo: testNodeInfoFromResourceSlices(t, "worker-0", []resourcev1.ResourceSlice{*testNodeCPUResourceSlice("worker-0")}),
+			want:     false,
+		},
+		{
+			name: "node exists with different DRA CPU topology",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Sockets:    ptr.To(int32(1)),
+						Cores:      ptr.To(int32(4)),
+						Threads:    ptr.To(int32(1)),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+					},
+				},
+			).Build(),
+			node:     makeNode("worker-0", 12, 8),
+			nodeInfo: testNodeInfoFromResourceSlices(t, "worker-0", []resourcev1.ResourceSlice{*testNodeCPUResourceSlice("worker-0")}),
+			want:     true,
 		},
 		{
 			name: "node exists, different memory",
@@ -817,7 +868,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{Client: tt.client}
-			got, err := r.NodeNeedsRecreate(ctx, tt.node, tt.draInventory)
+			got, err := r.NodeNeedsRecreate(ctx, tt.node, tt.nodeInfo, tt.draInventory)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NodeNeedsRecreate() error = %v, wantErr %v", err, tt.wantErr)
 				return

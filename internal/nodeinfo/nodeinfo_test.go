@@ -39,8 +39,12 @@ func cpuResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 		ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-cpus"},
 		Spec: resourcev1.ResourceSliceSpec{
 			NodeName: ptr.To(nodeName),
-			Pool:     resourcev1.ResourcePool{Name: nodeName},
-			Driver:   nodeinfo.DraDriverCpu,
+			Pool: resourcev1.ResourcePool{
+				Name:               nodeName,
+				Generation:         1,
+				ResourceSliceCount: 1,
+			},
+			Driver: nodeinfo.DraDriverCpu,
 			Devices: []resourcev1.Device{
 				device("cpu0", 0, 0),
 				device("cpu1", 1, 0),
@@ -164,8 +168,59 @@ func TestNewNodeInfoIgnoresGPUResourceSlices(t *testing.T) {
 		},
 	}
 
-	node := nodeinfo.NewNodeInfoFromResourceSlices("node", resourceSlices)
+	node, err := nodeinfo.NewNodeInfoFromResourceSlices("node", resourceSlices)
+	if err != nil {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v", err)
+	}
 	if len(node.CpuMap.CPUInfoMap) != 4 {
 		t.Fatalf("NewNodeInfoFromResourceSlices() CPU count = %d, want 4", len(node.CpuMap.CPUInfoMap))
+	}
+}
+
+func TestNewNodeInfoFromResourceSlicesMergesLatestCompleteCPUPool(t *testing.T) {
+	old := cpuResourceSlice("node")
+	old.Name = "old"
+	old.Spec.Devices = old.Spec.Devices[:1]
+
+	currentA := cpuResourceSlice("node")
+	currentA.Name = "00000-current"
+	currentA.Spec.Pool.Generation = 2
+	currentA.Spec.Pool.ResourceSliceCount = 2
+	currentA.Spec.Devices = currentA.Spec.Devices[:2]
+
+	currentB := cpuResourceSlice("node")
+	currentB.Name = "00001-current"
+	currentB.Spec.Pool.Generation = 2
+	currentB.Spec.Pool.ResourceSliceCount = 2
+	currentB.Spec.Devices = currentB.Spec.Devices[2:]
+
+	node, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*currentB, *old, *currentA})
+	if err != nil {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v", err)
+	}
+	if got := len(node.CpuMap.CPUInfoMap); got != 4 {
+		t.Fatalf("NewNodeInfoFromResourceSlices() CPU count = %d, want 4", got)
+	}
+	if got := len(node.CpuMap.AbstractToMachine); got != 2 {
+		t.Fatalf("NewNodeInfoFromResourceSlices() core count = %d, want 2", got)
+	}
+	if node.CpuMap.Pool != "node" {
+		t.Fatalf("NewNodeInfoFromResourceSlices() pool = %q, want node", node.CpuMap.Pool)
+	}
+}
+
+func TestNewNodeInfoFromResourceSlicesRejectsIncompleteLatestCPUPool(t *testing.T) {
+	old := cpuResourceSlice("node")
+	old.Name = "old"
+
+	current := cpuResourceSlice("node")
+	current.Name = "00000-current"
+	current.Spec.Pool.Generation = 2
+	current.Spec.Pool.ResourceSliceCount = 2
+	current.Spec.Devices = current.Spec.Devices[:2]
+
+	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*old, *current})
+	if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want incomplete pool error", err)
 	}
 }

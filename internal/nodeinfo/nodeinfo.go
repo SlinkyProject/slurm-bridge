@@ -4,8 +4,10 @@
 package nodeinfo
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -109,28 +111,83 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 	if err := kubeclient.List(ctx, resourceSliceList); err != nil {
 		return nil, err
 	}
-	return NewNodeInfoFromResourceSlices(nodeName, resourceSliceList.Items), nil
+	return NewNodeInfoFromResourceSlices(nodeName, resourceSliceList.Items)
 }
 
 // NewNodeInfoFromResourceSlices builds CPU topology from an existing
 // ResourceSlice snapshot.
-func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.ResourceSlice) *NodeInfo {
+func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.ResourceSlice) (*NodeInfo, error) {
 	nodeInfo := &NodeInfo{}
-	for _, resourceSlice := range resourceSlices {
-		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
-			continue
-		}
-		pool := resourceSlice.Spec.Pool.Name
-		switch resourceSlice.Spec.Driver {
-		case DraDriverCpu:
-			cpuInfos := NewCPUInfos(&resourceSlice)
-			nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
-		default:
-			continue
-		}
+	pool, cpuSlices, err := selectCPUResourcePool(nodeName, resourceSlices)
+	if err != nil {
+		return nil, err
 	}
 
-	return nodeInfo
+	var cpuInfos []*CPUInfo
+	for _, resourceSlice := range cpuSlices {
+		cpuInfos = append(cpuInfos, NewCPUInfos(resourceSlice)...)
+	}
+	if len(cpuInfos) != 0 {
+		nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
+	}
+
+	return nodeInfo, nil
+}
+
+type cpuPoolSnapshot struct {
+	generation         int64
+	resourceSliceCount int64
+	slices             []*resourcev1.ResourceSlice
+}
+
+func selectCPUResourcePool(nodeName string, resourceSlices []resourcev1.ResourceSlice) (string, []*resourcev1.ResourceSlice, error) {
+	snapshotsByPool := make(map[string]*cpuPoolSnapshot)
+	for i := range resourceSlices {
+		resourceSlice := &resourceSlices[i]
+		if resourceSlice.Spec.Driver != DraDriverCpu || ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
+			continue
+		}
+
+		pool := resourceSlice.Spec.Pool
+		snapshot, ok := snapshotsByPool[pool.Name]
+		if !ok || pool.Generation > snapshot.generation {
+			snapshotsByPool[pool.Name] = &cpuPoolSnapshot{
+				generation:         pool.Generation,
+				resourceSliceCount: pool.ResourceSliceCount,
+				slices:             []*resourcev1.ResourceSlice{resourceSlice},
+			}
+			continue
+		}
+		if pool.Generation < snapshot.generation {
+			continue
+		}
+		if pool.ResourceSliceCount != snapshot.resourceSliceCount {
+			return "", nil, fmt.Errorf("DRA CPU resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", pool.Name, snapshot.generation, snapshot.resourceSliceCount, pool.ResourceSliceCount)
+		}
+		snapshot.slices = append(snapshot.slices, resourceSlice)
+	}
+
+	poolNames := make([]string, 0, len(snapshotsByPool))
+	for pool := range snapshotsByPool {
+		poolNames = append(poolNames, pool)
+	}
+	slices.SortFunc(poolNames, cmp.Compare)
+	if len(poolNames) > 1 {
+		return "", nil, fmt.Errorf("DRA CPU inventory for node %q spans multiple resource pools %q", nodeName, poolNames)
+	}
+	if len(poolNames) == 0 {
+		return "", nil, nil
+	}
+
+	pool := poolNames[0]
+	snapshot := snapshotsByPool[pool]
+	if int64(len(snapshot.slices)) != snapshot.resourceSliceCount {
+		return "", nil, fmt.Errorf("DRA CPU resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", pool, snapshot.generation, len(snapshot.slices), snapshot.resourceSliceCount)
+	}
+	slices.SortFunc(snapshot.slices, func(a, b *resourcev1.ResourceSlice) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	return pool, snapshot.slices, nil
 }
 
 func deviceClassExists(ctx context.Context, kubeclient client.Client, deviceClassName string) (bool, error) {
