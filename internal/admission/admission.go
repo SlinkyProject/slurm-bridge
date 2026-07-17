@@ -119,6 +119,12 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
+	if err := validateDRADeviceClasses(newPod); err != nil {
+		return nil, err
+	}
+	if err := validateAnnotationConflicts(newPod); err != nil {
+		return nil, err
+	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
 	// node annotations should not be modified.
 	if newPod.Status.Phase == corev1.PodRunning {
