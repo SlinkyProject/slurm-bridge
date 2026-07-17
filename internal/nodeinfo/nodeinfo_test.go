@@ -31,7 +31,7 @@ func cpuResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 				nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To(cpuID)},
 				nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To(coreID)},
 				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-				nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+				nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 			},
 		}
 	}
@@ -239,5 +239,38 @@ func TestNewNodeInfoFromResourceSlicesRejectsIncompleteLatestCPUPool(t *testing.
 	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*old, *current})
 	if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
 		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want incomplete pool error", err)
+	}
+}
+
+func TestNewNodeInfoFromResourceSlicesRejectsGroupedCPUDevices(t *testing.T) {
+	resourceSlice := cpuResourceSlice("node")
+	resourceSlice.Spec.Devices = []resourcev1.Device{{
+		Name: "socket-0",
+		Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
+			"dra.cpu/numCPUs":              {IntValue: ptr.To[int64](4)},
+		},
+	}}
+	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*resourceSlice})
+	if err == nil || !strings.Contains(err.Error(), "individual-device schema") {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want grouped-device rejection", err)
+	}
+}
+
+func TestNewNodeInfoFromResourceSlicesRejectsDuplicateCPUIds(t *testing.T) {
+	first := cpuResourceSlice("node")
+	first.Name = "node-cpus-0"
+	first.Spec.Pool.ResourceSliceCount = 2
+	first.Spec.Devices = first.Spec.Devices[:2]
+
+	second := cpuResourceSlice("node")
+	second.Name = "node-cpus-1"
+	second.Spec.Pool.ResourceSliceCount = 2
+	second.Spec.Devices = second.Spec.Devices[2:]
+	second.Spec.Devices[0].Attributes[nodeinfo.DraDriverCpu_CpuID] = resourcev1.DeviceAttribute{IntValue: ptr.To[int64](1)}
+
+	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*first, *second})
+	if err == nil || !strings.Contains(err.Error(), "duplicate CPU ID 1") {
+		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want duplicate CPU ID error", err)
 	}
 }

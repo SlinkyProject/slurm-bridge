@@ -137,14 +137,68 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 	}
 
 	var cpuInfos []*CPUInfo
+	deviceSlices := make(map[string]string)
+	cpuIDSlices := make(map[int]string)
 	for _, resourceSlice := range cpuSlices {
-		cpuInfos = append(cpuInfos, NewCPUInfos(resourceSlice)...)
+		sliceCPUInfos, err := NewCPUInfos(resourceSlice)
+		if err != nil {
+			return nil, err
+		}
+		for _, cpuInfo := range sliceCPUInfos {
+			if previousSlice, found := deviceSlices[cpuInfo.Name]; found {
+				return nil, fmt.Errorf("DRA CPU resource pool %q contains duplicate device name %q in ResourceSlices %q and %q", pool, cpuInfo.Name, previousSlice, resourceSlice.Name)
+			}
+			if previousSlice, found := cpuIDSlices[cpuInfo.CpuID]; found {
+				return nil, fmt.Errorf("DRA CPU resource pool %q contains duplicate CPU ID %d in ResourceSlices %q and %q", pool, cpuInfo.CpuID, previousSlice, resourceSlice.Name)
+			}
+			deviceSlices[cpuInfo.Name] = resourceSlice.Name
+			cpuIDSlices[cpuInfo.CpuID] = resourceSlice.Name
+		}
+		cpuInfos = append(cpuInfos, sliceCPUInfos...)
 	}
 	if len(cpuInfos) != 0 {
+		if err := validateCPUCoreTopology(pool, cpuInfos); err != nil {
+			return nil, err
+		}
 		nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
 	}
 
 	return nodeInfo, nil
+}
+
+type cpuCoreID struct {
+	socket int
+	core   int
+}
+
+func validateCPUCoreTopology(pool string, cpuInfos []*CPUInfo) error {
+	coreTypes := make(map[cpuCoreID]CoreType)
+	threadsPerCore := make(map[cpuCoreID]int)
+	for _, cpuInfo := range cpuInfos {
+		core := cpuCoreID{socket: cpuInfo.SocketID, core: cpuInfo.CoreID}
+		if coreType, found := coreTypes[core]; found && coreType != cpuInfo.CoreType {
+			return fmt.Errorf("DRA CPU resource pool %q has inconsistent core types for socket %d core %d", pool, core.socket, core.core)
+		}
+		coreTypes[core] = cpuInfo.CoreType
+		if cpuInfo.CoreType != CoreTypeEfficiency {
+			threadsPerCore[core]++
+		}
+	}
+
+	wantThreads := 0
+	for core, threads := range threadsPerCore {
+		if wantThreads == 0 {
+			wantThreads = threads
+			continue
+		}
+		if threads != wantThreads {
+			return fmt.Errorf("DRA CPU resource pool %q has non-uniform topology: socket %d core %d has %d threads, expected %d", pool, core.socket, core.core, threads, wantThreads)
+		}
+	}
+	if wantThreads == 0 {
+		return fmt.Errorf("DRA CPU resource pool %q contains no Slurm-compatible CPU devices", pool)
+	}
+	return nil
 }
 
 type cpuPoolSnapshot struct {

@@ -140,7 +140,7 @@ func (r *Registry) MatchIndexedGRES(gres GRES) (DeviceProfile, bool, error) {
 	}
 	if gres.Name != expected.Name {
 		return DeviceProfile{}, true, fmt.Errorf(
-			"Slurm GRES type %q uses name %q, expected %q for DeviceProfile %q",
+			"slurm GRES type %q uses name %q, expected %q for DeviceProfile %q",
 			gres.Type, gres.Name, expected.Name, profile.Name,
 		)
 	}

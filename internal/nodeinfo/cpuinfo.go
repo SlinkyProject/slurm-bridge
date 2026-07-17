@@ -9,7 +9,6 @@ import (
 
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/utils/cpuset"
-	"k8s.io/utils/ptr"
 )
 
 // CPUInfo holds information about a single CPU.
@@ -71,22 +70,72 @@ const (
 	DraDriverCpu_CoreType resourcev1.QualifiedName = "dra.cpu/coreType"
 )
 
-func NewCPUInfos(rSlice *resourcev1.ResourceSlice) []*CPUInfo {
-	cpuInfos := []*CPUInfo{}
-	switch rSlice.Spec.Driver {
-	case DraDriverCpu:
-		for _, device := range rSlice.Spec.Devices {
-			cpuInfo := &CPUInfo{
-				Name:     device.Name,
-				CpuID:    int(ptr.Deref(device.Attributes[DraDriverCpu_CpuID].IntValue, -1)),
-				CoreID:   int(ptr.Deref(device.Attributes[DraDriverCpu_CoreID].IntValue, -1)),
-				SocketID: int(ptr.Deref(device.Attributes[DraDriverCpu_SocketID].IntValue, -1)),
-				CoreType: CoreType(ptr.Deref(device.Attributes[DraDriverCpu_CoreType].IntValue, 0)),
-			}
-			cpuInfos = append(cpuInfos, cpuInfo)
-		}
-	default:
-		panic(fmt.Errorf("unsupported resource device driver: %v", rSlice.Spec.Driver))
+func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
+	if rSlice == nil {
+		return nil, fmt.Errorf("expected a CPU ResourceSlice")
 	}
-	return cpuInfos
+	if rSlice.Spec.Driver != DraDriverCpu {
+		return nil, fmt.Errorf("unsupported resource device driver %q", rSlice.Spec.Driver)
+	}
+	if len(rSlice.Spec.Devices) == 0 {
+		return nil, fmt.Errorf("DRA CPU ResourceSlice %q contains no devices", rSlice.Name)
+	}
+
+	cpuInfos := make([]*CPUInfo, 0, len(rSlice.Spec.Devices))
+	for _, device := range rSlice.Spec.Devices {
+		cpuID, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_CpuID)
+		if err != nil {
+			return nil, err
+		}
+		coreID, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_CoreID)
+		if err != nil {
+			return nil, err
+		}
+		socketID, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_SocketID)
+		if err != nil {
+			return nil, err
+		}
+		coreType, err := requiredCPUCoreType(rSlice.Name, device)
+		if err != nil {
+			return nil, err
+		}
+		cpuInfos = append(cpuInfos, &CPUInfo{
+			Name:     device.Name,
+			CpuID:    cpuID,
+			CoreID:   coreID,
+			SocketID: socketID,
+			CoreType: coreType,
+		})
+	}
+	return cpuInfos, nil
+}
+
+func requiredCPUIntegerAttribute(sliceName string, device resourcev1.Device, name resourcev1.QualifiedName) (int, error) {
+	attribute, found := device.Attributes[name]
+	if !found || attribute.IntValue == nil {
+		return 0, fmt.Errorf("DRA CPU ResourceSlice %q device %q does not use the supported individual-device schema: attribute %q must be an integer", sliceName, device.Name, name)
+	}
+	if *attribute.IntValue < 0 {
+		return 0, fmt.Errorf("DRA CPU ResourceSlice %q device %q attribute %q must not be negative", sliceName, device.Name, name)
+	}
+	return int(*attribute.IntValue), nil
+}
+
+func requiredCPUCoreType(sliceName string, device resourcev1.Device) (CoreType, error) {
+	attribute, found := device.Attributes[DraDriverCpu_CoreType]
+	if !found || attribute.StringValue == nil {
+		return CoreTypeUndefined, fmt.Errorf("DRA CPU ResourceSlice %q device %q does not use the supported individual-device schema: attribute %q must be a string", sliceName, device.Name, DraDriverCpu_CoreType)
+	}
+	switch *attribute.StringValue {
+	case "":
+		return CoreTypeUndefined, nil
+	case CoreTypeStandard.String():
+		return CoreTypeStandard, nil
+	case CoreTypePerformance.String():
+		return CoreTypePerformance, nil
+	case CoreTypeEfficiency.String():
+		return CoreTypeEfficiency, nil
+	default:
+		return CoreTypeUndefined, fmt.Errorf("DRA CPU ResourceSlice %q device %q has unsupported core type %q", sliceName, device.Name, *attribute.StringValue)
+	}
 }

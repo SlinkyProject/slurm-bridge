@@ -39,7 +39,7 @@ func init() {
 }
 
 func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
-	coreType := ptr.To(int64(nodeinfo.CoreTypeStandard))
+	coreType := ptr.To(nodeinfo.CoreTypeStandard.String())
 	device := func(name string, cpuID, coreID int64) resourcev1.Device {
 		return resourcev1.Device{
 			Name: name,
@@ -47,7 +47,7 @@ func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 				nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To(cpuID)},
 				nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To(coreID)},
 				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-				nodeinfo.DraDriverCpu_CoreType: {IntValue: coreType},
+				nodeinfo.DraDriverCpu_CoreType: {StringValue: coreType},
 			},
 		}
 	}

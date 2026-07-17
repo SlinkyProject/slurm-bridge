@@ -242,7 +242,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](0)},
 											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
 											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 										},
 									},
 									{
@@ -251,7 +251,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](1)},
 											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
 											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 										},
 									},
 									{
@@ -260,7 +260,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](2)},
 											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
 											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 										},
 									},
 									{
@@ -269,7 +269,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](3)},
 											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
 											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 										},
 									},
 								},
@@ -1006,7 +1006,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](0)},
 										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
 										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 									},
 								},
 								{
@@ -1015,7 +1015,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](1)},
 										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
 										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 									},
 								},
 								{
@@ -1024,7 +1024,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](2)},
 										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
 										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 									},
 								},
 								{
@@ -1033,7 +1033,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](3)},
 										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
 										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {IntValue: ptr.To(int64(nodeinfo.CoreTypeStandard))},
+										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
 									},
 								},
 							},
