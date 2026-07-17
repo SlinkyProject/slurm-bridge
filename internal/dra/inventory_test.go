@@ -219,11 +219,9 @@ func TestBuildNodeInventory(t *testing.T) {
 			Selector: `device.driver == "gpu.example.com" && device.attributes["gpu.example.com"].model == "b"`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
 		}
-		registry := &Registry{
-			byName: map[string]DeviceProfile{
-				profileA.Name: profileA,
-				profileB.Name: profileB,
-			},
+		registry, err := newRegistry(profileA, profileB)
+		if err != nil {
+			t.Fatalf("newRegistry() error = %v", err)
 		}
 		slice := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-b", "gpu-unsupported", "gpu-a")
 		models := []string{"b", "unsupported", "a"}
@@ -264,11 +262,10 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 		profileB := profileA
 		profileB.Name = "gpu-b"
-		registry := &Registry{
-			byName: map[string]DeviceProfile{
-				profileA.Name: profileA,
-				profileB.Name: profileB,
-			},
+		profileB.Selector = `device.driver == "gpu.example.com" && true`
+		registry, registryErr := newRegistry(profileA, profileB)
+		if registryErr != nil {
+			t.Fatalf("newRegistry() error = %v", registryErr)
 		}
 		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0"),
