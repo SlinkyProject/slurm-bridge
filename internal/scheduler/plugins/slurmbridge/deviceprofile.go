@@ -239,6 +239,9 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 	if claimRequest == nil || claimRequest.Exactly == nil || claimRequest.Exactly.DeviceClassName != allocation.DeviceClassName {
 		return dra.DeviceProfile{}, fmt.Errorf("ResourceClaim is missing DeviceProfile request %q for DeviceClass %q", requestName, allocation.DeviceClassName)
 	}
+	if claimRequest.Exactly.Count != allocation.Count {
+		return dra.DeviceProfile{}, fmt.Errorf("ResourceClaim DeviceProfile request %q has count %d, expected exactly %d", requestName, claimRequest.Exactly.Count, allocation.Count)
+	}
 
 	deviceClass := &resourcev1.DeviceClass{}
 	if err := sb.Get(ctx, client.ObjectKey{Name: allocation.DeviceClassName}, deviceClass); err != nil {

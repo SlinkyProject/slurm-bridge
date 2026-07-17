@@ -105,7 +105,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName)
+		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -133,7 +133,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 
 	var deviceRequests []resourcev1.DeviceRequest
 	if nodeInfo != nil {
-		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName)
+		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -208,7 +208,7 @@ func (sb *SlurmBridge) bindClaim(
 		if err != nil {
 			return err
 		}
-		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName)
+		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName, resources.CoreBitmapAllocation.Count)
 		if err != nil {
 			return err
 		}
@@ -223,6 +223,9 @@ func (sb *SlurmBridge) bindClaim(
 		return err
 	}
 	devices = append(devices, indexedGRESDevices...)
+	if err := validateDeviceProfileAllocationCounts(resources, devices); err != nil {
+		return err
+	}
 
 	toUpdate := claim.DeepCopy()
 
@@ -260,6 +263,28 @@ func (sb *SlurmBridge) bindClaim(
 		return fmt.Errorf("failed to get claim %s: %w", klog.KObj(claim), err)
 	}
 
+	return nil
+}
+
+func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {
+	expected := make(map[string]int64)
+	if allocation.CoreBitmapAllocation != nil {
+		expected[allocation.CoreBitmapAllocation.RequestName] = allocation.CoreBitmapAllocation.Count
+	}
+	for _, indexed := range allocation.IndexedGRESAllocations {
+		expected[indexed.RequestName] = indexed.Count
+	}
+	actual := make(map[string]int64, len(expected))
+	for _, result := range results {
+		if _, profileRequest := expected[result.Request]; profileRequest {
+			actual[result.Request]++
+		}
+	}
+	for requestName, expectedCount := range expected {
+		if actual[requestName] != expectedCount {
+			return fmt.Errorf("DeviceProfile request %q allocated %d devices, expected exactly %d", requestName, actual[requestName], expectedCount)
+		}
+	}
 	return nil
 }
 

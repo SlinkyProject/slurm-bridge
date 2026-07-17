@@ -4,9 +4,14 @@
 package slurmbridge
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+
+	resourcev1 "k8s.io/api/resource/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
@@ -56,13 +61,71 @@ func TestAllocateIndexedGRESProfilesPartitionsAliases(t *testing.T) {
 		{DeviceClassName: "class-b", Profile: profile, Count: 2},
 	}
 	allocations, err := allocateIndexedGRESProfiles(requests, []slurmcontrol.GresLayout{{
-		Name: "gpu", Type: "gpu-example", Count: 3, Index: "3,1,0",
+		Name: "gpu", Type: "gpu-example", Count: 4, Index: "3,1,0,2",
 	}})
 	if err != nil {
 		t.Fatalf("allocateIndexedGRESProfiles() error = %v", err)
 	}
 	if len(allocations) != 2 || !slices.Equal(allocations[0].Indexes, []int{3}) || !slices.Equal(allocations[1].Indexes, []int{1, 0}) {
 		t.Fatalf("allocateIndexedGRESProfiles() = %#v, want indexes [3] and [1 0]", allocations)
+	}
+}
+
+func TestVerifyDeviceProfileRequestRejectsChangedCount(t *testing.T) {
+	profile, ok := dra.DefaultRegistry().LookupByName("cpu")
+	if !ok {
+		t.Fatal("default registry does not contain cpu")
+	}
+	sb := &SlurmBridge{
+		Client: fake.NewClientBuilder().WithObjects(&resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-cpus"},
+			Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+			}}},
+		}).Build(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
+		Requests: []resourcev1.DeviceRequest{{
+			Name: "cpu",
+			Exactly: &resourcev1.ExactDeviceRequest{
+				DeviceClassName: "my-cpus",
+				Count:           4,
+			},
+		}},
+	}}}
+	_, err := sb.verifyDeviceProfileRequest(context.Background(), claim, deviceProfileRequest{
+		DeviceClassName: "my-cpus",
+		Profile:         profile,
+		Count:           1,
+	}, "cpu")
+	if err == nil || !strings.Contains(err.Error(), "has count 4, expected exactly 1") {
+		t.Fatalf("verifyDeviceProfileRequest() error = %v, want changed count error", err)
+	}
+}
+
+func TestValidateDeviceProfileAllocationCounts(t *testing.T) {
+	allocation := &claimAllocation{
+		CoreBitmapAllocation: &coreBitmapAllocation{
+			deviceProfileRequest: deviceProfileRequest{Count: 1},
+			RequestName:          "cpu",
+		},
+		IndexedGRESAllocations: []indexedGRESAllocation{{
+			deviceProfileRequest: deviceProfileRequest{Count: 2},
+			RequestName:          "gpu",
+		}},
+	}
+	results := []resourcev1.DeviceRequestAllocationResult{
+		{Request: "cpu"},
+		{Request: "gpu"},
+		{Request: "gpu"},
+	}
+	if err := validateDeviceProfileAllocationCounts(allocation, results); err != nil {
+		t.Fatalf("validateDeviceProfileAllocationCounts() error = %v", err)
+	}
+	results = append(results, resourcev1.DeviceRequestAllocationResult{Request: "gpu"})
+	if err := validateDeviceProfileAllocationCounts(allocation, results); err == nil || !strings.Contains(err.Error(), `request "gpu" allocated 3 devices, expected exactly 2`) {
+		t.Fatalf("validateDeviceProfileAllocationCounts() error = %v, want excess allocation error", err)
 	}
 }
 
