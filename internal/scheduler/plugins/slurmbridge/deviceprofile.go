@@ -41,7 +41,6 @@ type claimAllocation struct {
 func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Pod) ([]deviceProfileRequest, error) {
 	counts := deviceClassRequestCounts(pod)
 	requests := make([]deviceProfileRequest, 0, len(counts))
-	registry := dra.DefaultRegistry()
 	for _, className := range slices.Sorted(maps.Keys(counts)) {
 		// TODO: Replace the missing/non-matching DeviceClass fallbacks below with
 		// explicit, versioned legacy handling during upgrades. New profile claim
@@ -53,7 +52,7 @@ func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Po
 			}
 			return nil, fmt.Errorf("get DeviceClass %q: %w", className, err)
 		}
-		profile, err := registry.MatchDeviceClass(deviceClass)
+		profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
 		if err != nil {
 			// DeviceClasses outside the profile registry continue through the
 			// existing driver-specific allocation path.
@@ -225,7 +224,6 @@ func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *
 	}
 
 	var results []resourcev1.DeviceRequestAllocationResult
-	registry := dra.DefaultRegistry()
 	for _, profileAllocation := range allocation.IndexedGRESAllocations {
 		request, ok := requests[profileAllocation.RequestName]
 		if !ok || request.Exactly == nil || request.Exactly.DeviceClassName != profileAllocation.DeviceClassName {
@@ -236,7 +234,7 @@ func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *
 		if err := sb.Get(ctx, client.ObjectKey{Name: profileAllocation.DeviceClassName}, deviceClass); err != nil {
 			return nil, fmt.Errorf("get DeviceClass %q while binding: %w", profileAllocation.DeviceClassName, err)
 		}
-		profile, err := registry.MatchDeviceClass(deviceClass)
+		profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
 		if err != nil {
 			return nil, fmt.Errorf("verify DeviceClass %q while binding: %w", profileAllocation.DeviceClassName, err)
 		}

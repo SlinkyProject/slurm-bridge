@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -521,7 +522,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
 			pod := tt.objects[len(tt.objects)-2].(*corev1.Pod).DeepCopy()
-			got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+			got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
 			if err != nil {
 				t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 			}

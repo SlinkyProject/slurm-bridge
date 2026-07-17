@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -172,7 +173,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := TranslateToSlurmJobIR(tt.args.client, tt.args.ctx, tt.args.pod)
+			got, err := TranslateToSlurmJobIR(tt.args.client, dra.DefaultRegistry(), tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TranslateToSlurmJobIR() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -237,7 +238,7 @@ func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *tes
 		}).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}
@@ -303,7 +304,7 @@ func TestTranslateToSlurmJobIRPrefersSupportedWorkloadBelowReadableAncestor(t *t
 		WithObjects(deployment, jobSet, job, pod).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}
@@ -534,8 +535,9 @@ func TestTranslatorParseGPUResources(t *testing.T) {
 		},
 	}
 	translator := translator{
-		Reader: fake.NewClientBuilder().Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -574,8 +576,9 @@ func TestTranslatorParseGPUResourcesUsesDeviceProfile(t *testing.T) {
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
 	if err := translator.parseGPUResources(ir); err != nil {
@@ -601,8 +604,9 @@ func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
 	if err := translator.parseGPUResources(ir); err != nil {
@@ -627,8 +631,9 @@ func TestTranslatorParseGPUResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(
 		podWithGPU(nvidiaDevicePlugin, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
 	if err := translator.parseGPUResources(ir); err != nil {
@@ -665,8 +670,9 @@ func TestTranslatorParseGPUResourcesCombinesProfileAliases(t *testing.T) {
 		},
 	}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
 	if err := translator.parseGPUResources(ir); err != nil {

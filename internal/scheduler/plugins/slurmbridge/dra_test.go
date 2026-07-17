@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
@@ -385,6 +386,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
+				draRegistry:   dra.DefaultRegistry(),
 			}
 			gotClaim, gotMappings, gotResources, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
@@ -475,7 +477,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 		},
 		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRAExampleDriver}},
 	).Build()
-	sb := &SlurmBridge{Client: kclient}
+	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
 
 	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, resources.Node, resources)
 	if err != nil {
@@ -650,7 +652,8 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 			pod := newPod()
 			kclient := newClient(pod, tt.funcs)
 			sb := &SlurmBridge{
-				Client: kclient,
+				Client:      kclient,
+				draRegistry: dra.DefaultRegistry(),
 			}
 
 			gotErr := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
@@ -737,7 +740,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient}
+	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -821,7 +824,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		WithObjects(pod, deviceClass).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient}
+	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -1183,7 +1186,8 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sb := &SlurmBridge{
-				Client: tt.kclient,
+				Client:      tt.kclient,
+				draRegistry: dra.DefaultRegistry(),
 			}
 			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{NodeResources: tt.resources})
 			if gotErr != nil {

@@ -63,7 +63,8 @@ type SlurmJobIR struct {
 
 type translator struct {
 	client.Reader
-	ctx context.Context
+	ctx         context.Context
+	draRegistry *dra.Registry
 }
 
 type workloadTranslator func(*translator, *corev1.Pod, *metav1.PartialObjectMetadata) (*SlurmJobIR, error)
@@ -98,8 +99,8 @@ func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
 	return ok
 }
 
-func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
-	t := translator{Reader: c, ctx: ctx}
+func PreFilter(c client.Client, registry *dra.Registry, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry}
 	switch slurmJobIR.RootPOM.TypeMeta {
 	case podgroup_v1alpha2:
 		return t.PreFilterPodGroup(pod, slurmJobIR)
@@ -112,13 +113,13 @@ func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR
 	}
 }
 
-func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
 	rootPOM, err := getRootOwnerMetadata(c, ctx, pod)
 	if err != nil {
 		return nil, err
 	}
 
-	t := translator{Reader: c, ctx: ctx}
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry}
 
 	// PodGroup (scheduling.k8s.io/v1alpha2): pods opt in via spec.schedulingGroup.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
@@ -265,7 +266,7 @@ func (t *translator) deviceClassGRES(className string) (dra.GRES, error) {
 		return dra.GRES{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
 	}
 
-	profile, err := dra.DefaultRegistry().MatchDeviceClass(deviceClass)
+	profile, err := t.draRegistry.MatchDeviceClass(deviceClass)
 	if err != nil {
 		return legacyGRES, nil //nolint:nilerr // Preserve the intentional legacy fallback for unmatched classes.
 	}
