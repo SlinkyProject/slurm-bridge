@@ -26,19 +26,19 @@ type NodeInfo struct {
 	CpuMap CPUMap
 }
 
-func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequest, error) {
+func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequest, error) {
 	var requests []resourcev1.DeviceRequest
 
 	if resources == nil {
 		return requests, nil
 	}
 
-	exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
+	exists, err := deviceClassExists(ctx, kubeclient, deviceClassName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
 		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
@@ -51,7 +51,7 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 			requests = append(requests, resourcev1.DeviceRequest{
 				Name: corev1.ResourceCPU.String(),
 				Exactly: &resourcev1.ExactDeviceRequest{
-					DeviceClassName: DraDriverCpu,
+					DeviceClassName: deviceClassName,
 					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
 					Count:           int64(cpuSet.Size()),
 					Selectors: []resourcev1.DeviceSelector{
@@ -69,19 +69,19 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 	return requests, nil
 }
 
-func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequestAllocationResult, error) {
+func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	var devices []resourcev1.DeviceRequestAllocationResult
 
 	if resources == nil {
 		return devices, nil
 	}
 
-	exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
+	exists, err := deviceClassExists(ctx, kubeclient, deviceClassName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
 		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)

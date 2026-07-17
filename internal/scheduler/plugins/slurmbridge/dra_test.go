@@ -53,6 +53,24 @@ func resourceSliceNodeIndex(obj client.Object) []string {
 	return []string{nodeName}
 }
 
+func exampleGPUDeviceClass(name string) *resourcev1.DeviceClass {
+	return &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
+		}}},
+	}
+}
+
+func nvidiaGPUDeviceClass(name string) *resourcev1.DeviceClass {
+	return &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
+		}}},
+	}
+}
+
 func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 	ctx := context.Background()
 	cs := clientsetfake.NewClientset(&resourcev1.DeviceClassList{
@@ -101,7 +119,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 		wantCPUMapping bool
 	}{
 		{
-			name: "No matching device class name",
+			name: "Missing DeviceClass fails closed",
 			fields: fields{
 				Client: fake.NewClientBuilder().
 					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
@@ -147,54 +165,15 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 					},
 				},
 			},
-		},
-		{
-			name: "CPU DRA request without CPU DeviceClass",
-			fields: fields{
-				Client: fake.NewClientBuilder().
-					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
-					Build(),
-				handle: f,
-			},
-			args: args{
-				ctx: ctx,
-				pod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: metav1.NamespaceDefault,
-						Name:      "foo",
-					},
-					Spec: corev1.PodSpec{
-						Containers: []corev1.Container{
-							{
-								Name: "foo",
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName): resource.MustParse("2"),
-									},
-								},
-							},
-						},
-					},
-				},
-				nodeName: "node1",
-				resources: &slurmcontrol.NodeResources{
-					Node:       "node1",
-					CoreBitmap: bitmaputil.String(bitmaputil.New(0)),
-				},
-			},
 			wantErr: true,
 		},
 		{
-			name: "Partial gres type does not map to device class resource",
+			name: "Partial gres type fails closed",
 			fields: fields{
 				handle: f,
 				Client: fake.NewClientBuilder().
 					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
-					WithObjects(
-						&resourcev1.DeviceClass{
-							ObjectMeta: metav1.ObjectMeta{Name: legacyDRAExampleDriver},
-						},
-					).
+					WithObjects(exampleGPUDeviceClass(legacyDRAExampleDriver)).
 					Build(),
 			},
 			args: args{
@@ -225,9 +204,10 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 					}},
 				},
 			},
+			wantErr: true,
 		},
 		{
-			name: "Matching device class name",
+			name: "Core-bitmap DeviceClass alias",
 			fields: fields{
 				handle: f,
 				Client: fake.NewClientBuilder().
@@ -237,8 +217,11 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 							ObjectMeta: metav1.ObjectMeta{Name: "node1"},
 						}, &resourcev1.DeviceClass{
 							ObjectMeta: metav1.ObjectMeta{
-								Name: nodeinfo.DraDriverCpu,
+								Name: "my-cpus",
 							},
+							Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+								CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+							}}},
 						},
 						&resourcev1.ResourceSlice{
 							ObjectMeta: metav1.ObjectMeta{
@@ -292,11 +275,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 								},
 							},
 						},
-						&resourcev1.DeviceClass{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: legacyDRAExampleDriver,
-							},
-						},
+						exampleGPUDeviceClass(legacyDRAExampleDriver),
 						&resourcev1.ResourceSlice{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "node1-gpu",
@@ -348,11 +327,11 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 								Name: "foo",
 								Resources: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{
-										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName):           resource.MustParse("4"),
+										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("4"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 									Limits: corev1.ResourceList{
-										corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName):           resource.MustParse("4"),
+										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("4"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 								},
@@ -419,11 +398,24 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			if tt.wantCPUMapping && !hasContainerExtendedResourceRequest(gotMappings, corev1.ContainerExtendedResourceRequest{
 				ContainerName: "foo",
 				RequestName:   corev1.ResourceCPU.String(),
-				ResourceName:  nodeinfo.DraDriverCpu_ExtendedResourceName,
+				ResourceName:  resourcev1.ResourceDeviceClassPrefix + "my-cpus",
 			}) {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() mappings = %v, want CPU extended resource mapping", gotMappings)
 			}
-			if tt.name == "Matching device class name" {
+			if tt.name == "Core-bitmap DeviceClass alias" {
+				if gotResources.CoreBitmapAllocation == nil || gotResources.CoreBitmapAllocation.DeviceClassName != "my-cpus" {
+					t.Fatalf("core-bitmap allocation = %#v, want DeviceClass my-cpus", gotResources.CoreBitmapAllocation)
+				}
+				var cpuRequest *resourcev1.DeviceRequest
+				for i := range gotClaim.Spec.Devices.Requests {
+					if gotClaim.Spec.Devices.Requests[i].Name == corev1.ResourceCPU.String() {
+						cpuRequest = &gotClaim.Spec.Devices.Requests[i]
+						break
+					}
+				}
+				if cpuRequest == nil || cpuRequest.Exactly == nil || cpuRequest.Exactly.DeviceClassName != "my-cpus" {
+					t.Fatalf("CPU claim request = %#v, want DeviceClass my-cpus", cpuRequest)
+				}
 				want := corev1.ContainerExtendedResourceRequest{
 					ContainerName: "foo",
 					RequestName:   "gpu",
@@ -475,7 +467,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
 			}}},
 		},
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRAExampleDriver}},
+		exampleGPUDeviceClass(legacyDRAExampleDriver),
 	).Build()
 	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
 
@@ -518,6 +510,64 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 	}
 	if len(resources.Gres) != 2 || resources.Gres[0].Type != "gpu-example" || resources.Gres[1].Type != legacyDRAExampleDriver {
 		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres)
+	}
+}
+
+func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(t *testing.T) {
+	const className = "profile-gpus"
+	resourceName := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + className)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "gpu-test"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "work",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				resourceName: resource.MustParse("1"),
+			}},
+		}}},
+	}
+	resources := &slurmcontrol.NodeResources{
+		Node: "node1",
+		Gres: []slurmcontrol.GresLayout{{Name: "gpu", Type: "gpu-example", Count: 1, Index: "0"}},
+	}
+	tests := []struct {
+		name       string
+		class      *resourcev1.DeviceClass
+		wantErrSub string
+	}{
+		{
+			name:       "deleted",
+			wantErrSub: `DeviceClass "profile-gpus" was not found`,
+		},
+		{
+			name:       "no longer matches a profile",
+			class:      &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: className}},
+			wantErrSub: `device class "profile-gpus" must have exactly one selector`,
+		},
+		{
+			name: "matches a different profile",
+			class: &resourcev1.DeviceClass{
+				ObjectMeta: metav1.ObjectMeta{Name: className},
+				Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+					CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
+				}}},
+			},
+			wantErrSub: `resolves to DeviceProfile "gpu-nvidia" but the Slurm allocation has no matching indexed GRES`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := fake.NewClientBuilder()
+			if tt.class != nil {
+				builder = builder.WithObjects(tt.class)
+			}
+			sb := &SlurmBridge{Client: builder.Build(), draRegistry: dra.DefaultRegistry()}
+
+			_, _, _, err := sb.createRequestsAndMappings(context.Background(), pod, resources.Node, resources)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("createRequestsAndMappings() error = %v, want %q", err, tt.wantErrSub)
+			}
+		})
 	}
 }
 
@@ -571,11 +621,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 						Name: "node1",
 					},
 				},
-				&resourcev1.DeviceClass{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: legacyDRAExampleDriver,
-					},
-				},
+				exampleGPUDeviceClass(legacyDRAExampleDriver),
 				&resourcev1.ResourceSlice{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1-gpu",
@@ -693,6 +739,42 @@ func TestValidateDeviceClassRequestsRejectsMultipleContainers(t *testing.T) {
 	}
 }
 
+func TestValidateDeviceClassRequestsForPodsRejectsCoreBitmapMultipleContainers(t *testing.T) {
+	const className = "my-cpus"
+	cpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + className)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "cpu-test"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{
+				Name: "first",
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					cpuResource: resource.MustParse("1"),
+				}},
+			},
+			{
+				Name: "second",
+				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					cpuResource: resource.MustParse("2"),
+				}},
+			},
+		}},
+	}
+	sb := &SlurmBridge{
+		Client: fake.NewClientBuilder().WithObjects(&resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: className},
+			Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+			}}},
+		}).Build(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	err := sb.validateDeviceClassRequestsForPods(context.Background(), []corev1.Pod{pod})
+	if err == nil || !strings.Contains(err.Error(), "requested by multiple containers") {
+		t.Fatalf("validateDeviceClassRequestsForPods() error = %v, want multiple containers error", err)
+	}
+}
+
 func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testing.T) {
 	ctx := context.Background()
 	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + legacyDRANVIDIADriver)
@@ -727,7 +809,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		WithObjects(
 			pod,
 			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRANVIDIADriver}},
+			nvidiaGPUDeviceClass(legacyDRANVIDIADriver),
 			&resourcev1.ResourceSlice{
 				ObjectMeta: metav1.ObjectMeta{Name: "node1-gpu"},
 				Spec: resourcev1.ResourceSliceSpec{
@@ -873,14 +955,19 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 }
 
 func TestSlurmBridge_bindClaim(t *testing.T) {
+	cpuProfile, ok := dra.DefaultRegistry().LookupByName("cpu")
+	if !ok {
+		t.Fatal("default registry does not contain CPU profile")
+	}
 	tests := []struct {
-		name      string
-		kclient   client.Client
-		claim     *resourcev1.ResourceClaim
-		pod       *corev1.Pod
-		nodeName  string
-		resources *slurmcontrol.NodeResources
-		wantErr   bool
+		name                 string
+		kclient              client.Client
+		claim                *resourcev1.ResourceClaim
+		pod                  *corev1.Pod
+		nodeName             string
+		resources            *slurmcontrol.NodeResources
+		coreBitmapAllocation *coreBitmapAllocation
+		wantErr              bool
 	}{
 		{
 			name: "smoke",
@@ -894,8 +981,11 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 					},
 					&resourcev1.DeviceClass{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: nodeinfo.DraDriverCpu,
+							Name: "my-cpus",
 						},
+						Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+							CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+						}}},
 					},
 					&resourcev1.ResourceSlice{
 						ObjectMeta: metav1.ObjectMeta{
@@ -1000,7 +1090,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 									{
 										Name: "cpu",
 										Exactly: &resourcev1.ExactDeviceRequest{
-											DeviceClassName: nodeinfo.DraDriverCpu,
+											DeviceClassName: "my-cpus",
 											Count:           4,
 											Selectors: []resourcev1.DeviceSelector{
 												{
@@ -1117,7 +1207,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 							{
 								Name: "cpu",
 								Exactly: &resourcev1.ExactDeviceRequest{
-									DeviceClassName: nodeinfo.DraDriverCpu,
+									DeviceClassName: "my-cpus",
 									Count:           4,
 									Selectors: []resourcev1.DeviceSelector{
 										{
@@ -1171,7 +1261,8 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 			},
 			nodeName: "node1",
 			resources: &slurmcontrol.NodeResources{
-				Node: "node1",
+				Node:       "node1",
+				CoreBitmap: bitmaputil.String(bitmaputil.New(0, 1)),
 				Gres: []slurmcontrol.GresLayout{
 					{
 						Name:  "gpu",
@@ -1181,6 +1272,14 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 					},
 				},
 			},
+			coreBitmapAllocation: &coreBitmapAllocation{
+				deviceProfileRequest: deviceProfileRequest{
+					DeviceClassName: "my-cpus",
+					Profile:         cpuProfile,
+					Count:           4,
+				},
+				RequestName: corev1.ResourceCPU.String(),
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -1189,7 +1288,10 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 				Client:      tt.kclient,
 				draRegistry: dra.DefaultRegistry(),
 			}
-			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{NodeResources: tt.resources})
+			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{
+				NodeResources:        tt.resources,
+				CoreBitmapAllocation: tt.coreBitmapAllocation,
+			})
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("bindClaim() failed: %v", gotErr)

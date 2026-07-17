@@ -60,12 +60,13 @@ func cpuClient(objects ...client.Object) client.Client {
 }
 
 func TestNodeInfoGetCPUDeviceRequests(t *testing.T) {
+	const deviceClassName = "my-cpus"
 	ctx := context.Background()
 	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
 	want := []resourcev1.DeviceRequest{{
 		Name: corev1.ResourceCPU.String(),
 		Exactly: &resourcev1.ExactDeviceRequest{
-			DeviceClassName: nodeinfo.DraDriverCpu,
+			DeviceClassName: deviceClassName,
 			AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
 			Count:           2,
 			Selectors: []resourcev1.DeviceSelector{{
@@ -77,14 +78,14 @@ func TestNodeInfoGetCPUDeviceRequests(t *testing.T) {
 	}}
 
 	kubeClient := cpuClient(
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}},
+		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: deviceClassName}},
 		cpuResourceSlice("node"),
 	)
 	node, err := nodeinfo.NewNodeInfo(ctx, kubeClient, "node")
 	if err != nil {
 		t.Fatalf("NewNodeInfo() error = %v", err)
 	}
-	got, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources)
+	got, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, deviceClassName)
 	if err != nil {
 		t.Fatalf("GetCPUDeviceRequests() error = %v", err)
 	}
@@ -123,7 +124,7 @@ func TestNodeInfoGetCPUDeviceRequestsErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewNodeInfo() error = %v", err)
 			}
-			_, err = node.GetCPUDeviceRequests(ctx, tt.kubeClient, resources)
+			_, err = node.GetCPUDeviceRequests(ctx, tt.kubeClient, resources, nodeinfo.DraDriverCpu)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("GetCPUDeviceRequests() error = %v, want containing %q", err, tt.want)
 			}
@@ -142,7 +143,7 @@ func TestNodeInfoGetCPUDeviceRequestAllocationResults(t *testing.T) {
 		t.Fatalf("NewNodeInfo() error = %v", err)
 	}
 	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	got, err := node.GetCPUDeviceRequestAllocationResults(ctx, kubeClient, resources)
+	got, err := node.GetCPUDeviceRequestAllocationResults(ctx, kubeClient, resources, nodeinfo.DraDriverCpu)
 	if err != nil {
 		t.Fatalf("GetCPUDeviceRequestAllocationResults() error = %v", err)
 	}

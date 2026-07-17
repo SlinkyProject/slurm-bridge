@@ -288,7 +288,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		"apiVersion", root.APIVersion,
 		"kind", root.Kind,
 		"root", rootName)
-	if err := validateDeviceClassRequestsForPods(s.slurmJobIR.Pods.Items); err != nil {
+	if err := sb.validateDeviceClassRequestsForPods(ctx, s.slurmJobIR.Pods.Items); err != nil {
 		logger.Error(err, "unsupported DRA extended resource request")
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
