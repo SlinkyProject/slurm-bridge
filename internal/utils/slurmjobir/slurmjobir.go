@@ -26,9 +26,8 @@ import (
 )
 
 const (
-	nvidiaDevicePlugin            = "nvidia.com/gpu"
-	amdDevicePlugin               = "amd.com/gpu"
-	cpuDRADeviceClassExtendedName = resourcev1.ResourceDeviceClassPrefix + "dra.cpu"
+	nvidiaDevicePlugin = "nvidia.com/gpu"
+	amdDevicePlugin    = "amd.com/gpu"
 )
 
 type SlurmJobIRJobInfo struct {
@@ -63,8 +62,9 @@ type SlurmJobIR struct {
 
 type translator struct {
 	client.Reader
-	ctx         context.Context
-	draRegistry *dra.Registry
+	ctx                 context.Context
+	draRegistry         *dra.Registry
+	deviceClassProfiles map[string]dra.DeviceProfile
 }
 
 type workloadTranslator func(*translator, *corev1.Pod, *metav1.PartialObjectMetadata) (*SlurmJobIR, error)
@@ -148,7 +148,7 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, ctx context.
 	}
 	slurmJobIR.RootPOM = *rootPOM
 	parsePodsCpuAndMemory(slurmJobIR)
-	if err := t.parseGPUResources(slurmJobIR); err != nil {
+	if err := t.parseDeviceResources(slurmJobIR); err != nil {
 		return nil, err
 	}
 	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM)
@@ -159,7 +159,6 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, ctx context.
 func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	var cpuMax resource.Quantity
 	var memMax resource.Quantity
-	cpuDRAResourceName := corev1.ResourceName(cpuDRADeviceClassExtendedName)
 	for _, p := range slurmJobIR.Pods.Items {
 		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
 		req := resourcehelper.PodRequests(&p, resourcehelper.PodResourcesOptions{})
@@ -168,12 +167,6 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 		}
 		if lim.Cpu().Cmp(cpuMax) == 1 {
 			cpuMax = *lim.Cpu()
-		}
-		if quantity := req[cpuDRAResourceName]; quantity.Cmp(cpuMax) == 1 {
-			cpuMax = quantity
-		}
-		if quantity := lim[cpuDRAResourceName]; quantity.Cmp(cpuMax) == 1 {
-			cpuMax = quantity
 		}
 		if req.Memory().Cmp(memMax) == 1 {
 			memMax = *req.Memory()
@@ -193,18 +186,20 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	}
 }
 
-// parseGPUResources sets each GRES requirement to the maximum per-pod quantity
-// requested across the external job. DeviceClasses which resolve to one
-// DeviceProfile are combined because they consume the same Slurm GRES.
-func (t *translator) parseGPUResources(slurmJobIR *SlurmJobIR) error {
+// parseDeviceResources resolves DRA extended resources to DeviceProfiles and
+// dispatches their Slurm representation by backend. Core-bitmap quantities
+// contribute to CPUs per task; indexed-GRES quantities contribute to GRES.
+func (t *translator) parseDeviceResources(slurmJobIR *SlurmJobIR) error {
 	maxByGRES := make(map[dra.GRES]resource.Quantity)
-	deviceClassCache := make(map[string]dra.GRES)
 	for i := range slurmJobIR.Pods.Items {
-		podGRES, err := t.podGPUResources(&slurmJobIR.Pods.Items[i], deviceClassCache)
+		podGRES, coreBitmapCPU, err := t.podDeviceResources(&slurmJobIR.Pods.Items[i])
 		if err != nil {
 			return err
 		}
 		mergeMaxGRESQuantities(maxByGRES, podGRES)
+		if coreBitmapCPU.Value() > 0 && (slurmJobIR.JobInfo.CpuPerTask == nil || coreBitmapCPU.Value() > int64(*slurmJobIR.JobInfo.CpuPerTask)) {
+			slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(coreBitmapCPU.Value())) //nolint:gosec
+		}
 	}
 
 	if gres := formatGRESResources(maxByGRES); gres != "" {
@@ -213,22 +208,38 @@ func (t *translator) parseGPUResources(slurmJobIR *SlurmJobIR) error {
 	return nil
 }
 
-func (t *translator) podGPUResources(pod *corev1.Pod, deviceClassCache map[string]dra.GRES) (map[dra.GRES]resource.Quantity, error) {
+func (t *translator) podDeviceResources(pod *corev1.Pod) (map[dra.GRES]resource.Quantity, resource.Quantity, error) {
 	resources := make(map[dra.GRES]resource.Quantity)
 	limits := resourcehelper.PodLimits(pod, resourcehelper.PodResourcesOptions{})
+	requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{})
+	coreRequest, err := t.coreBitmapQuantity(requests)
+	if err != nil {
+		return nil, resource.Quantity{}, err
+	}
+	coreLimit, err := t.coreBitmapQuantity(limits)
+	if err != nil {
+		return nil, resource.Quantity{}, err
+	}
+	coreBitmapCPU := coreRequest
+	if coreLimit.Cmp(coreBitmapCPU) > 0 {
+		coreBitmapCPU = coreLimit
+	}
+	nativeCPU := *requests.Cpu()
+	if limits.Cpu().Cmp(nativeCPU) > 0 {
+		nativeCPU = *limits.Cpu()
+	}
+	if nativeCPU.Sign() > 0 && coreBitmapCPU.Sign() > 0 {
+		return nil, resource.Quantity{}, fmt.Errorf("pod %s requests both native CPU and a core-bitmap DeviceProfile", pod.Name)
+	}
+
 	for resourceName, quantity := range limits {
 		if quantity.Sign() <= 0 {
 			continue
 		}
 		name := resourceName.String()
-		if name == cpuDRADeviceClassExtendedName {
-			continue
-		}
-		// Backend selection is deliberately resource-name based. In
-		// particular, nvidia.com/gpu remains the NVIDIA device-plugin
-		// resource even when a DeviceClass declares it as its
-		// spec.extendedResourceName. Only the implicit
-		// deviceclass.resource.kubernetes.io/<class> form selects DRA.
+		// Explicit GPU extended resources remain device-plugin requests.
+		// Only deviceclass.resource.kubernetes.io/<class> selects DRA and
+		// dispatches through the resolved DeviceProfile backend.
 		if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
 			addGRESQuantity(resources, dra.GRES{Name: "gpu"}, quantity)
 			continue
@@ -238,42 +249,68 @@ func (t *translator) podGPUResources(pod *corev1.Pod, deviceClassCache map[strin
 		if !ok {
 			continue
 		}
-		gres, ok := deviceClassCache[className]
-		if !ok {
-			var err error
-			gres, err = t.deviceClassGRES(className)
-			if err != nil {
-				return nil, err
-			}
-			deviceClassCache[className] = gres
+		profile, err := t.resolveDeviceClass(className)
+		if err != nil {
+			return nil, resource.Quantity{}, err
+		}
+		if profile.UsesCoreBitmap() {
+			continue
+		}
+		if !profile.UsesIndexedGRES() {
+			return nil, resource.Quantity{}, fmt.Errorf("DeviceClass %q resolves to unsupported backend %q", className, profile.Backend.String())
+		}
+		gres, err := profile.GRES()
+		if err != nil {
+			return nil, resource.Quantity{}, err
 		}
 		addGRESQuantity(resources, gres, quantity)
 	}
-	return resources, nil
+	return resources, coreBitmapCPU, nil
 }
 
-func (t *translator) deviceClassGRES(className string) (dra.GRES, error) {
-	// TODO: Replace this implicit fallback with explicit, versioned legacy
-	// handling during upgrades. New jobs with a missing or non-matching
-	// DeviceClass must fail closed; only jobs created by the legacy flow may use
-	// a driver-named GRES.
-	legacyGRES := dra.GRES{Name: "gpu", Type: className}
+func (t *translator) coreBitmapQuantity(resources corev1.ResourceList) (resource.Quantity, error) {
+	var total resource.Quantity
+	for resourceName, quantity := range resources {
+		if quantity.Sign() <= 0 {
+			continue
+		}
+		className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
+		if !ok {
+			continue
+		}
+		profile, err := t.resolveDeviceClass(className)
+		if err != nil {
+			return resource.Quantity{}, err
+		}
+		if profile.UsesCoreBitmap() {
+			total.Add(quantity)
+		}
+	}
+	return total, nil
+}
+
+func (t *translator) resolveDeviceClass(className string) (dra.DeviceProfile, error) {
+	if profile, ok := t.deviceClassProfiles[className]; ok {
+		return profile, nil
+	}
+	if t.deviceClassProfiles == nil {
+		t.deviceClassProfiles = make(map[string]dra.DeviceProfile)
+	}
+
 	deviceClass := &resourcev1.DeviceClass{}
 	if err := t.Get(t.ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
 		if apierrors.IsNotFound(err) {
-			return legacyGRES, nil
+			return dra.DeviceProfile{}, fmt.Errorf("DeviceClass %q was not found", className)
 		}
-		return dra.GRES{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
+		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
 	}
 
 	profile, err := t.draRegistry.MatchDeviceClass(deviceClass)
 	if err != nil {
-		return legacyGRES, nil //nolint:nilerr // Preserve the intentional legacy fallback for unmatched classes.
+		return dra.DeviceProfile{}, err
 	}
-	if len(deviceClass.Spec.Config) != 0 {
-		return dra.GRES{}, fmt.Errorf("DeviceClass %q configuration is not supported", className)
-	}
-	return profile.GRES()
+	t.deviceClassProfiles[className] = profile
+	return profile, nil
 }
 
 func addGRESQuantity(resources map[dra.GRES]resource.Quantity, gres dra.GRES, quantity resource.Quantity) {
