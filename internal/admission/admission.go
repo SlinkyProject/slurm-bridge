@@ -96,6 +96,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateDRADeviceClasses(pod); err != nil {
 		return nil, err
 	}
+	if err := validateAnnotationConflicts(pod); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -207,6 +210,48 @@ func validateContainerDRADeviceClasses(container corev1.Container) error {
 			deviceClassName, isDRADeviceClass := strings.CutPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
 			if isDRADeviceClass && !nodeinfo.IsSupportedDRADeviceClass(deviceClassName) {
 				return fmt.Errorf("container %q uses unsupported DRA device class %q", container.Name, deviceClassName)
+			}
+		}
+	}
+	return nil
+}
+
+// validateAnnotationConflicts rejects Slurm annotation overrides that would
+// contradict explicit DRA resource requests declared on the pod. DRA requests
+// are authoritative: the generated ResourceClaim must match what the pod
+// declared, so annotations that would replace those values are disallowed.
+func validateAnnotationConflicts(pod *corev1.Pod) error {
+	_, hasCpuPerTask := pod.Annotations[wellknown.AnnotationCpuPerTask]
+	_, hasGres := pod.Annotations[wellknown.AnnotationGres]
+	if !hasCpuPerTask && !hasGres {
+		return nil
+	}
+
+	checkResourceList := func(rl corev1.ResourceList) error {
+		for resourceName := range rl {
+			cls, isDRA := strings.CutPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
+			if !isDRA {
+				continue
+			}
+			if hasCpuPerTask && cls == nodeinfo.DraDriverCpu {
+				return fmt.Errorf("annotation %q conflicts with CPU DRA resource %q: explicit DRA requests are authoritative",
+					wellknown.AnnotationCpuPerTask, resourceName)
+			}
+			if hasGres && cls != nodeinfo.DraDriverCpu {
+				return fmt.Errorf("annotation %q conflicts with DRA resource %q: explicit DRA requests are authoritative",
+					wellknown.AnnotationGres, resourceName)
+			}
+		}
+		return nil
+	}
+
+	for _, containers := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
+		for _, c := range containers {
+			if err := checkResourceList(c.Resources.Requests); err != nil {
+				return err
+			}
+			if err := checkResourceList(c.Resources.Limits); err != nil {
+				return err
 			}
 		}
 	}

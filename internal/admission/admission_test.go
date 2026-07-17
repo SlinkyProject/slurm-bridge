@@ -208,6 +208,131 @@ func TestValidateDRADeviceClasses(t *testing.T) {
 	}
 }
 
+func TestValidateAnnotationConflicts(t *testing.T) {
+	cpuDRA := corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName)
+	gpuDRA := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverGpuNvidia)
+
+	tests := []struct {
+		name            string
+		pod             *corev1.Pod
+		wantErrContains string
+	}{
+		{
+			name: "no annotations no DRA",
+			pod:  &corev1.Pod{},
+		},
+		{
+			name: "cpu-per-task without CPU DRA is allowed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationCpuPerTask: "4",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("4"),
+					}},
+				}}},
+			},
+		},
+		{
+			name: "gres without GPU DRA is allowed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationGres: "gpu:4",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("4"),
+					}},
+				}}},
+			},
+		},
+		{
+			name: "cpu-per-task with CPU DRA in container requests is rejected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationCpuPerTask: "1",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						cpuDRA: resource.MustParse("4"),
+					}},
+				}}},
+			},
+			wantErrContains: wellknown.AnnotationCpuPerTask,
+		},
+		{
+			name: "cpu-per-task with CPU DRA in init container limits is rejected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationCpuPerTask: "1",
+				}},
+				Spec: corev1.PodSpec{InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						cpuDRA: resource.MustParse("4"),
+					}},
+				}}},
+			},
+			wantErrContains: wellknown.AnnotationCpuPerTask,
+		},
+		{
+			name: "gres with GPU DRA in container requests is rejected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationGres: "gpu:nvidia:4",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuDRA: resource.MustParse("4"),
+					}},
+				}}},
+			},
+			wantErrContains: wellknown.AnnotationGres,
+		},
+		{
+			name: "cpu-per-task with GPU DRA (not CPU DRA) is allowed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationCpuPerTask: "1",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						gpuDRA: resource.MustParse("4"),
+					}},
+				}}},
+			},
+		},
+		{
+			name: "gres with CPU DRA (not GPU DRA) is allowed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+					wellknown.AnnotationGres: "gpu:4",
+				}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						cpuDRA: resource.MustParse("4"),
+					}},
+				}}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAnnotationConflicts(tt.pod)
+			if tt.wantErrContains == "" {
+				if err != nil {
+					t.Fatalf("validateAnnotationConflicts() unexpected error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Fatalf("validateAnnotationConflicts() error = %v, want error containing %q", err, tt.wantErrContains)
+			}
+		})
+	}
+}
+
 var _ = Describe("Admission Controller", func() {
 	Context("SetupWithManager()", func() {
 		It("Should have correct maps between expected schedulers", func() {
