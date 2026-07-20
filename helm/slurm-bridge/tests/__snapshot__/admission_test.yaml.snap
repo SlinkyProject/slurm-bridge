@@ -47,7 +47,7 @@ manifests should match snapshot:
               name: slurm-bridge-admission
               readinessProbe:
                 httpGet:
-                  path: /healthz
+                  path: /readyz
                   port: 8081
               volumeMounts:
                 - mountPath: /tmp/k8s-webhook-server/serving-certs/
