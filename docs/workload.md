@@ -9,7 +9,11 @@
   - [Overview](#overview)
   - [Using the `slurm-bridge` Scheduler](#using-the-slurm-bridge-scheduler)
   - [CPU DRA](#cpu-dra)
+  - [Pod grouping](#pod-grouping)
   - [Annotations](#annotations)
+    - [Resolution rules](#resolution-rules)
+    - [Supported Slurm job annotations](#supported-slurm-job-annotations)
+    - [Scheduler-managed Pod metadata](#scheduler-managed-pod-metadata)
   - [PodGroup (1.36+)](#podgroup-136)
   - [JobSets](#jobsets)
   - [PodGroup coscheduling](#podgroup-coscheduling)
@@ -76,11 +80,47 @@ containers. Native CPU requests still reserve capacity in Slurm, but native
 containers share all CPUs not claimed through DRA; Slurm's native CPU IDs do not
 define their container CPU sets.
 
+## Pod grouping
+
+Slurm-bridge turns each group of Kubernetes Pods into one Slurm external job:
+
+| Workload              | Pods in one external job                                 | Where to put annotations   |
+| --------------------- | -------------------------------------------------------- | -------------------------- |
+| Pod                   | That Pod                                                 | Pod                        |
+| Job or JobSet         | One Pod                                                  | Job or JobSet              |
+| Built-in PodGroup     | Pods with the same `spec.schedulingGroup.podGroupName`   | PodGroup, Job, or Workload |
+| PodGroup coscheduling | Pods with the same `scheduling.x-k8s.io/pod-group` label | PodGroup                   |
+| LeaderWorkerSet       | One LeaderWorkerSet group                                | LeaderWorkerSet            |
+
+Slurm-bridge selects the first applicable grouping mechanism in this order:
+**built-in PodGroup -> PodGroup coscheduling -> root workload owner -> the Pod
+itself**.
+
+For Jobs, JobSets, and LeaderWorkerSets, annotations belong on the top-level
+workload object, not its Pod template or generated child objects.
+
+For grouped workloads:
+
+- **JobSet:** JobSet annotations apply to every per-Pod external job.
+  Annotations on generated Jobs or Pods are ignored.
+- **LeaderWorkerSet:** LeaderWorkerSet annotations apply to every group external
+  job. Pod annotations are ignored.
+- **Built-in PodGroup:** annotations are merged from the PodGroup, root owning
+  Job, and Workload. Pod annotations are ignored.
+- **PodGroup coscheduling:** only PodGroup annotations apply to the group.
+  Owning Job and Pod annotations are ignored.
+
+The built-in Workload API is therefore different from the other grouped
+workloads: it merges three annotation sources instead of reading one top-level
+source.
+
 ## Annotations
 
-Users can better inform or influence `slurm-bridge` how to represent their
-Kubernetes workload within Slurm by adding
-[annotations](../internal/wellknown/annotations.go) on the parent Object.
+Users can influence how `slurm-bridge` represents their Kubernetes workload in
+Slurm by adding `slurmjob.slinky.slurm.net/*` annotations to the annotation
+source identified in [Pod grouping](#pod-grouping). These annotations configure
+the Slurm external job; they are separate from the
+[scheduler-managed metadata](#scheduler-managed-pod-metadata).
 
 Example "pause" bare pod to illustrate annotations:
 
@@ -89,7 +129,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: pause
-  # `slurm-bridge` annotations on parent object
+  # Slurm job annotations on this Pod
   annotations:
     slurmjob.slinky.slurm.net/timelimit: "5"
     slurmjob.slinky.slurm.net/account: foo
@@ -111,7 +151,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: sleep
-  # `slurm-bridge` annotations on parent object
+  # Slurm job annotations on the Job, not spec.template.metadata
   annotations:
     slurmjob.slinky.slurm.net/timelimit: "5"
     slurmjob.slinky.slurm.net/account: foo
@@ -129,6 +169,46 @@ spec:
               cpu: "1"
               memory: 100Mi
 ```
+
+### Resolution rules
+
+Slurm parameters are resolved from lowest to highest precedence: **scheduler or
+Slurm defaults -> values derived from the workload and Pods -> Slurm job
+annotations**. For built-in PodGroups, annotation precedence is **PodGroup ->
+Job -> Workload**.
+
+Keys that do not conflict are combined.
+
+### Supported Slurm job annotations
+
+| Purpose                 | Annotation suffixes                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| Identity and accounting | `account`, `group-id`, `user-id`, `wckey`                                             |
+| Scheduling policy       | `constraints`, `exclusive`, `licenses`, `partition`, `priority`, `qos`, `reservation` |
+| Resources               | `cpu-per-task`, `gres`, `max-nodes`, `mem-per-node`, `min-nodes`                      |
+| Naming and duration     | `job-name`, `timelimit`                                                               |
+
+Prefix every suffix with `slurmjob.slinky.slurm.net/`; for example,
+`slurmjob.slinky.slurm.net/account`. Node counts, priority, and `timelimit` are
+base-10 integers; `timelimit` is measured in minutes. CPU and memory accept
+Kubernetes quantities. `exclusive: "false"` requests non-exclusive placement;
+exclusive placement is the default.
+
+Annotations can update a Slurm job while it is pending. Once Slurm allocates the
+job, treat its annotations and Pod membership as fixed.
+
+### Scheduler-managed Pod metadata
+
+Slurm-bridge writes the following metadata to Pods as it creates and allocates
+the external job:
+
+| Metadata                                 | Type       | Meaning                                                                                                |
+| ---------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `scheduler.slinky.slurm.net/slurm-jobid` | Label      | Slurm job ID associated with the Pod. All Pods represented by one external job receive the same value. |
+| `slinky.slurm.net/slurm-node`            | Annotation | Kubernetes node selected from the Slurm allocation for this Pod.                                       |
+
+These keys are owned by slurm-bridge. Users cannot set them when creating a
+managed Pod or change them after that Pod is running.
 
 ## PodGroup (1.36+)
 
@@ -202,9 +282,9 @@ Without them, the Slurm job name defaults to the **PodGroup object name** (not
 the Workload name) and the partition defaults to the scheduler configuration.
 See [Annotations](#annotations) for the full key list.
 
-If any layer sets `slurmjob.slinky.slurm.net/job-name`, later layers in that
-merge order overwrite earlier ones. In the example above, the PodGroup is named
-`training-job-workers` but the Workload sets
+If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
+applied **PodGroup -> Job -> Workload**, so the Workload wins. In the example
+above, the PodGroup is named `training-job-workers` but the Workload sets
 `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm receives
 **`training-job`**. A PodGroup cannot override a `job-name` set on its Workload
 or owning Job; put per-gang `job-name` on the **PodGroup** or **Job** instead.
