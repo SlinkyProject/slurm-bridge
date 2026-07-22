@@ -12,12 +12,12 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	resourcehelper "k8s.io/component-helpers/resource"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -62,6 +62,38 @@ type translator struct {
 	ctx context.Context
 }
 
+type workloadTranslator func(*translator, *corev1.Pod, *metav1.PartialObjectMetadata) (*SlurmJobIR, error)
+
+func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) {
+	switch typeMeta {
+	case podgroup_v1alpha2:
+		return (*translator).fromPodGroup, true
+	case jobSet_v1alpha2:
+		return (*translator).fromJobSet, true
+	case podgroup_coscheduling_v1alpha1:
+		return (*translator).fromPodGroupCoscheduling, true
+	case job_v1:
+		return (*translator).fromJob, true
+	case pod_v1:
+		return func(t *translator, pod *corev1.Pod, _ *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
+			return t.fromPod(pod)
+		}, true
+	case lws_v1:
+		return (*translator).fromLws, true
+	default:
+		return nil, false
+	}
+}
+
+func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
+	typeMeta := metav1.TypeMeta{
+		APIVersion: gvk.GroupVersion().String(),
+		Kind:       gvk.Kind,
+	}
+	_, ok := workloadTranslatorFor(typeMeta)
+	return ok
+}
+
 func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
 	t := translator{Reader: c, ctx: ctx}
 	switch slurmJobIR.RootPOM.TypeMeta {
@@ -77,7 +109,7 @@ func PreFilter(c client.Client, ctx context.Context, pod *corev1.Pod, slurmJobIR
 }
 
 func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
-	rootPOM, err := utils.GetRootOwnerMetadata(c, ctx, pod)
+	rootPOM, err := getRootOwnerMetadata(c, ctx, pod)
 	if err != nil {
 		return nil, err
 	}
@@ -100,20 +132,10 @@ func TranslateToSlurmJobIR(c client.Client, ctx context.Context, pod *corev1.Pod
 		return nil, err
 	}
 
-	switch rootPOM.TypeMeta {
-	case podgroup_v1alpha2:
-		slurmJobIR, err = t.fromPodGroup(pod, rootPOM)
-	case jobSet_v1alpha2:
-		slurmJobIR, err = t.fromJobSet(pod, rootPOM)
-	case podgroup_coscheduling_v1alpha1:
-		slurmJobIR, err = t.fromPodGroupCoscheduling(pod, rootPOM)
-	case job_v1:
-		slurmJobIR, err = t.fromJob(pod, rootPOM)
-	case pod_v1:
-		slurmJobIR, err = t.fromPod(pod)
-	case lws_v1:
-		slurmJobIR, err = t.fromLws(pod, rootPOM)
-	default:
+	translate, supported := workloadTranslatorFor(rootPOM.TypeMeta)
+	if supported {
+		slurmJobIR, err = translate(&t, pod, rootPOM)
+	} else {
 		slurmJobIR, err = t.fromPod(pod)
 	}
 	if err != nil {
