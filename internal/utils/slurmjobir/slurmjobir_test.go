@@ -5,6 +5,7 @@ package slurmjobir
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -12,16 +13,18 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func podWithResources(cpuRequest, memoryRequest, cpuLimit, memoryLimit string) corev1.Pod {
@@ -178,10 +181,11 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 	}
 }
 
-func TestTranslateToSlurmJobIRFallsBackToResolvedController(t *testing.T) {
+func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(jobset.AddToScheme(scheme))
+	unsupportedGVK := schema.FromAPIVersionAndKind("example.com/v1", "ExampleController")
+	const unsupportedName = "example-controller"
 
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
@@ -196,9 +200,9 @@ func TestTranslateToSlurmJobIRFallsBackToResolvedController(t *testing.T) {
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: jobset.GroupVersion.String(),
-					Kind:       "JobSet",
-					Name:       "missing-jobset",
+					APIVersion: unsupportedGVK.GroupVersion().String(),
+					Kind:       unsupportedGVK.Kind,
+					Name:       unsupportedName,
 					Controller: ptr.To(true),
 				},
 			},
@@ -213,7 +217,22 @@ func TestTranslateToSlurmJobIRFallsBackToResolvedController(t *testing.T) {
 			Controller: ptr.To(true),
 		},
 	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(job, pod).Build()
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(job, pod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if key.Name == unsupportedName {
+					return apierrors.NewForbidden(
+						unsupportedGVK.GroupVersion().WithResource("examplecontrollers").GroupResource(),
+						unsupportedName,
+						errors.New("access denied"),
+					)
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
 
 	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
 	if err != nil {
