@@ -262,7 +262,7 @@ func (t *translator) deviceClassGRES(className string) (dra.GRES, error) {
 
 	profile, err := dra.DefaultRegistry().MatchDeviceClass(deviceClass)
 	if err != nil {
-		return legacyGRES, nil
+		return legacyGRES, nil //nolint:nilerr // Preserve the intentional legacy fallback for unmatched classes.
 	}
 	if len(deviceClass.Spec.Config) != 0 {
 		return dra.GRES{}, fmt.Errorf("DeviceClass %q configuration is not supported", className)

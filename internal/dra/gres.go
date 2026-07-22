@@ -127,10 +127,10 @@ func (a AppliedInventory) Devices(profileName string, indexes []int) ([]DeviceId
 	seen := make(map[int]struct{}, len(indexes))
 	for i, index := range indexes {
 		if index < 0 || index >= len(devices) {
-			return nil, fmt.Errorf("Slurm GRES index %d is outside device profile %q inventory of %d devices", index, profileName, len(devices))
+			return nil, fmt.Errorf("slurm GRES index %d is outside device profile %q inventory of %d devices", index, profileName, len(devices))
 		}
 		if _, ok := seen[index]; ok {
-			return nil, fmt.Errorf("Slurm GRES index %d is repeated for device profile %q", index, profileName)
+			return nil, fmt.Errorf("slurm GRES index %d is repeated for device profile %q", index, profileName)
 		}
 		seen[index] = struct{}{}
 		selected[i] = devices[index]
