@@ -92,12 +92,12 @@ Slurm-bridge turns each group of Kubernetes Pods into one Slurm external job:
 | Built-in PodGroup         | Pods with the same `spec.schedulingGroup.podGroupName`   | PodGroup, Job, or Workload |
 | PodGroup coscheduling     | Pods with the same `scheduling.x-k8s.io/pod-group` label | PodGroup                   |
 | LeaderWorkerSet           | One LeaderWorkerSet group                                | LeaderWorkerSet            |
-| Other readable controller | One Pod                                                  | Root controller            |
+| Other readable controller | One Pod                                                  | Highest readable controller |
 
-Slurm-bridge first follows controller owner references to the root object. If
-that lookup succeeds, it selects the first applicable grouping mechanism in this
-order: **built-in PodGroup -> PodGroup coscheduling -> recognized root workload
-type -> the Pod itself**.
+Slurm-bridge first follows controller owner references toward the root object.
+It selects the first applicable grouping mechanism in this order: **built-in
+PodGroup -> PodGroup coscheduling -> recognized highest readable workload type
+-> the Pod itself**.
 
 For Jobs, JobSets, and LeaderWorkerSets, annotations belong on the top-level
 workload object, not its Pod template or generated child objects.
@@ -119,18 +119,19 @@ source.
 
 ### Other controller owners
 
-Every object in a Pod's controller-owner chain must exist and be readable by the
-slurm-bridge scheduler. If the root controller is readable but is not a
-recognized workload type, slurm-bridge schedules each Pod as a separate external
-job and reads annotations from that root controller. Annotations on intermediate
-controllers and the Pod are ignored.
+The Pod's direct controller owner must exist and be readable by the slurm-bridge
+scheduler. After resolving that controller, if a higher controller in the chain
+cannot be retrieved, slurm-bridge uses the highest controller it successfully
+resolved. If that controller is not a recognized workload type, slurm-bridge
+schedules each Pod as a separate external job and reads annotations from that
+controller. Annotations on lower controllers and the Pod are ignored.
 
 The default scheduler RBAC can read ReplicaSets and StatefulSets, but not
 Deployments, DaemonSets, or arbitrary custom controllers. For example, owner
-resolution for `Deployment -> ReplicaSet -> Pod` reaches the Deployment and
-fails unless the scheduler is granted permission to read Deployments. Owner
-resolution happens before PodGroup selection, so adding either PodGroup
-association does not bypass a missing owner permission.
+resolution for `Deployment -> ReplicaSet -> Pod` stops at the ReplicaSet if the
+scheduler cannot read the Deployment, and the Pod is still scheduled. If the
+ReplicaSet itself cannot be retrieved, scheduling fails because no controller
+in the chain was successfully resolved.
 
 ## Annotations
 

@@ -152,6 +152,111 @@ func TestGetRootOwnerMetadata(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Missing Deployment => ReplicaSet => Pod",
+			args: func() args {
+				replicaSet := &appsv1.ReplicaSet{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "ReplicaSet",
+						APIVersion: "apps/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "replicaset1",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								Name:       "deployment1",
+								Kind:       "Deployment",
+								APIVersion: "apps/v1",
+								Controller: ptr.To(true),
+							},
+						},
+					},
+				}
+				pod := pod.DeepCopy()
+				pod.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:       replicaSet.GetName(),
+						Kind:       replicaSet.Kind,
+						APIVersion: replicaSet.APIVersion,
+						Controller: ptr.To(true),
+					},
+				}
+				return args{
+					c:   fake.NewFakeClient(replicaSet, pod),
+					ctx: context.TODO(),
+					obj: pod,
+				}
+			}(),
+			want: &metav1.PartialObjectMetadata{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "ReplicaSet",
+					APIVersion: "apps/v1",
+				},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "replicaset1",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Missing ReplicaSet => Pod",
+			args: func() args {
+				pod := pod.DeepCopy()
+				pod.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:       "replicaset1",
+						Kind:       "ReplicaSet",
+						APIVersion: "apps/v1",
+						Controller: ptr.To(true),
+					},
+				}
+				return args{
+					c:   fake.NewFakeClient(pod),
+					ctx: context.TODO(),
+					obj: pod,
+				}
+			}(),
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "Controller owner cycle exceeds maximum depth",
+			args: func() args {
+				job := &batchv1.Job{
+					TypeMeta: metav1.TypeMeta{
+						Kind:       "Job",
+						APIVersion: "batch/v1",
+					},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "job1",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								Name:       "job1",
+								Kind:       "Job",
+								APIVersion: "batch/v1",
+								Controller: ptr.To(true),
+							},
+						},
+					},
+				}
+				pod := pod.DeepCopy()
+				pod.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:       job.Name,
+						Kind:       job.Kind,
+						APIVersion: job.APIVersion,
+						Controller: ptr.To(true),
+					},
+				}
+				return args{
+					c:   fake.NewFakeClient(job, pod),
+					ctx: context.TODO(),
+					obj: pod,
+				}
+			}(),
+			want:    nil,
+			wantErr: true,
+		},
+		{
 			name: "Job => Pod",
 			args: func() args {
 				job := &batchv1.Job{

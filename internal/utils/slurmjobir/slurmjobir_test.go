@@ -8,15 +8,20 @@ import (
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
 func podWithResources(cpuRequest, memoryRequest, cpuLimit, memoryLimit string) corev1.Pod {
@@ -170,6 +175,58 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 				t.Errorf("TranslateToSlurmJobIR() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTranslateToSlurmJobIRFallsBackToResolvedController(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme))
+
+	job := &batchv1.Job{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: batchv1.SchemeGroupVersion.String(),
+			Kind:       "Job",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "job1",
+			Annotations: map[string]string{
+				wellknown.AnnotationAccount: "job-account",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: jobset.GroupVersion.String(),
+					Kind:       "JobSet",
+					Name:       "missing-jobset",
+					Controller: ptr.To(true),
+				},
+			},
+		},
+	}
+	pod := st.MakePod().Namespace("default").Name("pod1").Obj()
+	pod.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: batchv1.SchemeGroupVersion.String(),
+			Kind:       "Job",
+			Name:       job.Name,
+			Controller: ptr.To(true),
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(job, pod).Build()
+
+	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	if err != nil {
+		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
+	}
+	if got.RootPOM.TypeMeta != job_v1 || got.RootPOM.Name != job.Name {
+		t.Errorf("RootPOM = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, job_v1, job.Name)
+	}
+	if got.JobInfo.MinNodes == nil || *got.JobInfo.MinNodes != 1 {
+		t.Errorf("MinNodes = %v, want 1 from the Job controller", got.JobInfo.MinNodes)
+	}
+	if got.JobInfo.Account == nil || *got.JobInfo.Account != "job-account" {
+		t.Errorf("Account = %v, want Job controller annotation", got.JobInfo.Account)
 	}
 }
 
