@@ -5,6 +5,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,14 +16,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
+const maxControllerOwnerDepth = 32
+
 func GetRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Object) (*metav1.PartialObjectMetadata, error) {
+	return getRootOwnerMetadata(c, ctx, obj, false, 0)
+}
+
+func getRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Object, controllerResolved bool, depth int) (*metav1.PartialObjectMetadata, error) {
 	namespace := obj.GetNamespace()
 	objGVK, err := apiutil.GVKForObject(obj, c.Scheme())
 	if err != nil {
 		return nil, err
 	}
 	metadata := obj.(metav1.ObjectMetaAccessor).GetObjectMeta()
-	pom := &metav1.PartialObjectMetadata{
+	currentPOM := &metav1.PartialObjectMetadata{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       objGVK.Kind,
 			APIVersion: objGVK.GroupVersion().String(),
@@ -36,20 +43,33 @@ func GetRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Objec
 	owner := getNextControllerOwner(obj)
 	if owner == nil {
 		// Found root owner
-		return pom, nil
+		return currentPOM, nil
 	}
-	name := owner.Name
-	pom.Name = name
+	if depth >= maxControllerOwnerDepth {
+		return nil, fmt.Errorf("controller owner chain exceeds maximum depth of %d at %s %s/%s", maxControllerOwnerDepth, objGVK.String(), namespace, obj.GetName())
+	}
+	ownerPOM := &metav1.PartialObjectMetadata{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      owner.Name,
+		},
+	}
 	ownerGVK := schema.FromAPIVersionAndKind(owner.APIVersion, owner.Kind)
-	pom.SetGroupVersionKind(ownerGVK)
+	ownerPOM.SetGroupVersionKind(ownerGVK)
 
-	key := client.ObjectKey{Namespace: namespace, Name: name}
-	if err := c.Get(ctx, key, pom); err != nil {
+	key := client.ObjectKey{Namespace: namespace, Name: owner.Name}
+	if err := c.Get(ctx, key, ownerPOM); err != nil {
+		// Keep the closest controller that was successfully resolved. The Pod
+		// itself is not a controller fallback, so failure to resolve its direct
+		// controller remains an error.
+		if controllerResolved {
+			return currentPOM, nil
+		}
 		return nil, err
 	}
 
 	// Follow owner reference
-	return GetRootOwnerMetadata(c, ctx, pom)
+	return getRootOwnerMetadata(c, ctx, ownerPOM, true, depth+1)
 }
 
 func getNextControllerOwner(obj client.Object) *metav1.OwnerReference {
