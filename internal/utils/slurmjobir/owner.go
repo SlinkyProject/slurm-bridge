@@ -18,10 +18,17 @@ import (
 const maxControllerOwnerDepth = 32
 
 func getRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Object) (*metav1.PartialObjectMetadata, error) {
-	return resolveRootOwnerMetadata(c, ctx, obj, false, 0)
+	return resolveRootOwnerMetadata(c, ctx, obj, false, 0, nil)
 }
 
-func resolveRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Object, controllerResolved bool, depth int) (*metav1.PartialObjectMetadata, error) {
+func resolveRootOwnerMetadata(
+	c client.Client,
+	ctx context.Context,
+	obj client.Object,
+	controllerResolved bool,
+	depth int,
+	supportedRoot *metav1.PartialObjectMetadata,
+) (*metav1.PartialObjectMetadata, error) {
 	namespace := obj.GetNamespace()
 	objGVK, err := apiutil.GVKForObject(obj, c.Scheme())
 	if err != nil {
@@ -38,9 +45,15 @@ func resolveRootOwnerMetadata(c client.Client, ctx context.Context, obj client.O
 			Name:      metadata.GetName(),
 		},
 	}
+	if controllerResolved && isSupportedWorkload(objGVK) {
+		supportedRoot = currentPOM
+	}
 
 	owner := getNextControllerOwner(obj)
 	if owner == nil {
+		if supportedRoot != nil {
+			return supportedRoot, nil
+		}
 		return currentPOM, nil
 	}
 	if depth >= maxControllerOwnerDepth {
@@ -58,16 +71,21 @@ func resolveRootOwnerMetadata(c client.Client, ctx context.Context, obj client.O
 	key := client.ObjectKey{Namespace: namespace, Name: owner.Name}
 	if err := c.Get(ctx, key, ownerPOM); err != nil {
 		// Fall back only when RBAC forbids access to an unsupported higher
-		// controller. Missing owners and supported workloads indicate broken
-		// owner chains or RBAC and must remain scheduling errors. The Pod itself
-		// is not a controller fallback, so its direct owner must be readable.
+		// controller. Prefer the highest supported workload already resolved;
+		// otherwise use the highest readable controller. Missing owners and
+		// supported workloads indicate broken owner chains or RBAC and must
+		// remain scheduling errors. The Pod itself is not a controller fallback,
+		// so its direct owner must be readable.
 		if controllerResolved && apierrors.IsForbidden(err) && !isSupportedWorkload(ownerGVK) {
+			if supportedRoot != nil {
+				return supportedRoot, nil
+			}
 			return currentPOM, nil
 		}
 		return nil, err
 	}
 
-	return resolveRootOwnerMetadata(c, ctx, ownerPOM, true, depth+1)
+	return resolveRootOwnerMetadata(c, ctx, ownerPOM, true, depth+1, supportedRoot)
 }
 
 func getNextControllerOwner(obj client.Object) *metav1.OwnerReference {

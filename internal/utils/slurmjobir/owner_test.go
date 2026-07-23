@@ -101,6 +101,30 @@ func TestGetRootOwnerMetadata(t *testing.T) {
 			}
 		}(),
 		func() testCase {
+			deployment := &appsv1.Deployment{
+				TypeMeta:   metav1.TypeMeta{APIVersion: appsv1.SchemeGroupVersion.String(), Kind: "Deployment"},
+				ObjectMeta: metav1.ObjectMeta{Name: "deployment1"},
+			}
+			job := &batchv1.Job{
+				TypeMeta: metav1.TypeMeta{APIVersion: batchv1.SchemeGroupVersion.String(), Kind: "Job"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            "job1",
+					OwnerReferences: []metav1.OwnerReference{controllerOwner(deployment.APIVersion, deployment.Kind, deployment.Name)},
+				},
+			}
+			pod := basePod.DeepCopy()
+			pod.OwnerReferences = []metav1.OwnerReference{controllerOwner(job.APIVersion, job.Kind, job.Name)}
+			return testCase{
+				name:   "readable unsupported owner above Job",
+				client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(deployment, job, pod).Build(),
+				pod:    pod,
+				want: &metav1.PartialObjectMetadata{
+					TypeMeta:   job.TypeMeta,
+					ObjectMeta: metav1.ObjectMeta{Name: job.Name},
+				},
+			}
+		}(),
+		func() testCase {
 			rs := &appsv1.ReplicaSet{
 				TypeMeta: metav1.TypeMeta{APIVersion: appsv1.SchemeGroupVersion.String(), Kind: "ReplicaSet"},
 				ObjectMeta: metav1.ObjectMeta{

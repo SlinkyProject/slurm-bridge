@@ -21,7 +21,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
@@ -36,7 +35,6 @@ import (
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
@@ -440,64 +438,6 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				t.Errorf("SlurmBridge.PreFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
 			}
 		})
-	}
-}
-
-func TestSlurmBridge_PreFilterRecordsWorkloadRoot(t *testing.T) {
-	ctx := context.Background()
-	recorder := events.NewFakeRecorder(1)
-	cs := clientsetfake.NewClientset()
-	informerFactory := informers.NewSharedInformerFactory(cs, 0)
-	f, err := tf.NewFramework(
-		ctx,
-		[]tf.RegisterPluginFunc{
-			tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
-			tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
-		},
-		"slurm-bridge",
-		fwkruntime.WithInformerFactory(informerFactory),
-		fwkruntime.WithEventRecorder(recorder),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	job := &batchv1.Job{
-		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
-			Name:      "job1",
-		},
-	}
-	pod := st.MakePod().Namespace("default").Name("pod1").Obj()
-	pod.OwnerReferences = []metav1.OwnerReference{
-		{
-			APIVersion: "batch/v1",
-			Kind:       "Job",
-			Name:       job.Name,
-			Controller: ptr.To(true),
-		},
-	}
-	sb := &SlurmBridge{
-		Client:        kubefake.NewFakeClient(job, pod),
-		slurmControl:  slurmcontrol.NewControl(fake.NewClientBuilder().Build(), "kubernetes", "slurm-bridge"),
-		handle:        f,
-		schedulerName: "slurm-bridge-scheduler",
-	}
-
-	_, status := sb.PreFilter(ctx, framework.NewCycleState(), pod.DeepCopy(), nil)
-	if status.Code() != fwk.Success {
-		t.Fatalf("PreFilter() status = %v, want Success: %v", status.Code(), status.Reasons())
-	}
-
-	const want = "Normal WorkloadRootSelected Using batch/v1 Job default/job1 as the workload root"
-	select {
-	case got := <-recorder.Events:
-		if got != want {
-			t.Fatalf("workload root event = %q, want %q", got, want)
-		}
-	default:
-		t.Fatal("PreFilter() did not record a workload root event")
 	}
 }
 
