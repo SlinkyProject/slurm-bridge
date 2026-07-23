@@ -132,8 +132,9 @@ Slurm-bridge turns each group of Kubernetes Pods into one Slurm external job:
 
 Slurm-bridge first follows controller owner references toward the root object.
 It selects the first applicable grouping mechanism in this order: **built-in
-PodGroup -> PodGroup coscheduling -> recognized highest readable workload type
--> the Pod itself**.
+PodGroup -> PodGroup coscheduling -> highest recognized workload type in the
+owner chain -> the Pod itself**. When no recognized workload exists, the highest
+readable controller remains the annotation source for the per-Pod external job.
 
 For Jobs, JobSets, and LeaderWorkerSets, annotations belong on the top-level
 workload object, not its Pod template or generated child objects.
@@ -156,12 +157,16 @@ source.
 ### Other controller owners
 
 The Pod's direct controller owner must exist and be readable by the slurm-bridge
-scheduler. After resolving that controller, slurm-bridge uses the highest
-controller it successfully resolved only when RBAC forbids access to a higher,
-unsupported controller type. If the resolved controller is not a recognized
-workload type, slurm-bridge schedules each Pod as a separate external job and
-reads annotations from that controller. Annotations on lower controllers and the
+scheduler. While following the owner chain, slurm-bridge remembers the highest
+recognized workload type. Higher readable controllers do not replace that
+workload as the scheduling root. If no recognized workload is found,
+slurm-bridge schedules each Pod as a separate external job and reads annotations
+from the highest readable controller. Annotations on lower controllers and the
 Pod are ignored.
+
+If RBAC forbids access to a higher, unsupported controller, traversal stops and
+slurm-bridge uses the highest recognized workload already found, or otherwise
+the highest readable controller.
 
 Slurm-bridge does not fall back when access to a supported workload type is
 forbidden; that indicates missing scheduler RBAC. It also does not fall back
@@ -349,7 +354,8 @@ applied **PodGroup -> Job -> Workload**, so the Workload wins. In the example
 above, the PodGroup is named `training-job-workers` but the Workload sets
 `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm receives
 **`training-job`**. A PodGroup cannot override a `job-name` set on its Workload
-or owning Job; put per-gang `job-name` on the **PodGroup** or **Job** instead.
+or owning Job. For per-gang names, omit `job-name` from the Workload and set it
+on each **PodGroup** or owning **Job** instead.
 
 A Workload may define several `podGroupTemplates`, each producing a runtime
 PodGroup. Workload-level identifiers such as `job-name` then apply to **every**

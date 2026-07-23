@@ -141,10 +141,8 @@ var _ fwk.PostFilterPlugin = &SlurmBridge{}
 var _ fwk.PreBindPlugin = &SlurmBridge{}
 
 const (
-	Name                                         = "SlurmBridge"
-	stateKey                        fwk.StateKey = Name
-	eventReasonWorkloadRootSelected              = "WorkloadRootSelected"
-	eventActionScheduling                        = "Scheduling"
+	Name                  = "SlurmBridge"
+	stateKey fwk.StateKey = Name
 )
 
 // Name returns name of the plugin. It is used in logs, etc.
@@ -279,19 +277,6 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		"apiVersion", root.APIVersion,
 		"kind", root.Kind,
 		"root", rootName)
-	if sb.handle != nil && sb.handle.EventRecorder() != nil {
-		sb.handle.EventRecorder().WithLogger(logger).Eventf(
-			pod,
-			nil,
-			corev1.EventTypeNormal,
-			eventReasonWorkloadRootSelected,
-			eventActionScheduling,
-			"Using %s %s %s as the workload root",
-			root.APIVersion,
-			root.Kind,
-			rootName,
-		)
-	}
 	if err := validateDeviceClassRequestsForPods(s.slurmJobIR.Pods.Items); err != nil {
 		logger.Error(err, "unsupported DRA extended resource request")
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
