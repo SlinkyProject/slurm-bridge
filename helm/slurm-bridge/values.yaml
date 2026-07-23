@@ -133,6 +133,8 @@ controllers:
     pullPolicy: IfNotPresent
   # -- Set the number of replicas to deploy.
   replicas: 1
+  # -- Enables leader election.
+  leaderElect: false
   # -- PodDisruptionBudget for the controllers deployment
   pdb:
     # -- Enable PodDisruptionBudget

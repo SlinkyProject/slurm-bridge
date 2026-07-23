@@ -44,6 +44,9 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=create;get;list;update
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
 // Input flags to the command
 type Flags struct {
 	enableLeaderElection bool

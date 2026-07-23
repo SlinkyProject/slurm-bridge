@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - nodes
   verbs:
   - get
@@ -29,6 +36,15 @@ rules:
   - pods/finalizers
   verbs:
   - patch
+  - update
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
   - update
 - apiGroups:
   - resource.k8s.io
