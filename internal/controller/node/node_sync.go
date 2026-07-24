@@ -114,7 +114,7 @@ func (r *NodeReconciler) taintNode(ctx context.Context, node *corev1.Node, nodeN
 		logger.V(2).Info("node patch is empty, skipping patch request", "node", klog.KObj(node))
 		return nil
 	}
-	logger.Info("Remove taint from node", "node", klog.KObj(node))
+	logger.Info("Add taint to node", "node", klog.KObj(node))
 	if err := r.Patch(ctx, toUpdate, patch); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
@@ -151,7 +151,7 @@ func (r *NodeReconciler) untaintNode(ctx context.Context, node *corev1.Node, nod
 		logger.V(2).Info("node patch is empty, skipping patch request", "node", klog.KObj(node))
 		return nil
 	}
-	logger.Info("Add taint to node", "node", klog.KObj(node))
+	logger.Info("Remove taint from node", "node", klog.KObj(node))
 	if err := r.Patch(ctx, toUpdate, patch); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
