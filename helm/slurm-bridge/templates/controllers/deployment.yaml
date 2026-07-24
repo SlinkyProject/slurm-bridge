@@ -29,7 +29,7 @@ spec:
       containers:
         - name: {{ include "slurm-bridge.controllers.name" . }}
           image: {{ include "slurm-bridge.controllers.imageRef" . }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.controllers.image.pullPolicy }}
           env:
             - name: SLURM_JWT
               valueFrom:
