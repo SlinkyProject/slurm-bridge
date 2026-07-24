@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -106,11 +108,20 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("node-controller").
 		For(&corev1.Node{}).
+		Watches(&resourcev1.ResourceSlice{}, handler.EnqueueRequestsFromMapFunc(resourceSliceNode)).
 		WatchesRawSource(source.Channel(r.EventCh, nodeEventHandler)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
+}
+
+func resourceSliceNode(_ context.Context, obj client.Object) []reconcile.Request {
+	resourceSlice := obj.(*resourcev1.ResourceSlice)
+	if resourceSlice.Spec.NodeName == nil || *resourceSlice.Spec.NodeName == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: *resourceSlice.Spec.NodeName}}}
 }
 
 func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *NodeReconciler {

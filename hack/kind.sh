@@ -8,7 +8,8 @@ set -euo pipefail
 
 ROOT_DIR="$(readlink -f "$(dirname "$0")/..")"
 SCRIPT_DIR="$(readlink -f "$(dirname "$0")")"
-SLURM_BRIDGE_TMP="/tmp/slurm-bridge-kind"
+SLURM_BRIDGE_TMP="$(mktemp -d)"
+trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 
@@ -572,7 +573,7 @@ OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_KJOB=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
-OPT_SLURM_OPERATOR_REF="v1.1.0"
+OPT_SLURM_OPERATOR_REF="release-1.2"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"

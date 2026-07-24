@@ -31,6 +31,14 @@ tests:
       - matchRegex:
           path: spec.template.metadata.annotations["checksum/scheduler-config"]
           pattern: ^[0-9a-f]{64}$
+  - it: image pull policy is configurable
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.image.pullPolicy: Always
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: Always
   - it: scheduler can update its leader election lease
     template: scheduler/rbac.yaml
     documentSelector:
