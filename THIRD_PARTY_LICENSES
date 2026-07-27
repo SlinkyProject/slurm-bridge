@@ -543,12 +543,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/exp/slices
 - Name: golang.org/x/exp/slices
-- Version: v0.0.0-20260603202125-055de637280b
+- Version: v0.0.0-20260218203240-3dfff04db8fa
 - License: BSD-3-Clause
 
 ### golang.org/x/net
 - Name: golang.org/x/net
-- Version: v0.55.0
+- Version: v0.56.0
 - License: BSD-3-Clause
 
 ### golang.org/x/oauth2
@@ -573,12 +573,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/text
 - Name: golang.org/x/text
-- Version: v0.38.0
+- Version: v0.39.0
 - License: BSD-3-Clause
 
 ### golang.org/x/time/rate
 - Name: golang.org/x/time/rate
-- Version: v0.15.0
+- Version: v0.14.0
 - License: BSD-3-Clause
 
 ### gomodules.xyz/jsonpatch/v2
