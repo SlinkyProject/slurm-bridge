@@ -5,18 +5,28 @@ package slurmjobir
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
 func podWithResources(cpuRequest, memoryRequest, cpuLimit, memoryLimit string) corev1.Pod {
@@ -170,6 +180,137 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 				t.Errorf("TranslateToSlurmJobIR() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	unsupportedGVK := schema.FromAPIVersionAndKind("example.com/v1", "ExampleController")
+	const unsupportedName = "example-controller"
+
+	job := &batchv1.Job{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: batchv1.SchemeGroupVersion.String(),
+			Kind:       "Job",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "job1",
+			Annotations: map[string]string{
+				wellknown.AnnotationAccount: "job-account",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: unsupportedGVK.GroupVersion().String(),
+					Kind:       unsupportedGVK.Kind,
+					Name:       unsupportedName,
+					Controller: ptr.To(true),
+				},
+			},
+		},
+	}
+	pod := st.MakePod().Namespace("default").Name("pod1").Obj()
+	pod.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion: batchv1.SchemeGroupVersion.String(),
+			Kind:       "Job",
+			Name:       job.Name,
+			Controller: ptr.To(true),
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(job, pod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if key.Name == unsupportedName {
+					return apierrors.NewForbidden(
+						unsupportedGVK.GroupVersion().WithResource("examplecontrollers").GroupResource(),
+						unsupportedName,
+						errors.New("access denied"),
+					)
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+
+	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	if err != nil {
+		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
+	}
+	if got.RootPOM.TypeMeta != job_v1 || got.RootPOM.Name != job.Name {
+		t.Errorf("RootPOM = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, job_v1, job.Name)
+	}
+	if got.JobInfo.MinNodes == nil || *got.JobInfo.MinNodes != 1 {
+		t.Errorf("MinNodes = %v, want 1 from the Job controller", got.JobInfo.MinNodes)
+	}
+	if got.JobInfo.Account == nil || *got.JobInfo.Account != "job-account" {
+		t.Errorf("Account = %v, want Job controller annotation", got.JobInfo.Account)
+	}
+}
+
+func TestTranslateToSlurmJobIRPrefersSupportedWorkloadBelowReadableAncestor(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme))
+
+	deployment := &appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: appsv1.SchemeGroupVersion.String(),
+			Kind:       "Deployment",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "outer-controller",
+		},
+	}
+	jobSet := &jobset.JobSet{
+		TypeMeta: jobSet_v1alpha2,
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "jobset1",
+			Annotations: map[string]string{
+				wellknown.AnnotationAccount: "jobset-account",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				controllerOwner(deployment.APIVersion, deployment.Kind, deployment.Name),
+			},
+		},
+	}
+	job := &batchv1.Job{
+		TypeMeta: job_v1,
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "job1",
+			OwnerReferences: []metav1.OwnerReference{
+				controllerOwner(jobSet.APIVersion, jobSet.Kind, jobSet.Name),
+			},
+		},
+	}
+	pod := st.MakePod().
+		Namespace("default").
+		Name("pod1").
+		Label("job-name", job.Name).
+		Obj()
+	pod.OwnerReferences = []metav1.OwnerReference{
+		controllerOwner(job.APIVersion, job.Kind, job.Name),
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(deployment, jobSet, job, pod).
+		Build()
+
+	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	if err != nil {
+		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
+	}
+	if got.RootPOM.TypeMeta != jobSet_v1alpha2 || got.RootPOM.Name != jobSet.Name {
+		t.Errorf("RootPOM = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, jobSet_v1alpha2, jobSet.Name)
+	}
+	if got.JobInfo.Account == nil || *got.JobInfo.Account != "jobset-account" {
+		t.Errorf("Account = %v, want JobSet controller annotation", got.JobInfo.Account)
 	}
 }
 

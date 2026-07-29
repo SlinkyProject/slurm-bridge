@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -90,7 +89,7 @@ func (t *translator) applySlurmAnnotations(
 	if !ok {
 		return fmt.Errorf("client does not support owner metadata lookup")
 	}
-	controllerPOM, err := utils.GetRootOwnerMetadata(c, t.ctx, pod)
+	controllerPOM, err := getRootOwnerMetadata(c, t.ctx, pod)
 	if err != nil {
 		return err
 	}
