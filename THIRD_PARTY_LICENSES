@@ -598,7 +598,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### google.golang.org/grpc
 - Name: google.golang.org/grpc
-- Version: v1.81.1
+- Version: v1.82.1
 - License: Apache-2.0
 
 ### google.golang.org/protobuf
