@@ -3,7 +3,7 @@ module github.com/SlinkyProject/slurm-bridge
 go 1.26.5
 
 require (
-	github.com/SlinkyProject/slurm-client v1.2.0-rc1
+	github.com/SlinkyProject/slurm-client v1.2.1
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -16,7 +16,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-scheduler v0.36.0
 	k8s.io/kubernetes v1.36.0
-	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
+	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	sigs.k8s.io/controller-runtime v0.24.0
 	sigs.k8s.io/jobset v0.11.1
 	sigs.k8s.io/lws v0.8.0
@@ -127,7 +127,7 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.47.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260414002931-afd174a4e478 // indirect
@@ -144,7 +144,7 @@ require (
 	k8s.io/csi-translation-lib v0.35.2 // indirect
 	k8s.io/dynamic-resource-allocation v0.36.0 // indirect
 	k8s.io/kms v0.36.0 // indirect
-	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
+	k8s.io/kube-openapi v0.0.0-20260319004828-5883c5ee87b9 // indirect
 	k8s.io/kubelet v0.36.0 // indirect
 	k8s.io/metrics v0.35.2 // indirect
 	k8s.io/streaming v0.36.0 // indirect
