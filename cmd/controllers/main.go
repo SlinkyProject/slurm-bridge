@@ -24,6 +24,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
@@ -125,11 +126,8 @@ func main() {
 	cfg := config.UnmarshalOrDie(data)
 
 	clientConfig := &slurmclient.Config{
-		Server: cfg.SlurmRestApi,
-		AuthToken: func() string {
-			token, _ := os.LookupEnv("SLURM_JWT")
-			return token
-		}(),
+		Server:        cfg.SlurmRestApi,
+		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
 	}
 	slurmClient, err := slurmclient.NewClient(clientConfig)
 	if err != nil {

@@ -82,11 +82,6 @@ spec:
 EOF
 ```
 
-> [!NOTE]
-> A long lifetime is used as `slurm-bridge` does not automatically restart when
-> the secret is refreshed. This is a limitation that will be addressed in a
-> subsequent release.
-
 When running Slurm on baremetal:
 
 ```sh

@@ -43,3 +43,11 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: does not expose the Slurm JWT to admission
+    template: admission/deployment.yaml
+    set:
+      admission:
+        enabled: true
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].env

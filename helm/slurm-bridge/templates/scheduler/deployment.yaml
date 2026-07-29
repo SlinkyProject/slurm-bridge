@@ -35,11 +35,8 @@ spec:
         - --v={{ . }}
         {{- end }}
         env:
-        - name: SLURM_JWT
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.sharedConfig.slurmJwtSecret }}
-              key: auth-token
+        - name: SLURM_JWT_FILE
+          value: /var/run/secrets/slurm/auth-token
         image: {{ include "slurm-bridge.scheduler.imageRef" . }}
         imagePullPolicy: {{ .Values.scheduler.image.pullPolicy }}
         livenessProbe:
@@ -66,6 +63,9 @@ spec:
         - name: slurm-bridge-config
           mountPath: /etc/slurm-bridge/
           readOnly: true
+        - name: slurm-jwt
+          mountPath: /var/run/secrets/slurm
+          readOnly: true
       hostNetwork: false
       hostPID: false
       {{- with .Values.scheduler.nodeSelector }}
@@ -84,3 +84,9 @@ spec:
       - name: slurm-bridge-config
         configMap:
           name: slurm-bridge-config
+      - name: slurm-jwt
+        secret:
+          secretName: {{ .Values.sharedConfig.slurmJwtSecret }}
+          items:
+          - key: auth-token
+            path: auth-token

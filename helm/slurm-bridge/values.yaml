@@ -171,5 +171,6 @@ controllers:
 sharedConfig:
   # -- The Slurm REST API URL in the form of: `[protocol]://[host]:[port]`
   slurmRestApi: http://slurm-restapi.slurm:6820
-  # -- The secret containing a SLURM_JWT token for authentication.
+  # -- The Secret containing the Slurm JWT in the `auth-token` key. The token is
+  # mounted and read before each Slurm REST API request to support rotation.
   slurmJwtSecret: slurm-bridge-token

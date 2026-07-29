@@ -57,3 +57,14 @@ tests:
               - get
               - list
               - update
+  - it: mounts the rotating Slurm JWT secret
+    template: scheduler/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[0]
+          value:
+            name: SLURM_JWT_FILE
+            value: /var/run/secrets/slurm/auth-token
+      - equal:
+          path: spec.template.spec.volumes[2].secret.secretName
+          value: slurm-bridge-token
