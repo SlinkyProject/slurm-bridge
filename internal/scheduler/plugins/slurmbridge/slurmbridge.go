@@ -267,6 +267,16 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
+	root := &s.slurmJobIR.RootPOM
+	rootName := root.Name
+	if root.Namespace != "" {
+		rootName = root.Namespace + "/" + root.Name
+	}
+	logger.V(3).Info("selected workload root",
+		"pod", klog.KObj(pod),
+		"apiVersion", root.APIVersion,
+		"kind", root.Kind,
+		"root", rootName)
 	if err := validateDeviceClassRequestsForPods(s.slurmJobIR.Pods.Items); err != nil {
 		logger.Error(err, "unsupported DRA extended resource request")
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
