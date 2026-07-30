@@ -1,3 +1,27 @@
+## v1.0.5
+
+### Added
+
+- Added configurable ImagePullPolicy.
+- Slurm-minimum-version annotation in helm chart.
+
+### Fixed
+
+- Fixed nodeSelector and affinity fields for deployments.
+- Fix namespace override.
+- Fixed config changes not rolling out after a helm upgrade.
+- Fixed scheduler crash on startup after the k8s 1.36 dependency bump on
+  release-1.0.
+- Delete bound pods after their Slurm placeholder job stops running.
+- Fixed repeated termination of jobs.
+- The node controller will watch resourcesliecs for changes to external nodes in
+  order to update them.
+- Replace /readyz probe with StartedChecker instead of a ping.
+- Correct the readinessProbe to use /readyz.
+- GO-2026-5942 GO-2026-5970.
+- GO-2026-4970 GO-2026-5856 GO-2026-6061.
+- Set the Helm chart appVersion to the slurm-bridge release version.
+
 ## v1.0.4
 
 ### Added
