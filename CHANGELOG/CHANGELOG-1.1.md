@@ -1,3 +1,46 @@
+## v1.1.2
+
+### Added
+
+- Added configurable ImagePullPolicy.
+- Slurm-minimum-version annotation in helm chart.
+
+### Fixed
+
+- Fixed nodeSelector and affinity fields for deployments.
+- Omit empty CPU DRA requests and fail on incomplete allocations.
+- Resolved DRA prebind when kube and Slurm node names differ and allocation
+  pools do not match node names.
+- Fix external job update code path from being unreachable.
+- Protect against a race condition where an external job update may occur but
+  the external job has started.
+- Allow pods to be annotated if an external job update race occurs and the job
+  is already running.
+- Fix pods going into unschedulable queue for situations in which they should
+  stay in the backoffq/activeq.
+- Fix namespace override.
+- Fixed config changes not rolling out after a helm upgrade.
+- Skip empty DRA claims and use pod resource names in mappings.
+- Match DRA mappings only to full device class names.
+- Delete bound pods after their Slurm placeholder job stops running.
+- Reject unsupported DRA DeviceClass requests from multiple containers.
+- Keep DRA GPU request names consistent across claims, mappings, and
+  allocations.
+- Limit DRA claims and allocations to the GRES requested by each pod.
+- Fixed repeated termination of jobs.
+- The node controller will watch resourcesliecs for changes to external nodes in
+  order to update them.
+- Replace /readyz probe with StartedChecker instead of a ping.
+- Correct the readinessProbe to use /readyz.
+- GO-2026-5942 GO-2026-5970.
+- GO-2026-5158.
+- GO-2026-4970 GO-2026-5856 GO-2026-6061.
+- Set the Helm chart appVersion to the slurm-bridge release version.
+
+### Changed
+
+- Disabled SchedulerPopFromBackoffQ.
+
 ## v1.1.1
 
 ### Added

@@ -1,3 +1,34 @@
+## v1.2.1
+
+### Added
+
+- Added configurable ImagePullPolicy.
+- Slurm-minimum-version annotation in helm chart.
+
+### Fixed
+
+- Delete bound pods after their Slurm placeholder job stops running.
+- Mark assigned PodGroups as scheduled.
+- Reject unsupported DRA DeviceClass requests from multiple containers.
+- Keep DRA GPU request names consistent across claims, mappings, and
+  allocations.
+- Limit DRA claims and allocations to the GRES requested by each pod.
+- Fixed repeated termination of jobs.
+- The node controller will watch resourcesliecs for changes to external nodes in
+  order to update them.
+- Replace /readyz probe with StartedChecker instead of a ping.
+- Correct the readinessProbe to use /readyz.
+- GO-2026-5942 GO-2026-5970.
+- GO-2026-5158.
+- GO-2026-6061.
+- GO-2026-4970 GO-2026-5856.
+- Set the Helm chart appVersion to the slurm-bridge release version.
+- Pods with some invalid owners in the owner tree can now be scheduled.
+
+### Changed
+
+- Update Jobset and DRA APIs.
+
 ## v1.2.0
 
 ### Fixed
