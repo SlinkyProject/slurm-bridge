@@ -602,6 +602,14 @@ func contextWithAdmissionSubresource(subresource string) context.Context {
 }
 
 func TestPodAdmission_ValidateCreate(t *testing.T) {
+	topologySpreadConstraint := corev1.TopologySpreadConstraint{
+		MaxSkew:           1,
+		TopologyKey:       "example.com/nonexistent",
+		WhenUnsatisfiable: corev1.DoNotSchedule,
+		LabelSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{"app": "topology-test"},
+		},
+	}
 	type fields struct {
 		SchedulerName     string
 		ManagedNamespaces []string
@@ -611,11 +619,12 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 		pod *corev1.Pod
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    admission.Warnings
-		wantErr bool
+		name            string
+		fields          fields
+		args            args
+		want            admission.Warnings
+		wantErr         bool
+		wantErrContains string
 	}{
 		{
 			name: "PodWithDefaultNamespace is ignored",
@@ -691,6 +700,43 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			},
 			want:    nil,
 			wantErr: true,
+		},
+		{
+			name: "PodWithTopologySpreadConstraint",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+					Spec: corev1.PodSpec{
+						TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+							topologySpreadConstraint,
+						},
+					},
+				},
+			},
+			want:            nil,
+			wantErr:         true,
+			wantErrContains: "spec.topologySpreadConstraints",
+		},
+		{
+			name: "PodWithEmptyTopologySpreadConstraints",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+					Spec: corev1.PodSpec{
+						TopologySpreadConstraints: []corev1.TopologySpreadConstraint{},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
 		},
 		{
 			name: "PodWithNativeAndDRACPU",
@@ -844,6 +890,49 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "PodWithSchedulerNameAndTopologySpreadConstraintInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec: corev1.PodSpec{
+						SchedulerName: SchedulerName,
+						TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+							topologySpreadConstraint,
+						},
+					},
+				},
+			},
+			want:            nil,
+			wantErr:         true,
+			wantErrContains: "spec.topologySpreadConstraints",
+		},
+		{
+			name: "PodWithTopologySpreadConstraintAndDifferentSchedulerInUnmanagedNamespace",
+			fields: fields{
+				SchedulerName:     SchedulerName,
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "unmanaged-ns"},
+					Spec: corev1.PodSpec{
+						SchedulerName: "other-scheduler",
+						TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+							topologySpreadConstraint,
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
 			name: "PodWithDifferentSchedulerInUnmanagedNamespace",
 			fields: fields{
 				SchedulerName:     SchedulerName,
@@ -876,6 +965,10 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			got, err := r.ValidateCreate(tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("PodAdmission.ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+				t.Errorf("PodAdmission.ValidateCreate() error = %v, want error containing %q", err, tt.wantErrContains)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {

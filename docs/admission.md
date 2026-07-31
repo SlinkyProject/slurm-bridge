@@ -30,7 +30,7 @@ It also states that:
 The `slurm-bridge` admission controller is both mutating and validating. It
 modifies pods within namespaces specified in `helm/slurm-bridge/values.yaml` to
 use the `slurm-bridge` [scheduler] instead of the default Kubernetes scheduler,
-and rejects unsupported resource combinations.
+and rejects unsupported scheduling and resource configurations.
 
 ## Design
 
@@ -50,6 +50,10 @@ requests by the admission controller.
 In-place resizing is not supported for managed pods. The admission controller
 rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
 diverge from the corresponding Slurm allocation.
+
+Pod topology spread constraints are not supported. The admission controller
+rejects managed pods with a non-empty `spec.topologySpreadConstraints` field
+rather than allowing the scheduler to ignore the requested placement behavior.
 
 Managed pods are also validated against the supported DRA DeviceClass set.
 Unsupported DeviceClass resources in requests or limits are rejected for init

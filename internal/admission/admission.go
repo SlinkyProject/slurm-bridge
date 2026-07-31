@@ -90,6 +90,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if pod.Spec.ResourceClaims != nil {
 		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
 	}
+	if len(pod.Spec.TopologySpreadConstraints) > 0 {
+		return nil, fmt.Errorf("spec.topologySpreadConstraints is not supported by the slurm-bridge scheduler")
+	}
 	if err := validateCPUResources(pod); err != nil {
 		return nil, err
 	}
