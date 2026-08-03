@@ -632,6 +632,31 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Error, ErrorNodeConfigInvalid.Error()),
 		},
 		{
+			name: "Error listing Slurm nodes",
+			fields: fields{
+				Client: kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: func() slurmcontrol.SlurmControlInterface {
+					f := interceptor.Funcs{
+						List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
+							return ErrorNodeConfigInvalid
+						},
+					}
+					return slurmcontrol.NewControl(interceptor.NewClient(fake.NewFakeClient(), f), "kubernetes", "slurm-bridge")
+				}(),
+				handle: f,
+			},
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod:   pod.DeepCopy(),
+				m: framework.NewNodeToStatus(map[string]*fwk.Status{
+					"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
+			},
+			want:  nil,
+			want1: fwk.NewStatus(fwk.Error, ErrorNodeConfigInvalid.Error()),
+		},
+		{
 			name: "Kube nodes not valid slurm nodes",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
