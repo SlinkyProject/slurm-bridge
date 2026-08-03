@@ -33,9 +33,9 @@ type SlurmControlInterface interface {
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
+	GetNodeNames(ctx context.Context) ([]string, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
-	IsSlurmNode(ctx context.Context, node string) (bool, error)
 }
 
 // RealPodControl is the default implementation of SlurmControlInterface.
@@ -248,21 +248,16 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 	return ptr.Deref(job.JobId, 0), nil
 }
 
-func (r *realSlurmControl) IsSlurmNode(ctx context.Context, nodeName string) (bool, error) {
-	logger := klog.FromContext(ctx)
-
-	node := &slurmtypes.V0044Node{}
-	nodeKey := object.ObjectKey(nodeName)
-
-	err := r.Get(ctx, nodeKey, node)
-	if err != nil {
-		if err.Error() == http.StatusText(http.StatusNotFound) {
-			return false, nil
-		}
-		logger.Error(err, "could not get slurm node", "pod", nodeName)
-		return false, err
+func (r *realSlurmControl) GetNodeNames(ctx context.Context) ([]string, error) {
+	list := &slurmtypes.V0044NodeList{}
+	if err := r.List(ctx, list); err != nil {
+		return nil, err
 	}
-	return true, nil
+	nodeNames := make([]string, len(list.Items))
+	for i, node := range list.Items {
+		nodeNames[i] = ptr.Deref(node.Name, "")
+	}
+	return nodeNames, nil
 }
 
 // GetResources will return the resources used by a node for a given JobId

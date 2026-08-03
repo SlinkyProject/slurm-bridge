@@ -384,6 +384,12 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		logger.Error(err, "error getting nodes that SlurmBridge can use")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
+	slurmNodeNames, err := sb.slurmControl.GetNodeNames(ctx)
+	if err != nil {
+		logger.Error(err, "error getting Slurm nodes")
+		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	slurmNodes := sets.New(slurmNodeNames...)
 	for _, node := range feasibleNodes {
 		status := m.Get(node.Node().Name)
 		// If the Unschedulable code was set by SlurmBridge
@@ -392,7 +398,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		// this node for consideration.
 		if status.Plugin() == Name {
 			slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
-			if isSlurm, _ := sb.slurmControl.IsSlurmNode(ctx, slurmName); isSlurm {
+			if slurmNodes.Has(slurmName) {
 				s.slurmJobIR.JobInfo.Nodes = append(s.slurmJobIR.JobInfo.Nodes, slurmName)
 			}
 		}
