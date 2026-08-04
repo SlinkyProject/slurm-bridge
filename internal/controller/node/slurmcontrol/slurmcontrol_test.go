@@ -664,6 +664,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		draInventory []dra.GRESInventory
 		want         bool
 		wantErr      bool
+		wantErrText  string
 	}{
 		{
 			name:   "node does not exist in Slurm",
@@ -832,6 +833,24 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "node exists with unrelated extra and profile inventory",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:gpu-example:2"),
+						Extra:      ptr.To("owned by an administrator"),
+					},
+				},
+			).Build(),
+			node:         makeNode("worker-0", 4, 8),
+			draInventory: testExampleDRAInventory(),
+			wantErr:      true,
+			wantErrText:  `cannot record applied DRA inventory on Slurm node "worker-0": Extra field is already in use`,
+		},
+		{
 			name: "get error",
 			client: func() slurmclient.Client {
 				f := interceptor.Funcs{
@@ -872,6 +891,9 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NodeNeedsRecreate() error = %v, wantErr %v", err, tt.wantErr)
 				return
+			}
+			if tt.wantErrText != "" && !strings.Contains(err.Error(), tt.wantErrText) {
+				t.Errorf("NodeNeedsRecreate() error = %v, want containing %q", err, tt.wantErrText)
 			}
 			if got != tt.want {
 				t.Errorf("NodeNeedsRecreate() = %v, want %v", got, tt.want)
