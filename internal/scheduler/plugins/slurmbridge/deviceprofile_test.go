@@ -52,8 +52,8 @@ func TestAllocateIndexedGRESProfilesIgnoresOtherBackends(t *testing.T) {
 
 func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 	resources := slurmcontrol.NodeResources{
-		Node:        "node-a",
-		NodeComment: "inventory-comment",
+		Node:      "node-a",
+		NodeExtra: "inventory-extra",
 		Gres: []slurmcontrol.GresLayout{
 			{Name: "gpu", Type: "gpu-example", Count: 2, Index: "0-1"},
 			{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "2"},
@@ -81,7 +81,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		t.Errorf("legacy resources = %#v, want %#v", legacyResources.Gres, wantLegacy)
 	}
 	if profileResources.Node != resources.Node || legacyResources.Node != resources.Node ||
-		profileResources.NodeComment != resources.NodeComment || legacyResources.NodeComment != resources.NodeComment {
+		profileResources.NodeExtra != resources.NodeExtra || legacyResources.NodeExtra != resources.NodeExtra {
 		t.Fatalf("split resources did not preserve node metadata: profile=%#v legacy=%#v", profileResources, legacyResources)
 	}
 	if len(resources.Gres) != 4 {

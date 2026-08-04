@@ -213,7 +213,7 @@ func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *
 	if len(allocation.IndexedGRESAllocations) == 0 {
 		return nil, nil
 	}
-	applied, err := dra.DecodeAppliedInventory(allocation.NodeResources.NodeComment)
+	applied, err := dra.DecodeAppliedInventory(allocation.NodeResources.NodeExtra)
 	if err != nil {
 		return nil, err
 	}

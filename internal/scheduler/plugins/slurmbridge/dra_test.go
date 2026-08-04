@@ -803,8 +803,8 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		},
 	}
 	resources := &slurmcontrol.NodeResources{
-		Node:        "node1",
-		NodeComment: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}`,
+		Node:      "node1",
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  "gpu-example",
