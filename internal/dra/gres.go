@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	// AppliedInventoryCommentPrefix identifies node comments owned by the DRA
+	// AppliedInventoryExtraPrefix identifies node Extra values owned by the DRA
 	// GRES inventory integration.
-	AppliedInventoryCommentPrefix = "slurm-bridge.dra-gres-map="
+	AppliedInventoryExtraPrefix = "slurm-bridge.dra-gres-map="
 	// appliedInventoryVersion records the version of the format used for storing DRA device identities in Slurm
-	// node comments. This version is required if the format changes in future.
+	// node Extra fields. This version is required if the format changes in future.
 	appliedInventoryVersion = 1
 	devicePathPrefix        = "/dra/"
 )
@@ -116,8 +116,8 @@ type appliedInventoryWire struct {
 	Profiles map[string][]string `json:"profiles"`
 }
 
-// EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node
-// comment. Device array position is the Slurm GRES index.
+// EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node Extra
+// field. Device array position is the Slurm GRES index.
 func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 	profiles := make(map[string][]string, len(inventory))
 	for _, gres := range inventory {
@@ -138,15 +138,15 @@ func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode applied inventory: %w", err)
 	}
-	return AppliedInventoryCommentPrefix + string(data), nil
+	return AppliedInventoryExtraPrefix + string(data), nil
 }
 
 // DecodeAppliedInventory decodes the profile-to-index mapping stored in a
-// Slurm node comment.
-func DecodeAppliedInventory(comment string) (AppliedInventory, error) {
-	data, ok := strings.CutPrefix(comment, AppliedInventoryCommentPrefix)
+// Slurm node Extra field.
+func DecodeAppliedInventory(extra string) (AppliedInventory, error) {
+	data, ok := strings.CutPrefix(extra, AppliedInventoryExtraPrefix)
 	if !ok {
-		return nil, fmt.Errorf("slurm node comment does not contain a DRA GRES map")
+		return nil, fmt.Errorf("slurm node Extra does not contain a DRA GRES map")
 	}
 
 	var wire appliedInventoryWire

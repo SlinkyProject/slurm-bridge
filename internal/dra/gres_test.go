@@ -127,16 +127,16 @@ func TestAppliedInventoryRoundTrip(t *testing.T) {
 		},
 	}
 
-	comment, err := EncodeAppliedInventory(inventory)
+	extra, err := EncodeAppliedInventory(inventory)
 	if err != nil {
 		t.Fatalf("EncodeAppliedInventory() error = %v", err)
 	}
-	wantComment := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/rack/pool-a/gpu-0","/dra/gpu.example.com/rack/pool-a/gpu-1"]}}`
-	if comment != wantComment {
-		t.Fatalf("EncodeAppliedInventory() = %q, want %q", comment, wantComment)
+	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/rack/pool-a/gpu-0","/dra/gpu.example.com/rack/pool-a/gpu-1"]}}`
+	if extra != wantExtra {
+		t.Fatalf("EncodeAppliedInventory() = %q, want %q", extra, wantExtra)
 	}
 
-	got, err := DecodeAppliedInventory(comment)
+	got, err := DecodeAppliedInventory(extra)
 	if err != nil {
 		t.Fatalf("DecodeAppliedInventory() error = %v", err)
 	}
@@ -201,24 +201,24 @@ func TestEncodeAppliedInventoryRejectsInvalidInventory(t *testing.T) {
 	}
 }
 
-func TestDecodeAppliedInventoryRejectsInvalidComment(t *testing.T) {
+func TestDecodeAppliedInventoryRejectsInvalidExtra(t *testing.T) {
 	tests := []struct {
 		name    string
-		comment string
+		extra   string
 		wantErr string
 	}{
-		{name: "wrong prefix", comment: `{}`, wantErr: "does not contain a DRA GRES map"},
-		{name: "invalid JSON", comment: AppliedInventoryCommentPrefix + `{`, wantErr: "decode applied inventory"},
-		{name: "unknown version", comment: AppliedInventoryCommentPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
-		{name: "missing profiles", comment: AppliedInventoryCommentPrefix + `{"v":1}`, wantErr: "has no profiles map"},
-		{name: "empty profile", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
-		{name: "invalid path prefix", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
-		{name: "incomplete path", comment: AppliedInventoryCommentPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
+		{name: "wrong prefix", extra: `{}`, wantErr: "does not contain a DRA GRES map"},
+		{name: "invalid JSON", extra: AppliedInventoryExtraPrefix + `{`, wantErr: "decode applied inventory"},
+		{name: "unknown version", extra: AppliedInventoryExtraPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
+		{name: "missing profiles", extra: AppliedInventoryExtraPrefix + `{"v":1}`, wantErr: "has no profiles map"},
+		{name: "empty profile", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
+		{name: "invalid path prefix", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
+		{name: "incomplete path", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := DecodeAppliedInventory(tt.comment)
+			_, err := DecodeAppliedInventory(tt.extra)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("DecodeAppliedInventory() error = %v, want error containing %q", err, tt.wantErr)
 			}

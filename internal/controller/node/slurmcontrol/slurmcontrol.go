@@ -222,11 +222,11 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 	currentCpus := int64(ptr.Deref(slurmNode.Cpus, 0))
 	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
 	currentGres := ptr.Deref(slurmNode.Gres, "")
-	currentComment := ptr.Deref(slurmNode.Comment, "")
-	commentChanged := desiredGRES.comment != currentComment &&
-		(desiredGRES.comment != "" || strings.HasPrefix(currentComment, dra.AppliedInventoryCommentPrefix))
+	currentExtra := ptr.Deref(slurmNode.Extra, "")
+	extraChanged := desiredGRES.extra != currentExtra &&
+		(desiredGRES.extra != "" || strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix))
 
-	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGRES.gres != currentGres || commentChanged {
+	if desiredCpus != currentCpus || desiredMemoryMB != currentMemoryMB || desiredGRES.gres != currentGres || extraChanged {
 		return true, nil
 	}
 	return false, nil
@@ -311,9 +311,9 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 			"slurmNode", slurmNodeName)
 		return err
 	}
-	if gresConfig.comment != "" {
+	if gresConfig.extra != "" {
 		createdNode := &slurmtypes.V0044Node{V0044Node: api.V0044Node{Name: ptr.To(slurmNodeName)}}
-		req := api.V0044UpdateNodeMsg{Comment: ptr.To(gresConfig.comment)}
+		req := api.V0044UpdateNodeMsg{Extra: ptr.To(gresConfig.extra)}
 		if err := r.Update(ctx, createdNode, req); err != nil {
 			return fmt.Errorf("could not record applied DRA inventory on Slurm node %q: %w", slurmNodeName, err)
 		}
@@ -325,7 +325,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 type nodeGRESConfig struct {
 	gres     string
 	gresConf string
-	comment  string
+	extra    string
 }
 
 func buildNodeGRESConfig(nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (nodeGRESConfig, error) {
@@ -354,11 +354,11 @@ func buildNodeGRESConfig(nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInv
 		gresConf: strings.Join(gresConfEntries, "+"),
 	}
 	if len(draInventory) > 0 {
-		comment, err := dra.EncodeAppliedInventory(draInventory)
+		extra, err := dra.EncodeAppliedInventory(draInventory)
 		if err != nil {
 			return nodeGRESConfig{}, err
 		}
-		config.comment = comment
+		config.extra = extra
 	}
 	return config, nil
 }

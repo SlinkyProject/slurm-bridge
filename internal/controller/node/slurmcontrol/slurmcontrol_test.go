@@ -742,7 +742,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:gpu-example:2"),
-						Comment:    ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`),
 					},
 				},
 			).Build(),
@@ -759,7 +759,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:gpu-example:2"),
-						Comment:    ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0"]}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0"]}}`),
 					},
 				},
 			).Build(),
@@ -775,7 +775,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Comment:    ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`),
 					},
 				},
 			).Build(),
@@ -783,14 +783,14 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "node exists with unrelated comment and no profile inventory",
+			name: "node exists with unrelated extra and no profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
 				&types.V0044Node{
 					V0044Node: api.V0044Node{
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Comment:    ptr.To("owned by an administrator"),
+						Extra:      ptr.To("owned by an administrator"),
 					},
 				},
 			).Build(),
@@ -1375,7 +1375,8 @@ func Test_realSlurmControl_AddNode_withNodeInfo_includesGRESInNodeConfig(t *test
 
 func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 	var nodeConf string
-	var comment string
+	var extra string
+	var comment *string
 	f := interceptor.Funcs{
 		Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
 			if r, ok := req.(api.V0044OpenapiCreateNodeReq); ok {
@@ -1385,7 +1386,8 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 		},
 		Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
 			if r, ok := req.(api.V0044UpdateNodeMsg); ok {
-				comment = ptr.Deref(r.Comment, "")
+				extra = ptr.Deref(r.Extra, "")
+				comment = r.Comment
 			}
 			return nil
 		},
@@ -1411,9 +1413,12 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
 		}
 	}
-	wantComment := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`
-	if comment != wantComment {
-		t.Errorf("AddNode() comment = %q, want %q", comment, wantComment)
+	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`
+	if extra != wantExtra {
+		t.Errorf("AddNode() extra = %q, want %q", extra, wantExtra)
+	}
+	if comment != nil {
+		t.Errorf("AddNode() comment = %q, want nil", ptr.Deref(comment, ""))
 	}
 }
 
@@ -1435,8 +1440,8 @@ func TestBuildNodeGRESConfigKeepsLegacyDrivers(t *testing.T) {
 	if !strings.HasPrefix(config.gresConf, wantLegacyConf) {
 		t.Fatalf("buildNodeGRESConfig() GresConf = %q, want prefix %q", config.gresConf, wantLegacyConf)
 	}
-	if config.comment == "" {
-		t.Fatal("buildNodeGRESConfig() omitted the applied DRA inventory comment")
+	if config.extra == "" {
+		t.Fatal("buildNodeGRESConfig() omitted the applied DRA inventory Extra")
 	}
 }
 
