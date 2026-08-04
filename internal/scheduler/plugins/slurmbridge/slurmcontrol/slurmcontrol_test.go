@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -667,21 +668,20 @@ func TestNewControl(t *testing.T) {
 	}
 }
 
-func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
+func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	type fields struct {
 		Client    client.Client
 		mcsLabel  string
 		partition string
 	}
 	type args struct {
-		ctx      context.Context
-		nodeName string
+		ctx context.Context
 	}
 	tests := []struct {
 		name    string
 		fields  fields
 		args    args
-		want    bool
+		want    []string
 		wantErr bool
 	}{
 		{
@@ -693,19 +693,18 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 				}(),
 			},
 			args: args{
-				ctx:      context.Background(),
-				nodeName: "node1",
+				ctx: context.Background(),
 			},
-			want:    false,
+			want:    []string{},
 			wantErr: false,
 		},
 		{
-			name: "Get node fails",
+			name: "List nodes fails",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
-						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
-							return fmt.Errorf("failed to get node")
+						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
+							return fmt.Errorf("failed to list nodes")
 						},
 					}
 					return fake.NewClientBuilder().
@@ -716,17 +715,20 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 			},
-			want:    false,
+			want:    nil,
 			wantErr: true,
 		},
 		{
-			name: "Node exists",
+			name: "List nodes",
 			fields: fields{
 				Client: func() client.Client {
 					nodes := &slurmtypes.V0044NodeList{
 						Items: []slurmtypes.V0044Node{
 							{V0044Node: api.V0044Node{
 								Name: ptr.To("node1"),
+							}},
+							{V0044Node: api.V0044Node{
+								Name: ptr.To("node2"),
 							}},
 						},
 					}
@@ -736,33 +738,9 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 				}(),
 			},
 			args: args{
-				ctx:      context.Background(),
-				nodeName: "node1",
+				ctx: context.Background(),
 			},
-			want:    true,
-			wantErr: false,
-		},
-		{
-			name: "Node does no exist",
-			fields: fields{
-				Client: func() client.Client {
-					nodes := &slurmtypes.V0044NodeList{
-						Items: []slurmtypes.V0044Node{
-							{V0044Node: api.V0044Node{
-								Name: ptr.To("node1"),
-							}},
-						},
-					}
-					return fake.NewClientBuilder().
-						WithLists(nodes).
-						Build()
-				}(),
-			},
-			args: args{
-				ctx:      context.Background(),
-				nodeName: "node2",
-			},
-			want:    false,
+			want:    []string{"node1", "node2"},
 			wantErr: false,
 		},
 	}
@@ -773,13 +751,15 @@ func Test_realSlurmControl_IsSlurmNode(t *testing.T) {
 				mcsLabel:  tt.fields.mcsLabel,
 				partition: tt.fields.partition,
 			}
-			got, err := r.IsSlurmNode(tt.args.ctx, tt.args.nodeName)
+			got, err := r.GetNodeNames(tt.args.ctx)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("realSlurmControl.IsSlurmNode() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("realSlurmControl.GetNodeNames() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if got != tt.want {
-				t.Errorf("realSlurmControl.IsSlurmNode() = %v, want %v", got, tt.want)
+			slices.Sort(got)
+			slices.Sort(tt.want)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("realSlurmControl.GetNodeNames() = %v, want %v", got, tt.want)
 			}
 		})
 	}
