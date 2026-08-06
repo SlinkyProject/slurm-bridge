@@ -31,13 +31,7 @@ manifests should match snapshot:
             helm.sh/chart: slurm-bridge-1.2.3
         spec:
           containers:
-            - env:
-                - name: SLURM_JWT
-                  valueFrom:
-                    secretKeyRef:
-                      key: auth-token
-                      name: slurm-bridge-token
-              image: ghcr.io/slinkyproject/slurm-bridge-admission:1.2.3
+            - image: ghcr.io/slinkyproject/slurm-bridge-admission:1.2.3
               imagePullPolicy: IfNotPresent
               livenessProbe:
                 httpGet:

@@ -31,12 +31,6 @@ spec:
         - name: {{ include "slurm-bridge.admission.name" . }}
           image: {{ include "slurm-bridge.admission.imageRef" . }}
           imagePullPolicy: {{ .Values.admission.image.pullPolicy }}
-          env:
-            - name: SLURM_JWT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.sharedConfig.slurmJwtSecret }}
-                  key: auth-token
           livenessProbe:
             httpGet:
               path: /healthz

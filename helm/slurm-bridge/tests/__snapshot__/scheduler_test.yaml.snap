@@ -106,11 +106,8 @@ manifests should match snapshot:
                 - --config=/etc/kubernetes/scheduler-config.yaml
                 - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false
               env:
-                - name: SLURM_JWT
-                  valueFrom:
-                    secretKeyRef:
-                      key: auth-token
-                      name: slurm-bridge-token
+                - name: SLURM_JWT_FILE
+                  value: /var/run/secrets/slurm/auth-token
               image: ghcr.io/slinkyproject/slurm-bridge-scheduler:1.2.3
               imagePullPolicy: IfNotPresent
               livenessProbe:
@@ -134,6 +131,9 @@ manifests should match snapshot:
                 - mountPath: /etc/slurm-bridge/
                   name: slurm-bridge-config
                   readOnly: true
+                - mountPath: /var/run/secrets/slurm
+                  name: slurm-jwt
+                  readOnly: true
           hostNetwork: false
           hostPID: false
           serviceAccountName: slurm-bridge-scheduler
@@ -144,6 +144,12 @@ manifests should match snapshot:
             - configMap:
                 name: slurm-bridge-config
               name: slurm-bridge-config
+            - name: slurm-jwt
+              secret:
+                items:
+                  - key: auth-token
+                    path: auth-token
+                secretName: slurm-bridge-token
   4: |
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole

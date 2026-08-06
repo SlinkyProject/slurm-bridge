@@ -38,6 +38,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
 
 	"github.com/puttsk/hostlist"
 )
@@ -198,11 +199,8 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		return nil, err
 	}
 	clientConfig := &slurmclient.Config{
-		Server: cfg.SlurmRestApi,
-		AuthToken: func() string {
-			token, _ := os.LookupEnv("SLURM_JWT")
-			return token
-		}(),
+		Server:        cfg.SlurmRestApi,
+		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
 	}
 	slurmClient, err := slurmclient.NewClient(clientConfig)
 	if err != nil {
