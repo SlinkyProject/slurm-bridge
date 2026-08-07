@@ -49,8 +49,8 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This is equivalent to `--kjob --dra-driver-cpu --dra-example-driver`. Each flag
-can still be used individually.
+This is equivalent to `--dra-driver-cpu --dra-example-driver`. Each flag can
+still be used individually.
 
 Examples remain individually selectable:
 
