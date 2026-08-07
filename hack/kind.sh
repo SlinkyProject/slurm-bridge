@@ -64,6 +64,7 @@ function tool::require_min_version() {
 # and have needed installed base software
 
 function sys::check() {
+	local require_kind="${1:-true}"
 	local fail=false
 	if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
 		echo "'docker' or 'podman' is required:"
@@ -79,7 +80,7 @@ function sys::check() {
 		echo "'helm' is required: https://helm.sh/"
 		fail=true
 	fi
-	if ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
+	if $require_kind && ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
 		fail=true
 	fi
 	if ! tool::require_min_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
@@ -138,6 +139,16 @@ function kind::start() {
 function kind::delete() {
 	local cluster_name="${1:-kind}"
 	kind delete cluster --name "$cluster_name"
+}
+
+function cluster::use_existing() {
+	sys::check false
+	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
+	if [ -z "$OPT_REGISTRY" ]; then
+		echo "[cluster] WARNING: no --registry or SKAFFOLD_DEFAULT_REPO was provided; local images will only be available if Skaffold can load them into a kind context." >&2
+	fi
+	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	kubectl cluster-info
 }
 
 function helm::find() {
@@ -453,22 +464,11 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
-	local cluster_name="${1:-kind}"
-	local version="main"
-	local dra_path
-	local repo="https://github.com/kubernetes-sigs/dra-example-driver.git"
-	dra_path="$(git::checkout dra-example-driver "$repo" "$version")"
-	(
-		cd "$dra_path"
+	local version="0.4.0"
+	local chart="oci://registry.k8s.io/dra-example-driver/charts/dra-example-driver"
+	local values="$SLURM_BRIDGE_TMP/dra-example-driver-values.yaml"
 
-		# Build DRA images and load them into kind cluster.
-		export KIND_CLUSTER_NAME="$cluster_name"
-		./demo/build-driver.sh
-
-		# Install with selectors and tolerations for slurm-bridge.
-		local helm_chart="./deployments/helm/dra-example-driver/"
-		cd $helm_chart
-		cat <<EOF >./values-dev.yaml
+	cat <<EOF >"$values"
 kubeletPlugin:
   numDevices: 4
   nodeSelector:
@@ -479,10 +479,12 @@ kubeletPlugin:
       value: "slurm-bridge-scheduler"
       effect: "NoExecute"
 EOF
-		helm upgrade -i --create-namespace --namespace dra-example-driver \
-			-f values.yaml -f values-dev.yaml \
-			dra-example-driver .
-	)
+
+	helm upgrade --install dra-example-driver "$chart" \
+		--version "$version" \
+		--namespace dra-example-driver \
+		--create-namespace \
+		--values "$values"
 }
 
 function dra-driver-cpu::install() {
@@ -504,9 +506,9 @@ function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
-	usage: $(basename "$0") [--config=KIND_CONFIG_PATH]
+	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
-	        [--core][--extras][--all]
+	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
@@ -514,6 +516,9 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 
 KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
+	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
+	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
+	                    Can also be set with SKAFFOLD_DEFAULT_REPO.
 	--recreate          Delete the Kind cluster and continue.
 	--delete            Delete the Kind cluster and exit.
 
@@ -521,6 +526,7 @@ HELM OPTIONS:
 	--all               Equivalent of: --core --extras
 	--extras            Equivalent of: --kjob --dra-driver-cpu --dra-example-driver
 	--core              Install the slurm-bridge stack.
+	--prereqs           Install slurm-bridge prerequisites only.
 	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
@@ -541,17 +547,33 @@ HELP OPTIONS:
 EOF
 }
 
+function main::validate_options() {
+	if $OPT_EXISTING_CLUSTER && { $OPT_DELETE || $OPT_RECREATE; }; then
+		echo "--existing-cluster cannot be used with --delete or --recreate." >&2
+		exit 1
+	fi
+	if $OPT_CORE && $OPT_PREREQS; then
+		echo "--core and --prereqs cannot be used together." >&2
+		exit 1
+	fi
+}
+
 function main() {
 	if $OPT_DEBUG; then
 		set -x
 	fi
+	main::validate_options
 	local cluster_name="${1:-"kind"}"
 	if $OPT_DELETE || $OPT_RECREATE; then
 		kind::delete "$cluster_name"
 		$OPT_DELETE && return
 	fi
 
-	kind::start "$cluster_name" "$OPT_CONFIG"
+	if $OPT_EXISTING_CLUSTER; then
+		cluster::use_existing
+	else
+		kind::start "$cluster_name" "$OPT_CONFIG"
+	fi
 
 	make -C "$ROOT_DIR" values-dev || true
 
@@ -559,9 +581,11 @@ function main() {
 		dra-driver-cpu::install
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
-		dra-example-driver::install "$cluster_name"
+		dra-example-driver::install
 	fi
-	if $OPT_CORE; then
+	if $OPT_PREREQS; then
+		slurm-bridge::prerequisites
+	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
 	if $OPT_KJOB; then
@@ -573,7 +597,10 @@ OPT_DEBUG=false
 OPT_RECREATE=false
 OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
 OPT_DELETE=false
+OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
+OPT_PREREQS=false
+OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
@@ -583,7 +610,7 @@ OPT_SLURM_OPERATOR_REF="release-1.2"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,core,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -604,8 +631,25 @@ while :; do
 		OPT_DELETE=true
 		shift
 		;;
+	--existing-cluster)
+		OPT_EXISTING_CLUSTER=true
+		shift
+		;;
+	--registry)
+		OPT_REGISTRY="$2"
+		if [ -z "$OPT_REGISTRY" ]; then
+			echo "--registry requires a non-empty REPO" >&2
+			exit 1
+		fi
+		export SKAFFOLD_DEFAULT_REPO="$OPT_REGISTRY"
+		shift 2
+		;;
 	--core)
 		OPT_CORE=true
+		shift
+		;;
+	--prereqs)
+		OPT_PREREQS=true
 		shift
 		;;
 	--slurm-node-mode)
