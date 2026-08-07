@@ -141,7 +141,9 @@ function cluster::use_existing() {
 	if [ -z "$OPT_REGISTRY" ]; then
 		echo "[cluster] WARNING: no --registry or SKAFFOLD_DEFAULT_REPO was provided; local images will only be available if Skaffold can load them into a kind context." >&2
 	fi
-	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	if $OPT_CORE || $OPT_PREREQS; then
+		slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+	fi
 	kubectl cluster-info
 }
 
