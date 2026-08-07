@@ -464,22 +464,11 @@ function kjob::install() {
 }
 
 function dra-example-driver::install() {
-	local cluster_name="${1:-kind}"
-	local version="main"
-	local dra_path
-	local repo="https://github.com/kubernetes-sigs/dra-example-driver.git"
-	dra_path="$(git::checkout dra-example-driver "$repo" "$version")"
-	(
-		cd "$dra_path"
+	local version="0.4.0"
+	local chart="oci://registry.k8s.io/dra-example-driver/charts/dra-example-driver"
+	local values="$SLURM_BRIDGE_TMP/dra-example-driver-values.yaml"
 
-		# Build DRA images and load them into kind cluster.
-		export KIND_CLUSTER_NAME="$cluster_name"
-		./demo/build-driver.sh
-
-		# Install with selectors and tolerations for slurm-bridge.
-		local helm_chart="./deployments/helm/dra-example-driver/"
-		cd $helm_chart
-		cat <<EOF >./values-dev.yaml
+	cat <<EOF >"$values"
 kubeletPlugin:
   numDevices: 4
   nodeSelector:
@@ -490,10 +479,12 @@ kubeletPlugin:
       value: "slurm-bridge-scheduler"
       effect: "NoExecute"
 EOF
-		helm upgrade -i --create-namespace --namespace dra-example-driver \
-			-f values.yaml -f values-dev.yaml \
-			dra-example-driver .
-	)
+
+	helm upgrade --install dra-example-driver "$chart" \
+		--version "$version" \
+		--namespace dra-example-driver \
+		--create-namespace \
+		--values "$values"
 }
 
 function dra-driver-cpu::install() {
@@ -561,10 +552,6 @@ function main::validate_options() {
 		echo "--existing-cluster cannot be used with --delete or --recreate." >&2
 		exit 1
 	fi
-	if $OPT_EXISTING_CLUSTER && { $OPT_DRA_DRIVER_CPU || $OPT_DRA_EXAMPLE_DRIVER; }; then
-		echo "--existing-cluster cannot be used with kind-specific DRA demo installers." >&2
-		exit 1
-	fi
 	if $OPT_CORE && $OPT_PREREQS; then
 		echo "--core and --prereqs cannot be used together." >&2
 		exit 1
@@ -594,7 +581,7 @@ function main() {
 		dra-driver-cpu::install
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
-		dra-example-driver::install "$cluster_name"
+		dra-example-driver::install
 	fi
 	if $OPT_PREREQS; then
 		slurm-bridge::prerequisites
