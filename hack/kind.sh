@@ -447,22 +447,6 @@ function slurm-bridge::secret() {
 	kubectl apply -f "${SCRIPT_DIR}"/token.yaml
 }
 
-function kjob::install() {
-	local version="0.1.0"
-	local kjob_path
-	local repo="https://github.com/kubernetes-sigs/kjob.git"
-	kjob_path="$(git::checkout kjob "$repo" "v${version}")"
-	(
-		cd "$kjob_path"
-		make install
-		make kubectl-kjob
-		cp "./bin/kubectl-kjob" "$SCRIPT_DIR/kubectl-kjob"
-	)
-	kubectl apply -f "${SCRIPT_DIR}"/kjob.yaml
-	echo -e "\nRun the following command to install the kubectl kjob plugin:"
-	echo -e "sudo cp ${SCRIPT_DIR}/kubectl-kjob /usr/local/bin/kubectl-kjob\n"
-}
-
 function dra-example-driver::install() {
 	local cluster_name="${1:-kind}"
 	local version="0.2.0"
@@ -502,7 +486,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
-	        [--kjob] [--dra-example-driver] [--dra-driver-cpu]
+	        [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -520,7 +504,6 @@ HELM OPTIONS:
 	--extras            Equivalent of: --dra-example-driver
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
-	--kjob              Install kjob CRDs and build kubectl-kjob
 	--dra-driver-cpu    Unsupported in release-1.0.
 	--dra-example-driver Install DRA driver: dra-example-driver
 
@@ -586,9 +569,6 @@ function main() {
 	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
-	if $OPT_KJOB; then
-		kjob::install
-	fi
 }
 
 OPT_DEBUG=false
@@ -602,13 +582,12 @@ OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
-OPT_KJOB=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="release-1.0"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,kjob,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -679,10 +658,6 @@ while :; do
 		;;
 	--extras)
 		OPT_EXTRAS=true
-		shift
-		;;
-	--kjob)
-		OPT_KJOB=true
 		shift
 		;;
 	--dra-driver-cpu)
