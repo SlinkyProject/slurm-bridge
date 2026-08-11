@@ -5,8 +5,8 @@ package slurmcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 
@@ -17,6 +17,7 @@ import (
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -73,7 +74,7 @@ func (r *realSlurmControl) NodeExists(ctx context.Context, node *corev1.Node) (b
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -90,7 +91,7 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 	slurmNode := &slurmtypes.V0044Node{}
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -108,7 +109,7 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -125,7 +126,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	opts := &slurmclient.GetOptions{RefreshCache: true}
 	if err := r.Get(ctx, key, slurmNode, opts); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -149,7 +150,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -189,7 +190,7 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -204,7 +205,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -241,7 +242,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		}
 		return r.updateNodeTopology(ctx, node, slurmNode)
 	}
-	if !tolerateError(err) {
+	if err != nil && !errors.Is(err, slurmerrors.ErrObjectNotFound) {
 		return err
 	}
 
@@ -374,7 +375,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	key := slurmobject.ObjectKey(slurmNodeName)
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -383,7 +384,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	logger.Info("Removing Kubernetes node from Slurm", "node", klog.KObj(node),
 		"slurmNode", slurmNodeName)
 	if err := r.Delete(ctx, slurmNode); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return fmt.Errorf("could not remove node from Slurm: %w", err)
@@ -397,7 +398,7 @@ func (r *realSlurmControl) validatePartitionExists(ctx context.Context, partitio
 	partition := &slurmtypes.V0044PartitionInfo{}
 	key := slurmobject.ObjectKey(partitionName)
 	if err := r.Get(ctx, key, partition); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return fmt.Errorf("partition not found")
 		}
 		return err
@@ -449,17 +450,4 @@ func NewControl(client slurmclient.Client) SlurmControlInterface {
 	return &realSlurmControl{
 		Client: client,
 	}
-}
-
-func tolerateError(err error) bool {
-	if err == nil {
-		return true
-	}
-	errText := err.Error()
-	notFound := http.StatusText(http.StatusNotFound)
-	noContent := http.StatusText(http.StatusNoContent)
-	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
-		return true
-	}
-	return false
 }

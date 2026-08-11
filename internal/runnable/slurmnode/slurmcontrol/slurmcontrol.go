@@ -5,7 +5,6 @@ package slurmcontrol
 
 import (
 	"context"
-	"net/http"
 
 	"k8s.io/utils/ptr"
 
@@ -32,9 +31,6 @@ func (r *realSlurmControl) RefreshNodeCache(ctx context.Context) error {
 		RefreshCache: true,
 	}
 	if err := r.List(ctx, nodeList, opts); err != nil {
-		if tolerateError(err) {
-			return nil
-		}
 		return err
 	}
 	return nil
@@ -59,16 +55,4 @@ func NewControl(client client.Client) SlurmControlInterface {
 	return &realSlurmControl{
 		Client: client,
 	}
-}
-
-func tolerateError(err error) bool {
-	if err == nil {
-		return true
-	}
-	errText := err.Error()
-	if errText == http.StatusText(http.StatusNotFound) ||
-		errText == http.StatusText(http.StatusNoContent) {
-		return true
-	}
-	return false
 }
