@@ -515,6 +515,7 @@ SLURM OPTIONS:
 	                    Can also be set with SLURM_OPERATOR_REPO.
 	--slurm-operator-ref=REF
 	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
+	                    Can also be set with SLURM_OPERATOR_REF.
 
 HELP OPTIONS:
 	--debug             Show script debug information.
@@ -583,7 +584,7 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
-OPT_SLURM_OPERATOR_REF="release-1.0"
+OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-release-1.0}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
