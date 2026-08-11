@@ -4,12 +4,15 @@
 package config
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
 const (
-	ConfigFile = "/etc/slurm-bridge/config.yaml"
+	ConfigFile         = "/etc/slurm-bridge/config.yaml"
+	SlurmClientTimeout = 5 * time.Minute
 )
 
 type Config struct {
