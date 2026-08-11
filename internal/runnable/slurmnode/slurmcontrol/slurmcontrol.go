@@ -7,9 +7,10 @@ import (
 	"context"
 	"net/http"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
-	"k8s.io/utils/ptr"
 )
 
 type SlurmControlInterface interface {

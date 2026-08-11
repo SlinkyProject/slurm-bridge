@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func podWithResources(cpuRequest, memoryRequest, cpuLimit, memoryLimit string) corev1.Pod {

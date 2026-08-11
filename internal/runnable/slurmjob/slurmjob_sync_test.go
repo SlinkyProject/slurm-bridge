@@ -14,14 +14,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func TestSlurmJobRunnable_Sync(t *testing.T) {

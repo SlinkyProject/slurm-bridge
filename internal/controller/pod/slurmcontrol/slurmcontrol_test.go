@@ -13,11 +13,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func Test_realSlurmControl_GetJob(t *testing.T) {
@@ -81,7 +82,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Job found but cancelled",
+			name: "Job found but canceled",
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
@@ -250,7 +251,7 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "job cancelled",
+			name: "job canceled",
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{

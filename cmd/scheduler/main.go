@@ -10,11 +10,10 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // for rest client metric registration
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
-
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge"
-
 	// Ensure scheme package is initialized.
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge"
 )
 
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=create;get;list;update

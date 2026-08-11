@@ -6,12 +6,12 @@ package nodeinfo_test
 import (
 	"testing"
 
+	"github.com/kelindar/bitmap"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/utils/cpuset"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
-	"github.com/kelindar/bitmap"
 )
 
 func TestNewCPUMap(t *testing.T) {

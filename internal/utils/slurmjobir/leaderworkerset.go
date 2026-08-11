@@ -6,7 +6,6 @@ package slurmjobir
 import (
 	"errors"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -14,6 +13,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var (

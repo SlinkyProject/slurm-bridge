@@ -361,7 +361,7 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "job cancelled",
+			name: "job canceled",
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{

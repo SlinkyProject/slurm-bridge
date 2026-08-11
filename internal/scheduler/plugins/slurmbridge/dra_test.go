@@ -10,10 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
-
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -32,6 +28,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
 )
 
 func init() {

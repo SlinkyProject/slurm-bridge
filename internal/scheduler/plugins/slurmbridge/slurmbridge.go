@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/puttsk/hostlist"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
@@ -32,16 +33,15 @@ import (
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
+	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
+
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	nodecontrollerutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
-
-	"github.com/puttsk/hostlist"
 )
 
 var (
