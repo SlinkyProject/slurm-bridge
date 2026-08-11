@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"net/http"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -128,6 +129,7 @@ func main() {
 	clientConfig := &slurmclient.Config{
 		Server:        cfg.SlurmRestApi,
 		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
+		HTTPClient:    &http.Client{Timeout: config.SlurmClientTimeout},
 	}
 	slurmClient, err := slurmclient.NewClient(clientConfig)
 	if err != nil {
