@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"reflect"
 	"slices"
@@ -159,6 +160,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 			token, _ := os.LookupEnv("SLURM_JWT")
 			return token
 		}(),
+		HTTPClient: &http.Client{Timeout: config.SlurmClientTimeout},
 	}
 	slurmClient, err := slurmclient.NewClient(clientConfig)
 	if err != nil {
