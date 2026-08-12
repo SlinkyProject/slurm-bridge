@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
@@ -16,6 +15,8 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var (

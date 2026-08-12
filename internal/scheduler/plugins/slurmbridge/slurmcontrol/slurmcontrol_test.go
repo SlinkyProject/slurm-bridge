@@ -10,22 +10,22 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
+	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	st "k8s.io/kubernetes/pkg/scheduler/testing"
+	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
-	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	st "k8s.io/kubernetes/pkg/scheduler/testing"
-	"k8s.io/utils/ptr"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func Test_sharedFromExclusiveAnnotation(t *testing.T) {

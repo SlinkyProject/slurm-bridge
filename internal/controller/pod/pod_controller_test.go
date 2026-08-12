@@ -18,8 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 const (

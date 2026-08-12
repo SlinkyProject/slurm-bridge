@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -21,6 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func newPodGroupCoscheduling(name string, minMembers int32, status sched.PodGroupStatus) *sched.PodGroup {

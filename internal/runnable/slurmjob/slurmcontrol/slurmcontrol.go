@@ -5,15 +5,15 @@ package slurmcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
-	"strings"
 
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -46,9 +46,6 @@ func (r *realSlurmControl) RefreshJobCache(ctx context.Context) error {
 		RefreshCache: true,
 	}
 	if err := r.List(ctx, jobList, opts); err != nil {
-		if tolerateError(err) {
-			return nil
-		}
 		return err
 	}
 	return nil
@@ -60,7 +57,7 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -73,9 +70,6 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error) {
 	jobList := &types.V0044JobInfoList{}
 	if err := r.List(ctx, jobList); err != nil {
-		if tolerateError(err) {
-			return nil, nil, nil
-		}
 		return nil, nil, err
 	}
 
@@ -102,7 +96,7 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]k
 	job := &types.V0044JobInfo{}
 	key := client.ObjectKey(fmt.Sprintf("%v", jobId))
 	if err := r.Get(ctx, key, job); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -130,7 +124,7 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 		},
 	}
 	if err := r.Delete(ctx, job); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -144,17 +138,4 @@ func NewControl(client client.Client) SlurmControlInterface {
 	return &realSlurmControl{
 		Client: client,
 	}
-}
-
-func tolerateError(err error) bool {
-	if err == nil {
-		return true
-	}
-	errText := err.Error()
-	notFound := http.StatusText(http.StatusNotFound)
-	noContent := http.StatusText(http.StatusNoContent)
-	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
-		return true
-	}
-	return false
 }

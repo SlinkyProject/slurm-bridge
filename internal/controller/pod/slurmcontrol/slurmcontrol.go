@@ -5,15 +5,15 @@ package slurmcontrol
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -43,7 +43,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 	}
 	err := r.Get(ctx, jobId, job, &client.GetOptions{RefreshCache: true})
 	if err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -60,7 +60,7 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -77,7 +77,7 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 		},
 	}
 	if err := r.Delete(ctx, job); err != nil {
-		if tolerateError(err) {
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
 			return nil
 		}
 		return err
@@ -91,17 +91,4 @@ func NewControl(client client.Client) SlurmControlInterface {
 	return &realSlurmControl{
 		Client: client,
 	}
-}
-
-func tolerateError(err error) bool {
-	if err == nil {
-		return true
-	}
-	errText := err.Error()
-	notFound := http.StatusText(http.StatusNotFound)
-	noContent := http.StatusText(http.StatusNoContent)
-	if strings.Contains(errText, notFound) || strings.Contains(errText, noContent) {
-		return true
-	}
-	return false
 }

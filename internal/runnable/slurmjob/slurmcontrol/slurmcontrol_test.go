@@ -5,8 +5,6 @@ package slurmcontrol
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"slices"
 	"testing"
 
@@ -361,7 +359,7 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "job cancelled",
+			name: "job canceled",
 			fields: fields{
 				Client: func() client.Client {
 					obj := &types.V0044JobInfo{
@@ -437,67 +435,6 @@ func Test_realSlurmControl_TerminateJob(t *testing.T) {
 			r := NewControl(tt.slurmClient)
 			if err := r.TerminateJob(tt.args.ctx, tt.args.jobId); (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.TerminateJob() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func Test_tolerateError(t *testing.T) {
-	type args struct {
-		err error
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			name: "Nil",
-			args: args{
-				err: nil,
-			},
-			want: true,
-		},
-		{
-			name: "Empty",
-			args: args{
-				err: errors.New(""),
-			},
-			want: false,
-		},
-		{
-			name: "NotFound",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusNotFound)),
-			},
-			want: true,
-		},
-		{
-			name: "NoContent",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusNoContent)),
-			},
-			want: true,
-		},
-		{
-			name: "Forbidden",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusForbidden)),
-			},
-			want: false,
-		},
-		{
-			name: "wrapped Not Found (e.g. slurm-client cache sync)",
-			args: args{
-				err: errors.New("failed to wait on type V0044JobInfo object 69 cache sync: [Not Found, Invalid job id specified]"),
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tolerateError(tt.args.err); got != tt.want {
-				t.Errorf("tolerateError() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -842,67 +841,6 @@ func Test_realSlurmControl_RemoveNode(t *testing.T) {
 			err := r.RemoveNode(ctx, tt.node)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("RemoveNode() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func Test_tolerateError(t *testing.T) {
-	type args struct {
-		err error
-	}
-	tests := []struct {
-		name string
-		args args
-		want bool
-	}{
-		{
-			name: "Nil",
-			args: args{
-				err: nil,
-			},
-			want: true,
-		},
-		{
-			name: "Empty",
-			args: args{
-				err: errors.New(""),
-			},
-			want: false,
-		},
-		{
-			name: "NotFound",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusNotFound)),
-			},
-			want: true,
-		},
-		{
-			name: "NoContent",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusNoContent)),
-			},
-			want: true,
-		},
-		{
-			name: "Forbidden",
-			args: args{
-				err: errors.New(http.StatusText(http.StatusForbidden)),
-			},
-			want: false,
-		},
-		{
-			name: "wrapped Not Found (e.g. slurm-client cache sync)",
-			args: args{
-				err: errors.New("failed to wait on type V0044JobInfo object 69 cache sync: [Not Found, Invalid job id specified]"),
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tolerateError(tt.args.err); got != tt.want {
-				t.Errorf("tolerateError() = %v, want %v", got, tt.want)
 			}
 		})
 	}

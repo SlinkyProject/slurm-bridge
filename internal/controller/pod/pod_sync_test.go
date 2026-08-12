@@ -232,7 +232,7 @@ var _ = Describe("syncKubernetes()", func() {
 
 	Context("With a not-Ready (crash-looping) pod", func() {
 		// Regression: a crash-looping pod is never Ready, but its Slurm job
-		// can still be preempted/cancelled. It must be deleted like any
+		// can still be preempted/canceled. It must be deleted like any
 		// other pod, or its ResourceClaim keeps a device allocation that
 		// Slurm has already handed to another pod (device double-booking).
 		It("Should terminate the pod when its job is gone", func() {
@@ -507,9 +507,9 @@ var _ = Describe("syncSlurm()", func() {
 			Expect(exists).To(BeFalse())
 		})
 
-		It("Should not terminate an already cancelled job", func() {
-			By("Creating a terminal pod and cancelled Slurm job")
-			podName := "cancelled"
+		It("Should not terminate an already canceled job", func() {
+			By("Creating a terminal pod and canceled Slurm job")
+			podName := "canceled"
 			pod := newTerminalPod(podName, jobId)
 			jobList := &slurmtypes.V0044JobInfoList{
 				Items: []slurmtypes.V0044JobInfo{
