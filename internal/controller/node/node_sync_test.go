@@ -212,6 +212,7 @@ var _ = Describe("syncState()", func() {
 				}
 				o.State = ptr.To(stateSet.UnsortedList())
 				o.Comment = r.Comment
+				o.Extra = r.Extra
 				o.Reason = r.Reason
 			default:
 				return errors.New("failed to cast slurm object")

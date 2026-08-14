@@ -13,6 +13,7 @@ require (
 	k8s.io/client-go v0.36.0
 	k8s.io/component-base v0.36.0
 	k8s.io/component-helpers v0.36.0
+	k8s.io/dynamic-resource-allocation v0.36.0
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-scheduler v0.36.0
 	k8s.io/kubernetes v1.36.0
@@ -138,7 +139,6 @@ require (
 	k8s.io/cloud-provider v0.35.2 // indirect
 	k8s.io/controller-manager v0.35.2 // indirect
 	k8s.io/csi-translation-lib v0.35.2 // indirect
-	k8s.io/dynamic-resource-allocation v0.36.0 // indirect
 	k8s.io/kms v0.36.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260319004828-5883c5ee87b9 // indirect
 	k8s.io/kubelet v0.36.0 // indirect

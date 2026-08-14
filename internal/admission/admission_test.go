@@ -15,6 +15,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -141,69 +142,6 @@ func TestValidateCPUResources(t *testing.T) {
 			err := validateCPUResources(tt.pod)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateCPUResources() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateDRADeviceClasses(t *testing.T) {
-	resourceName := func(deviceClassName string) corev1.ResourceName {
-		return corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + deviceClassName)
-	}
-	tests := []struct {
-		name            string
-		pod             *corev1.Pod
-		wantErrContains string
-	}{
-		{
-			name: "supported classes",
-			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
-					resourceName(nodeinfo.DraDriverCpu):       resource.MustParse("1"),
-					resourceName(nodeinfo.DraDriverGpuNvidia): resource.MustParse("1"),
-					resourceName(nodeinfo.DraExampleDriver):   resource.MustParse("1"),
-				}},
-			}}}},
-		},
-		{
-			name: "unsupported class in regular container request",
-			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
-					resourceName("other.gpu.example.com"): resource.MustParse("1"),
-				}},
-			}}}},
-			wantErrContains: `unsupported DRA device class "other.gpu.example.com"`,
-		},
-		{
-			name: "unsupported class in init container limit",
-			pod: &corev1.Pod{Spec: corev1.PodSpec{InitContainers: []corev1.Container{{
-				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-					resourceName("other.gpu.example.com"): resource.MustParse("1"),
-				}},
-			}}}},
-			wantErrContains: `unsupported DRA device class "other.gpu.example.com"`,
-		},
-		{
-			name: "non-DRA extended resource",
-			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
-					"example.com/gpu": resource.MustParse("1"),
-				}},
-			}}}},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateDRADeviceClasses(tt.pod)
-			if tt.wantErrContains == "" {
-				if err != nil {
-					t.Fatalf("validateDRADeviceClasses() unexpected error = %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErrContains) {
-				t.Fatalf("validateDRADeviceClasses() error = %v, want error containing %q", err, tt.wantErrContains)
 			}
 		})
 	}
@@ -620,12 +558,13 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 		pod *corev1.Pod
 	}
 	tests := []struct {
-		name            string
-		fields          fields
-		args            args
-		want            admission.Warnings
-		wantErr         bool
-		wantErrContains string
+		name                string
+		fields              fields
+		args                args
+		want                admission.Warnings
+		wantWarningContains string
+		wantErr             bool
+		wantErrContains     string
 	}{
 		{
 			name: "PodWithDefaultNamespace is ignored",
@@ -780,8 +719,8 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					}}},
 				},
 			},
-			want:    nil,
-			wantErr: true,
+			wantWarningContains: `get device class "other.gpu.example.com"`,
+			wantErr:             false,
 		},
 		{
 			name: "PodWithUnsupportedDRAClassInUnmanagedNamespace",
@@ -960,6 +899,7 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &PodAdmission{
+				Client:            fake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
 				SchedulerName:     tt.fields.SchedulerName,
 				ManagedNamespaces: tt.fields.ManagedNamespaces,
 			}
@@ -968,8 +908,16 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 				t.Errorf("PodAdmission.ValidateCreate() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
-				t.Errorf("PodAdmission.ValidateCreate() error = %v, want error containing %q", err, tt.wantErrContains)
+			if tt.wantErrContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("PodAdmission.ValidateCreate() error = %v, want error containing %q", err, tt.wantErrContains)
+				}
+				return
+			}
+			if tt.wantWarningContains != "" {
+				if len(got) != 1 || !strings.Contains(got[0], tt.wantWarningContains) {
+					t.Errorf("PodAdmission.ValidateCreate() = %v, want warning containing %q", got, tt.wantWarningContains)
+				}
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
@@ -977,6 +925,130 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
+	const deviceClassName = "gpu.example.com"
+	deviceResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + deviceClassName)
+	validClass := func() *resourcev1.DeviceClass {
+		return &resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: deviceClassName,
+			},
+			Spec: resourcev1.DeviceClassSpec{
+				Selectors: []resourcev1.DeviceSelector{{
+					CEL: &resourcev1.CELDeviceSelector{
+						Expression: `device.driver == "gpu.example.com"`,
+					},
+				}},
+			},
+		}
+	}
+	newAdmission := func(classes ...*resourcev1.DeviceClass) *PodAdmission {
+		objects := make([]runtime.Object, 0, len(classes))
+		for _, class := range classes {
+			objects = append(objects, class)
+		}
+		return &PodAdmission{
+			Client:            fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(objects...).Build(),
+			SchedulerName:     SchedulerName,
+			ManagedNamespaces: []string{namespace},
+		}
+	}
+	newPod := func() *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "work"}},
+			},
+		}
+	}
+
+	t.Run("request in app container", func(t *testing.T) {
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		warnings, err := newAdmission(validClass()).ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v", err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want none", warnings)
+		}
+	})
+
+	t.Run("limit in init container", func(t *testing.T) {
+		pod := newPod()
+		pod.Spec.InitContainers = []corev1.Container{{
+			Name: "init",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				deviceResource: resource.MustParse("1"),
+			}},
+		}}
+		warnings, err := newAdmission(validClass()).ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v", err)
+		}
+		if len(warnings) != 0 {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want none", warnings)
+		}
+	})
+
+	t.Run("missing class", func(t *testing.T) {
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		warnings, err := newAdmission().ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want warning", err)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], `get device class "gpu.example.com"`) {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want missing DeviceClass warning", warnings)
+		}
+	})
+
+	t.Run("non-canonical selector", func(t *testing.T) {
+		class := validClass()
+		class.Spec.Selectors[0].CEL.Expression = `device.driver == 'gpu.example.com'`
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		warnings, err := newAdmission(class).ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want warning", err)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "does not match a supported device profile") {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want selector mismatch warning", warnings)
+		}
+	})
+
+	t.Run("class configuration", func(t *testing.T) {
+		class := validClass()
+		class.Spec.Config = []resourcev1.DeviceClassConfiguration{{
+			DeviceConfiguration: resourcev1.DeviceConfiguration{
+				Opaque: &resourcev1.OpaqueDeviceConfiguration{
+					Driver: "gpu.example.com",
+					Parameters: runtime.RawExtension{
+						Raw: []byte(`{"enabled":true}`),
+					},
+				},
+			},
+		}}
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		warnings, err := newAdmission(class).ValidateCreate(context.Background(), pod)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want warning", err)
+		}
+		if len(warnings) != 1 || !strings.Contains(warnings[0], "configuration is not supported") {
+			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want unsupported configuration warning", warnings)
+		}
+	})
 }
 
 func TestPodAdmission_ValidateUpdate(t *testing.T) {

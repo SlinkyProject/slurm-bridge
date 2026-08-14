@@ -6,6 +6,7 @@ package admission
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -39,6 +41,7 @@ func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 // +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
 var _ admission.Defaulter[*corev1.Pod] = &PodAdmission{}
@@ -97,13 +100,12 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateCPUResources(pod); err != nil {
 		return nil, err
 	}
-	if err := validateDRADeviceClasses(pod); err != nil {
-		return nil, err
-	}
+	// TODO(killianmuldoon) Change this to a hard error before merging
+	warnings := r.validateDRAResourceWarnings(ctx, pod)
 	if err := validateAnnotationConflicts(pod); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return warnings, nil
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -123,9 +125,8 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
-	if err := validateDRADeviceClasses(newPod); err != nil {
-		return nil, err
-	}
+	// TODO(killianmuldoon) Change this to a hard error before merging
+	warnings := r.validateDRAResourceWarnings(ctx, newPod)
 	if err := validateAnnotationConflicts(newPod); err != nil {
 		return nil, err
 	}
@@ -141,7 +142,7 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 			return nil, fmt.Errorf("can't update a running pod's external node annotation")
 		}
 	}
-	return nil, nil
+	return warnings, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
@@ -196,34 +197,50 @@ func resourceIsSet(resources corev1.ResourceRequirements, name corev1.ResourceNa
 	return requested || limited
 }
 
-func validateDRADeviceClasses(pod *corev1.Pod) error {
-	for _, container := range pod.Spec.InitContainers {
-		if err := validateContainerDRADeviceClasses(container); err != nil {
-			return err
+func (r *PodAdmission) validateDRAResourceWarnings(ctx context.Context, pod *corev1.Pod) admission.Warnings {
+	if err := r.validateDRAResources(ctx, pod); err != nil {
+		return admission.Warnings{err.Error()}
+	}
+	return nil
+}
+
+func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod) error {
+	classNames := make(map[string]struct{})
+	containers := slices.Clone(pod.Spec.InitContainers)
+	containers = append(containers, pod.Spec.Containers...)
+	for _, container := range containers {
+		for resourceName := range container.Resources.Requests {
+			addDeviceClassName(classNames, resourceName)
+		}
+		for resourceName := range container.Resources.Limits {
+			addDeviceClassName(classNames, resourceName)
 		}
 	}
-	for _, container := range pod.Spec.Containers {
-		if err := validateContainerDRADeviceClasses(container); err != nil {
+
+	registry := dra.DefaultRegistry()
+	for _, className := range slices.Sorted(maps.Keys(classNames)) {
+		deviceClass := &resourcev1.DeviceClass{}
+		if err := r.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
+			return fmt.Errorf("get device class %q: %w", className, err)
+		}
+		if len(deviceClass.Spec.Config) != 0 {
+			return fmt.Errorf("device class %q configuration is not supported", className)
+		}
+		// TODO: Persist the resolved DeviceProfile and verify that the live
+		// DeviceClass still maps to it when scheduling and binding the claim.
+		if _, err := registry.MatchDeviceClass(deviceClass); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateContainerDRADeviceClasses(container corev1.Container) error {
-	resourceLists := []corev1.ResourceList{
-		container.Resources.Requests,
-		container.Resources.Limits,
+func addDeviceClassName(classNames map[string]struct{}, resourceName corev1.ResourceName) {
+	name := string(resourceName)
+	if !strings.HasPrefix(name, resourcev1.ResourceDeviceClassPrefix) {
+		return
 	}
-	for _, resources := range resourceLists {
-		for resourceName := range resources {
-			deviceClassName, isDRADeviceClass := strings.CutPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
-			if isDRADeviceClass && !nodeinfo.IsSupportedDRADeviceClass(deviceClassName) {
-				return fmt.Errorf("container %q uses unsupported DRA device class %q", container.Name, deviceClassName)
-			}
-		}
-	}
-	return nil
+	classNames[strings.TrimPrefix(name, resourcev1.ResourceDeviceClassPrefix)] = struct{}{}
 }
 
 // validateAnnotationConflicts rejects Slurm annotation overrides that would

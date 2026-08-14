@@ -12,3 +12,11 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - resource.k8s.io
+  resources:
+  - deviceclasses
+  verbs:
+  - get
+  - list
+  - watch

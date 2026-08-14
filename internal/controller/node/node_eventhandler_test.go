@@ -5,16 +5,23 @@ package node
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func newQueue() workqueue.TypedRateLimitingInterface[reconcile.Request] {
@@ -198,6 +205,82 @@ func Test_nodeEventHandler_Update(t *testing.T) {
 			h.Update(tt.args.ctx, tt.args.evt, tt.args.q)
 			if got := tt.args.q.Len(); got > tt.want {
 				t.Errorf("Update() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_resourceSliceToNodes(t *testing.T) {
+	externalNode := func(name string) *corev1.Node {
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{wellknown.LabelExternalNode: ""},
+		}}
+	}
+	r := &NodeReconciler{
+		Client: fake.NewClientBuilder().WithObjects(
+			externalNode("node-a"),
+			externalNode("node-b"),
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-c"}},
+		).Build(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	tests := []struct {
+		name  string
+		slice *resourcev1.ResourceSlice
+		want  []string
+	}{
+		{
+			name: "node-local example slice",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.example.com",
+				NodeName: ptr.To("node-a"),
+				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+			}},
+			want: []string{"node-a"},
+		},
+		{
+			name: "unsupported driver",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.nvidia.com",
+				NodeName: ptr.To("node-a"),
+				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+			}},
+		},
+		{
+			name: "all external nodes",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.example.com",
+				AllNodes: ptr.To(true),
+				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+			}},
+			want: []string{"node-a", "node-b"},
+		},
+		{
+			name: "per-device selection",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:                 "gpu.example.com",
+				PerDeviceNodeSelection: ptr.To(true),
+				Devices: []resourcev1.Device{
+					{Name: "gpu-a", NodeName: ptr.To("node-a")},
+					{Name: "gpu-c", NodeName: ptr.To("node-c")},
+				},
+			}},
+			want: []string{"node-a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requests := r.resourceSliceToNodes(context.Background(), tt.slice)
+			got := make([]string, len(requests))
+			for i, request := range requests {
+				got[i] = request.Name
+			}
+			sort.Strings(got)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("resourceSliceToNodes() = %v, want %v", got, tt.want)
 			}
 		})
 	}

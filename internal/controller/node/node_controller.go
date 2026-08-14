@@ -27,6 +27,7 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
 )
 
@@ -61,6 +62,7 @@ type NodeReconciler struct {
 	EventCh       chan event.GenericEvent
 
 	slurmControl  slurmcontrol.SlurmControlInterface
+	draRegistry   *dra.Registry
 	eventRecorder record.EventRecorderLogger
 }
 
@@ -102,28 +104,22 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res c
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.draRegistry == nil {
+		r.draRegistry = dra.DefaultRegistry()
+	}
 	nodeEventHandler := &nodeEventHandler{
 		Reader: mgr.GetCache(),
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("node-controller").
 		For(&corev1.Node{}).
-		Watches(&resourcev1.ResourceSlice{}, handler.EnqueueRequestsFromMapFunc(resourceSliceNode)).
+		Watches(&resourcev1.ResourceSlice{}, handler.EnqueueRequestsFromMapFunc(r.resourceSliceToNodes)).
 		WatchesRawSource(source.Channel(r.EventCh, nodeEventHandler)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
 }
-
-func resourceSliceNode(_ context.Context, obj client.Object) []reconcile.Request {
-	resourceSlice := obj.(*resourcev1.ResourceSlice)
-	if resourceSlice.Spec.NodeName == nil || *resourceSlice.Spec.NodeName == "" {
-		return nil
-	}
-	return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: *resourceSlice.Spec.NodeName}}}
-}
-
 func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *NodeReconciler {
 	scheme := kubeClient.Scheme()
 	eventSource := corev1.EventSource{Component: ControllerName}
@@ -135,6 +131,7 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		EventCh:       eventCh,
 		SlurmClient:   slurmClient,
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
+		draRegistry:   dra.DefaultRegistry(),
 		eventRecorder: eventRecorder,
 	}
 	return r

@@ -211,9 +211,14 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 	if err := kubeclient.List(ctx, resourceSliceList); err != nil {
 		return nil, err
 	}
+	return NewNodeInfoFromResourceSlices(ctx, nodeName, resourceSliceList.Items), nil
+}
 
+// NewNodeInfoFromResourceSlices builds the legacy node inventory from an
+// existing ResourceSlice snapshot.
+func NewNodeInfoFromResourceSlices(ctx context.Context, nodeName string, resourceSlices []resourcev1.ResourceSlice) *NodeInfo {
 	nodeInfo := &NodeInfo{}
-	for _, resourceSlice := range resourceSliceList.Items {
+	for _, resourceSlice := range resourceSlices {
 		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
 			continue
 		}
@@ -230,7 +235,7 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 		}
 	}
 
-	return nodeInfo, nil
+	return nodeInfo
 }
 
 // GetGresAndGresConf returns Slurm GRES and GresConf strings for this node's devices.
