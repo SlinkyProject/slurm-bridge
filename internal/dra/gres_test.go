@@ -151,6 +151,48 @@ func TestAppliedInventoryRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAppliedInventoryDevices(t *testing.T) {
+	inventory := AppliedInventory{
+		"gpu-example": {
+			deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
+			deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
+			deviceIDForTest("gpu.example.com", "pool-a", "gpu-2"),
+		},
+	}
+
+	got, err := inventory.Devices("gpu-example", []int{2, 0})
+	if err != nil {
+		t.Fatalf("AppliedInventory.Devices() error = %v", err)
+	}
+	want := []DeviceIdentity{
+		deviceIDForTest("gpu.example.com", "pool-a", "gpu-2"),
+		deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AppliedInventory.Devices() = %#v, want %#v", got, want)
+	}
+
+	tests := []struct {
+		name        string
+		profileName string
+		indexes     []int
+		wantErr     string
+	}{
+		{name: "missing profile", profileName: "missing", indexes: []int{0}, wantErr: "does not contain"},
+		{name: "negative index", profileName: "gpu-example", indexes: []int{-1}, wantErr: "outside"},
+		{name: "large index", profileName: "gpu-example", indexes: []int{3}, wantErr: "outside"},
+		{name: "duplicate index", profileName: "gpu-example", indexes: []int{1, 1}, wantErr: "repeated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := inventory.Devices(tt.profileName, tt.indexes)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("AppliedInventory.Devices() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestEncodeAppliedInventoryEmpty(t *testing.T) {
 	got, err := EncodeAppliedInventory(nil)
 	if err != nil {

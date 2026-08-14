@@ -33,6 +33,22 @@ func (g GRES) String() string {
 	return g.Name + ":" + g.Type
 }
 
+// GRES returns the indexed Slurm GRES represented by this DeviceProfile.
+func (p DeviceProfile) GRES() (GRES, error) {
+	switch backend := p.Backend.(type) {
+	case IndexedGRESBackend:
+		if backend.GRESName == "" {
+			return GRES{}, fmt.Errorf("device profile %q has an empty Slurm GRES name", p.Name)
+		}
+		if p.Name == "" {
+			return GRES{}, fmt.Errorf("device profile for driver %q has an empty name", p.Driver)
+		}
+		return GRES{Name: backend.GRESName, Type: p.Name}, nil
+	default:
+		return GRES{}, fmt.Errorf("device profile %q has unsupported backend %T", p.Name, p.Backend)
+	}
+}
+
 // GRESInventory describes one indexed Slurm GRES and its stable DRA device
 // mapping. Devices[i] is the DRA device represented by Slurm index i.
 type GRESInventory struct {
@@ -45,24 +61,14 @@ func (n NodeInventory) GRES() ([]GRESInventory, error) {
 	var inventory []GRESInventory
 	for _, profileInventory := range n.Profiles {
 		profile := profileInventory.Profile
-		switch backend := profile.Backend.(type) {
-		case IndexedGRESBackend:
-			if backend.GRESName == "" {
-				return nil, fmt.Errorf("device profile %q has an empty Slurm GRES name", profile.Name)
-			}
-			if profile.Name == "" {
-				return nil, fmt.Errorf("device profile for driver %q has an empty name", profile.Driver)
-			}
-			inventory = append(inventory, GRESInventory{
-				GRES: GRES{
-					Name: backend.GRESName,
-					Type: profile.Name,
-				},
-				Devices: slices.Clone(profileInventory.Devices),
-			})
-		default:
-			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
+		gres, err := profile.GRES()
+		if err != nil {
+			return nil, err
 		}
+		inventory = append(inventory, GRESInventory{
+			GRES:    gres,
+			Devices: slices.Clone(profileInventory.Devices),
+		})
 	}
 	return inventory, nil
 }
@@ -108,6 +114,29 @@ func (g GRESInventory) SlurmConfig() (string, string, error) {
 // AppliedInventory records the DRA device represented by each Slurm index,
 // keyed by stable DeviceProfile name.
 type AppliedInventory map[string][]DeviceIdentity
+
+// Devices returns the devices represented by indexes for a DeviceProfile.
+// The order of the returned devices matches the order of indexes.
+func (a AppliedInventory) Devices(profileName string, indexes []int) ([]DeviceIdentity, error) {
+	devices, ok := a[profileName]
+	if !ok {
+		return nil, fmt.Errorf("applied inventory does not contain device profile %q", profileName)
+	}
+
+	selected := make([]DeviceIdentity, len(indexes))
+	seen := make(map[int]struct{}, len(indexes))
+	for i, index := range indexes {
+		if index < 0 || index >= len(devices) {
+			return nil, fmt.Errorf("slurm GRES index %d is outside device profile %q inventory of %d devices", index, profileName, len(devices))
+		}
+		if _, ok := seen[index]; ok {
+			return nil, fmt.Errorf("slurm GRES index %d is repeated for device profile %q", index, profileName)
+		}
+		seen[index] = struct{}{}
+		selected[i] = devices[index]
+	}
+	return selected, nil
+}
 
 type appliedInventoryWire struct {
 	Version int `json:"v"`

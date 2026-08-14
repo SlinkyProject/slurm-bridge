@@ -16,7 +16,7 @@ func TestDefaultRegistry(t *testing.T) {
 	want := DeviceProfile{
 		Name:     "gpu-example",
 		Driver:   "gpu.example.com",
-		Selector: `device.driver == "gpu.example.com"`,
+		Selector: `device.driver == 'gpu.example.com'`,
 		Backend:  IndexedGRESBackend{GRESName: "gpu"},
 	}
 	registry := DefaultRegistry()
@@ -31,7 +31,7 @@ func TestDefaultRegistry(t *testing.T) {
 
 func TestRegistryLookupsAreExact(t *testing.T) {
 	registry := DefaultRegistry()
-	selector := `device.driver == "gpu.example.com"`
+	selector := `device.driver == 'gpu.example.com'`
 
 	if _, ok := registry.LookupByName("GPU-example"); ok {
 		t.Fatal("Registry.LookupByName() accepted a non-canonical name")
@@ -69,7 +69,7 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			Spec: resourcev1.DeviceClassSpec{
 				Selectors: []resourcev1.DeviceSelector{{
 					CEL: &resourcev1.CELDeviceSelector{
-						Expression: `device.driver == "gpu.example.com"`,
+						Expression: `device.driver == 'gpu.example.com'`,
 					},
 				}},
 			},
@@ -128,7 +128,7 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			name: "non-canonical selector",
 			class: func() *resourcev1.DeviceClass {
 				class := valid()
-				class.Spec.Selectors[0].CEL.Expression = ` device.driver == "gpu.example.com"`
+				class.Spec.Selectors[0].CEL.Expression = ` device.driver == 'gpu.example.com'`
 				return class
 			},
 			wantErr: "does not match a supported device profile",
