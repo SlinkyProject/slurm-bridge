@@ -26,7 +26,7 @@ type NodeInfo struct {
 	CpuMap CPUMap
 }
 
-func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string, requestedCount int64) ([]resourcev1.DeviceRequest, error) {
+func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequest, error) {
 	var requests []resourcev1.DeviceRequest
 
 	if resources == nil {
@@ -41,7 +41,7 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
-		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap, requestedCount)
+		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 				Exactly: &resourcev1.ExactDeviceRequest{
 					DeviceClassName: deviceClassName,
 					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-					Count:           requestedCount,
+					Count:           int64(len(cpuIDs)),
 					Selectors: []resourcev1.DeviceSelector{
 						{
 							CEL: &resourcev1.CELDeviceSelector{
@@ -68,7 +68,7 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 	return requests, nil
 }
 
-func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string, requestedCount int64) ([]resourcev1.DeviceRequestAllocationResult, error) {
+func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	var devices []resourcev1.DeviceRequestAllocationResult
 
 	if resources == nil {
@@ -83,7 +83,7 @@ func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kub
 		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
-		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap, requestedCount)
+		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
 		}
@@ -104,19 +104,12 @@ func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kub
 	return devices, nil
 }
 
-func (n *NodeInfo) allocatedCPUDeviceIDs(coreBitmap string, requestedCount int64) ([]int, error) {
-	if requestedCount <= 0 {
-		return nil, fmt.Errorf("requested CPU device count must be greater than zero, got %d", requestedCount)
-	}
+func (n *NodeInfo) allocatedCPUDeviceIDs(coreBitmap string) ([]int, error) {
 	bitmap, err := bitmaputil.NewFrom(coreBitmap)
 	if err != nil {
 		return nil, err
 	}
-	cpuIDs := n.CpuMap.ToMachineCPUs(bitmap).List()
-	if requestedCount > int64(len(cpuIDs)) {
-		return nil, fmt.Errorf("not enough CPUs in Slurm allocation: requested %d, allocated %d", requestedCount, len(cpuIDs))
-	}
-	return cpuIDs[:requestedCount], nil
+	return n.CpuMap.ToMachineCPUs(bitmap).List(), nil
 }
 
 func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string) (*NodeInfo, error) {

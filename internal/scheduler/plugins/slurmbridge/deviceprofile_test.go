@@ -71,7 +71,40 @@ func TestAllocateIndexedGRESProfilesPartitionsAliases(t *testing.T) {
 	}
 }
 
-func TestVerifyDeviceProfileRequestRejectsChangedCount(t *testing.T) {
+func TestVerifyIndexedGRESDeviceProfileRequestRejectsChangedCount(t *testing.T) {
+	profile, ok := dra.DefaultRegistry().LookupByName("gpu-example")
+	if !ok {
+		t.Fatal("default registry does not contain gpu-example")
+	}
+	sb := &SlurmBridge{
+		Client: fake.NewClientBuilder().WithObjects(&resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "example-gpus"},
+			Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "gpu.example.com"`},
+			}}},
+		}).Build(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
+		Requests: []resourcev1.DeviceRequest{{
+			Name: "gpu",
+			Exactly: &resourcev1.ExactDeviceRequest{
+				DeviceClassName: "example-gpus",
+				Count:           4,
+			},
+		}},
+	}}}
+	_, err := sb.verifyDeviceProfileRequest(context.Background(), claim, deviceProfileRequest{
+		DeviceClassName: "example-gpus",
+		Profile:         profile,
+		Count:           1,
+	}, "gpu")
+	if err == nil || !strings.Contains(err.Error(), "has count 4, expected exactly 1") {
+		t.Fatalf("verifyDeviceProfileRequest() error = %v, want changed count error", err)
+	}
+}
+
+func TestVerifyCoreBitmapRequestUsesAllocatedThreadCount(t *testing.T) {
 	profile, ok := dra.DefaultRegistry().LookupByName("cpu")
 	if !ok {
 		t.Fatal("default registry does not contain cpu")
@@ -94,13 +127,17 @@ func TestVerifyDeviceProfileRequestRejectsChangedCount(t *testing.T) {
 			},
 		}},
 	}}}
-	_, err := sb.verifyDeviceProfileRequest(context.Background(), claim, deviceProfileRequest{
-		DeviceClassName: "my-cpus",
-		Profile:         profile,
-		Count:           1,
-	}, "cpu")
-	if err == nil || !strings.Contains(err.Error(), "has count 4, expected exactly 1") {
-		t.Fatalf("verifyDeviceProfileRequest() error = %v, want changed count error", err)
+	allocation := &coreBitmapAllocation{
+		deviceProfileRequest: deviceProfileRequest{
+			DeviceClassName: "my-cpus",
+			Profile:         profile,
+			Count:           3,
+		},
+		RequestName:    "cpu",
+		AllocatedCount: 4,
+	}
+	if err := sb.verifyCoreBitmapRequest(context.Background(), claim, allocation); err != nil {
+		t.Fatalf("verifyCoreBitmapRequest() error = %v", err)
 	}
 }
 
@@ -109,6 +146,7 @@ func TestValidateDeviceProfileAllocationCounts(t *testing.T) {
 		CoreBitmapAllocation: &coreBitmapAllocation{
 			deviceProfileRequest: deviceProfileRequest{Count: 1},
 			RequestName:          "cpu",
+			AllocatedCount:       2,
 		},
 		IndexedGRESAllocations: []indexedGRESAllocation{{
 			deviceProfileRequest: deviceProfileRequest{Count: 2},
@@ -116,6 +154,7 @@ func TestValidateDeviceProfileAllocationCounts(t *testing.T) {
 		}},
 	}
 	results := []resourcev1.DeviceRequestAllocationResult{
+		{Request: "cpu"},
 		{Request: "cpu"},
 		{Request: "gpu"},
 		{Request: "gpu"},

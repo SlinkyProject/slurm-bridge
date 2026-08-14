@@ -105,7 +105,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count)
+		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -133,10 +133,18 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 
 	var deviceRequests []resourcev1.DeviceRequest
 	if nodeInfo != nil {
-		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count)
+		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		cpuRequest := deviceRequestNamed(deviceRequests, coreBitmapAllocation.RequestName)
+		if cpuRequest == nil || cpuRequest.Exactly == nil {
+			return nil, nil, nil, fmt.Errorf("pod requests core-bitmap DeviceClass %q but no exact CPU device request was generated", coreBitmapAllocation.DeviceClassName)
+		}
+		if cpuRequest.Exactly.Count < coreBitmapAllocation.Count {
+			return nil, nil, nil, fmt.Errorf("not enough CPUs in Slurm allocation for DeviceClass %q: requested %d, allocated %d", coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count, cpuRequest.Exactly.Count)
+		}
+		coreBitmapAllocation.AllocatedCount = cpuRequest.Exactly.Count
 	}
 	legacyRequests, err = legacyGPUDeviceRequests(ctx, sb.Client, claimResources.Gres)
 	if err != nil {
@@ -208,7 +216,7 @@ func (sb *SlurmBridge) bindClaim(
 		if err != nil {
 			return err
 		}
-		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName, resources.CoreBitmapAllocation.Count)
+		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return err
 		}
@@ -269,7 +277,7 @@ func (sb *SlurmBridge) bindClaim(
 func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {
 	expected := make(map[string]int64)
 	if allocation.CoreBitmapAllocation != nil {
-		expected[allocation.CoreBitmapAllocation.RequestName] = allocation.CoreBitmapAllocation.Count
+		expected[allocation.CoreBitmapAllocation.RequestName] = allocation.CoreBitmapAllocation.AllocatedCount
 	}
 	for _, indexed := range allocation.IndexedGRESAllocations {
 		expected[indexed.RequestName] = indexed.Count
@@ -420,12 +428,16 @@ func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1
 }
 
 func hasDeviceRequestNamed(requests []resourcev1.DeviceRequest, name string) bool {
-	for _, request := range requests {
-		if request.Name == name {
-			return true
+	return deviceRequestNamed(requests, name) != nil
+}
+
+func deviceRequestNamed(requests []resourcev1.DeviceRequest, name string) *resourcev1.DeviceRequest {
+	for i := range requests {
+		if requests[i].Name == name {
+			return &requests[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // patchPodExtendedResourceClaimStatus updates the pod's status with information about

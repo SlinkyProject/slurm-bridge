@@ -68,10 +68,10 @@ func TestNodeInfoGetCPUDeviceRequests(t *testing.T) {
 		Exactly: &resourcev1.ExactDeviceRequest{
 			DeviceClassName: deviceClassName,
 			AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-			Count:           1,
+			Count:           2,
 			Selectors: []resourcev1.DeviceSelector{{
 				CEL: &resourcev1.CELDeviceSelector{
-					Expression: "device.attributes['dra.cpu'].cpuID in [0]",
+					Expression: "device.attributes['dra.cpu'].cpuID in [0,1]",
 				},
 			}},
 		},
@@ -85,7 +85,7 @@ func TestNodeInfoGetCPUDeviceRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNodeInfo() error = %v", err)
 	}
-	got, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, deviceClassName, 1)
+	got, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, deviceClassName)
 	if err != nil {
 		t.Fatalf("GetCPUDeviceRequests() error = %v", err)
 	}
@@ -124,7 +124,7 @@ func TestNodeInfoGetCPUDeviceRequestsErrors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewNodeInfo() error = %v", err)
 			}
-			_, err = node.GetCPUDeviceRequests(ctx, tt.kubeClient, resources, nodeinfo.DraDriverCpu, 1)
+			_, err = node.GetCPUDeviceRequests(ctx, tt.kubeClient, resources, nodeinfo.DraDriverCpu)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("GetCPUDeviceRequests() error = %v, want containing %q", err, tt.want)
 			}
@@ -143,19 +143,20 @@ func TestNodeInfoGetCPUDeviceRequestAllocationResults(t *testing.T) {
 		t.Fatalf("NewNodeInfo() error = %v", err)
 	}
 	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	got, err := node.GetCPUDeviceRequestAllocationResults(ctx, kubeClient, resources, nodeinfo.DraDriverCpu, 1)
+	got, err := node.GetCPUDeviceRequestAllocationResults(ctx, kubeClient, resources, nodeinfo.DraDriverCpu)
 	if err != nil {
 		t.Fatalf("GetCPUDeviceRequestAllocationResults() error = %v", err)
 	}
 	want := []resourcev1.DeviceRequestAllocationResult{
 		{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Pool: "node", Device: "cpu0"},
+		{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Pool: "node", Device: "cpu1"},
 	}
 	if !equality.Semantic.DeepEqual(got, want) {
 		t.Fatalf("GetCPUDeviceRequestAllocationResults() = %#v, want %#v", got, want)
 	}
 }
 
-func TestNodeInfoGetCPUDeviceRequestsRejectsInsufficientAllocation(t *testing.T) {
+func TestNodeInfoGetCPUDeviceRequestsIncludesAllAllocatedCoreThreads(t *testing.T) {
 	ctx := context.Background()
 	kubeClient := cpuClient(
 		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}},
@@ -165,10 +166,20 @@ func TestNodeInfoGetCPUDeviceRequestsRejectsInsufficientAllocation(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewNodeInfo() error = %v", err)
 	}
-	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	_, err = node.GetCPUDeviceRequests(ctx, kubeClient, resources, nodeinfo.DraDriverCpu, 3)
-	if err == nil || !strings.Contains(err.Error(), "requested 3, allocated 2") {
-		t.Fatalf("GetCPUDeviceRequests() error = %v, want insufficient allocation error", err)
+	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0, 1))}
+	requests, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, nodeinfo.DraDriverCpu)
+	if err != nil {
+		t.Fatalf("GetCPUDeviceRequests() error = %v", err)
+	}
+	if len(requests) != 1 || requests[0].Exactly == nil {
+		t.Fatalf("GetCPUDeviceRequests() = %#v, want one exact request", requests)
+	}
+	if got := requests[0].Exactly.Count; got != 4 {
+		t.Fatalf("GetCPUDeviceRequests() count = %d, want all 4 threads from two allocated cores", got)
+	}
+	wantSelector := "device.attributes['dra.cpu'].cpuID in [0,1,2,3]"
+	if got := requests[0].Exactly.Selectors[0].CEL.Expression; got != wantSelector {
+		t.Fatalf("GetCPUDeviceRequests() selector = %q, want %q", got, wantSelector)
 	}
 }
 

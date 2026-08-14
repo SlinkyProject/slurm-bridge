@@ -35,7 +35,8 @@ type indexedGRESAllocation struct {
 
 type coreBitmapAllocation struct {
 	deviceProfileRequest
-	RequestName string
+	RequestName    string
+	AllocatedCount int64
 }
 
 type claimAllocation struct {
@@ -258,7 +259,9 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 }
 
 func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *coreBitmapAllocation) error {
-	profile, err := sb.verifyDeviceProfileRequest(ctx, claim, allocation.deviceProfileRequest, allocation.RequestName)
+	effectiveRequest := allocation.deviceProfileRequest
+	effectiveRequest.Count = allocation.AllocatedCount
+	profile, err := sb.verifyDeviceProfileRequest(ctx, claim, effectiveRequest, allocation.RequestName)
 	if err != nil {
 		return err
 	}

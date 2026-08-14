@@ -327,11 +327,11 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 								Name: "foo",
 								Resources: corev1.ResourceRequirements{
 									Requests: corev1.ResourceList{
-										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("4"),
+										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("3"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 									Limits: corev1.ResourceList{
-										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("4"),
+										corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"):     resource.MustParse("3"),
 										corev1.ResourceName("deviceclass.resource.kubernetes.io/gpu.example.com"): resource.MustParse("3"),
 									},
 								},
@@ -415,6 +415,12 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				}
 				if cpuRequest == nil || cpuRequest.Exactly == nil || cpuRequest.Exactly.DeviceClassName != "my-cpus" {
 					t.Fatalf("CPU claim request = %#v, want DeviceClass my-cpus", cpuRequest)
+				}
+				if cpuRequest.Exactly.Count != 4 {
+					t.Fatalf("CPU claim request count = %d, want all 4 threads from two allocated cores", cpuRequest.Exactly.Count)
+				}
+				if gotResources.CoreBitmapAllocation.Count != 3 || gotResources.CoreBitmapAllocation.AllocatedCount != 4 {
+					t.Fatalf("core-bitmap counts = (requested %d, allocated %d), want (3, 4)", gotResources.CoreBitmapAllocation.Count, gotResources.CoreBitmapAllocation.AllocatedCount)
 				}
 				want := corev1.ContainerExtendedResourceRequest{
 					ContainerName: "foo",
@@ -1278,7 +1284,8 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 					Profile:         cpuProfile,
 					Count:           4,
 				},
-				RequestName: corev1.ResourceCPU.String(),
+				RequestName:    corev1.ResourceCPU.String(),
+				AllocatedCount: 4,
 			},
 		},
 	}
