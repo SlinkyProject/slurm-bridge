@@ -78,6 +78,7 @@ func (h *nodeEventHandler) Update(ctx context.Context, evt event.UpdateEvent, q 
 var _ handler.EventHandler = &nodeEventHandler{}
 
 func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx)
 	resourceSlice, ok := obj.(*resourcev1.ResourceSlice)
 	if !ok || !r.draRegistry.SupportsDriver(resourceSlice.Spec.Driver) {
 		return nil
@@ -91,7 +92,7 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 	// This handles cases where a ResourceSlice doesn't correspond to exactly one node.
 	nodes := &corev1.NodeList{}
 	if err := r.List(ctx, nodes); err != nil {
-		log.FromContext(ctx).Error(err, "failed to list nodes for ResourceSlice", "resourceSlice", client.ObjectKeyFromObject(resourceSlice))
+		logger.Error(err, "failed to list nodes for ResourceSlice", "resourceSlice", client.ObjectKeyFromObject(resourceSlice))
 		return nil
 	}
 
@@ -103,7 +104,7 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 		}
 		matches, err := dra.ResourceSliceMatchesNode(node, resourceSlice)
 		if err != nil {
-			log.FromContext(ctx).Error(err, "failed to match ResourceSlice to node", "resourceSlice", client.ObjectKeyFromObject(resourceSlice), "node", client.ObjectKeyFromObject(node))
+			logger.Error(err, "failed to match ResourceSlice to node", "resourceSlice", client.ObjectKeyFromObject(resourceSlice), "node", client.ObjectKeyFromObject(node))
 			continue
 		}
 		if matches {
