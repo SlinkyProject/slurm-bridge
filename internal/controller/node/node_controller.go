@@ -63,7 +63,7 @@ type NodeReconciler struct {
 
 	slurmControl  slurmcontrol.SlurmControlInterface
 	draRegistry   *dra.Registry
-	eventRecorder record.EventRecorderLogger
+	eventRecorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;patch;watch
@@ -107,6 +107,9 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.draRegistry == nil {
 		r.draRegistry = dra.DefaultRegistry()
 	}
+	if r.eventRecorder == nil {
+		r.eventRecorder = mgr.GetEventRecorderFor(ControllerName) //nolint:staticcheck // The controller currently records core/v1 Events.
+	}
 	nodeEventHandler := &nodeEventHandler{
 		Reader: mgr.GetCache(),
 	}
@@ -122,8 +125,6 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent, draRegistry *dra.Registry) *NodeReconciler {
 	scheme := kubeClient.Scheme()
-	eventSource := corev1.EventSource{Component: ControllerName}
-	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
 	if draRegistry == nil {
 		draRegistry = dra.DefaultRegistry()
 	}
@@ -135,7 +136,6 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		SlurmClient:   slurmClient,
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
 		draRegistry:   draRegistry,
-		eventRecorder: eventRecorder,
 	}
 	return r
 }

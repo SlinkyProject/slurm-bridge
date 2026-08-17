@@ -5,6 +5,7 @@ package dra
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -302,6 +303,14 @@ func TestBuildNodeInventory(t *testing.T) {
 		})
 		if err == nil || !strings.Contains(err.Error(), `matches overlapping device profiles "gpu-a" and "gpu-b"`) {
 			t.Fatalf("BuildNodeInventory() error = %v, want overlapping profile error", err)
+		}
+		var overlapErr *OverlappingDeviceProfilesError
+		if !errors.As(err, &overlapErr) {
+			t.Fatalf("BuildNodeInventory() error = %T, want *OverlappingDeviceProfilesError", err)
+		}
+		wantDevice := deviceIDForTest("gpu.example.com", "pool-a", "gpu-0")
+		if overlapErr.Device != wantDevice || overlapErr.Profiles != [2]string{"gpu-a", "gpu-b"} {
+			t.Fatalf("BuildNodeInventory() overlap error = %#v, want device %q and profiles [gpu-a gpu-b]", overlapErr, wantDevice.String())
 		}
 	})
 

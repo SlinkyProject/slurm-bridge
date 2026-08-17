@@ -27,6 +27,8 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
+const eventReasonOverlappingDRADeviceProfiles = "OverlappingDRADeviceProfiles"
+
 func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error {
 	var errs []error
 
@@ -276,6 +278,10 @@ func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *
 	}
 	nodeInventory, err := dra.BuildNodeInventory(ctx, r.draRegistry, node, resourceSlices.Items)
 	if err != nil {
+		var overlapErr *dra.OverlappingDeviceProfilesError
+		if r.eventRecorder != nil && errors.As(err, &overlapErr) {
+			r.eventRecorder.Event(node, corev1.EventTypeWarning, eventReasonOverlappingDRADeviceProfiles, overlapErr.Error())
+		}
 		return nil, nil, err
 	}
 	gresInventory, err := nodeInventory.GRES()

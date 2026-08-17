@@ -108,7 +108,10 @@ must also be listed in Slurm's
 `GresTypes`; for example, profiles using `gpu` and `nic` require
 `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory when its type is
 not listed. Selectors use the same length and estimated-cost limits as
-Kubernetes DeviceClass CEL selectors.
+Kubernetes DeviceClass CEL selectors. Profiles for the same driver must be
+mutually exclusive. If a device matches more than one profile, the node
+controller leaves its Slurm GRES inventory unchanged and emits an
+`OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
 ### Legacy GPU device plugins
 
