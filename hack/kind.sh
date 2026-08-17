@@ -12,6 +12,7 @@ SLURM_BRIDGE_TMP="$(mktemp -d)"
 trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
+DRANET_INTERFACE_NAME="dranet0"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 KWOK_CHART_REPO="https://kwok.sigs.k8s.io/charts/"
@@ -137,6 +138,9 @@ function kind::start() {
 	kubectl config use-context kind-"$cluster_name"
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
 	kind::configure_nodes "$OPT_SLURM_NODE_MODE"
+	if $OPT_DRANET; then
+		kind::configure_dranet_interfaces
+	fi
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -191,6 +195,20 @@ function kind::configure_nodes() {
 			kubectl annotate node "$bridge_node" \
 				topology.slinky.slurm.net/spec=topo-switch:s2 --overwrite
 		fi
+	done
+}
+
+function kind::configure_dranet_interfaces() {
+	local bridge_nodes
+	local bridge_node
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	for bridge_node in $bridge_nodes; do
+		if ! docker exec "$bridge_node" ip link show "$DRANET_INTERFACE_NAME" >/dev/null 2>&1; then
+			docker exec "$bridge_node" ip link add "$DRANET_INTERFACE_NAME" type dummy
+		fi
+		docker exec "$bridge_node" ip link set dev "$DRANET_INTERFACE_NAME" up
 	done
 }
 

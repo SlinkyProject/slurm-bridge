@@ -75,7 +75,9 @@ Install all optional Kind development fixtures:
 
 This installs the CPU, example GPU, NVIDIA GPU, and DRANET DRA drivers. Each
 driver can still be installed individually with `--dra-driver-cpu`,
-`--dra-example-driver`, `--dra-driver-nvidia-gpu`, or `--dranet`.
+`--dra-example-driver`, `--dra-driver-nvidia-gpu`, or `--dranet`. The `--dranet`
+fixture creates a `dranet0` dummy interface on each managed Kind worker before
+installing the driver.
 
 NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
 installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to
