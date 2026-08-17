@@ -16,6 +16,14 @@ manifests should match snapshot:
             driver: gpu.example.com
             name: gpu-example
             selector: device.driver == 'gpu.example.com'
+          - backend:
+              gresName: nic
+              type: indexed-gres
+            driver: dra.net
+            name: dranet-rdma
+            selector: device.driver == 'dra.net' && has(device.attributes['dra.net'].pciAddress)
+              && has(device.attributes['dra.net'].rdma) && device.attributes['dra.net'].rdma
+              == true
     kind: ConfigMap
     metadata:
       labels:
@@ -46,7 +54,7 @@ manifests should match snapshot:
       template:
         metadata:
           annotations:
-            checksum/config: 38fc24c3dd6c1dff633768368792085f7c2c3e4b1cb533c4776a014d909531ea
+            checksum/config: c86a9e96fcd3f8fd1a15bd1920c70660191112488c8f9ef900e82f23c3920000
           labels:
             app.kubernetes.io/component: controllers
             app.kubernetes.io/instance: test-release

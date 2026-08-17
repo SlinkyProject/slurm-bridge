@@ -40,6 +40,12 @@ tests:
       - matchRegex:
           path: data["config.yaml"]
           pattern: '(?s)deviceProfiles:.*gresName: accelerator.*driver: accelerator.example.com.*name: custom-accelerator'
+  - it: renders the default PCI-backed DRANET RDMA profile
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?s)name: dranet-rdma.*pciAddress.*rdma\s+==\s+true'
   - it: image pull policy is configurable
     template: controllers/deployment.yaml
     set:

@@ -93,6 +93,7 @@ Examples remain individually selectable:
 
 ```sh
 kubectl apply -f hack/examples/job/single.yaml
+kubectl apply -f hack/examples/dra/dranet/job.yaml
 kubectl apply -f hack/examples/dra/gpu-example/job.yaml
 kubectl apply -f hack/examples/dra/nvidia/job.yaml
 ```

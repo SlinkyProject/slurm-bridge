@@ -82,9 +82,9 @@ Other DeviceClass extended resources are unsupported. Validation covers
 requests and limits in both init containers and regular containers.
 
 Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
-shared Slurm Bridge configuration. The Helm chart supplies the example driver
-profile by default; operators can replace or extend the list through
-`sharedConfig.deviceProfiles`:
+shared Slurm Bridge configuration. The Helm chart supplies the example GPU and
+PCI-backed DRANET profiles by default; operators can replace or extend the list
+through `sharedConfig.deviceProfiles`:
 
 ```yaml
 sharedConfig:
@@ -107,11 +107,33 @@ used as the ResourceClaim request name. Every configured `backend.gresName`
 must also be listed in Slurm's
 `GresTypes`; for example, profiles using `gpu` and `nic` require
 `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory when its type is
-not listed. Selectors use the same length and estimated-cost limits as
-Kubernetes DeviceClass CEL selectors. Profiles for the same driver must be
-mutually exclusive. If a device matches more than one profile, the node
-controller leaves its Slurm GRES inventory unchanged and emits an
+not listed. The bundled external and hybrid Kind configurations include
+`GresTypes=gpu,nic` by default. Selectors use the same length and estimated-cost
+limits as Kubernetes DeviceClass CEL selectors. Profiles for the same driver
+must be mutually exclusive. If a device matches more than one profile, the
+node controller leaves its Slurm GRES inventory unchanged and emits an
 `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
+
+The default `dranet-rdma` profile maps PCI-backed devices with DRANET's `rdma`
+attribute set to the Slurm `nic` GRES. It includes InfiniBand, RoCE, and iWARP
+devices; it does not imply an InfiniBand link layer.
+
+The Kind DRANET e2e values extend those defaults with a fixture-only `dranet0`
+profile. It selects the dummy network interface created by
+`hack/kind.sh --dranet` by driver and interface name:
+
+```yaml
+sharedConfig:
+  deviceProfiles:
+    - name: dranet0
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' && has(device.attributes['dra.net'].ifName) &&
+        device.attributes['dra.net'].ifName == 'dranet0'
+      backend:
+        type: indexed-gres
+        gresName: nic
+```
 
 ### Legacy GPU device plugins
 

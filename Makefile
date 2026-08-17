@@ -104,6 +104,7 @@ DEMO_WORKLOADS := \
 	hack/examples/job/single.yaml \
 	hack/examples/jobset/single.yaml \
 	hack/examples/podgroup-coscheduling/sleep.yaml \
+	hack/examples/dra/dranet/job.yaml \
 	hack/examples/dra/gpu-example/job.yaml
 
 .PHONY: demo-start

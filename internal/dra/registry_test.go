@@ -39,6 +39,15 @@ func TestDefaultRegistry(t *testing.T) {
 			Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
 		},
+		{
+			Name:   "dranet-rdma",
+			Driver: "dra.net",
+			Selector: `device.driver == 'dra.net' && ` +
+				`has(device.attributes['dra.net'].pciAddress) && ` +
+				`has(device.attributes['dra.net'].rdma) && ` +
+				`device.attributes['dra.net'].rdma == true`,
+			Backend: IndexedGRESBackend{GRESName: "nic"},
+		},
 	}
 	registry := DefaultRegistry()
 
@@ -82,7 +91,7 @@ func TestNewRegistryRejectsDuplicates(t *testing.T) {
 	}
 }
 
-func TestNewRegistryRejectsInvalidProfiles(t *testing.T) {
+func TestNewRegistryRejectsInvalidConfiguredProfiles(t *testing.T) {
 	valid := DeviceProfile{
 		Name:     "gpu-example",
 		Driver:   "gpu.example.com",
@@ -271,7 +280,7 @@ func TestNewRegistryRejectsDuplicateKeys(t *testing.T) {
 	})
 }
 
-func TestNewRegistryRejectsInvalidProfiles(t *testing.T) {
+func TestNewRegistryRejectsInvalidInternalProfiles(t *testing.T) {
 	valid := DeviceProfile{
 		Name:     "profile-a",
 		Driver:   "driver-a.example.com",
@@ -342,10 +351,14 @@ func TestNewRegistryRejectsInvalidProfiles(t *testing.T) {
 
 func TestRegistryProfilesForDriver(t *testing.T) {
 	registry := DefaultRegistry()
-	profile, _ := registry.LookupByName("gpu-example")
+	gpuProfile, _ := registry.LookupByName("gpu-example")
+	dranetProfile, _ := registry.LookupByName("dranet-rdma")
 
-	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{profile}) {
-		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{profile})
+	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{gpuProfile}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{gpuProfile})
+	}
+	if got := registry.profilesForDriver("dra.net"); !reflect.DeepEqual(got, []DeviceProfile{dranetProfile}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{dranetProfile})
 	}
 	if got := registry.profilesForDriver("unsupported.example.com"); len(got) != 0 {
 		t.Fatalf("Registry.profilesForDriver() = %#v, want no profiles", got)
@@ -366,6 +379,9 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	}
 	if !registry.SupportsDriver("dra.cpu") {
 		t.Fatal("Registry.SupportsDriver() = false for the CPU driver")
+	}
+	if !registry.SupportsDriver("dra.net") {
+		t.Fatal("Registry.SupportsDriver() = false for DRANET")
 	}
 	profileB := DeviceProfile{
 		Name:     "profile-b",

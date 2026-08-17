@@ -15,7 +15,7 @@ configFiles:
           - switch: s2
 controller:
   extraConf: |
-    GresTypes=gpu
+    GresTypes=gpu,nic
     MCSPlugin=mcs/label
     MCSParameters=ondemand,ondemandselect
 nodesets:

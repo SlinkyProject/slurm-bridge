@@ -183,6 +183,16 @@ sharedConfig:
       backend:
         type: indexed-gres
         gresName: gpu
+    - name: dranet-rdma
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' &&
+        has(device.attributes['dra.net'].pciAddress) &&
+        has(device.attributes['dra.net'].rdma) &&
+        device.attributes['dra.net'].rdma == true
+      backend:
+        type: indexed-gres
+        gresName: nic
   # -- The Secret containing the Slurm JWT in the `auth-token` key. The token is
   # mounted and read before each Slurm REST API request to support rotation.
   slurmJwtSecret: slurm-bridge-token

@@ -179,7 +179,24 @@ func DefaultRegistry() *Registry {
 			GRESName: "gpu",
 		},
 	}
-	return mustNewRegistry(cpu, exampleGPU, nvidiaGPU)
+	// DRANET v1.4 publishes pciAddress and rdma as device attributes:
+	// https://github.com/kubernetes-sigs/dranet/blob/v1.4.0/pkg/apis/attributes.go
+	dranetRDMA := DeviceProfile{
+		Name:   "dranet-rdma",
+		Driver: "dra.net",
+		Selector: `device.driver == 'dra.net' && ` +
+			`has(device.attributes['dra.net'].pciAddress) && ` +
+			`has(device.attributes['dra.net'].rdma) && ` +
+			`device.attributes['dra.net'].rdma == true`,
+		Backend: IndexedGRESBackend{
+			GRESName: "nic",
+		},
+	}
+	registry, err := NewRegistry([]DeviceProfile{cpu, exampleGPU, nvidiaGPU, dranetRDMA})
+	if err != nil {
+		panic(err)
+	}
+	return registry
 }
 
 // LookupByName returns the profile with the given stable profile name.

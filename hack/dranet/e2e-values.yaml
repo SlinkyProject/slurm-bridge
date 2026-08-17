@@ -1,0 +1,32 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Kind's dummy interface is neither PCI-backed nor RDMA-capable, so extend the
+# production defaults with a fixture-only profile for the DRANET e2e workload.
+sharedConfig:
+  deviceProfiles:
+    - name: gpu-example
+      driver: gpu.example.com
+      selector: device.driver == 'gpu.example.com'
+      backend:
+        type: indexed-gres
+        gresName: gpu
+    - name: dranet-rdma
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' &&
+        has(device.attributes['dra.net'].pciAddress) &&
+        has(device.attributes['dra.net'].rdma) &&
+        device.attributes['dra.net'].rdma == true
+      backend:
+        type: indexed-gres
+        gresName: nic
+    - name: dranet0
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' && has(device.attributes['dra.net'].ifName) &&
+        device.attributes['dra.net'].ifName == 'dranet0'
+      backend:
+        type: indexed-gres
+        gresName: nic
