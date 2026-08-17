@@ -73,9 +73,9 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This installs the CPU, example GPU, and NVIDIA GPU DRA drivers. Each driver can
-still be installed individually with `--dra-driver-cpu`, `--dra-example-driver`,
-or `--dra-driver-nvidia-gpu`.
+This installs the CPU, example GPU, NVIDIA GPU, and DRANET DRA drivers. Each
+driver can still be installed individually with `--dra-driver-cpu`,
+`--dra-example-driver`, `--dra-driver-nvidia-gpu`, or `--dranet`.
 
 NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
 installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to

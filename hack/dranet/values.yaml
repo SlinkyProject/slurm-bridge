@@ -1,0 +1,11 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+nodeSelector:
+  scheduler.slinky.slurm.net/slurm-bridge: worker
+
+tolerations:
+  - key: slinky.slurm.net/managed-node
+    operator: Equal
+    value: slurm-bridge-scheduler
+    effect: NoExecute

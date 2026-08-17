@@ -615,6 +615,18 @@ function nvml-mock::uninstall() {
 		--wait --timeout=180s
 }
 
+function dranet::install() {
+	local version="v1.4.0"
+	local chart="oci://registry.k8s.io/networking/charts/dranet"
+	local config_dir="$SCRIPT_DIR/dranet"
+
+	helm upgrade --install dranet "$chart" \
+		--version "$version" \
+		--namespace kube-system \
+		--values "$config_dir/values.yaml"
+	kubectl -n kube-system rollout status daemonset/dranet --timeout=120s
+}
+
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
@@ -623,7 +635,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
-	        [--dra-driver-nvidia-gpu] [--kwok] [--metrics]
+	        [--dra-driver-nvidia-gpu] [--dranet] [--kwok] [--metrics]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -645,6 +657,7 @@ HELM OPTIONS:
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
+	--dranet            Install DRA driver: DRANET
 	--kwok              Install KWOK and its fast stage configuration.
 	--metrics           Install metrics collection for Slurm Bridge.
 
@@ -712,6 +725,9 @@ function main() {
 		fi
 		dra-driver-nvidia-gpu::install
 	fi
+	if $OPT_DRANET; then
+		dranet::install
+	fi
 	if $OPT_PREREQS; then
 		slurm-bridge::prerequisites
 	elif $OPT_CORE; then
@@ -735,6 +751,7 @@ OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
 MOCK_NVML="${MOCK_NVML:-false}"
+OPT_DRANET=false
 OPT_KWOK=false
 OPT_METRICS=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
@@ -750,7 +767,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -835,6 +852,10 @@ while :; do
 		OPT_DRA_DRIVER_NVIDIA_GPU=true
 		shift
 		;;
+	--dranet)
+		OPT_DRANET=true
+		shift
+		;;
 	--kwok)
 		OPT_KWOK=true
 		shift
@@ -868,6 +889,7 @@ if $OPT_EXTRAS; then
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
 	OPT_DRA_DRIVER_NVIDIA_GPU=true
+	OPT_DRANET=true
 fi
 
 main "$@"
