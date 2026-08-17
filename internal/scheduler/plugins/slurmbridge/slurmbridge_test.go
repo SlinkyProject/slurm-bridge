@@ -6,6 +6,7 @@ package slurmbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -17,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
@@ -56,6 +56,54 @@ type activateRecorder struct {
 
 func (r *activateRecorder) Activate(_ klog.Logger, pods map[string]*corev1.Pod) {
 	r.pods = pods
+}
+
+func TestFindMatchingError(t *testing.T) {
+	target := errors.New("target error")
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+		},
+		{
+			name: "direct error",
+			err:  target,
+			want: true,
+		},
+		{
+			name: "wrapped error",
+			err:  fmt.Errorf("context: %w", target),
+			want: true,
+		},
+		{
+			name: "joined error",
+			err:  errors.Join(errors.New("other error"), target),
+			want: true,
+		},
+		{
+			name: "nested error",
+			err:  errors.Join(errors.New("other error"), fmt.Errorf("context: %w", target)),
+			want: true,
+		},
+		{
+			name: "no match",
+			err:  errors.Join(errors.New("first error"), errors.New("second error")),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findMatchingError(tt.err, func(err error) bool {
+				return err.Error() == target.Error()
+			})
+			if (got != nil) != tt.want {
+				t.Errorf("findMatchingError() = %v, want match %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestSlurmbridge_Name(t *testing.T) {
@@ -699,10 +747,10 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				return nil
 			},
 			Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
-				return utilerrors.NewAggregate([]error{
+				return errors.Join(
 					errors.New("Internal Server Error"),
 					errors.New("Job is no longer pending execution"),
-				})
+				)
 			},
 		}
 		return slurmcontrol.NewControl(interceptor.NewClient(base, f), "kubernetes", "slurm-bridge")
@@ -811,7 +859,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, object object.Object, req any, opts ...slurmclient.CreateOption) error {
-							return utilerrors.NewAggregate([]error{ErrorNodeConfigInvalid})
+							return errors.Join(errors.New("Bad Request"), ErrorNodeConfigInvalid)
 						},
 					}
 					nodes := &types.V0044NodeList{
@@ -851,7 +899,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, object object.Object, req any, opts ...slurmclient.CreateOption) error {
-							return utilerrors.NewAggregate([]error{ErrorPodUpdateFailed})
+							return ErrorPodUpdateFailed
 						},
 					}
 					nodes := &types.V0044NodeList{
@@ -976,7 +1024,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
-							return utilerrors.NewAggregate([]error{ErrorPodUpdateFailed})
+							return errors.Join(ErrorPodUpdateFailed)
 						},
 					}
 					jobs := &types.V0044JobInfoList{
@@ -1080,7 +1128,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
-							return utilerrors.NewAggregate([]error{ErrorPodUpdateFailed})
+							return errors.Join(ErrorPodUpdateFailed)
 						},
 					}
 					jobs := &types.V0044JobInfoList{

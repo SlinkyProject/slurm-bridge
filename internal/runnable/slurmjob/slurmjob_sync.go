@@ -5,12 +5,12 @@ package slurmjob
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -43,7 +43,7 @@ func (r *SlurmJobRunnable) Sync(ctx context.Context) error {
 		}
 	}
 
-	return utilerrors.NewAggregate(errs)
+	return errors.Join(errs...)
 }
 
 func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) error {
@@ -58,7 +58,7 @@ func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) er
 	for _, podKey := range podKeys {
 		pod := &corev1.Pod{}
 		if err := r.Get(ctx, client.ObjectKey(podKey), pod); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				continue
 			}
 			return err
