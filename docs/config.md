@@ -13,6 +13,7 @@
     - [Hybrid Nodes](#hybrid-nodes)
     - [Topology](#topology)
     - [Hybrid Workload Isolation](#hybrid-workload-isolation)
+      - [Production label authorization](#production-label-authorization)
 
 <!-- mdformat-toc end -->
 
@@ -77,6 +78,11 @@ PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
 Hybrid nodes run kubelet and `slurmd` on the same physical host. In this mode,
 slurm-operator manages the Slurm nodes with a `Nodeset`, and bridge jobs run on
 the Slurm nodes registered by those `slurmd` pods.
+
+Hybrid nodes share capacity between workload managers over time. A physical node
+must not run a native Slurm user workload and a Slurm-bridge-managed Kubernetes
+user workload simultaneously. System components such as kubelet, `slurmd`, CNI,
+device plugins, and monitoring DaemonSets are expected exceptions.
 
 For example, a DaemonSet-mode `Nodeset` can place one `slurmd` pod on each
 Kubernetes worker node selected for bridge scheduling:
@@ -155,19 +161,48 @@ topology.
 
 ### Hybrid Workload Isolation
 
-When you have kubelet and slurmd daemons running side-by-side, you may want to
-isolate their workloads to allow the physical node to dynamically switch
-workload types.
+Bridge jobs receive exclusive whole-node Slurm allocations by default. Workloads
+requesting `slurmjob.slinky.slurm.net/exclusive: "false"` are always submitted
+with `Shared=mcs` and the configured `schedulerConfig.mcsLabel`. This allows
+bridge-managed Kubernetes workloads in the same MCS category to share a node
+without enabling unprotected sharing with native Slurm jobs.
 
-This can be achieved by enabling [MCS] in Slurm.
+Configure both the bridge and Slurm to enable [MCS] isolation:
+
+```yaml
+# slurm-bridge values.yaml
+schedulerConfig:
+  mcsLabel: kubernetes
+```
 
 ```conf
 # slurm.conf
-...
 MCSPlugin=mcs/label
 MCSParameters=ondemand,ondemandselect
 ```
 
+With `ondemandselect`, the bridge's `Shared=mcs` value activates MCS node
+filtering for non-exclusive jobs. Native Slurm jobs with a different or empty
+MCS label cannot share those nodes while a `kubernetes`-labeled allocation is
+running.
+
+#### Production label authorization
+
+Slurm's `mcs/label` plugin controls category-based sharing but accepts arbitrary
+labels; it does not authorize their use. Production clusters must reserve
+`schedulerConfig.mcsLabel` at the `slurmctld` boundary with a server-side
+[`job_submit` plugin][job-submit] or equivalent site policy, using a trusted
+bridge identity and rejecting native submissions or modifications that request
+the reserved label. Without that Slurm-side policy, a native user can
+deliberately join the bridge's MCS category.
+
+MCS only governs workloads represented by active Slurm allocations. Continue to
+use the `slinky.slurm.net/managed-node` `NoExecute` taint and admission policy
+to keep Kubernetes workloads that bypass slurm-bridge off hybrid nodes.
+Operational or controller-driven cancellation must also keep a node unavailable
+to native Slurm work until its Kubernetes pods have actually stopped.
+
 <!-- Links -->
 
+[job-submit]: https://slurm.schedmd.com/job_submit_plugins.html
 [mcs]: https://slurm.schedmd.com/mcs.html

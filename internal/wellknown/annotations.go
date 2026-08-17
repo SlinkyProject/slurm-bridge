@@ -31,8 +31,8 @@ const (
 	// per task
 	AnnotationCpuPerTask = SlurmJobPrefix + "cpu-per-task"
 	// AnnotationExclusive overrides the default exclusive (SharedNone)
-	// flag for the Slurm external job. Set to "false" for non-exclusive
-	// placement; any other value or unset keeps exclusive.
+	// flag for the Slurm external job. With MCS isolation, "false" requests
+	// MCS-category sharing; any other value or unset keeps exclusive.
 	AnnotationExclusive = SlurmJobPrefix + "exclusive"
 	// AnnotationGres overrides the default gres
 	// for the Slurm external job.

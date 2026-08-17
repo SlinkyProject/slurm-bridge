@@ -194,8 +194,12 @@ Keys that do not conflict are combined.
 Prefix every suffix with `slurmjob.slinky.slurm.net/`; for example,
 `slurmjob.slinky.slurm.net/account`. Node counts, priority, and `timelimit` are
 base-10 integers; `timelimit` is measured in minutes. CPU and memory accept
-Kubernetes quantities. `exclusive: "false"` requests non-exclusive placement;
-exclusive placement is the default.
+Kubernetes quantities. Exclusive placement is the default. `exclusive: "false"`
+always requests MCS-category sharing; the resulting external job uses Slurm's
+`Shared=mcs` mode and requires a configured `schedulerConfig.mcsLabel`. Because
+Slurm's `mcs/label` plugin does not authorize label use, production clusters
+must also reserve that label from native users as described in
+[Production label authorization](config.md#production-label-authorization).
 
 Annotations can update a Slurm job while it is pending. Slurm validates each
 change. If it rejects an update, the previous Slurm job value remains in effect.

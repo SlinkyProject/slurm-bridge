@@ -136,3 +136,33 @@ func TestUnmarshalOrDie(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_ValidateScheduler(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantErr bool
+	}{
+		{
+			name:   "valid MCS label",
+			config: Config{MCSLabel: "kubernetes"},
+		},
+		{
+			name:    "empty MCS label",
+			config:  Config{},
+			wantErr: true,
+		},
+		{
+			name:    "whitespace MCS label",
+			config:  Config{MCSLabel: "  "},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.config.ValidateScheduler(); (err != nil) != tt.wantErr {
+				t.Errorf("Config.ValidateScheduler() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
