@@ -6,10 +6,17 @@ package dra
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apiserver/pkg/cel/environment"
+	dracel "k8s.io/dynamic-resource-allocation/cel"
 )
+
+var deviceProfileNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?$`)
 
 // Registry indexes supported DeviceProfiles by name and canonical selector.
 type Registry struct {
@@ -77,6 +84,68 @@ func mustNewRegistry(profiles ...DeviceProfile) *Registry {
 		panic(err)
 	}
 	return registry
+}
+
+// NewRegistry validates profiles and indexes them by name and canonical
+// selector.
+func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
+	seen := &Registry{
+		byName:     make(map[string]DeviceProfile, len(profiles)),
+		bySelector: make(map[string]DeviceProfile, len(profiles)),
+	}
+	for i, profile := range profiles {
+		if profile.Name == "" {
+			return nil, fmt.Errorf("device profile %d has an empty name", i)
+		}
+		if !deviceProfileNamePattern.MatchString(profile.Name) {
+			return nil, fmt.Errorf("device profile name %q must start and end with an alphanumeric character and contain only alphanumeric characters, '.', '_' or '-'", profile.Name)
+		}
+		if _, exists := seen.byName[profile.Name]; exists {
+			return nil, fmt.Errorf("duplicate device profile name %q", profile.Name)
+		}
+		if profile.Driver == "" {
+			return nil, fmt.Errorf("device profile %q has an empty driver", profile.Name)
+		}
+		if len(profile.Driver) > resourcev1.DriverNameMaxLength {
+			return nil, fmt.Errorf("device profile %q driver %q exceeds the maximum length of %d characters", profile.Name, profile.Driver, resourcev1.DriverNameMaxLength)
+		}
+		if problems := validation.IsDNS1123Subdomain(profile.Driver); len(problems) > 0 {
+			return nil, fmt.Errorf("device profile %q has invalid driver %q: %s", profile.Name, profile.Driver, strings.Join(problems, "; "))
+		}
+		if profile.Selector == "" {
+			return nil, fmt.Errorf("device profile %q has an empty selector", profile.Name)
+		}
+		if len(profile.Selector) > resourcev1.CELSelectorExpressionMaxLength {
+			return nil, fmt.Errorf("selector for device profile %q exceeds the maximum length of %d bytes", profile.Name, resourcev1.CELSelectorExpressionMaxLength)
+		}
+		envType := environment.NewExpressions
+		compiled := dracel.GetCompiler(deviceProfileCELFeatures).CompileCELExpression(profile.Selector, dracel.Options{EnvType: &envType})
+		if compiled.Error != nil {
+			return nil, fmt.Errorf("compile selector for device profile %q: %w", profile.Name, compiled.Error)
+		}
+		if compiled.MaxCost > resourcev1.CELSelectorExpressionMaxCost {
+			return nil, fmt.Errorf("selector for device profile %q is too complex: estimated cost %d exceeds limit %d", profile.Name, compiled.MaxCost, resourcev1.CELSelectorExpressionMaxCost)
+		}
+		if existing, exists := seen.bySelector[profile.Selector]; exists {
+			return nil, fmt.Errorf("device profiles %q and %q have the same selector", existing.Name, profile.Name)
+		}
+		if profile.Backend == nil {
+			return nil, fmt.Errorf("device profile %q has no backend", profile.Name)
+		}
+		switch profile.Backend.(type) {
+		case CoreBitmapBackend:
+		case IndexedGRESBackend:
+			if _, err := profile.GRES(); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
+		}
+
+		seen.byName[profile.Name] = profile
+		seen.bySelector[profile.Selector] = profile
+	}
+	return newRegistry(profiles...)
 }
 
 // DefaultRegistry returns a registry containing the profiles currently

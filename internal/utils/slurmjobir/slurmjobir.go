@@ -67,6 +67,13 @@ type translator struct {
 	deviceClassProfiles map[string]dra.DeviceProfile
 }
 
+func (t *translator) registry() *dra.Registry {
+	if t.draRegistry != nil {
+		return t.draRegistry
+	}
+	return dra.DefaultRegistry()
+}
+
 type workloadTranslator func(*translator, *corev1.Pod, *metav1.PartialObjectMetadata) (*SlurmJobIR, error)
 
 func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) {
@@ -305,7 +312,7 @@ func (t *translator) resolveDeviceClass(className string) (dra.DeviceProfile, er
 		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
 	}
 
-	profile, err := t.draRegistry.MatchDeviceClass(deviceClass)
+	profile, err := t.registry().MatchDeviceClass(deviceClass)
 	if err != nil {
 		return dra.DeviceProfile{}, err
 	}

@@ -16,10 +16,12 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-var deviceProfileCELCache = dracel.NewCache(10, dracel.Features{
+var deviceProfileCELFeatures = dracel.Features{
 	EnableConsumableCapacity: true,
 	EnableListTypeAttributes: true,
-})
+}
+
+var deviceProfileCELCache = dracel.NewCache(10, deviceProfileCELFeatures)
 
 // DeviceIdentity is the stable DRA identity of a device.
 type DeviceIdentity = structured.DeviceID

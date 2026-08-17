@@ -31,6 +31,14 @@ type PodAdmission struct {
 	SchedulerName            string
 	ManagedNamespaces        []string
 	ManagedNamespaceSelector *metav1.LabelSelector
+	DRARegistry              *dra.Registry
+}
+
+func (r *PodAdmission) draRegistry() *dra.Registry {
+	if r.DRARegistry != nil {
+		return r.DRARegistry
+	}
+	return dra.DefaultRegistry()
 }
 
 func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
@@ -247,7 +255,7 @@ func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod
 		}
 	}
 
-	registry := dra.DefaultRegistry()
+	registry := r.draRegistry()
 	hasNativeCPU := podRequestsNativeCPU(pod)
 	for _, className := range slices.Sorted(maps.Keys(classNames)) {
 		deviceClass := &resourcev1.DeviceClass{}

@@ -74,6 +74,7 @@ Kubernetes: `>= 1.34.0-0`
 | schedulerConfig.mcsLabel | string | `"kubernetes"` | Set the Slurm MCS Label to use for external jobs. Ref: https://slurm.schedmd.com/sbatch.html#OPT_mcs-label |
 | schedulerConfig.partition | string | `"slurm-bridge"` | Set the default Slurm partition to use for external jobs. Ref: https://slurm.schedmd.com/sbatch.html#OPT_partition |
 | schedulerConfig.schedulerName | string | `"slurm-bridge-scheduler"` | Set the name of the scheduler. |
+| sharedConfig.deviceProfiles | list | `[{"backend":{"gresName":"gpu","type":"indexed-gres"},"driver":"gpu.example.com","name":"gpu-example","selector":"device.driver == 'gpu.example.com'"}]` | DRA DeviceProfiles recognized by Slurm Bridge. A DeviceClass resolves to a profile when its single CEL selector exactly matches `selector`. `name` becomes the Slurm GRES type and must remain stable while allocations using the profile exist. `driver` must be a Kubernetes DRA driver name and `backend.gresName` must be a DNS-1123 label of at most 60 characters. |
 | sharedConfig.slurmJwtSecret | string | `"slurm-bridge-token"` | The Secret containing the Slurm JWT in the `auth-token` key. The token is mounted and read before each Slurm REST API request to support rotation. |
 | sharedConfig.slurmRestApi | string | `"http://slurm-restapi.slurm:6820"` | The Slurm REST API URL in the form of: `[protocol]://[host]:[port]` |
 

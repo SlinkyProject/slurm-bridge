@@ -4,6 +4,7 @@
 package dra
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,6 +49,133 @@ func TestDefaultRegistry(t *testing.T) {
 		if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("Registry.LookupBySelector() = (%#v, %t), want (%#v, true)", got, ok, want)
 		}
+	}
+}
+
+func TestNewRegistryRejectsDuplicates(t *testing.T) {
+	profile := DeviceProfile{
+		Name:     "gpu-example",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	}
+	tests := []struct {
+		name     string
+		profiles []DeviceProfile
+		wantErr  string
+	}{
+		{name: "duplicate name", profiles: []DeviceProfile{profile, profile}, wantErr: "duplicate device profile name"},
+		{name: "duplicate selector", profiles: []DeviceProfile{profile, {
+			Name: "other", Driver: "other.example.com", Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
+		}}, wantErr: "same selector"},
+		{name: "invalid selector", profiles: []DeviceProfile{{
+			Name: "broken", Driver: "gpu.example.com", Selector: `device.`, Backend: IndexedGRESBackend{GRESName: "gpu"},
+		}}, wantErr: "compile selector"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRegistry(tt.profiles)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("NewRegistry() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNewRegistryRejectsInvalidProfiles(t *testing.T) {
+	valid := DeviceProfile{
+		Name:     "gpu-example",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	}
+	expensiveSelector := "true"
+	for i := range 7 {
+		expensiveSelector = fmt.Sprintf("[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].all(x%d, %s)", i, expensiveSelector)
+	}
+	tests := []struct {
+		name    string
+		profile DeviceProfile
+		wantErr string
+	}{
+		{name: "empty name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Name = ""
+			return profile
+		}(), wantErr: "empty name"},
+		{name: "invalid name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Name = "gpu:example"
+			return profile
+		}(), wantErr: "device profile name"},
+		{name: "empty driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = ""
+			return profile
+		}(), wantErr: "empty driver"},
+		{name: "invalid driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = "not a driver"
+			return profile
+		}(), wantErr: "invalid driver"},
+		{name: "uppercase driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = "GPU.example.com"
+			return profile
+		}(), wantErr: "invalid driver"},
+		{name: "long driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = strings.Repeat("a", resourcev1.DriverNameMaxLength+1)
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "empty selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = ""
+			return profile
+		}(), wantErr: "empty selector"},
+		{name: "long selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = strings.Repeat(" ", resourcev1.CELSelectorExpressionMaxLength+1)
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "expensive selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = expensiveSelector
+			return profile
+		}(), wantErr: "too complex"},
+		{name: "nil backend", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = nil
+			return profile
+		}(), wantErr: "no backend"},
+		{name: "empty GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{}
+			return profile
+		}(), wantErr: "empty Slurm GRES name"},
+		{name: "invalid GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{GRESName: "GPU_name"}
+			return profile
+		}(), wantErr: "invalid Slurm GRES name"},
+		{name: "long GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{GRESName: strings.Repeat("a", indexedGRESNameMaxLength()+1)}
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "unsupported backend", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = unsupportedBackend{}
+			return profile
+		}(), wantErr: "unsupported backend"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRegistry([]DeviceProfile{tt.profile})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("NewRegistry() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 

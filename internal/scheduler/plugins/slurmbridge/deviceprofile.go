@@ -45,6 +45,13 @@ type claimAllocation struct {
 	IndexedGRESAllocations []indexedGRESAllocation
 }
 
+func (sb *SlurmBridge) registry() *dra.Registry {
+	if sb.draRegistry != nil {
+		return sb.draRegistry
+	}
+	return dra.DefaultRegistry()
+}
+
 func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Pod) ([]deviceProfileRequest, error) {
 	counts := deviceClassRequestCounts(pod)
 	requests := make([]deviceProfileRequest, 0, len(counts))
@@ -184,7 +191,9 @@ func splitGRESResources(registry *dra.Registry, resources slurmcontrol.NodeResou
 	indexedGRESResources.Gres = nil
 	remainingResources = resources
 	remainingResources.Gres = nil
-
+	if registry == nil {
+		registry = dra.DefaultRegistry()
+	}
 	for _, resource := range resources.Gres {
 		_, owned, err := registry.MatchIndexedGRES(dra.GRES{Name: resource.Name, Type: resource.Type})
 		if err != nil {
@@ -205,8 +214,9 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 	for _, request := range requests {
 		usedNames[request.Name] = struct{}{}
 	}
-	for i := range allocations {
-		gres, _ := allocations[i].Profile.GRES()
+	namedAllocations := make([]indexedGRESAllocation, 0, len(allocations))
+	for _, allocation := range allocations {
+		gres, _ := allocation.Profile.GRES()
 		requestName := gres.Name
 		for suffix := 2; ; suffix++ {
 			if _, used := usedNames[requestName]; !used {
@@ -215,17 +225,18 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 			requestName = fmt.Sprintf("%s-%d", gres.Name, suffix)
 		}
 		usedNames[requestName] = struct{}{}
-		allocations[i].RequestName = requestName
+		allocation.RequestName = requestName
+		namedAllocations = append(namedAllocations, allocation)
 		requests = append(requests, resourcev1.DeviceRequest{
 			Name: requestName,
 			Exactly: &resourcev1.ExactDeviceRequest{
-				DeviceClassName: allocations[i].DeviceClassName,
+				DeviceClassName: allocation.DeviceClassName,
 				AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-				Count:           allocations[i].Count,
+				Count:           allocation.Count,
 			},
 		})
 	}
-	return requests, allocations
+	return requests, namedAllocations
 }
 
 func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation deviceProfileRequest, requestName string) (dra.DeviceProfile, error) {
@@ -248,7 +259,7 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 	if err := sb.Get(ctx, client.ObjectKey{Name: allocation.DeviceClassName}, deviceClass); err != nil {
 		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q while binding: %w", allocation.DeviceClassName, err)
 	}
-	profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
+	profile, err := sb.registry().MatchDeviceClass(deviceClass)
 	if err != nil {
 		return dra.DeviceProfile{}, fmt.Errorf("verify DeviceClass %q while binding: %w", allocation.DeviceClassName, err)
 	}

@@ -120,10 +120,13 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}).
 		Complete(r)
 }
-func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent) *NodeReconciler {
+func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, schedulerName string, eventCh chan event.GenericEvent, draRegistry *dra.Registry) *NodeReconciler {
 	scheme := kubeClient.Scheme()
 	eventSource := corev1.EventSource{Component: ControllerName}
 	eventRecorder := record.NewBroadcaster().NewRecorder(scheme, eventSource)
+	if draRegistry == nil {
+		draRegistry = dra.DefaultRegistry()
+	}
 	r := &NodeReconciler{
 		Client:        kubeClient,
 		Scheme:        scheme,
@@ -131,7 +134,7 @@ func NewReconciler(kubeClient client.Client, slurmClient slurmclient.Client, sch
 		EventCh:       eventCh,
 		SlurmClient:   slurmClient,
 		slurmControl:  slurmcontrol.NewControl(slurmClient),
-		draRegistry:   dra.DefaultRegistry(),
+		draRegistry:   draRegistry,
 		eventRecorder: eventRecorder,
 	}
 	return r

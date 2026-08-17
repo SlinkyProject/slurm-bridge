@@ -80,11 +80,11 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 - Bridge jobs use exclusive, whole-node allocations by default. Workloads that
   request non-exclusive placement always use Slurm MCS workload isolation.
-- Only supports the following DRA drivers:
-  - [DRA Driver CPU][dra-driver-cpu] for CPUs.
-  - [NVIDIA DRA Driver][nvidia-dra-driver] for GPUs.
-  - [DRA Example Driver][dra-example-driver] for GPUs.
-  - [NVIDIA DRA Driver][dra-driver-nvidia-gpu] for full GPUs.
+- Supports [DRA Driver CPU][dra-driver-cpu] for CPUs, plus indexed GPU and
+  accelerator drivers mapped to Slurm GRES through configured device profiles.
+  The chart includes profiles for [DRA Example Driver][dra-example-driver] and
+  [NVIDIA DRA Driver][dra-driver-nvidia-gpu] GPUs by default, and retains its
+  specialized [NVIDIA DRA Driver][nvidia-dra-driver] path.
 - NVIDIA GPU backend selection is resource-name based:
   `deviceclass.resource.kubernetes.io/gpu.nvidia.com` selects the NVIDIA DRA
   DeviceClass, while `nvidia.com/gpu` selects the NVIDIA device plugin.

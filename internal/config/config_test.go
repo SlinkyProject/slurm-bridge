@@ -96,6 +96,49 @@ managedNamespaceSelector:
 			},
 			wantErr: false,
 		},
+		{
+			name: "Test deviceProfiles",
+			args: args{in: []byte(`
+deviceProfiles:
+  - name: custom-accelerator
+    driver: accelerator.example.com
+    selector: device.driver == 'accelerator.example.com'
+    backend:
+      type: indexed-gres
+      gresName: accelerator
+`)},
+			want: &Config{DeviceProfiles: []DeviceProfileConfig{{
+				Name:     "custom-accelerator",
+				Driver:   "accelerator.example.com",
+				Selector: `device.driver == 'accelerator.example.com'`,
+				Backend: DeviceProfileBackendConfig{
+					Type:     "indexed-gres",
+					GRESName: "accelerator",
+				},
+			}}},
+			wantErr: false,
+		},
+		{
+			name: "Reject unknown field",
+			args: args{in: []byte(`
+deviceProfiles:
+  - name: custom-accelerator
+    driver: accelerator.example.com
+    selector: device.driver == 'accelerator.example.com'
+    backend:
+      type: indexed-gres
+      gresNam: accelerator
+`)},
+			wantErr: true,
+		},
+		{
+			name: "Reject duplicate field",
+			args: args{in: []byte(`
+schedulerName: first
+schedulerName: second
+`)},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +151,44 @@ managedNamespaceSelector:
 				t.Errorf("Unmarshal() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestConfigDRARegistry(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:     "custom-accelerator",
+		Driver:   "accelerator.example.com",
+		Selector: `device.driver == 'accelerator.example.com'`,
+		Backend: DeviceProfileBackendConfig{
+			Type:     "indexed-gres",
+			GRESName: "accelerator",
+		},
+	}}}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
+	}
+	profile, ok := registry.LookupByName("custom-accelerator")
+	if !ok {
+		t.Fatal("Config.DRARegistry() omitted configured profile")
+	}
+	gres, err := profile.GRES()
+	if err != nil {
+		t.Fatalf("DeviceProfile.GRES() error = %v", err)
+	}
+	if gres.Name != "accelerator" || gres.Type != "custom-accelerator" {
+		t.Fatalf("DeviceProfile.GRES() = %#v", gres)
+	}
+}
+
+func TestConfigDRARegistryRejectsInvalidBackend(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:    "broken",
+		Backend: DeviceProfileBackendConfig{Type: "unknown"},
+	}}}
+	if _, err := cfg.DRARegistry(); err == nil {
+		t.Fatal("Config.DRARegistry() error = nil, want unsupported backend error")
 	}
 }
 

@@ -57,10 +57,11 @@ rather than allowing the scheduler to ignore the requested placement behavior.
 
 Managed pods are also validated against the supported DRA DeviceClass set.
 Unsupported DeviceClass resources in requests or limits are rejected for init
-containers and regular containers. See [Device resources] for the complete list
-of supported DRA classes and legacy device-plugin resources. Pods outside
-managed namespaces that do not select the `slurm-bridge` scheduler are not
-subject to this validation.
+containers and regular containers. Operators can extend the supported set with
+configured device profiles. See [Device resources] for the built-in classes,
+profile configuration, and legacy device-plugin resources. Pods outside managed
+namespaces that do not select the `slurm-bridge` scheduler are not subject to
+this validation.
 
 ### Sequence Diagram
 

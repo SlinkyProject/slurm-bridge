@@ -207,6 +207,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err := cfg.ValidateScheduler(); err != nil {
 		return nil, err
 	}
+	draRegistry, err := cfg.DRARegistry()
+	if err != nil {
+		return nil, fmt.Errorf("configure DRA device profiles: %w", err)
+	}
 
 	client, err := client.New(handle.KubeConfig(), client.Options{})
 	if err != nil {
@@ -228,7 +232,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		schedulerName: cfg.SchedulerName,
 		slurmControl:  sc,
 		handle:        handle,
-		draRegistry:   dra.DefaultRegistry(),
+		draRegistry:   draRegistry,
 	}
 	return plugin, nil
 }
@@ -277,7 +281,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	}
 
 	// Construct an intermediate representation of the Slurm external job
-	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.draRegistry, ctx, pod)
+	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), ctx, pod)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
@@ -659,7 +663,7 @@ func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string
 func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	// Construct an intermediate representation of the Slurm external job
-	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.draRegistry, ctx, pod)
+	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), ctx, pod)
 	if err != nil {
 		logger.Error(err, "failed to translate to slurmjobir")
 		return err

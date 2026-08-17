@@ -80,7 +80,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, nil, errors.New("expected node resources")
 	}
 
-	indexedGRESResources, remainingResources, err := splitGRESResources(sb.draRegistry, *resources)
+	indexedGRESResources, remainingResources, err := splitGRESResources(sb.registry(), *resources)
 	if err != nil {
 		return nil, nil, nil, err
 	}

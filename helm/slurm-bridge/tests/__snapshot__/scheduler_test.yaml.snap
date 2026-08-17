@@ -9,6 +9,13 @@ manifests should match snapshot:
           - slurm-bridge
         mcsLabel: kubernetes
         partition: slurm-bridge
+        deviceProfiles:
+          - backend:
+              gresName: gpu
+              type: indexed-gres
+            driver: gpu.example.com
+            name: gpu-example
+            selector: device.driver == 'gpu.example.com'
     kind: ConfigMap
     metadata:
       labels:
@@ -91,7 +98,7 @@ manifests should match snapshot:
       template:
         metadata:
           annotations:
-            checksum/config: e52364aa50203cb6d54d245f9245986ec8c42fb8d70382ecdac7012ab7cd2b63
+            checksum/config: 38fc24c3dd6c1dff633768368792085f7c2c3e4b1cb533c4776a014d909531ea
             checksum/scheduler-config: cbda1f53c1cc2426d84a29c3f231b3c1b2d409828da5a52364e0a42c388be285
           labels:
             app.kubernetes.io/component: scheduler

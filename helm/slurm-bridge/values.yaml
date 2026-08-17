@@ -171,6 +171,18 @@ controllers:
 sharedConfig:
   # -- The Slurm REST API URL in the form of: `[protocol]://[host]:[port]`
   slurmRestApi: http://slurm-restapi.slurm:6820
+  # -- DRA DeviceProfiles recognized by Slurm Bridge. A DeviceClass resolves to
+  # a profile when its single CEL selector exactly matches `selector`.
+  # `name` becomes the Slurm GRES type and must remain stable while allocations
+  # using the profile exist. `driver` must be a Kubernetes DRA driver name and
+  # `backend.gresName` must be a DNS-1123 label of at most 60 characters.
+  deviceProfiles:
+    - name: gpu-example
+      driver: gpu.example.com
+      selector: device.driver == 'gpu.example.com'
+      backend:
+        type: indexed-gres
+        gresName: gpu
   # -- The Secret containing the Slurm JWT in the `auth-token` key. The token is
   # mounted and read before each Slurm REST API request to support rotation.
   slurmJwtSecret: slurm-bridge-token

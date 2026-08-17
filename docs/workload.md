@@ -66,7 +66,8 @@ more.
 
 ### Supported DRA DeviceClasses
 
-`slurm-bridge` supports the following DRA DeviceClass extended resources:
+`slurm-bridge` supports the following DRA DeviceClass extended resources out of
+the box:
 
 | DeviceClass       | Extended resource                                    | Device type |
 | ----------------- | ---------------------------------------------------- | ----------- |
@@ -75,10 +76,39 @@ more.
 | `gpu.example.com` | `deviceclass.resource.kubernetes.io/gpu.example.com` | Example GPU |
 
 For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
-ResourceClaim and records the allocated devices for the Pod. Managed Pods that
-request any other DeviceClass extended resource are rejected during admission.
-Validation covers requests and limits in both init containers and regular
-containers.
+ResourceClaim and records the allocated devices for the Pod. Additional indexed
+DeviceClasses are supported when they resolve to a configured device profile.
+Other DeviceClass extended resources are unsupported. Validation covers
+requests and limits in both init containers and regular containers.
+
+Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
+shared Slurm Bridge configuration. The Helm chart supplies the example driver
+profile by default; operators can replace or extend the list through
+`sharedConfig.deviceProfiles`:
+
+```yaml
+sharedConfig:
+  deviceProfiles:
+    - name: custom-accelerator
+      driver: accelerator.example.com
+      selector: device.driver == 'accelerator.example.com'
+      backend:
+        type: indexed-gres
+        gresName: accelerator
+```
+
+The DeviceClass must have exactly one CEL selector and it must exactly match a
+configured profile selector. Profile names become Slurm GRES types: they must
+start and end with an alphanumeric character, may contain only alphanumeric
+characters, `.`, `_`, and `-`, and must remain stable while allocations using
+them exist. `driver` must be a valid lowercase Kubernetes DRA driver name, and
+`gresName` must be a DNS-1123 label of at most 60 characters because it is also
+used as the ResourceClaim request name. Every configured `backend.gresName`
+must also be listed in Slurm's
+`GresTypes`; for example, profiles using `gpu` and `nic` require
+`GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory when its type is
+not listed. Selectors use the same length and estimated-cost limits as
+Kubernetes DeviceClass CEL selectors.
 
 ### Legacy GPU device plugins
 

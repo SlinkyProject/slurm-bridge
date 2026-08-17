@@ -86,7 +86,7 @@ var _ = Describe("Node Controller", func() {
 			By("Reconciling the created resource")
 			eventCh := make(chan event.TypedGenericEvent[client.Object])
 			slurmClient := slurmclientfake.NewFakeClient()
-			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh, nil)
 			Expect(controllerReconciler).NotTo(BeNil())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -105,7 +105,7 @@ var _ = Describe("Node Controller", func() {
 				},
 			}
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(list).Build()
-			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
+			controllerReconciler := NewReconciler(k8sClient, slurmClient, schedulerName, eventCh, nil)
 			Expect(controllerReconciler).NotTo(BeNil())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

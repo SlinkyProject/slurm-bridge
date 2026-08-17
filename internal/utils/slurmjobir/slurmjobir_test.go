@@ -561,15 +561,24 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 	}
 }
 
-func TestTranslatorParseDeviceResourcesUsesIndexedGRESProfile(t *testing.T) {
+func TestTranslatorParseDeviceResourcesUsesConfiguredDeviceProfile(t *testing.T) {
 	const className = "example-gpus"
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
 		Spec: resourcev1.DeviceClassSpec{
 			Selectors: []resourcev1.DeviceSelector{{
-				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
+				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'accelerator.example.com'`},
 			}},
 		},
+	}
+	registry, err := dra.NewRegistry([]dra.DeviceProfile{{
+		Name:     "custom-accelerator",
+		Driver:   "accelerator.example.com",
+		Selector: `device.driver == 'accelerator.example.com'`,
+		Backend:  dra.IndexedGRESBackend{GRESName: "accelerator"},
+	}})
+	if err != nil {
+		t.Fatalf("dra.NewRegistry() error = %v", err)
 	}
 	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
@@ -577,14 +586,14 @@ func TestTranslatorParseDeviceResourcesUsesIndexedGRESProfile(t *testing.T) {
 	translator := translator{
 		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
 		ctx:         context.Background(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: registry,
 	}
 
-	if err := translator.parseDeviceResources(ir); err != nil {
+	if err = translator.parseDeviceResources(ir); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=2")
+	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/accelerator:custom-accelerator=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/accelerator:custom-accelerator=2")
 	}
 }
 
