@@ -502,8 +502,6 @@ test: fmt vet envtest ## Run tests.
 	chmod -R -f u+w "$(ENVTEST_ASSETS)"
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" \
 		go test $$(go list ./... | grep -v /e2e) -v -coverprofile cover.out.tmp
-	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" \
-		go test $$(go list ./... | grep -v /e2e | grep -v "/test") -v -coverprofile cover.out.tmp
 	cat cover.out.tmp | grep -v "_generated." > cover.out
 	go tool cover -func cover.out
 	go tool cover -html cover.out -o cover.html
@@ -515,5 +513,5 @@ test: fmt vet envtest ## Run tests.
 		fi
 
 .PHONY: test-e2e
-test-e2e:
-	go test -v -timeout 25m ./test/e2e
+test-e2e: ## Run end-to-end tests against the current Kubernetes context.
+	go test -count=1 -v -timeout 25m ./test/e2e
