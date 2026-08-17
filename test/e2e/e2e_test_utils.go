@@ -214,6 +214,9 @@ func testSlurmBridgeJobScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "Slurm-scheduled job", slurmBridgeNamespace, "slurm")
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for job cleanup: %v", err)
@@ -275,7 +278,7 @@ func testSlurmBridgePodScheduling() types.Feature {
 				}
 				return pod.Spec.NodeName != "", nil
 			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(10*time.Second)); err != nil {
-				t.Fatalf("pod was never scheduled to a node: %v", err)
+				t.Fatalf("pod was never scheduled to a node: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 
 			node := &corev1.Node{}
@@ -291,6 +294,9 @@ func testSlurmBridgePodScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "Slurm-scheduled pod", slurmBridgeNamespace, "slurm")
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for pod cleanup: %v", err)
@@ -361,7 +367,7 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 				}
 				return pod.Status.Phase == corev1.PodRunning, nil
 			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
-				t.Fatalf("DRA pod never reached Running: %v", err)
+				t.Fatalf("DRA pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 
 			node := &corev1.Node{}
@@ -411,6 +417,10 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "DRA resources allocated to container",
+					slurmBridgeNamespace, "slurm", "kube-system", "dra-example-driver")
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for DRA pod cleanup: %v", err)
