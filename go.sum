@@ -15,8 +15,6 @@ github.com/NYTimes/gziphandler v1.1.1/go.mod h1:n/CVRwUEOgIxrgPvAQhUUr9oeUtvrhMo
 github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
 github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260811152948-fb6e6598c859 h1:zhFhzgGI4n/BMYgnyxc3g7lUr448lzPcOI4BlvxGvuc=
 github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260811152948-fb6e6598c859/go.mod h1:HH71A9Dk4DEp7HQIducdEdR/ZzaHV+NGx0RtyoKhQWI=
-github.com/SlinkyProject/slurm-operator v1.0.2 h1:iQA22YXcPWtIsu7Cu+w8jnoCPuCElAzMXokkryte3PY=
-github.com/SlinkyProject/slurm-operator v1.0.2/go.mod h1:8hAx2YlthvLeeUv3qNK8tIY9mTVeyOIeTmQTKkPNo9Q=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d h1:licZJFw2RwpHMqeKTCYkitsPqHNxTmd4SNR5r94FGM8=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
@@ -339,8 +337,6 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 h1:o4JXh1EVt9k/+g42oCprj/FisM4qX9L3sZB3upGN2ZU=
 github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55/go.mod h1:OmDBASR4679mdNQnz2pUhc2G8CO2JrUAVFDRBDP/hJE=
-github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.86.1 h1:j/GvU9UxlK5nuUKOWYOY0LRqcfHZl1ffTOa46+00Cys=
-github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.86.1/go.mod h1:nPk0OteXBkbT0CRCa2oZQL1jRLW6RJ2fuIijHypeJdk=
 github.com/prometheus/client_golang v1.23.2 h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=
 github.com/prometheus/client_golang v1.23.2/go.mod h1:Tb1a6LWHB3/SPIzCoaDXI4I8UHKeFTEQ1YCr+0Gyqmg=
 github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=
