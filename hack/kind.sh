@@ -469,7 +469,8 @@ EOF
 		--version "$version" \
 		--namespace dra-example-driver \
 		--create-namespace \
-		--values "$values"
+		--values "$values" \
+		--wait --timeout=120s
 }
 
 function dra-driver-cpu::install() {

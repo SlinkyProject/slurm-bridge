@@ -15,5 +15,6 @@ func TestScheduling(t *testing.T) {
 	_ = testEnv.Test(t,
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgePodScheduling(),
+		testSlurmBridgeDRAResourceScheduling(),
 	)
 }

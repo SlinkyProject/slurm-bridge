@@ -82,8 +82,8 @@ push-charts: build-chart ## Push OCI packages.
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
 
 .PHONY: kind-start
-kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack.
-	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
+kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
+	./hack/kind.sh --all $(KIND_CLUSTER_NAME)
 
 .PHONY: kind-stop
 kind-stop: ## Delete the development Kind cluster.
