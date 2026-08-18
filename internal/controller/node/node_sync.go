@@ -5,6 +5,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/util/taints"
 	"k8s.io/utils/set"
@@ -42,7 +42,7 @@ func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error 
 		errs = append(errs, err)
 	}
 
-	return utilerrors.NewAggregate(errs)
+	return errors.Join(errs...)
 }
 
 // syncTaint will handle applying and removing the slurm-bridge taint on nodes.

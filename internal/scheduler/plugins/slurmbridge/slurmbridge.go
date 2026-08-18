@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -56,23 +55,32 @@ var (
 
 const slurmJobNotPending = "job is no longer pending execution"
 
-func isJobNotPendingError(err error) bool {
+func findMatchingError(err error, matches func(error) bool) error {
 	if err == nil {
-		return false
+		return nil
+	}
+	if matches(err) {
+		return err
 	}
 
-	var agg utilerrors.Aggregate
-	if errors.As(err, &agg) {
-		for _, e := range agg.Errors() {
-			if isJobNotPendingError(e) {
-				return true
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, child := range joined.Unwrap() {
+			if match := findMatchingError(child, matches); match != nil {
+				return match
 			}
 		}
+		return nil
 	}
 
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, slurmJobNotPending) ||
-		strings.Contains(msg, "eslurm_job_not_pending")
+	return findMatchingError(errors.Unwrap(err), matches)
+}
+
+func isJobNotPendingError(err error) bool {
+	return findMatchingError(err, func(err error) bool {
+		msg := strings.ToLower(err.Error())
+		return strings.Contains(msg, slurmJobNotPending) ||
+			strings.Contains(msg, "eslurm_job_not_pending")
+	}) != nil
 }
 
 func init() {
@@ -415,16 +423,12 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	if externalJob.JobId == 0 {
 		jobid, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
-			aggErrors := func() utilerrors.Aggregate {
-				var target utilerrors.Aggregate
-				_ = errors.As(err, &target)
-				return target
-			}().Errors()
-			for _, e := range aggErrors {
-				if strings.ToLower(e.Error()) == ErrorNodeConfigInvalid.Error() {
-					logger.Error(err, "invalid node configuration for external job")
-					return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, e.Error())
-				}
+			invalidConfigErr := findMatchingError(err, func(err error) bool {
+				return strings.EqualFold(err.Error(), ErrorNodeConfigInvalid.Error())
+			})
+			if invalidConfigErr != nil {
+				logger.Error(err, "invalid node configuration for external job")
+				return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, invalidConfigErr.Error())
 			}
 			logger.Error(err, "error submitting Slurm job")
 			return nil, fwk.NewStatus(fwk.Error, err.Error())

@@ -5,13 +5,13 @@ package pod
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,7 +37,7 @@ func (r *PodReconciler) Sync(ctx context.Context, req reconcile.Request) error {
 		errs = append(errs, err)
 	}
 
-	return utilerrors.NewAggregate(errs)
+	return errors.Join(errs...)
 }
 
 // syncKubernetes reconciles the Kubernetes Pod with Slurm Jobs.
