@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 const (
@@ -314,8 +316,9 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 	podName := envconf.RandomName("pod-dra-e2e", 32)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: slurmBridgeNamespace,
+			Name:        podName,
+			Namespace:   slurmBridgeNamespace,
+			Annotations: map[string]string{wellknown.AnnotationExclusive: "true"},
 		},
 		Spec: corev1.PodSpec{
 			SchedulerName: slurmBridgeScheduler,
@@ -379,7 +382,7 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("container CPU set matches DRA allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("container CPU set matches exclusive DRA allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			environment, err := execInPod(ctx, config, pod, "env")
 			if err != nil {
 				t.Fatalf("failed to read container environment: %v", err)
@@ -388,8 +391,8 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			if err != nil {
 				t.Fatalf("failed to find DRA CPU allocation: %v", err)
 			}
-			if allocated.Size() != 1 {
-				t.Fatalf("container received %d DRA CPUs (%s), want 1", allocated.Size(), allocated.String())
+			if allocated.Size() == 0 {
+				t.Fatal("container received an empty DRA CPU allocation")
 			}
 
 			effectiveOutput, err := execInPod(ctx, config, pod, "cat", "/sys/fs/cgroup/cpuset.cpus.effective")
