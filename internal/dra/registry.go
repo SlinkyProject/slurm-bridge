@@ -75,6 +75,9 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 		if compiled.MaxCost > resourcev1.CELSelectorExpressionMaxCost {
 			return nil, fmt.Errorf("selector for device profile %q is too complex: estimated cost %d exceeds limit %d", profile.Name, compiled.MaxCost, resourcev1.CELSelectorExpressionMaxCost)
 		}
+		if err := validateDeviceProfileSelector(profile); err != nil {
+			return nil, err
+		}
 		if existing, exists := registry.bySelector[profile.Selector]; exists {
 			return nil, fmt.Errorf("device profiles %q and %q have the same selector", existing.Name, profile.Name)
 		}

@@ -69,7 +69,7 @@ func TestNewRegistryRejectsDuplicates(t *testing.T) {
 	}{
 		{name: "duplicate name", profiles: []DeviceProfile{profile, profile}, wantErr: "duplicate device profile name"},
 		{name: "duplicate selector", profiles: []DeviceProfile{profile, {
-			Name: "other", Driver: "other.example.com", Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
+			Name: "other", Driver: profile.Driver, Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
 		}}, wantErr: "same selector"},
 		{name: "invalid selector", profiles: []DeviceProfile{{
 			Name: "broken", Driver: "gpu.example.com", Selector: `device.`, Backend: IndexedGRESBackend{GRESName: "gpu"},
