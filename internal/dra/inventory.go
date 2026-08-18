@@ -39,7 +39,8 @@ func (e *OverlappingDeviceProfilesError) Error() string {
 }
 
 // ProfileInventory contains the devices resolved to one DeviceProfile.
-// Devices are ordered by Slurm index: Devices[i] is allocated as index i.
+// Devices are ordered within the profile. Their absolute Slurm indexes also
+// account for earlier profiles which use the same GRES name.
 type ProfileInventory struct {
 	Profile DeviceProfile
 	Devices []DeviceIdentity

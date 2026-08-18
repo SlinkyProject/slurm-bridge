@@ -900,12 +900,12 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 	}
 	resources := &slurmcontrol.NodeResources{
 		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}`,
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  "gpu-example",
 			Count: 2,
-			Index: "2,0",
+			Index: "6,4",
 		}},
 	}
 	kclient := fake.NewClientBuilder().
@@ -955,7 +955,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		!hasContainerExtendedResourceRequest(updatedPod.Status.ExtendedResourceClaimStatus.RequestMappings, wantMapping) {
 		t.Fatalf("pod request mappings = %#v, want %#v", updatedPod.Status.ExtendedResourceClaimStatus, wantMapping)
 	}
-	if resources.Gres[0].Index != "2,0" || resources.Gres[0].Type != "gpu-example" {
+	if resources.Gres[0].Index != "6,4" || resources.Gres[0].Type != "gpu-example" {
 		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres[0])
 	}
 }

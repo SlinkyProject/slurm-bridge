@@ -462,7 +462,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(gotExtra).To(Equal(
-			`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`,
+			`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`,
 		))
 		updatedNode := &corev1.Node{}
 		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())

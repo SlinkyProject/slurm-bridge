@@ -793,7 +793,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:gpu-example:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
 					},
 				},
 			).Build(),
@@ -1505,7 +1505,7 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
 		}
 	}
-	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`
+	wantExtra := `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`
 	if extra != wantExtra {
 		t.Errorf("AddNode() extra = %q, want %q", extra, wantExtra)
 	}
@@ -1770,6 +1770,35 @@ func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t
 				t.Fatal("UpdateHybridNode() mutated a node outside hybrid scope")
 			}
 		})
+	}
+}
+
+func TestBuildNodeGRESConfigOffsetsProfilesSharingGRESName(t *testing.T) {
+	inventory := []dra.GRESInventory{
+		{
+			GRES:    dra.GRES{Name: "nic", Type: "dranet0"},
+			Devices: []dra.DeviceIdentity{structured.MakeDeviceID("dra.net", "node-a", "dranet0")},
+		},
+		{
+			GRES:    dra.GRES{Name: "nic", Type: "sriov-vf"},
+			Devices: []dra.DeviceIdentity{structured.MakeDeviceID("sriov.example.com", "node-a", "vf-0")},
+		},
+	}
+
+	config, err := buildNodeGRESConfig(inventory)
+	if err != nil {
+		t.Fatalf("buildNodeGRESConfig() error = %v", err)
+	}
+	applied, err := dra.DecodeAppliedInventory(config.extra)
+	if err != nil {
+		t.Fatalf("DecodeAppliedInventory() error = %v", err)
+	}
+	devices, err := applied.Devices("sriov-vf", []int{1})
+	if err != nil {
+		t.Fatalf("AppliedInventory.Devices() error = %v", err)
+	}
+	if len(devices) != 1 || devices[0] != inventory[1].Devices[0] {
+		t.Fatalf("AppliedInventory.Devices() = %#v, want sriov-vf device at global nic index 1", devices)
 	}
 }
 

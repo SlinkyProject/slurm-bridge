@@ -135,7 +135,7 @@ func TestAppliedInventoryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeAppliedInventory() error = %v", err)
 	}
-	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/rack/pool-a/gpu-0","/dra/gpu.example.com/rack/pool-a/gpu-1"]}}`
+	wantExtra := `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":0,"devices":["/dra/gpu.example.com/rack/pool-a/gpu-0","/dra/gpu.example.com/rack/pool-a/gpu-1"]}}}`
 	if extra != wantExtra {
 		t.Fatalf("EncodeAppliedInventory() = %q, want %q", extra, wantExtra)
 	}
@@ -146,8 +146,10 @@ func TestAppliedInventoryRoundTrip(t *testing.T) {
 	}
 	want := AppliedInventory{
 		"gpu-example": {
-			deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-0"),
-			deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-1"),
+			Devices: []DeviceIdentity{
+				deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-0"),
+				deviceIDForTest("gpu.example.com", "rack/pool-a", "gpu-1"),
+			},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -155,16 +157,80 @@ func TestAppliedInventoryRoundTrip(t *testing.T) {
 	}
 }
 
-func TestAppliedInventoryDevices(t *testing.T) {
-	inventory := AppliedInventory{
-		"gpu-example": {
-			deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
-			deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
-			deviceIDForTest("gpu.example.com", "pool-a", "gpu-2"),
+func TestAppliedInventorySharedGRESNameOffsets(t *testing.T) {
+	inventory := []GRESInventory{
+		{
+			GRES:    GRES{Name: "nic", Type: "dranet0"},
+			Devices: []DeviceIdentity{deviceIDForTest("dranet.example.com", "pool-a", "dranet0")},
+		},
+		{
+			GRES:    GRES{Name: "gpu", Type: "gpu-example"},
+			Devices: []DeviceIdentity{deviceIDForTest("gpu.example.com", "pool-a", "gpu-0")},
+		},
+		{
+			GRES:    GRES{Name: "nic", Type: "sriov-vf"},
+			Devices: []DeviceIdentity{deviceIDForTest("sriov.example.com", "pool-a", "vf-0")},
 		},
 	}
 
-	got, err := inventory.Devices("gpu-example", []int{2, 0})
+	extra, err := EncodeAppliedInventory(inventory)
+	if err != nil {
+		t.Fatalf("EncodeAppliedInventory() error = %v", err)
+	}
+	got, err := DecodeAppliedInventory(extra)
+	if err != nil {
+		t.Fatalf("DecodeAppliedInventory() error = %v", err)
+	}
+
+	tests := []struct {
+		profile string
+		index   int
+		want    DeviceIdentity
+	}{
+		{profile: "dranet0", index: 0, want: inventory[0].Devices[0]},
+		{profile: "gpu-example", index: 0, want: inventory[1].Devices[0]},
+		{profile: "sriov-vf", index: 1, want: inventory[2].Devices[0]},
+	}
+	for _, tt := range tests {
+		devices, err := got.Devices(tt.profile, []int{tt.index})
+		if err != nil {
+			t.Fatalf("AppliedInventory.Devices(%q, %d) error = %v", tt.profile, tt.index, err)
+		}
+		if len(devices) != 1 || devices[0] != tt.want {
+			t.Errorf("AppliedInventory.Devices(%q, %d) = %#v, want %#v", tt.profile, tt.index, devices, tt.want)
+		}
+	}
+}
+
+func TestDecodeAppliedInventoryVersion1(t *testing.T) {
+	extra := AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0"]}}`
+	inventory, err := DecodeAppliedInventory(extra)
+	if err != nil {
+		t.Fatalf("DecodeAppliedInventory() error = %v", err)
+	}
+	devices, err := inventory.Devices("gpu-example", []int{0})
+	if err != nil {
+		t.Fatalf("AppliedInventory.Devices() error = %v", err)
+	}
+	want := deviceIDForTest("gpu.example.com", "pool-a", "gpu-0")
+	if len(devices) != 1 || devices[0] != want {
+		t.Fatalf("AppliedInventory.Devices() = %#v, want %#v", devices, want)
+	}
+}
+
+func TestAppliedInventoryDevices(t *testing.T) {
+	inventory := AppliedInventory{
+		"gpu-example": {
+			FirstIndex: 4,
+			Devices: []DeviceIdentity{
+				deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),
+				deviceIDForTest("gpu.example.com", "pool-a", "gpu-1"),
+				deviceIDForTest("gpu.example.com", "pool-a", "gpu-2"),
+			},
+		},
+	}
+
+	got, err := inventory.Devices("gpu-example", []int{6, 4})
 	if err != nil {
 		t.Fatalf("AppliedInventory.Devices() error = %v", err)
 	}
@@ -184,8 +250,9 @@ func TestAppliedInventoryDevices(t *testing.T) {
 	}{
 		{name: "missing profile", profileName: "missing", indexes: []int{0}, wantErr: "does not contain"},
 		{name: "negative index", profileName: "gpu-example", indexes: []int{-1}, wantErr: "outside"},
-		{name: "large index", profileName: "gpu-example", indexes: []int{3}, wantErr: "outside"},
-		{name: "duplicate index", profileName: "gpu-example", indexes: []int{1, 1}, wantErr: "repeated"},
+		{name: "below range", profileName: "gpu-example", indexes: []int{3}, wantErr: "outside"},
+		{name: "large index", profileName: "gpu-example", indexes: []int{7}, wantErr: "outside"},
+		{name: "duplicate index", profileName: "gpu-example", indexes: []int{5, 5}, wantErr: "repeated"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -202,7 +269,7 @@ func TestEncodeAppliedInventoryEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncodeAppliedInventory() error = %v", err)
 	}
-	want := `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`
+	want := `slurm-bridge.dra-gres-map={"v":2,"profiles":{}}`
 	if got != want {
 		t.Fatalf("EncodeAppliedInventory() = %q, want %q", got, want)
 	}
@@ -255,11 +322,12 @@ func TestDecodeAppliedInventoryRejectsInvalidExtra(t *testing.T) {
 	}{
 		{name: "wrong prefix", extra: `{}`, wantErr: "does not contain a DRA GRES map"},
 		{name: "invalid JSON", extra: AppliedInventoryExtraPrefix + `{`, wantErr: "decode applied inventory"},
-		{name: "unknown version", extra: AppliedInventoryExtraPrefix + `{"v":2,"profiles":{}}`, wantErr: "unsupported applied inventory version 2"},
+		{name: "unknown version", extra: AppliedInventoryExtraPrefix + `{"v":3,"profiles":{}}`, wantErr: "unsupported applied inventory version 3"},
 		{name: "missing profiles", extra: AppliedInventoryExtraPrefix + `{"v":1}`, wantErr: "has no profiles map"},
 		{name: "empty profile", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"":[]}}`, wantErr: "empty device profile name"},
 		{name: "invalid path prefix", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"gpu-example":["gpu.example.com/pool/gpu-0"]}}`, wantErr: `must start with "/dra/"`},
 		{name: "incomplete path", extra: AppliedInventoryExtraPrefix + `{"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/gpu-0"]}}`, wantErr: "must contain a driver, pool, and device name"},
+		{name: "negative first index", extra: AppliedInventoryExtraPrefix + `{"v":2,"profiles":{"gpu-example":{"firstIndex":-1,"devices":[]}}}`, wantErr: "negative first Slurm GRES index"},
 	}
 
 	for _, tt := range tests {
