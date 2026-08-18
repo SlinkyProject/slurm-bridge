@@ -412,6 +412,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		}
 	}
 
+	if len(s.slurmJobIR.JobInfo.Nodes) > len(s.slurmJobIR.Pods.Items) {
+		s.slurmJobIR.JobInfo.Nodes = s.slurmJobIR.JobInfo.Nodes[:len(s.slurmJobIR.Pods.Items)]
+	}
+
 	// If this situation occurs, the best we can do is trigger another
 	// scheduling cycle.
 	if len(s.slurmJobIR.JobInfo.Nodes) < len(s.slurmJobIR.Pods.Items) {
