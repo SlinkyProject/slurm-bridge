@@ -265,6 +265,27 @@ func TestRegistryMatchIndexedGRES(t *testing.T) {
 	}
 }
 
+func TestNewRegistryProfileLimit(t *testing.T) {
+	profiles := make([]DeviceProfile, maxDeviceProfiles)
+	for i := range profiles {
+		profiles[i] = DeviceProfile{
+			Name:     fmt.Sprintf("profile-%d", i),
+			Driver:   "devices.example.com",
+			Selector: fmt.Sprintf("device.driver == 'devices.example.com' && %d == %d", i, i),
+			Backend:  IndexedGRESBackend{GRESName: "device"},
+		}
+	}
+
+	if _, err := NewRegistry(profiles); err != nil {
+		t.Fatalf("NewRegistry() with %d profiles returned error: %v", maxDeviceProfiles, err)
+	}
+
+	profiles = append(profiles, DeviceProfile{})
+	if _, err := NewRegistry(profiles); err == nil || !strings.Contains(err.Error(), "maximum is 256") {
+		t.Fatalf("NewRegistry() error = %v, want profile limit error", err)
+	}
+}
+
 func TestRegistryProfilesForDriver(t *testing.T) {
 	registry := DefaultRegistry()
 	gpuProfile, _ := registry.LookupByName("gpu-example")

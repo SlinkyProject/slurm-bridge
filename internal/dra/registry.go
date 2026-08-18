@@ -16,6 +16,8 @@ import (
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 )
 
+const maxDeviceProfiles = 256
+
 var deviceProfileNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?$`)
 
 // Registry indexes supported DeviceProfiles by name and canonical selector.
@@ -29,6 +31,10 @@ type Registry struct {
 // NewRegistry validates profiles and indexes them by name and canonical
 // selector.
 func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
+	if len(profiles) > maxDeviceProfiles {
+		return nil, fmt.Errorf("device profile registry contains %d profiles, maximum is %d", len(profiles), maxDeviceProfiles)
+	}
+
 	registry := &Registry{
 		byName:            make(map[string]DeviceProfile, len(profiles)),
 		bySelector:        make(map[string]DeviceProfile, len(profiles)),

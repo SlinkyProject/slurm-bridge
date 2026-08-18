@@ -21,7 +21,7 @@ var deviceProfileCELFeatures = dracel.Features{
 	EnableListTypeAttributes: true,
 }
 
-var deviceProfileCELCache = dracel.NewCache(10, deviceProfileCELFeatures)
+var deviceProfileCELCache = dracel.NewCache(maxDeviceProfiles, deviceProfileCELFeatures)
 
 // DeviceIdentity is the stable DRA identity of a device.
 type DeviceIdentity = structured.DeviceID
