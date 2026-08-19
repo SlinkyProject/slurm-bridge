@@ -18,6 +18,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -229,6 +230,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
 	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme))
 
 	workloadRef := &schedulingv1alpha2.PodGroupTemplateReference{
 		Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
@@ -245,7 +247,67 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		wantPartition *string
 		wantQOS       *string
 		wantAccount   *string
+		wantNoAccount bool
+		wantNoWckey   bool
 	}{
+		{
+			name: "jobset is selected instead of intermediate job",
+			objects: []client.Object{
+				func() *schedulingv1alpha2.PodGroup {
+					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					})
+					pg.Annotations = map[string]string{
+						wellknown.AnnotationPartition: "podgroup-partition",
+						wellknown.AnnotationQOS:       "podgroup-qos",
+					}
+					pg.Spec.PodGroupTemplateRef = workloadRef
+					return pg
+				}(),
+				&schedulingv1alpha2.Workload{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-workload",
+						Namespace: "default",
+						Annotations: map[string]string{
+							wellknown.AnnotationQOS: "workload-qos",
+						},
+					},
+				},
+				&jobset.JobSet{
+					TypeMeta: jobSet_v1alpha2,
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-jobset",
+						Namespace: "default",
+						Annotations: map[string]string{
+							wellknown.AnnotationPartition: "jobset-partition",
+							wellknown.AnnotationQOS:       "jobset-qos",
+						},
+					},
+				},
+				func() *batchv1.Job {
+					job := jobWithAnnotations("my-job", "default", map[string]string{
+						wellknown.AnnotationPartition: "job-partition",
+						wellknown.AnnotationQOS:       "job-qos",
+						wellknown.AnnotationAccount:   "intermediate-job-account",
+					})
+					job.OwnerReferences = []metav1.OwnerReference{
+						controllerOwner(jobSet_v1alpha2.APIVersion, jobSet_v1alpha2.Kind, "my-jobset"),
+					}
+					return job
+				}(),
+				func() *corev1.Pod {
+					pod := podWithJobOwner(podWithSchedulingGroup("default", "p1", "pg1"), "my-job")
+					pod.Annotations = map[string]string{wellknown.AnnotationWckey: "pod-wckey"}
+					return pod
+				}(),
+				podWithJobOwner(podWithSchedulingGroup("default", "p2", "pg1"), "my-job"),
+			},
+			wantJobName:   "pg1",
+			wantPartition: ptr.To("jobset-partition"),
+			wantQOS:       ptr.To("workload-qos"),
+			wantNoAccount: true,
+			wantNoWckey:   true,
+		},
 		{
 			name: "workload overrides job and podgroup",
 			objects: []client.Object{
@@ -487,6 +549,12 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 				if got.JobInfo.Account == nil || *got.JobInfo.Account != *tt.wantAccount {
 					t.Errorf("Account = %v, want %v", got.JobInfo.Account, *tt.wantAccount)
 				}
+			}
+			if tt.wantNoAccount && got.JobInfo.Account != nil {
+				t.Errorf("Account = %q, want intermediate Job annotation ignored", *got.JobInfo.Account)
+			}
+			if tt.wantNoWckey && got.JobInfo.Wckey != nil {
+				t.Errorf("Wckey = %q, want Pod annotation ignored", *got.JobInfo.Wckey)
 			}
 		})
 	}
