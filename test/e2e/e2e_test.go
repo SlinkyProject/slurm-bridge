@@ -13,6 +13,7 @@ var testEnv = env.New()
 
 func TestScheduling(t *testing.T) {
 	_ = testEnv.Test(t,
+		testSlurmBridgeReadiness(),
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(),

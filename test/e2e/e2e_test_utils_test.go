@@ -4,11 +4,28 @@
 package e2e
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
 	"k8s.io/utils/cpuset"
 )
+
+func TestSlurmNodeNames(t *testing.T) {
+	t.Parallel()
+
+	output := `NodeName=worker-1 CPUTot=8 State=IDLE
+NodeName=worker-2 CPUTot=8 State=ALLOCATED
+`
+	want := map[string]struct{}{
+		"worker-1": {},
+		"worker-2": {},
+	}
+
+	if got := slurmNodeNames(output); !maps.Equal(got, want) {
+		t.Fatalf("slurmNodeNames() = %v, want %v", got, want)
+	}
+}
 
 func TestDRACPUSetFromEnvironment(t *testing.T) {
 	t.Parallel()

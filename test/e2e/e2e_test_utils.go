@@ -33,12 +33,15 @@ import (
 )
 
 const (
-	slurmBridgeNamespace   = "slurm-bridge"
-	slurmBridgeScheduler   = "slurm-bridge-scheduler"
-	slurmBridgeWorkerLabel = "scheduler.slinky.slurm.net/slurm-bridge"
-	slurmJobIDLabel        = "scheduler.slinky.slurm.net/slurm-jobid"
-	draCPUResource         = "deviceclass.resource.kubernetes.io/dra.cpu"
-	draGPUResource         = "deviceclass.resource.kubernetes.io/gpu.example.com"
+	slurmNamespace              = "slurm"
+	slurmControllerPodName      = "slurm-controller-0"
+	slurmBridgeNamespace        = "slurm-bridge"
+	slurmBridgeScheduler        = "slurm-bridge-scheduler"
+	slurmBridgeWorkerLabel      = "scheduler.slinky.slurm.net/slurm-bridge"
+	slurmJobIDLabel             = "scheduler.slinky.slurm.net/slurm-jobid"
+	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
+	draGPUResource              = "deviceclass.resource.kubernetes.io/gpu.example.com"
+	slurmBridgeReadinessTimeout = 3 * time.Minute
 )
 
 var gpuDeviceEnvironment = regexp.MustCompile(`(?m)^GPU_DEVICE_[0-9]+=(gpu-[0-9]+)$`)
@@ -89,6 +92,81 @@ func execInPod(ctx context.Context, config *envconf.Config, pod *corev1.Pod, com
 	}
 
 	return stdout.String(), nil
+}
+
+func slurmNodeNames(output string) map[string]struct{} {
+	nodes := make(map[string]struct{})
+	for line := range strings.Lines(output) {
+		for field := range strings.FieldsSeq(line) {
+			if name, found := strings.CutPrefix(field, "NodeName="); found {
+				nodes[name] = struct{}{}
+				break
+			}
+		}
+	}
+	return nodes
+}
+
+func testSlurmBridgeReadiness() types.Feature {
+	return features.New("Slurm Bridge readiness").
+		Assess("Slurm has a bridge worker node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			lastObservation := "readiness check did not run"
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				bridgeNodes := &corev1.NodeList{}
+				if err := crClient.List(ctx, bridgeNodes,
+					client.MatchingLabels{slurmBridgeWorkerLabel: "worker"},
+				); err != nil {
+					lastObservation = fmt.Sprintf("list Kubernetes bridge workers: %v", err)
+					return false, nil
+				}
+				if len(bridgeNodes.Items) == 0 {
+					lastObservation = "no Kubernetes bridge workers found"
+					return false, nil
+				}
+
+				controllerPod := &corev1.Pod{}
+				if err := crClient.Get(ctx, client.ObjectKey{
+					Namespace: slurmNamespace,
+					Name:      slurmControllerPodName,
+				}, controllerPod); err != nil {
+					lastObservation = fmt.Sprintf("get Slurm controller pod: %v", err)
+					return false, nil
+				}
+
+				output, err := execInPod(ctx, config, controllerPod, "scontrol", "show", "nodes", "--oneliner")
+				if err != nil {
+					lastObservation = fmt.Sprintf("query Slurm nodes: %v", err)
+					return false, nil
+				}
+
+				registeredNodes := slurmNodeNames(output)
+				for i := range bridgeNodes.Items {
+					if _, found := registeredNodes[bridgeNodes.Items[i].Name]; found {
+						return true, nil
+					}
+				}
+				lastObservation = fmt.Sprintf(
+					"%d Kubernetes bridge workers found, but none of the %d Slurm nodes match",
+					len(bridgeNodes.Items), len(registeredNodes),
+				)
+				return false, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmBridgeReadinessTimeout), wait.WithInterval(5*time.Second)); err != nil {
+				t.Fatalf("Slurm never registered a bridge worker node: %v; last observation: %s", err, lastObservation)
+			}
+			return ctx
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "Slurm Bridge readiness", slurmNamespace)
+			}
+			return ctx
+		}).
+		Feature()
 }
 
 func draCPUSetFromEnvironment(environment string) (cpuset.CPUSet, error) {
