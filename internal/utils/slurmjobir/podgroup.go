@@ -16,6 +16,7 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 )
 
 var (
@@ -34,8 +35,8 @@ func podGroupName(pod *corev1.Pod) (string, bool) {
 	return name, name != ""
 }
 
-// parsePodGroupSlurmAnnotations merges Slurm annotations along the PodGroup chain.
-// On conflict, left-most (root-most) wins: Workload > controller (Job) > PodGroup.
+// parsePodGroupSlurmAnnotations merges Slurm annotations from the PodGroup,
+// selected controller, and Workload. Only one controller source is applied.
 // Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 func (t *translator) parsePodGroupSlurmAnnotations(
 	slurmJobIR *SlurmJobIR,
@@ -51,6 +52,11 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 			job := &batchv1.Job{}
 			if err := t.Get(t.ctx, client.ObjectKeyFromObject(controllerPOM), job); err == nil {
 				ann = job.GetAnnotations()
+			}
+		} else if controllerPOM.TypeMeta == jobSet_v1alpha2 {
+			jobSet := &jobset.JobSet{}
+			if err := t.Get(t.ctx, client.ObjectKeyFromObject(controllerPOM), jobSet); err == nil {
+				ann = jobSet.GetAnnotations()
 			}
 		}
 		if err := parseAnnotations(slurmJobIR, ann); err != nil {
