@@ -6,6 +6,11 @@
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
+# Use the Go version declared by the module for all Make targets.
+MODULE_GO_VERSION := $(strip $(shell sed -n -E 's/^go[[:space:]]+([^[:space:]]+).*$$/\1/p' go.mod))
+GOTOOLCHAIN := go$(MODULE_GO_VERSION)
+export GOTOOLCHAIN
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -27,6 +32,10 @@ VERSION = $(shell cat ./VERSION)
 .PHONY: version
 version: ## Show current version.
 	@echo VERSION=$(VERSION)
+
+.PHONY: go-version
+go-version: ## Show the Go toolchain version declared in go.mod.
+	@echo GOTOOLCHAIN=$(GOTOOLCHAIN)
 
 .PHONY: version-match
 version-match: version ## Sync chart versions with VERSION.
