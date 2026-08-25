@@ -964,6 +964,59 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			wantActivate: true,
 		},
 		{
+			name: "Nodes filtered by other plugins are submitted as excluded nodes",
+			fields: fields{
+				Client: kubefake.NewFakeClient(
+					pod.DeepCopy(),
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+				),
+				slurmControl: func() slurmcontrol.SlurmControlInterface {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job.RequiredNodes != nil {
+								return fmt.Errorf("expected RequiredNodes to be unset, got %v", *jobSubmit.Job.RequiredNodes)
+							}
+							if jobSubmit.Job.ExcludedNodes == nil || !reflect.DeepEqual(*jobSubmit.Job.ExcludedNodes, api.V0044CsvString{"node2"}) {
+								return fmt.Errorf("expected ExcludedNodes [node2], got %v", jobSubmit.Job.ExcludedNodes)
+							}
+							obj.(*types.V0044JobInfo).JobId = ptr.To(int32(1))
+							return nil
+						},
+					}
+					nodes := &types.V0044NodeList{
+						Items: []types.V0044Node{
+							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+						},
+					}
+					c := fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						WithLists(nodes).
+						Build()
+					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+				}(),
+				handle: f,
+			},
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod:   pod.DeepCopy(),
+				m: framework.NewNodeToStatus(map[string]*fwk.Status{
+					// node1 was rejected only by SlurmBridge itself: it is
+					// kubernetes-feasible and stays out of the exclusion.
+					"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+					// node2 was rejected by another Filter plugin: it must
+					// be handed to Slurm as an excluded node.
+					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin("NodeResourcesFit"),
+				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
+			},
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
+		},
+		{
 			name: "Updating an external job succeeds",
 			fields: fields{
 				Client: kubefake.NewFakeClient(

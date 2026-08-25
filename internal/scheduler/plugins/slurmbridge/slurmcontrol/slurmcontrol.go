@@ -192,10 +192,17 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 					return &api.V0044Uint64NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
-			MinimumNodes:  slurmJobIR.JobInfo.MinNodes,
-			Name:          slurmJobIR.JobInfo.JobName,
-			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
-			RequiredNodes: ptr.To(api.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
+			MinimumNodes: slurmJobIR.JobInfo.MinNodes,
+			Name:         slurmJobIR.JobInfo.JobName,
+			Nodes:        ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
+			// Use excluded_nodes, not required_nodes, to pass kubernetes constraints to Slurm.
+			// Stale required_nodes kill jobs at slurmctld state recovery (present through Slurm 26.05.3).
+			ExcludedNodes: func() *api.V0044CsvString {
+				if len(slurmJobIR.JobInfo.ExcNodes) == 0 {
+					return nil
+				}
+				return ptr.To(api.V0044CsvString(slurmJobIR.JobInfo.ExcNodes))
+			}(),
 			Priority: func() *api.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.Priority != nil {
 					return &api.V0044Uint32NoValStruct{

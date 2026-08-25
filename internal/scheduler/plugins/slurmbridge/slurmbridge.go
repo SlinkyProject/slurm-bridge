@@ -418,6 +418,32 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
+	// Slurm nodes that kubernetes cannot place this pod on — cordoned,
+	// tainted, failing affinity, or without free resources (rejected by
+	// any Filter plugin other than SlurmBridge) — are passed to Slurm as
+	// excluded nodes. Exclusion is used instead of required_nodes because
+	// required_nodes is fatally re-validated at slurmctld state recovery:
+	// one entry naming a since-deleted node kills the job, while stale
+	// excluded_nodes entries are tolerated.
+	allNodes, err := sb.handle.SnapshotSharedLister().NodeInfos().List()
+	if err != nil {
+		logger.Error(err, "error listing all nodes from the snapshot")
+		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	feasibleSet := sets.New(s.slurmJobIR.JobInfo.Nodes...)
+	for _, node := range allNodes {
+		if node.Node() == nil {
+			continue
+		}
+		slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
+		if feasibleSet.Has(slurmName) {
+			continue
+		}
+		if slurmNodes.Has(slurmName) {
+			s.slurmJobIR.JobInfo.ExcNodes = append(s.slurmJobIR.JobInfo.ExcNodes, slurmName)
+		}
+	}
+
 	// If no external job exists, we should create one with the list
 	// of nodes that passed Filter plugins.
 	if externalJob.JobId == 0 {
