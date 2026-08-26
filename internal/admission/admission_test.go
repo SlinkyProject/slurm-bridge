@@ -149,7 +149,7 @@ func TestValidateCPUResources(t *testing.T) {
 
 func TestValidateAnnotationConflicts(t *testing.T) {
 	cpuDRA := corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName)
-	gpuDRA := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverGpuNvidia)
+	gpuDRA := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "gpu.nvidia.com")
 
 	tests := []struct {
 		name            string

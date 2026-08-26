@@ -116,7 +116,16 @@ Limitations
   - `DRA Example
     Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
     for GPUs.
+  - `NVIDIA DRA
+    Driver <https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu>`__
+    for full GPUs.
 
+- NVIDIA GPU backend selection is resource-name based:
+  ``deviceclass.resource.kubernetes.io/gpu.nvidia.com`` selects the
+  NVIDIA DRA DeviceClass, while ``nvidia.com/gpu`` selects the NVIDIA
+  device plugin. ``DeviceClass.spec.extendedResourceName`` aliases are
+  not resolved by ``slurm-bridge``; use the implicit DeviceClass
+  resource name for NVIDIA DRA.
 - Native ``cpu`` requests do not activate CPU DRA. Pods must explicitly
   request ``deviceclass.resource.kubernetes.io/dra.cpu`` and cannot
   combine it with native ``cpu`` requests or limits.

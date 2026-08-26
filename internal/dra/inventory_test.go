@@ -73,6 +73,35 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 	})
 
+	t.Run("classifies NVIDIA full GPUs", func(t *testing.T) {
+		slice := resourceSlice("node-a", "gpu.nvidia.com", "node-a", "gpu-1", "gpu-0-mig-1g.10gb-0-0", "gpu-0")
+		deviceTypes := []string{"gpu", "mig", "gpu"}
+		for i := range slice.Spec.Devices {
+			slice.Spec.Devices[i].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				"type": {StringValue: ptr.To(deviceTypes[i])},
+			}
+		}
+
+		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		profile, _ := DefaultRegistry().LookupByName("gpu-nvidia")
+		want := NodeInventory{
+			NodeName: "node-a",
+			Profiles: []ProfileInventory{{
+				Profile: profile,
+				Devices: []DeviceIdentity{
+					deviceIDForTest("gpu.nvidia.com", "node-a", "gpu-0"),
+					deviceIDForTest("gpu.nvidia.com", "node-a", "gpu-1"),
+				},
+			}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("BuildNodeInventory() = %#v, want %#v", got, want)
+		}
+	})
+
 	t.Run("returns an empty inventory without matching devices", func(t *testing.T) {
 		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-b", "gpu.example.com", "pool-a", "gpu-0"),

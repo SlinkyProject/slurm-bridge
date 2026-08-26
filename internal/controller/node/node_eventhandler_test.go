@@ -241,11 +241,25 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			want: []string{"node-a"},
 		},
 		{
-			name: "unsupported driver",
+			name: "node-local NVIDIA GPU slice",
 			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
 				Driver:   "gpu.nvidia.com",
 				NodeName: ptr.To("node-a"),
-				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+				Devices: []resourcev1.Device{{
+					Name: "gpu-0",
+					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						"type": {StringValue: ptr.To("gpu")},
+					},
+				}},
+			}},
+			want: []string{"node-a"},
+		},
+		{
+			name: "unsupported driver",
+			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "unsupported.example.com",
+				NodeName: ptr.To("node-a"),
+				Devices:  []resourcev1.Device{{Name: "device-0"}},
 			}},
 		},
 		{
@@ -281,6 +295,69 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			sort.Strings(got)
 			if !slices.Equal(got, tt.want) {
 				t.Fatalf("resourceSliceToNodes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
+	tests := []struct {
+		name        string
+		driver      string
+		device      resourcev1.Device
+		wantProfile string
+	}{
+		{
+			name:   "example GPU",
+			driver: "gpu.example.com",
+			device: resourcev1.Device{
+				Name: "gpu-0",
+				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					"index": {IntValue: ptr.To[int64](0)},
+				},
+			},
+			wantProfile: "gpu-example",
+		},
+		{
+			name:   "NVIDIA GPU",
+			driver: "gpu.nvidia.com",
+			device: resourcev1.Device{
+				Name: "gpu-0",
+				Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					"type": {StringValue: ptr.To("gpu")},
+				},
+			},
+			wantProfile: "gpu-nvidia",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+			resourceSlice := &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-a-gpus"},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver:   tt.driver,
+					NodeName: ptr.To(node.Name),
+					Pool: resourcev1.ResourcePool{
+						Name:               node.Name,
+						Generation:         1,
+						ResourceSliceCount: 1,
+					},
+					Devices: []resourcev1.Device{tt.device},
+				},
+			}
+			r := &NodeReconciler{
+				Client:      fake.NewClientBuilder().WithObjects(node, resourceSlice).Build(),
+				draRegistry: dra.DefaultRegistry(),
+			}
+
+			_, inventory, err := r.nodeRegistrationInventories(context.Background(), node)
+			if err != nil {
+				t.Fatalf("nodeRegistrationInventories() error = %v", err)
+			}
+			if len(inventory) != 1 || inventory[0].GRES != (dra.GRES{Name: "gpu", Type: tt.wantProfile}) {
+				t.Fatalf("nodeRegistrationInventories() profile inventory = %#v, want gpu:%s", inventory, tt.wantProfile)
 			}
 		})
 	}

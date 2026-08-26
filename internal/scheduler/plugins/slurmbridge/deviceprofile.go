@@ -146,22 +146,23 @@ func expandGRESIndexes(gres slurmcontrol.GresLayout) ([]int, error) {
 // splitGRESResources classifies allocated Slurm GRES by their actual
 // representation. A GRES type which is a registered DeviceProfile is handled
 // exclusively by the profile path, even when no request currently resolves to
-// it. All other GRES remain available to the legacy driver-specific path.
+// it. All other GRES remain available to their existing non-profile paths,
+// including classic device plugins and legacy DRA compatibility.
 //
-// TODO: Replace the registry-miss fallback with explicit, versioned recognition
-// of legacy driver-named GRES during upgrades. New unknown GPU GRES must fail
-// closed instead of implicitly entering the nodeinfo path.
-func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources, legacyResources slurmcontrol.NodeResources, err error) {
+// TODO: Distinguish explicitly versioned legacy driver-named GPU GRES from
+// other non-profile GRES. New unknown DRA GPU GRES must fail closed instead of
+// implicitly entering the compatibility path.
+func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources, nonProfileResources slurmcontrol.NodeResources, err error) {
 	profileResources = resources
 	profileResources.Gres = nil
-	legacyResources = resources
-	legacyResources.Gres = nil
+	nonProfileResources = resources
+	nonProfileResources.Gres = nil
 
 	registry := dra.DefaultRegistry()
 	for _, resource := range resources.Gres {
 		profile, registered := registry.LookupByName(resource.Type)
 		if !registered {
-			legacyResources.Gres = append(legacyResources.Gres, resource)
+			nonProfileResources.Gres = append(nonProfileResources.Gres, resource)
 			continue
 		}
 
@@ -178,7 +179,7 @@ func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources,
 		profileResources.Gres = append(profileResources.Gres, resource)
 	}
 
-	return profileResources, legacyResources, nil
+	return profileResources, nonProfileResources, nil
 }
 
 func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations []indexedGRESAllocation) ([]resourcev1.DeviceRequest, []indexedGRESAllocation) {

@@ -191,7 +191,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 					WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
 					WithObjects(
 						&resourcev1.DeviceClass{
-							ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver},
+							ObjectMeta: metav1.ObjectMeta{Name: legacyDRAExampleDriver},
 						},
 					).
 					Build(),
@@ -288,7 +288,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 						},
 						&resourcev1.DeviceClass{
 							ObjectMeta: metav1.ObjectMeta{
-								Name: nodeinfo.DraExampleDriver,
+								Name: legacyDRAExampleDriver,
 							},
 						},
 						&resourcev1.ResourceSlice{
@@ -297,30 +297,30 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 							},
 							Spec: resourcev1.ResourceSliceSpec{
 								NodeName: ptr.To("node1"),
-								Driver:   nodeinfo.DraExampleDriver,
+								Driver:   legacyDRAExampleDriver,
 								Devices: []resourcev1.Device{
 									{
 										Name: "gpu-0",
 										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+											legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](0)},
 										},
 									},
 									{
 										Name: "gpu-1",
 										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](1)},
+											legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](1)},
 										},
 									},
 									{
 										Name: "gpu-2",
 										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](2)},
+											legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](2)},
 										},
 									},
 									{
 										Name: "gpu-3",
 										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](3)},
+											legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](3)},
 										},
 									},
 								},
@@ -420,7 +420,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				want := corev1.ContainerExtendedResourceRequest{
 					ContainerName: "foo",
 					RequestName:   "gpu",
-					ResourceName:  resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraExampleDriver,
+					ResourceName:  resourcev1.ResourceDeviceClassPrefix + legacyDRAExampleDriver,
 				}
 				if !hasContainerExtendedResourceRequest(gotMappings, want) {
 					t.Errorf("mappings = %v, want %v", gotMappings, want)
@@ -443,7 +443,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 	ctx := context.Background()
 	const profileClass = "profile-gpus"
 	profileResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + profileClass)
-	legacyResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraExampleDriver)
+	legacyResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + legacyDRAExampleDriver)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "mixed-gpus"},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{
@@ -458,7 +458,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 		Node: "node1",
 		Gres: []slurmcontrol.GresLayout{
 			{Name: "gpu", Type: "gpu-example", Count: 1, Index: "0"},
-			{Name: "gpu", Type: nodeinfo.DraExampleDriver, Count: 1, Index: "1"},
+			{Name: "gpu", Type: legacyDRAExampleDriver, Count: 1, Index: "1"},
 		},
 	}
 	kclient := fake.NewClientBuilder().WithObjects(
@@ -468,7 +468,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
 			}}},
 		},
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraExampleDriver}},
+		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRAExampleDriver}},
 	).Build()
 	sb := &SlurmBridge{Client: kclient}
 
@@ -484,16 +484,16 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 	}
 
 	legacyRequest := claim.Spec.Devices.Requests[0]
-	if legacyRequest.Name != "gpu" || legacyRequest.Exactly == nil || legacyRequest.Exactly.DeviceClassName != nodeinfo.DraExampleDriver {
-		t.Errorf("legacy request = %#v, want gpu request for %q", legacyRequest, nodeinfo.DraExampleDriver)
+	if legacyRequest.Name != "gpu" || legacyRequest.Exactly == nil || legacyRequest.Exactly.DeviceClassName != legacyDRAExampleDriver {
+		t.Errorf("legacy request = %#v, want gpu request for %q", legacyRequest, legacyDRAExampleDriver)
 	}
 	profileRequest := claim.Spec.Devices.Requests[1]
 	if profileRequest.Name != "gpu-2" || profileRequest.Exactly == nil || profileRequest.Exactly.DeviceClassName != profileClass {
 		t.Errorf("profile request = %#v, want gpu-2 request for %q", profileRequest, profileClass)
 	}
 
-	if len(allocation.NodeResources.Gres) != 1 || allocation.NodeResources.Gres[0].Type != nodeinfo.DraExampleDriver {
-		t.Errorf("legacy claim resources = %#v, want only %q", allocation.NodeResources.Gres, nodeinfo.DraExampleDriver)
+	if len(allocation.NodeResources.Gres) != 1 || allocation.NodeResources.Gres[0].Type != legacyDRAExampleDriver {
+		t.Errorf("legacy claim resources = %#v, want only %q", allocation.NodeResources.Gres, legacyDRAExampleDriver)
 	}
 	if len(allocation.IndexedGRESAllocations) != 1 ||
 		allocation.IndexedGRESAllocations[0].RequestName != "gpu-2" ||
@@ -509,7 +509,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 			t.Errorf("mappings = %#v, want %#v", mappings, want)
 		}
 	}
-	if len(resources.Gres) != 2 || resources.Gres[0].Type != "gpu-example" || resources.Gres[1].Type != nodeinfo.DraExampleDriver {
+	if len(resources.Gres) != 2 || resources.Gres[0].Type != "gpu-example" || resources.Gres[1].Type != legacyDRAExampleDriver {
 		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres)
 	}
 }
@@ -548,7 +548,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 		Gres: []slurmcontrol.GresLayout{
 			{
 				Name:  "gpu",
-				Type:  nodeinfo.DraExampleDriver,
+				Type:  legacyDRAExampleDriver,
 				Count: 1,
 				Index: "0",
 			},
@@ -566,7 +566,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 				},
 				&resourcev1.DeviceClass{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: nodeinfo.DraExampleDriver,
+						Name: legacyDRAExampleDriver,
 					},
 				},
 				&resourcev1.ResourceSlice{
@@ -575,12 +575,12 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 					},
 					Spec: resourcev1.ResourceSliceSpec{
 						NodeName: ptr.To("node1"),
-						Driver:   nodeinfo.DraExampleDriver,
+						Driver:   legacyDRAExampleDriver,
 						Devices: []resourcev1.Device{
 							{
 								Name: "gpu-0",
 								Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-									nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+									legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](0)},
 								},
 							},
 						},
@@ -665,7 +665,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 }
 
 func TestValidateDeviceClassRequestsRejectsMultipleContainers(t *testing.T) {
-	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverGpuNvidia)
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + legacyDRANVIDIADriver)
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{
 		{
 			Name: "first",
@@ -687,7 +687,7 @@ func TestValidateDeviceClassRequestsRejectsMultipleContainers(t *testing.T) {
 
 func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testing.T) {
 	ctx := context.Background()
-	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverGpuNvidia)
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + legacyDRANVIDIADriver)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceDefault,
@@ -709,7 +709,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		Node: "node1",
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
-			Type:  nodeinfo.DraDriverGpuNvidia,
+			Type:  legacyDRANVIDIADriver,
 			Count: 4,
 			Index: "0-3",
 		}},
@@ -719,13 +719,13 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		WithObjects(
 			pod,
 			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverGpuNvidia}},
+			&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRANVIDIADriver}},
 			&resourcev1.ResourceSlice{
 				ObjectMeta: metav1.ObjectMeta{Name: "node1-gpu"},
 				Spec: resourcev1.ResourceSliceSpec{
 					NodeName: ptr.To("node1"),
 					Pool:     resourcev1.ResourcePool{Name: "node1"},
-					Driver:   nodeinfo.DraDriverGpuNvidia,
+					Driver:   legacyDRANVIDIADriver,
 					Devices:  []resourcev1.Device{{Name: "gpu-0"}},
 				},
 			},
@@ -938,7 +938,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 					},
 					&resourcev1.DeviceClass{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: nodeinfo.DraExampleDriver,
+							Name: legacyDRAExampleDriver,
 						},
 					},
 					&resourcev1.ResourceSlice{
@@ -947,30 +947,30 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 						},
 						Spec: resourcev1.ResourceSliceSpec{
 							NodeName: ptr.To("node1"),
-							Driver:   nodeinfo.DraExampleDriver,
+							Driver:   legacyDRAExampleDriver,
 							Devices: []resourcev1.Device{
 								{
 									Name: "gpu-0",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
+										legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](0)},
 									},
 								},
 								{
 									Name: "gpu-1",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](1)},
+										legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](1)},
 									},
 								},
 								{
 									Name: "gpu-2",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](2)},
+										legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](2)},
 									},
 								},
 								{
 									Name: "gpu-3",
 									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](3)},
+										legacyDRAExampleGPUIndexAttribute: {IntValue: ptr.To[int64](3)},
 									},
 								},
 							},
@@ -1001,7 +1001,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 									{
 										Name: "gpu",
 										Exactly: &resourcev1.ExactDeviceRequest{
-											DeviceClassName: nodeinfo.DraExampleDriver,
+											DeviceClassName: legacyDRAExampleDriver,
 											Count:           3,
 											Selectors: []resourcev1.DeviceSelector{
 												{
@@ -1053,7 +1053,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 									{
 										Name: "gpu",
 										Exactly: &resourcev1.ExactDeviceRequest{
-											DeviceClassName: nodeinfo.DraExampleDriver,
+											DeviceClassName: legacyDRAExampleDriver,
 											Count:           3,
 											Selectors: []resourcev1.DeviceSelector{
 												{
@@ -1118,7 +1118,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 							{
 								Name: "gpu",
 								Exactly: &resourcev1.ExactDeviceRequest{
-									DeviceClassName: nodeinfo.DraExampleDriver,
+									DeviceClassName: legacyDRAExampleDriver,
 									Count:           3,
 									Selectors: []resourcev1.DeviceSelector{
 										{
@@ -1246,7 +1246,7 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 							{
 								Name: "gpu",
 								Exactly: &resourcev1.ExactDeviceRequest{
-									DeviceClassName: nodeinfo.DraExampleDriver,
+									DeviceClassName: legacyDRAExampleDriver,
 									Count:           3,
 									Selectors: []resourcev1.DeviceSelector{
 										{

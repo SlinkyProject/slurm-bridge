@@ -13,19 +13,29 @@ import (
 )
 
 func TestDefaultRegistry(t *testing.T) {
-	want := DeviceProfile{
-		Name:     "gpu-example",
-		Driver:   "gpu.example.com",
-		Selector: `device.driver == 'gpu.example.com'`,
-		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	wants := []DeviceProfile{
+		{
+			Name:     "gpu-example",
+			Driver:   "gpu.example.com",
+			Selector: `device.driver == 'gpu.example.com'`,
+			Backend:  IndexedGRESBackend{GRESName: "gpu"},
+		},
+		{
+			Name:     "gpu-nvidia",
+			Driver:   "gpu.nvidia.com",
+			Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
+			Backend:  IndexedGRESBackend{GRESName: "gpu"},
+		},
 	}
 	registry := DefaultRegistry()
 
-	if got, ok := registry.LookupByName(want.Name); !ok || !reflect.DeepEqual(got, want) {
-		t.Fatalf("Registry.LookupByName() = (%#v, %t), want (%#v, true)", got, ok, want)
-	}
-	if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
-		t.Fatalf("Registry.LookupBySelector() = (%#v, %t), want (%#v, true)", got, ok, want)
+	for _, want := range wants {
+		if got, ok := registry.LookupByName(want.Name); !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("Registry.LookupByName() = (%#v, %t), want (%#v, true)", got, ok, want)
+		}
+		if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("Registry.LookupBySelector() = (%#v, %t), want (%#v, true)", got, ok, want)
+		}
 	}
 }
 
@@ -54,8 +64,12 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	if !registry.SupportsDriver("gpu.example.com") {
 		t.Fatal("Registry.SupportsDriver() = false for the example driver")
 	}
-	if registry.SupportsDriver("gpu.nvidia.com") {
-		t.Fatal("Registry.SupportsDriver() = true for an unregistered driver")
+	nvidia, _ := registry.LookupByName("gpu-nvidia")
+	if got := registry.profilesForDriver("gpu.nvidia.com"); !reflect.DeepEqual(got, []DeviceProfile{nvidia}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{nvidia})
+	}
+	if !registry.SupportsDriver("gpu.nvidia.com") {
+		t.Fatal("Registry.SupportsDriver() = false for the NVIDIA driver")
 	}
 }
 
@@ -82,6 +96,21 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
 		}
 		want, _ := registry.LookupByName("gpu-example")
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("matching NVIDIA GPU class", func(t *testing.T) {
+		deviceClass := valid()
+		deviceClass.Name = "gpu.nvidia.com"
+		deviceClass.Spec.Selectors[0].CEL.Expression = `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`
+
+		got, err := registry.MatchDeviceClass(deviceClass)
+		if err != nil {
+			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
+		}
+		want, _ := registry.LookupByName("gpu-nvidia")
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
 		}

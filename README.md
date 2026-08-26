@@ -80,6 +80,12 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
   - [DRA Driver CPU][dra-driver-cpu] for CPUs.
   - [NVIDIA DRA Driver][nvidia-dra-driver] for GPUs.
   - [DRA Example Driver][dra-example-driver] for GPUs.
+  - [NVIDIA DRA Driver][dra-driver-nvidia-gpu] for full GPUs.
+- NVIDIA GPU backend selection is resource-name based:
+  `deviceclass.resource.kubernetes.io/gpu.nvidia.com` selects the NVIDIA DRA
+  DeviceClass, while `nvidia.com/gpu` selects the NVIDIA device plugin.
+  `DeviceClass.spec.extendedResourceName` aliases are not resolved by
+  `slurm-bridge`; use the implicit DeviceClass resource name for NVIDIA DRA.
 - Native `cpu` requests do not activate CPU DRA. Pods must explicitly request
   `deviceclass.resource.kubernetes.io/dra.cpu` and cannot combine it with native
   `cpu` requests or limits.
@@ -143,6 +149,7 @@ specific language governing permissions and limitations under the License.
 [contact-schedmd]: https://www.schedmd.com/slurm-resources/contact-schedmd/
 [docs]: ./docs/
 [dra-driver-cpu]: https://github.com/kubernetes-sigs/dra-driver-cpu
+[dra-driver-nvidia-gpu]: https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu
 [dra-example-driver]: https://github.com/kubernetes-sigs/dra-example-driver
 [kubernetes]: https://kubernetes.io/
 [nvidia-dra-driver]: https://github.com/NVIDIA/k8s-dra-driver-gpu

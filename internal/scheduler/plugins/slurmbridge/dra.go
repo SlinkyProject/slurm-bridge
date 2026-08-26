@@ -81,7 +81,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, nil, errors.New("expected node resources")
 	}
 
-	profileResources, legacyResources, err := splitGRESResources(*resources)
+	profileResources, nonProfileResources, err := splitGRESResources(*resources)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -97,37 +97,46 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
 	var nodeInfo *nodeinfo.NodeInfo
 	var allocatedRequests []resourcev1.DeviceRequest
-	if podRequestsCPUDRA || len(legacyResources.Gres) > 0 {
+	if podRequestsCPUDRA {
 		nodeInfo, err = nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocatedRequests, err = nodeInfo.GetDeviceRequests(ctx, sb.Client, &legacyResources, podRequestsCPUDRA)
+		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &nonProfileResources)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		claimIncludesCPUDRARequest := hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String())
-		if podRequestsCPUDRA && !claimIncludesCPUDRARequest {
+		if !hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String()) {
 			return nil, nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
 		}
 	}
+	legacyRequests, err := legacyGPUDeviceRequests(ctx, sb.Client, nonProfileResources.Gres)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	allocatedRequests = append(allocatedRequests, legacyRequests...)
 
 	requestedCounts := deviceClassRequestCounts(pod)
 	for _, allocation := range indexedGRESAllocations {
 		delete(requestedCounts, allocation.DeviceClassName)
 	}
-	claimResources, err := subsetGRESResources(legacyResources, requestedCounts, deviceClassNames(allocatedRequests))
+	claimResources, err := subsetGRESResources(nonProfileResources, requestedCounts, deviceClassNames(allocatedRequests))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	var deviceRequests []resourcev1.DeviceRequest
 	if nodeInfo != nil {
-		deviceRequests, err = nodeInfo.GetDeviceRequests(ctx, sb.Client, claimResources, podRequestsCPUDRA)
+		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
+	legacyRequests, err = legacyGPUDeviceRequests(ctx, sb.Client, claimResources.Gres)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	deviceRequests = append(deviceRequests, legacyRequests...)
 	deviceRequests, indexedGRESAllocations = appendIndexedGRESRequests(deviceRequests, indexedGRESAllocations)
 
 	mappings, err := createContainerRequestMappings(pod, deviceRequests)
@@ -185,16 +194,21 @@ func (sb *SlurmBridge) bindClaim(
 	}
 	claimIncludesCPUDRARequest := claimRequestsCPUDRA(claim)
 	var devices []resourcev1.DeviceRequestAllocationResult
-	if claimIncludesCPUDRARequest || len(resources.NodeResources.Gres) > 0 {
+	if claimIncludesCPUDRARequest {
 		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 		if err != nil {
 			return err
 		}
-		devices, err = nodeInfo.GetDeviceRequestAllocationResult(ctx, sb.Client, resources.NodeResources, claimIncludesCPUDRARequest)
+		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources)
 		if err != nil {
 			return err
 		}
 	}
+	legacyDevices, err := legacyGPUAllocationResults(ctx, sb.Client, nodeName, resources.NodeResources.Gres)
+	if err != nil {
+		return err
+	}
+	devices = append(devices, legacyDevices...)
 	indexedGRESDevices, err := sb.indexedGRESAllocationResults(ctx, claim, resources)
 	if err != nil {
 		return err

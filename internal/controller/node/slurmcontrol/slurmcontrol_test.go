@@ -646,7 +646,6 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		name         string
 		client       slurmclient.Client
 		node         *corev1.Node
-		nodeInfo     *nodeinfo.NodeInfo
 		draInventory []dra.GRESInventory
 		want         bool
 		wantErr      bool
@@ -716,22 +715,6 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
 			want: true,
-		},
-		{
-			name: "node exists, desired gres empty (nodeInfo no GPUs) slurm has gres",
-			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:driver:1"),
-					},
-				},
-			).Build(),
-			node:     makeNode("worker-0", 4, 8),
-			nodeInfo: &nodeinfo.NodeInfo{},
-			want:     true,
 		},
 		{
 			name: "node exists with matching profile inventory",
@@ -834,7 +817,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{Client: tt.client}
-			got, err := r.NodeNeedsRecreate(ctx, tt.node, tt.nodeInfo, tt.draInventory)
+			got, err := r.NodeNeedsRecreate(ctx, tt.node, tt.draInventory)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NodeNeedsRecreate() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1248,7 +1231,7 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "add node with nodeInfo from NewNodeInfo (GRES)",
+			name: "add node with CPU topology from NewNodeInfo",
 			fields: fields{
 				Client: fake.NewFakeClient(),
 			},
@@ -1266,30 +1249,7 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 				nodeInfo: func() *nodeinfo.NodeInfo {
 					kubeClient := ctrlclientfake.NewClientBuilder().
 						WithScheme(scheme.Scheme).
-						WithObjects(
-							testNodeCPUResourceSlice("test-node"),
-							&resourcev1.ResourceSlice{
-								ObjectMeta: metav1.ObjectMeta{Name: "test-node-gpu-slice"},
-								Spec: resourcev1.ResourceSliceSpec{
-									NodeName: ptr.To("test-node"),
-									Driver:   nodeinfo.DraExampleDriver,
-									Devices: []resourcev1.Device{
-										{
-											Name: "gpu-0",
-											Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-												nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
-											},
-										},
-										{
-											Name: "gpu-1",
-											Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-												nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](1)},
-											},
-										},
-									},
-								},
-							},
-						).
+						WithObjects(testNodeCPUResourceSlice("test-node")).
 						Build()
 					info, err := nodeinfo.NewNodeInfo(context.Background(), kubeClient, "test-node")
 					if err != nil {
@@ -1310,66 +1270,6 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 				t.Errorf("realSlurmControl.AddNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
-	}
-}
-
-func Test_realSlurmControl_AddNode_withNodeInfo_includesGRESInNodeConfig(t *testing.T) {
-	var nodeConf string
-	f := interceptor.Funcs{
-		Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
-			if r, ok := req.(api.V0044OpenapiCreateNodeReq); ok {
-				nodeConf = r.NodeConf
-			}
-			return nil
-		},
-	}
-	slurmClient := fake.NewClientBuilder().WithInterceptorFuncs(f).Build()
-	kubeClient := ctrlclientfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(
-			testNodeCPUResourceSlice("test-node"),
-			&resourcev1.ResourceSlice{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-node-gpu-slice"},
-				Spec: resourcev1.ResourceSliceSpec{
-					NodeName: ptr.To("test-node"),
-					Driver:   nodeinfo.DraExampleDriver,
-					Devices: []resourcev1.Device{
-						{
-							Name: "gpu-0",
-							Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-								nodeinfo.DraExampleDriver_Index: {IntValue: ptr.To[int64](0)},
-							},
-						},
-					},
-				},
-			},
-		).
-		Build()
-	nodeInfo, err := nodeinfo.NewNodeInfo(context.Background(), kubeClient, "test-node")
-	if err != nil {
-		t.Fatalf("NewNodeInfo: %v", err)
-	}
-	r := &realSlurmControl{Client: slurmClient}
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
-		Status: corev1.NodeStatus{
-			Capacity: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("4"),
-				corev1.ResourceMemory: resource.MustParse("8Gi"),
-			},
-		},
-	}
-	if err := r.AddNode(context.Background(), node, nodeInfo, nil); err != nil {
-		t.Fatalf("AddNode: %v", err)
-	}
-	if nodeConf == "" {
-		t.Fatal("Create was not called or NodeConf was not captured")
-	}
-	if !strings.Contains(nodeConf, "Gres=") {
-		t.Errorf("NodeConf missing Gres=: %q", nodeConf)
-	}
-	if !strings.Contains(nodeConf, "GresConf=") {
-		t.Errorf("NodeConf missing GresConf=: %q", nodeConf)
 	}
 }
 
@@ -1419,48 +1319,6 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 	}
 	if comment != nil {
 		t.Errorf("AddNode() comment = %q, want nil", ptr.Deref(comment, ""))
-	}
-}
-
-func TestBuildNodeGRESConfigKeepsLegacyDrivers(t *testing.T) {
-	nvidia := &nodeinfo.NodeInfo{GpuMap: nodeinfo.NewGPUMap(
-		"pool-nvidia",
-		nodeinfo.DraDriverGpuNvidia,
-		[]*nodeinfo.GPUInfo{{Name: "gpu-0", Index: 0}},
-	)}
-
-	config, err := buildNodeGRESConfig(nvidia, testExampleDRAInventory())
-	if err != nil {
-		t.Fatalf("buildNodeGRESConfig() error = %v", err)
-	}
-	if want := "gpu:gpu.nvidia.com:1,gpu:gpu-example:2"; config.gres != want {
-		t.Fatalf("buildNodeGRESConfig() Gres = %q, want %q", config.gres, want)
-	}
-	wantLegacyConf := "count=1,name=gpu,type=gpu.nvidia.com,file=gpu-0+"
-	if !strings.HasPrefix(config.gresConf, wantLegacyConf) {
-		t.Fatalf("buildNodeGRESConfig() GresConf = %q, want prefix %q", config.gresConf, wantLegacyConf)
-	}
-	if config.extra == "" {
-		t.Fatal("buildNodeGRESConfig() omitted the applied DRA inventory Extra")
-	}
-}
-
-func TestBuildNodeGRESConfigReplacesLegacyExampleDriver(t *testing.T) {
-	example := &nodeinfo.NodeInfo{GpuMap: nodeinfo.NewGPUMap(
-		"pool-a",
-		nodeinfo.DraExampleDriver,
-		[]*nodeinfo.GPUInfo{{Name: "gpu-0", Index: 0}, {Name: "gpu-1", Index: 1}},
-	)}
-
-	config, err := buildNodeGRESConfig(example, testExampleDRAInventory())
-	if err != nil {
-		t.Fatalf("buildNodeGRESConfig() error = %v", err)
-	}
-	if want := "gpu:gpu-example:2"; config.gres != want {
-		t.Fatalf("buildNodeGRESConfig() Gres = %q, want %q", config.gres, want)
-	}
-	if strings.Contains(config.gres, nodeinfo.DraExampleDriver) {
-		t.Fatalf("buildNodeGRESConfig() retained legacy example-driver GRES: %q", config.gres)
 	}
 }
 
