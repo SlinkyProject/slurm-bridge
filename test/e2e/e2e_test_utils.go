@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -33,12 +34,25 @@ import (
 )
 
 const (
+	slurmNodeModeEnvironment    = "SLURM_NODE_MODE"
+	slurmNodeModeExternal       = slurmNodeMode("external")
+	slurmNodeModeHybrid         = slurmNodeMode("hybrid")
 	slurmNamespace              = "slurm"
+	slinkyNamespace             = "slinky"
 	slurmControllerPodName      = "slurm-controller-0"
 	slurmBridgeNamespace        = "slurm-bridge"
+	slurmBridgePartition        = "slurm-bridge"
 	slurmBridgeScheduler        = "slurm-bridge-scheduler"
+	slurmNodeModeLabel          = "slurm-node-mode"
 	slurmBridgeWorkerLabel      = "scheduler.slinky.slurm.net/slurm-bridge"
 	slurmJobIDLabel             = "scheduler.slinky.slurm.net/slurm-jobid"
+	slurmWorkerAppLabel         = "app.kubernetes.io/name"
+	slurmWorkerAppValue         = "slurmd"
+	slurmWorkerClusterLabel     = "slinky.slurm.net/cluster"
+	slurmWorkerClusterValue     = "slurm"
+	slurmWorkerScalingModeLabel = "nodeset.slinky.slurm.net/scaling-mode"
+	slurmWorkerDaemonSetMode    = "DaemonSet"
+	slurmJobStateCancelled      = "CANCELLED" //nolint:misspell // Slurm API spelling.
 	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
 	draExampleGPUResource       = "deviceclass.resource.kubernetes.io/gpu.example.com"
 	draNvidiaGPUResource        = "deviceclass.resource.kubernetes.io/gpu.nvidia.com"
@@ -50,6 +64,27 @@ var (
 	exampleGPUDeviceEnvironment = regexp.MustCompile(`(?m)^GPU_DEVICE_[0-9]+=(gpu-[0-9]+)$`)
 	nvidiaSMIGPU                = regexp.MustCompile(`(?m)^GPU [0-9]+: .+ \(UUID: GPU-[^)]+\)$`)
 )
+
+type slurmNodeMode string
+
+func parseSlurmNodeMode(value string) (slurmNodeMode, error) {
+	mode := slurmNodeMode(value)
+	switch mode {
+	case slurmNodeModeExternal, slurmNodeModeHybrid:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("%s must be one of %q or %q, got %q",
+			slurmNodeModeEnvironment, slurmNodeModeExternal, slurmNodeModeHybrid, value)
+	}
+}
+
+func parseSlurmNodeModeFromEnvironment() (slurmNodeMode, error) {
+	value := os.Getenv(slurmNodeModeEnvironment)
+	if value == "" {
+		value = string(slurmNodeModeExternal)
+	}
+	return parseSlurmNodeMode(value)
+}
 
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
@@ -99,12 +134,49 @@ func execInPod(ctx context.Context, config *envconf.Config, pod *corev1.Pod, com
 	return stdout.String(), nil
 }
 
-func slurmNodeNames(output string) map[string]struct{} {
-	nodes := make(map[string]struct{})
+func slurmNodeStates(output string) map[string]string {
+	nodes := make(map[string]string)
 	for line := range strings.Lines(output) {
+		var name string
+		var state string
 		for field := range strings.FieldsSeq(line) {
-			if name, found := strings.CutPrefix(field, "NodeName="); found {
-				nodes[name] = struct{}{}
+			if value, found := strings.CutPrefix(field, "NodeName="); found {
+				name = value
+			}
+			if value, found := strings.CutPrefix(field, "State="); found {
+				state = value
+			}
+		}
+		if name != "" {
+			nodes[name] = state
+		}
+	}
+	return nodes
+}
+
+func slurmJobNodeList(output string) (string, error) {
+	return slurmJobField(output, "NodeList")
+}
+
+func slurmJobField(output, name string) (string, error) {
+	for field := range strings.FieldsSeq(output) {
+		if value, found := strings.CutPrefix(field, name+"="); found && value != "" && value != "(null)" {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf("slurm job output does not contain %s: %s", name, strings.TrimSpace(output))
+}
+
+func readyHybridWorkerNodes(pods []corev1.Pod) map[string]struct{} {
+	nodes := make(map[string]struct{})
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Spec.NodeName == "" {
+			continue
+		}
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+				nodes[pod.Spec.NodeName] = struct{}{}
 				break
 			}
 		}
@@ -112,9 +184,51 @@ func slurmNodeNames(output string) map[string]struct{} {
 	return nodes
 }
 
-func testSlurmBridgeReadiness() types.Feature {
+func bridgeNodesReadyForMode(
+	mode slurmNodeMode,
+	bridgeNodes []corev1.Node,
+	slurmStates map[string]string,
+	readyHybridNodes map[string]struct{},
+) (bool, string) {
+	for i := range bridgeNodes {
+		node := &bridgeNodes[i]
+		state, registered := slurmStates[node.Name]
+		if !registered {
+			return false, fmt.Sprintf("Kubernetes bridge worker %s is not registered in Slurm", node.Name)
+		}
+
+		_, hasExternalLabel := node.Labels[wellknown.LabelExternalNode]
+		switch mode {
+		case slurmNodeModeExternal:
+			if !hasExternalLabel {
+				return false, fmt.Sprintf("external-mode worker %s does not have label %s",
+					node.Name, wellknown.LabelExternalNode)
+			}
+			if !strings.Contains(state, "EXTERNAL") {
+				return false, fmt.Sprintf("external-mode worker %s has Slurm state %q", node.Name, state)
+			}
+		case slurmNodeModeHybrid:
+			if hasExternalLabel {
+				return false, fmt.Sprintf("hybrid-mode worker %s unexpectedly has label %s",
+					node.Name, wellknown.LabelExternalNode)
+			}
+			if strings.Contains(state, "EXTERNAL") {
+				return false, fmt.Sprintf("hybrid-mode worker %s unexpectedly has Slurm state %q", node.Name, state)
+			}
+			if _, ready := readyHybridNodes[node.Name]; !ready {
+				return false, fmt.Sprintf("hybrid-mode worker %s does not have a Ready DaemonSet slurmd pod", node.Name)
+			}
+		default:
+			return false, fmt.Sprintf("unsupported Slurm node mode %q", mode)
+		}
+	}
+
+	return true, fmt.Sprintf("all %d Kubernetes bridge workers are ready in %s mode", len(bridgeNodes), mode)
+}
+
+func testSlurmBridgeReadiness(nodeMode slurmNodeMode) types.Feature {
 	return features.New("Slurm Bridge readiness").
-		Assess("Slurm has a bridge worker node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess(fmt.Sprintf("Slurm has all bridge workers in %s mode", nodeMode), func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
@@ -149,25 +263,39 @@ func testSlurmBridgeReadiness() types.Feature {
 					return false, nil
 				}
 
-				registeredNodes := slurmNodeNames(output)
-				for i := range bridgeNodes.Items {
-					if _, found := registeredNodes[bridgeNodes.Items[i].Name]; found {
-						return true, nil
+				readyHybridNodes := map[string]struct{}{}
+				if nodeMode == slurmNodeModeHybrid {
+					slurmWorkerPods := &corev1.PodList{}
+					if err := crClient.List(ctx, slurmWorkerPods,
+						client.InNamespace(slurmNamespace),
+						client.MatchingLabels{
+							slurmWorkerAppLabel:         slurmWorkerAppValue,
+							slurmWorkerClusterLabel:     slurmWorkerClusterValue,
+							slurmWorkerScalingModeLabel: slurmWorkerDaemonSetMode,
+						},
+					); err != nil {
+						lastObservation = fmt.Sprintf("list hybrid slurmd pods: %v", err)
+						return false, nil
 					}
+					readyHybridNodes = readyHybridWorkerNodes(slurmWorkerPods.Items)
 				}
-				lastObservation = fmt.Sprintf(
-					"%d Kubernetes bridge workers found, but none of the %d Slurm nodes match",
-					len(bridgeNodes.Items), len(registeredNodes),
+
+				ready, observation := bridgeNodesReadyForMode(
+					nodeMode,
+					bridgeNodes.Items,
+					slurmNodeStates(output),
+					readyHybridNodes,
 				)
-				return false, nil
+				lastObservation = observation
+				return ready, nil
 			}, wait.WithContext(ctx), wait.WithTimeout(slurmBridgeReadinessTimeout), wait.WithInterval(5*time.Second)); err != nil {
-				t.Fatalf("Slurm never registered a bridge worker node: %v; last observation: %s", err, lastObservation)
+				t.Fatalf("Slurm Bridge never became ready in %s mode: %v; last observation: %s", nodeMode, err, lastObservation)
 			}
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 			if t.Failed() {
-				captureFailureDiagnostics(t, "Slurm Bridge readiness", slurmNamespace)
+				captureFailureDiagnostics(t, "Slurm Bridge readiness", slurmNamespace, slinkyNamespace)
 			}
 			return ctx
 		}).
@@ -300,7 +428,7 @@ func testSlurmBridgeJobScheduling() types.Feature {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if t.Failed() {
-				captureFailureDiagnostics(t, "Slurm-scheduled job", slurmBridgeNamespace, "slurm")
+				captureFailureDiagnostics(t, "Slurm-scheduled job", slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
 			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -352,7 +480,7 @@ func testSlurmBridgePodScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("pod runs on Slurm Bridge worker node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("pod runs on the worker node allocated by Slurm", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
@@ -361,7 +489,7 @@ func testSlurmBridgePodScheduling() types.Feature {
 				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 					return false, err
 				}
-				return pod.Spec.NodeName != "", nil
+				return pod.Spec.NodeName != "" && pod.Labels[slurmJobIDLabel] != "", nil
 			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(10*time.Second)); err != nil {
 				t.Fatalf("pod was never scheduled to a node: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
@@ -376,11 +504,31 @@ func testSlurmBridgePodScheduling() types.Feature {
 			if pod.Spec.SchedulerName != slurmBridgeScheduler {
 				t.Fatalf("pod was not scheduled by Slurm Bridge scheduler")
 			}
+
+			controllerPod := &corev1.Pod{}
+			if err := crClient.Get(ctx, client.ObjectKey{
+				Namespace: slurmNamespace,
+				Name:      slurmControllerPodName,
+			}, controllerPod); err != nil {
+				t.Fatalf("failed to get Slurm controller pod: %v", err)
+			}
+			output, err := execInPod(ctx, config, controllerPod,
+				"scontrol", "show", "job", pod.Labels[slurmJobIDLabel], "--oneliner")
+			if err != nil {
+				t.Fatalf("failed to query Slurm job %s: %v", pod.Labels[slurmJobIDLabel], err)
+			}
+			slurmNode, err := slurmJobNodeList(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slurmNode != pod.Spec.NodeName {
+				t.Fatalf("Slurm allocated node %s, but Kubernetes bound the pod to %s", slurmNode, pod.Spec.NodeName)
+			}
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if t.Failed() {
-				captureFailureDiagnostics(t, "Slurm-scheduled pod", slurmBridgeNamespace, "slurm")
+				captureFailureDiagnostics(t, "Slurm-scheduled pod", slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
 			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -395,13 +543,19 @@ func testSlurmBridgePodScheduling() types.Feature {
 		Feature()
 }
 
-func testSlurmBridgeDRAResourceScheduling() types.Feature {
+func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 	podName := envconf.RandomName("pod-dra-e2e", 32)
+	exclusiveValue := "false"
+	featureName := "Non-exclusive DRA resources allocated to container"
+	if exclusive {
+		exclusiveValue = "true"
+		featureName = "Exclusive DRA resources allocated to container"
+	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        podName,
 			Namespace:   slurmBridgeNamespace,
-			Annotations: map[string]string{wellknown.AnnotationExclusive: "true"},
+			Annotations: map[string]string{wellknown.AnnotationExclusive: exclusiveValue},
 		},
 		Spec: corev1.PodSpec{
 			SchedulerName: slurmBridgeScheduler,
@@ -428,7 +582,7 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 		},
 	}
 
-	return features.New("DRA resources allocated to container").
+	return features.New(featureName).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -465,7 +619,7 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("container CPU set matches exclusive DRA allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("container CPU set matches DRA allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			environment, err := execInPod(ctx, config, pod, "env")
 			if err != nil {
 				t.Fatalf("failed to read container environment: %v", err)
@@ -504,8 +658,8 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if t.Failed() {
-				captureFailureDiagnostics(t, "DRA resources allocated to container",
-					slurmBridgeNamespace, "slurm", "kube-system", "dra-example-driver")
+				captureFailureDiagnostics(t, featureName,
+					slurmBridgeNamespace, slurmNamespace, slinkyNamespace, "kube-system", "dra-example-driver")
 			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -634,6 +788,110 @@ func testSlurmBridgeNvidiaGPUResourceScheduling() types.Feature {
 			}
 			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 				t.Errorf("failed to delete NVIDIA DRA pod %s: %v", podName, err)
+			}
+			return ctx
+		}).
+		Feature()
+}
+
+func testHybridSlurmBatchScheduling() types.Feature {
+	var jobID string
+	jobCompleted := false
+
+	return features.New("Native Slurm batch scheduling").
+		WithLabel(slurmNodeModeLabel, string(slurmNodeModeHybrid)).
+		Assess("job submitted through Slurm runs on a hybrid worker", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			controllerPod := &corev1.Pod{}
+			if err := crClient.Get(ctx, client.ObjectKey{
+				Namespace: slurmNamespace,
+				Name:      slurmControllerPodName,
+			}, controllerPod); err != nil {
+				t.Fatalf("failed to get Slurm controller pod: %v", err)
+			}
+
+			output, err := execInPod(ctx, config, controllerPod,
+				"sbatch", "--parsable", "--partition="+slurmBridgePartition,
+				"--chdir=/tmp", "--output=/dev/null", "--wrap=/bin/true")
+			if err != nil {
+				t.Fatalf("failed to submit native Slurm job: %v", err)
+			}
+			jobID, _, _ = strings.Cut(strings.TrimSpace(output), ";")
+			if jobID == "" {
+				t.Fatalf("sbatch did not return a job ID: %q", output)
+			}
+
+			var jobOutput string
+			var lastObservation string
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				jobOutput, err = execInPod(ctx, config, controllerPod,
+					"scontrol", "show", "job", jobID, "--oneliner")
+				if err != nil {
+					return false, fmt.Errorf("query native Slurm job %s: %w", jobID, err)
+				}
+
+				state, err := slurmJobField(jobOutput, "JobState")
+				if err != nil {
+					return false, err
+				}
+				lastObservation = "JobState=" + state
+				switch state {
+				case "COMPLETED":
+					return true, nil
+				case "BOOT_FAIL", slurmJobStateCancelled, "DEADLINE", "FAILED", "NODE_FAIL",
+					"OUT_OF_MEMORY", "PREEMPTED", "REVOKED", "TIMEOUT":
+					return false, fmt.Errorf("native Slurm job %s reached terminal state %s", jobID, state)
+				default:
+					return false, nil
+				}
+			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(time.Second)); err != nil {
+				t.Fatalf("native Slurm job %s did not complete: %v; last observation: %s", jobID, err, lastObservation)
+			}
+			jobCompleted = true
+
+			nodeName, err := slurmJobNodeList(jobOutput)
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := &corev1.Node{}
+			if err := crClient.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
+				t.Fatalf("failed to get Kubernetes node %s allocated by Slurm: %v", nodeName, err)
+			}
+			if node.Labels[slurmBridgeWorkerLabel] != "worker" {
+				t.Fatalf("native Slurm job ran on node %s which is not a Slurm Bridge worker", nodeName)
+			}
+			if _, external := node.Labels[wellknown.LabelExternalNode]; external {
+				t.Fatalf("native Slurm job ran on external node %s", nodeName)
+			}
+			return ctx
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "native Slurm batch job", slurmNamespace, slinkyNamespace)
+			}
+			if jobID == "" || jobCompleted {
+				return ctx
+			}
+
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Logf("failed to get client while canceling native Slurm job %s: %v", jobID, err)
+				return ctx
+			}
+			controllerPod := &corev1.Pod{}
+			if err := crClient.Get(ctx, client.ObjectKey{
+				Namespace: slurmNamespace,
+				Name:      slurmControllerPodName,
+			}, controllerPod); err != nil {
+				t.Logf("failed to get Slurm controller pod while canceling native job %s: %v", jobID, err)
+				return ctx
+			}
+			if _, err := execInPod(ctx, config, controllerPod, "scancel", jobID); err != nil {
+				t.Logf("failed to cancel native Slurm job %s: %v", jobID, err)
 			}
 			return ctx
 		}).

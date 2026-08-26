@@ -22,6 +22,33 @@ the current chart defaults before applying these overrides. If an older file is
 a full copy of `values.yaml`, replace it with `{}` so it does not pin defaults
 from an older checkout.
 
+## End-to-end tests
+
+The end-to-end suite can exercise either supported Slurm node mode. External
+mode is the default:
+
+```sh
+make kind-start test-e2e
+```
+
+Use a separate cluster for hybrid mode because an installed cluster cannot
+switch node modes in place:
+
+```sh
+KUBECONFIG=/tmp/slurm-bridge-hybrid.kubeconfig \
+BUILDX_CONFIG=/tmp/slurm-bridge-hybrid-buildx \
+SKAFFOLD_CACHE_FILE=/tmp/slurm-bridge-hybrid-skaffold-cache \
+KIND_CLUSTER_NAME=slurm-bridge-hybrid \
+SLURM_NODE_MODE=hybrid \
+make kind-start test-e2e
+```
+
+`SLURM_NODE_MODE` is also passed into the test process. The readiness feature
+uses it to verify that the cluster actually contains external nodes or
+DaemonSet-mode hybrid `slurmd` pods, as requested. Hybrid runs also include a
+native `sbatch` feature labeled `slurm-node-mode=hybrid`, which verifies that a
+job submitted directly to Slurm completes on one of those hybrid workers.
+
 ## Remote cluster
 
 Install a compatible released Slinky stack first. The workstation running the
