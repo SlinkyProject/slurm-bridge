@@ -178,7 +178,7 @@ spec:
 Slurm parameters are resolved from lowest to highest precedence: **scheduler or
 Slurm defaults -> values derived from the workload and Pods -> Slurm job
 annotations**. For built-in PodGroups, annotation precedence is **PodGroup ->
-Job -> Workload**.
+selected controller (Job or JobSet) -> Workload**.
 
 Keys that do not conflict are combined.
 
@@ -218,14 +218,14 @@ managed Pod or change them after that Pod is running.
 
 Slurm-bridge turns each group of Kubernetes Pods into one Slurm external job:
 
-| Workload                  | Pods in one external job                                 | Where to put annotations    |
-| ------------------------- | -------------------------------------------------------- | --------------------------- |
-| Pod                       | That Pod                                                 | Pod                         |
-| Job or JobSet             | One Pod                                                  | Job or JobSet               |
-| Built-in PodGroup         | Pods with the same `spec.schedulingGroup.podGroupName`   | PodGroup, Job, or Workload  |
-| PodGroup coscheduling     | Pods with the same `scheduling.x-k8s.io/pod-group` label | PodGroup                    |
-| LeaderWorkerSet           | One LeaderWorkerSet group                                | LeaderWorkerSet             |
-| Other readable controller | One Pod                                                  | Highest readable controller |
+| Workload                  | Pods in one external job                                 | Where to put annotations                      |
+| ------------------------- | -------------------------------------------------------- | --------------------------------------------- |
+| Pod                       | That Pod                                                 | Pod                                           |
+| Job or JobSet             | One Pod                                                  | Job or JobSet                                 |
+| Built-in PodGroup         | Pods with the same `spec.schedulingGroup.podGroupName`   | PodGroup, selected Job or JobSet, or Workload |
+| PodGroup coscheduling     | Pods with the same `scheduling.x-k8s.io/pod-group` label | PodGroup                                      |
+| LeaderWorkerSet           | One LeaderWorkerSet group                                | LeaderWorkerSet                               |
+| Other readable controller | One Pod                                                  | Highest readable controller                   |
 
 Slurm-bridge first follows controller owner references toward the root object.
 It selects the first applicable grouping mechanism in this order: **built-in
@@ -242,13 +242,15 @@ For grouped workloads:
   Annotations on generated Jobs or Pods are ignored.
 - **LeaderWorkerSet:** LeaderWorkerSet annotations apply to every group external
   job. Pod annotations are ignored.
-- **Built-in PodGroup:** annotations are merged from the PodGroup, root owning
-  Job, and Workload. Pod annotations are ignored.
+- **Built-in PodGroup:** annotations are merged from the PodGroup, one selected
+  controller (Job or JobSet), and Workload. If a Job belongs to a JobSet, the
+  JobSet is selected and the intermediate Job's annotations are ignored. Pod
+  annotations are also ignored.
 - **PodGroup coscheduling:** only PodGroup annotations apply to the group.
   Owning Job and Pod annotations are ignored.
 
 The built-in Workload API is therefore different from the other grouped
-workloads: it merges three annotation sources instead of reading one top-level
+workloads: it merges scoped annotation sources instead of reading one top-level
 source.
 
 ### Other controller owners
@@ -344,26 +346,27 @@ spec:
 Ref: [Workload API][workload-api]
 
 To override Slurm submission parameters, add optional
-`slurmjob.slinky.slurm.net/*` annotations on the **Workload**, owning **Job**,
-or runtime **PodGroup**. On conflict, **Workload** > **Job** > **PodGroup**.
-Without them, the Slurm job name defaults to the **PodGroup object name** (not
-the Workload name) and the partition defaults to the scheduler configuration.
-See [Annotations](#annotations) for the full key list.
+`slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
+controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
+**Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
+job name defaults to the **PodGroup object name** (not the Workload name) and
+the partition defaults to the scheduler configuration. See
+[Annotations](#annotations) for the full key list.
 
 If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
-applied **PodGroup -> Job -> Workload**, so the Workload wins. In the example
-above, the PodGroup is named `training-job-workers` but the Workload sets
-`slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm receives
-**`training-job`**. A PodGroup cannot override a `job-name` set on its Workload
-or owning Job. For per-gang names, omit `job-name` from the Workload and set it
-on each **PodGroup** or owning **Job** instead.
+applied **PodGroup -> selected controller -> Workload**, so the Workload wins.
+In the example above, the PodGroup is named `training-job-workers` but the
+Workload sets `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm
+receives **`training-job`**. A PodGroup cannot override a `job-name` set on its
+Workload or selected controller. For per-gang names, omit `job-name` from
+broader sources and set it on each **PodGroup** instead.
 
 A Workload may define several `podGroupTemplates`, each producing a runtime
 PodGroup. Workload-level identifiers such as `job-name` then apply to **every**
 PodGroup under that Workload. Each gang still submits a separate Slurm external
 job (distinct job ID on the pods), but all share the same Slurm job **name** in
 `squeue`. Use the Workload for **shared** parameters (partition, account, QOS,
-time limit) and **PodGroup** or **Job** for per-gang identifiers.
+time limit) and **PodGroup** for per-gang identifiers.
 
 ## JobSets
 
