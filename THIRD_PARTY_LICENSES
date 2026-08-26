@@ -508,7 +508,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/crypto
 - Name: golang.org/x/crypto
-- Version: v0.54.0
+- Version: v0.55.0
 - License: BSD-3-Clause
 
 ### golang.org/x/exp/slices
@@ -518,7 +518,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/net
 - Name: golang.org/x/net
-- Version: v0.57.0
+- Version: v0.58.0
 - License: BSD-3-Clause
 
 ### golang.org/x/oauth2
@@ -543,7 +543,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/text
 - Name: golang.org/x/text
-- Version: v0.40.0
+- Version: v0.41.0
 - License: BSD-3-Clause
 
 ### golang.org/x/time/rate
@@ -593,12 +593,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/api
 - Name: k8s.io/api
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/apiextensions-apiserver/pkg
 - Name: k8s.io/apiextensions-apiserver/pkg
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/apimachinery/pkg
@@ -613,12 +613,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/apiserver
 - Name: k8s.io/apiserver
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/client-go
 - Name: k8s.io/client-go
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/cloud-provider/volume
@@ -628,17 +628,17 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/component-base
 - Name: k8s.io/component-base
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/component-helpers
 - Name: k8s.io/component-helpers
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/controller-manager/pkg/features
 - Name: k8s.io/controller-manager/pkg/features
-- Version: v0.35.2
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/csi-translation-lib
@@ -648,7 +648,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/dynamic-resource-allocation
 - Name: k8s.io/dynamic-resource-allocation
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/klog/v2
@@ -658,7 +658,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/kms
 - Name: k8s.io/kms
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg
@@ -693,17 +693,17 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/kube-scheduler
 - Name: k8s.io/kube-scheduler
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/kubelet/pkg/apis
 - Name: k8s.io/kubelet/pkg/apis
-- Version: v0.36.0
+- Version: v0.36.2
 - License: Apache-2.0
 
 ### k8s.io/kubernetes
 - Name: k8s.io/kubernetes
-- Version: v1.36.0
+- Version: v1.36.2
 - License: Apache-2.0
 
 ### k8s.io/streaming/pkg
