@@ -17,6 +17,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,6 +107,9 @@ func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 		return nil, err
 	}
 	if err := batchv1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	if err := resourcev1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
 

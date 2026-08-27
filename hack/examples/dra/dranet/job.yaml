@@ -27,7 +27,7 @@ spec:
       containers:
         - name: network
           image: busybox:stable
-          command: [sh, -c, 'ip link show dranet0; sleep 300']
+          command: [sh, -c, ip link show dranet0; sleep 300]
           resources:
             requests:
               cpu: '1'

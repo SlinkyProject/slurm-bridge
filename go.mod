@@ -10,6 +10,7 @@ require (
 	github.com/puttsk/hostlist v0.1.0
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.3
+	k8s.io/apiserver v0.36.2
 	k8s.io/client-go v0.36.2
 	k8s.io/component-base v0.36.2
 	k8s.io/component-helpers v0.36.2
@@ -147,7 +148,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	k8s.io/apiextensions-apiserver v0.36.2 // indirect
-	k8s.io/apiserver v0.36.2 // indirect
 	k8s.io/cloud-provider v0.35.2 // indirect
 	k8s.io/controller-manager v0.36.2 // indirect
 	k8s.io/csi-translation-lib v0.35.2 // indirect

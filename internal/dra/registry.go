@@ -78,14 +78,6 @@ func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
 	return registry, nil
 }
 
-func mustNewRegistry(profiles ...DeviceProfile) *Registry {
-	registry, err := newRegistry(profiles...)
-	if err != nil {
-		panic(err)
-	}
-	return registry
-}
-
 // NewRegistry validates profiles and indexes them by name and canonical
 // selector.
 func NewRegistry(profiles []DeviceProfile) (*Registry, error) {

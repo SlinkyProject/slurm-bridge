@@ -113,19 +113,16 @@ Limitations
 - Bridge jobs use exclusive, whole-node allocations by default.
   Workloads that request non-exclusive placement always use Slurm MCS
   workload isolation.
-- Only supports the following DRA drivers:
-
-  - `DRA Driver
-    CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs.
-  - `NVIDIA DRA Driver <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__
-    for GPUs.
-  - `DRA Example
-    Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
-    for GPUs.
-  - `NVIDIA DRA
-    Driver <https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu>`__
-    for full GPUs.
-
+- Supports `DRA Driver
+  CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs,
+  plus indexed GPU and accelerator drivers mapped to Slurm GRES through
+  configured device profiles. The chart includes profiles for `DRA
+  Example
+  Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__ and
+  `NVIDIA DRA
+  Driver <https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu>`__
+  GPUs by default, and retains its specialized `NVIDIA DRA
+  Driver <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__ path.
 - NVIDIA GPU backend selection is resource-name based:
   ``deviceclass.resource.kubernetes.io/gpu.nvidia.com`` selects the
   NVIDIA DRA DeviceClass, while ``nvidia.com/gpu`` selects the NVIDIA

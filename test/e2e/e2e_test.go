@@ -28,6 +28,7 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(false),
 		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
+		testSlurmBridgeDRANETResourceScheduling(),
 	}
 	if nodeMode == slurmNodeModeExternal {
 		testFeatures = append(testFeatures, testSlurmBridgeDRAResourceScheduling(true))
