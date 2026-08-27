@@ -182,6 +182,68 @@ func TestConfigDRARegistry(t *testing.T) {
 	}
 }
 
+func TestConfigDRARegistryUsesDefaultsWhenProfilesAreNil(t *testing.T) {
+	for _, input := range []string{"", "deviceProfiles: null\n"} {
+		cfg, err := Unmarshal([]byte(input))
+		if err != nil {
+			t.Fatalf("Unmarshal(%q) error = %v", input, err)
+		}
+		if cfg.DeviceProfiles != nil {
+			t.Fatalf("Unmarshal(%q) DeviceProfiles = %#v, want nil", input, cfg.DeviceProfiles)
+		}
+		registry, err := cfg.DRARegistry()
+		if err != nil {
+			t.Fatalf("Config.DRARegistry() error = %v", err)
+		}
+		for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+			if _, ok := registry.LookupByName(profileName); !ok {
+				t.Errorf("Config.DRARegistry() omitted default profile %q for input %q", profileName, input)
+			}
+		}
+	}
+}
+
+func TestConfigDRARegistryHonoursExplicitEmptyProfiles(t *testing.T) {
+	cfg, err := Unmarshal([]byte("deviceProfiles: []\n"))
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if cfg.DeviceProfiles == nil {
+		t.Fatal("Unmarshal() DeviceProfiles = nil, want explicit empty slice")
+	}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
+	}
+	for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+		if _, ok := registry.LookupByName(profileName); ok {
+			t.Errorf("Config.DRARegistry() unexpectedly included profile %q", profileName)
+		}
+	}
+}
+
+func TestConfigDRARegistrySupportsCoreBitmapBackend(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:     "custom-cpu",
+		Driver:   "cpu.example.com",
+		Selector: `device.driver == 'cpu.example.com'`,
+		Backend:  DeviceProfileBackendConfig{Type: "core-bitmap"},
+	}}}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
+	}
+	profile, ok := registry.LookupByName("custom-cpu")
+	if !ok {
+		t.Fatal("Config.DRARegistry() omitted configured core-bitmap profile")
+	}
+	if !profile.UsesCoreBitmap() {
+		t.Fatalf("Config.DRARegistry() backend = %T, want core-bitmap", profile.Backend)
+	}
+}
+
 func TestConfigDRARegistryRejectsInvalidBackend(t *testing.T) {
 	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
 		Name:    "broken",

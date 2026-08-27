@@ -71,10 +71,16 @@ func UnmarshalOrDie(in []byte) *Config {
 // DRARegistry converts the user-facing profile configuration into the runtime
 // registry shared by all slurm-bridge components.
 func (c *Config) DRARegistry() (*dra.Registry, error) {
+	if c.DeviceProfiles == nil {
+		return dra.DefaultRegistry(), nil
+	}
+
 	profiles := make([]dra.DeviceProfile, 0, len(c.DeviceProfiles))
 	for _, configured := range c.DeviceProfiles {
 		var backend dra.Backend
 		switch configured.Backend.Type {
+		case "core-bitmap":
+			backend = dra.CoreBitmapBackend{}
 		case "indexed-gres":
 			backend = dra.IndexedGRESBackend{GRESName: configured.Backend.GRESName}
 		default:
