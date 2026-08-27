@@ -40,11 +40,16 @@ const (
 	slurmBridgeWorkerLabel      = "scheduler.slinky.slurm.net/slurm-bridge"
 	slurmJobIDLabel             = "scheduler.slinky.slurm.net/slurm-jobid"
 	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
-	draGPUResource              = "deviceclass.resource.kubernetes.io/gpu.example.com"
+	draExampleGPUResource       = "deviceclass.resource.kubernetes.io/gpu.example.com"
+	draNvidiaGPUResource        = "deviceclass.resource.kubernetes.io/gpu.nvidia.com"
+	nvidiaGPUPresentLabel       = "nvidia.com/gpu.present"
 	slurmBridgeReadinessTimeout = 3 * time.Minute
 )
 
-var gpuDeviceEnvironment = regexp.MustCompile(`(?m)^GPU_DEVICE_[0-9]+=(gpu-[0-9]+)$`)
+var (
+	exampleGPUDeviceEnvironment = regexp.MustCompile(`(?m)^GPU_DEVICE_[0-9]+=(gpu-[0-9]+)$`)
+	nvidiaSMIGPU                = regexp.MustCompile(`(?m)^GPU [0-9]+: .+ \(UUID: GPU-[^)]+\)$`)
+)
 
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
@@ -410,12 +415,12 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 						Requests: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("100Mi"),
 							draCPUResource:        resource.MustParse("1"),
-							draGPUResource:        resource.MustParse("1"),
+							draExampleGPUResource: resource.MustParse("1"),
 						},
 						Limits: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("100Mi"),
 							draCPUResource:        resource.MustParse("1"),
-							draGPUResource:        resource.MustParse("1"),
+							draExampleGPUResource: resource.MustParse("1"),
 						},
 					},
 				},
@@ -491,7 +496,7 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			if err != nil {
 				t.Fatalf("failed to read container environment: %v", err)
 			}
-			matches := gpuDeviceEnvironment.FindAllStringSubmatch(environment, -1)
+			matches := exampleGPUDeviceEnvironment.FindAllStringSubmatch(environment, -1)
 			if len(matches) != 1 {
 				t.Fatalf("container has %d example GPU allocations, want 1", len(matches))
 			}
@@ -509,6 +514,126 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 			}
 			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 				t.Errorf("failed to delete DRA pod %s: %v", podName, err)
+			}
+			return ctx
+		}).
+		Feature()
+}
+
+func testSlurmBridgeNvidiaGPUResourceScheduling() types.Feature {
+	podName := envconf.RandomName("pod-dra-nvidia-e2e", 32)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: slurmBridgeNamespace,
+		},
+		Spec: corev1.PodSpec{
+			SchedulerName: slurmBridgeScheduler,
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    podName,
+					Image:   "busybox:stable",
+					Command: []string{"sh", "-c", "sleep 300"},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("100Mi"),
+							draNvidiaGPUResource:  resource.MustParse("1"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("100Mi"),
+							draNvidiaGPUResource:  resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return features.New("NVIDIA DRA GPU allocated to container").
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			gpuNodes := &corev1.NodeList{}
+			if err := crClient.List(ctx, gpuNodes, client.MatchingLabels{
+				slurmBridgeWorkerLabel: "worker",
+				nvidiaGPUPresentLabel:  "true",
+			}); err != nil {
+				t.Fatalf("failed to list NVIDIA GPU nodes: %v", err)
+			}
+			if len(gpuNodes.Items) == 0 {
+				t.Skip("no Slurm Bridge worker exposes NVIDIA GPUs")
+			}
+
+			if err := crClient.Create(ctx, pod); err != nil {
+				t.Fatalf("failed to create NVIDIA DRA pod: %v", err)
+			}
+			return ctx
+		}).
+		Assess("pod runs on Slurm Bridge worker node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+					return false, err
+				}
+				if pod.Status.Phase == corev1.PodFailed {
+					return false, fmt.Errorf("NVIDIA DRA pod failed: %s", pod.Status.Message)
+				}
+				return pod.Status.Phase == corev1.PodRunning, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+				t.Fatalf("NVIDIA DRA pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
+			}
+
+			node := &corev1.Node{}
+			if err := crClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
+				t.Fatalf("failed to get node %s: %v", pod.Spec.NodeName, err)
+			}
+			if node.Labels[slurmBridgeWorkerLabel] != "worker" {
+				t.Fatalf("NVIDIA DRA pod ran on node %s which is not a Slurm Bridge worker", pod.Spec.NodeName)
+			}
+			return ctx
+		}).
+		Assess("container has one NVIDIA GPU plumbed in", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			deviceOutput, err := execInPod(ctx, config, pod, "sh", "-c",
+				`for device in /dev/nvidia[0-9]*; do [ ! -e "$device" ] || echo "$device"; done`)
+			if err != nil {
+				t.Fatalf("failed to list NVIDIA GPU device nodes: %v", err)
+			}
+			devices := strings.Fields(deviceOutput)
+			if len(devices) != 1 {
+				t.Fatalf("container has %d NVIDIA GPU device nodes, want 1: %q", len(devices), deviceOutput)
+			}
+
+			nvidiaSMIOutput, err := execInPod(ctx, config, pod, "nvidia-smi", "-L")
+			if err != nil {
+				t.Fatalf("failed to query the NVIDIA GPU from the container: %v", err)
+			}
+			matches := nvidiaSMIGPU.FindAllString(nvidiaSMIOutput, -1)
+			if len(matches) != 1 {
+				t.Fatalf("container sees %d NVIDIA GPUs through nvidia-smi, want 1: %q", len(matches), nvidiaSMIOutput)
+			}
+			return ctx
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(t, "NVIDIA DRA GPU allocated to container",
+					slurmBridgeNamespace, "slurm", "dra-driver-nvidia-gpu", "nvml-mock")
+			}
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Errorf("failed to get client for NVIDIA DRA pod cleanup: %v", err)
+				return ctx
+			}
+			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+				t.Errorf("failed to delete NVIDIA DRA pod %s: %v", podName, err)
 			}
 			return ctx
 		}).

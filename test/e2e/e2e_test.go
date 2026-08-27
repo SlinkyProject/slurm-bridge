@@ -17,5 +17,6 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(),
+		testSlurmBridgeNvidiaGPUResourceScheduling(),
 	)
 }
