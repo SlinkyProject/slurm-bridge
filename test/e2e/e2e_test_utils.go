@@ -533,7 +533,7 @@ func testSlurmBridgeNvidiaGPUResourceScheduling() types.Feature {
 			Containers: []corev1.Container{
 				{
 					Name:    podName,
-					Image:   "busybox:stable",
+					Image:   "ubuntu:24.04",
 					Command: []string{"sh", "-c", "sleep 300"},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
