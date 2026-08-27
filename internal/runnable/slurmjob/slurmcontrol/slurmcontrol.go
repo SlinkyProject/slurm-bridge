@@ -21,11 +21,25 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
 
+// BridgeJob is a bridge-created external job and the pods it claims via its
+// admin comment.
+type BridgeJob struct {
+	JobId   int32
+	Nodes   string
+	PodKeys []kubetypes.NamespacedName
+}
+
 type SlurmControlInterface interface {
 	// RefreshJobCache forces the Node cache to be refreshed
 	RefreshJobCache(ctx context.Context) error
 	// ListPodsFromJobs returns a list of Slurm jobIds and their pods
 	ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error)
+	// ListBridgeJobs returns every bridge-created job with its node list and
+	// claimed pods, served from the job cache.
+	ListBridgeJobs(ctx context.Context) ([]BridgeJob, error)
+	// GetJobNodesLive reports whether the job exists in a non-terminal state
+	// and which nodes it holds, bypassing the job cache.
+	GetJobNodesLive(ctx context.Context, jobId int32) (exists bool, nodes string, err error)
 	// GetPodsFromJob returns a list of pod keys associated to the Slurm job.
 	GetPodsFromJob(ctx context.Context, jobId int32) ([]kubetypes.NamespacedName, error)
 	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
@@ -89,6 +103,52 @@ func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kub
 	}
 
 	return jobIds, pods, nil
+}
+
+// ListBridgeJobs implements SlurmControlInterface.
+func (r *realSlurmControl) ListBridgeJobs(ctx context.Context) ([]BridgeJob, error) {
+	jobList := &types.V0044JobInfoList{}
+	if err := r.List(ctx, jobList); err != nil {
+		return nil, err
+	}
+
+	jobs := []BridgeJob{}
+	for _, job := range jobList.Items {
+		extInfo := &externaljobinfo.ExternalJobInfo{}
+		if err := externaljobinfo.ParseIntoExternalJobInfo(job.AdminComment, extInfo); err != nil {
+			// Assume the job was not created by slurm-bridge
+			continue
+		}
+		out := BridgeJob{
+			JobId: ptr.Deref(job.JobId, 0),
+			Nodes: ptr.Deref(job.Nodes, ""),
+		}
+		for _, podName := range extInfo.Pods {
+			out.PodKeys = append(out.PodKeys, utils.NamespacedNameFromString(podName))
+		}
+		jobs = append(jobs, out)
+	}
+
+	return jobs, nil
+}
+
+// GetJobNodesLive implements SlurmControlInterface.
+func (r *realSlurmControl) GetJobNodesLive(ctx context.Context, jobId int32) (bool, string, error) {
+	if jobId == 0 {
+		return false, "", nil
+	}
+	job := &types.V0044JobInfo{}
+	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
+	if err := r.Get(ctx, key, job, &client.GetOptions{SkipCache: true}); err != nil {
+		if utils.IsSlurmJobNotFoundErr(err) {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+	if job.GetStateAsSet().HasAny(api.V0044JobInfoJobStateCANCELLED, api.V0044JobInfoJobStateCOMPLETED) {
+		return false, "", nil
+	}
+	return true, ptr.Deref(job.Nodes, ""), nil
 }
 
 // GetPodsFromJob implements SlurmControlInterface.

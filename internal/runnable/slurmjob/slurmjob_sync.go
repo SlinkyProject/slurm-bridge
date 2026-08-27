@@ -43,6 +43,10 @@ func (r *SlurmJobRunnable) Sync(ctx context.Context) error {
 		}
 	}
 
+	if err := r.reconcilePodMetadata(ctx); err != nil {
+		errs = append(errs, err)
+	}
+
 	return errors.Join(errs...)
 }
 

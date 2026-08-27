@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +20,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -267,12 +265,6 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	s := &stateData{}
 	state.Write(stateKey, s)
 
-	// Populate podToJob representation to validate pod label and annotation
-	if err := sb.validatePodToJob(ctx, pod); err != nil {
-		logger.Error(err, "error validating pod against podToJob")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
-	}
-
 	// Construct an intermediate representation of the Slurm external job
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.draRegistry, ctx, pod)
 	if err != nil {
@@ -299,10 +291,30 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	node := pod.Annotations[wellknown.AnnotationExternalJobNode]
 	jobID := pod.Labels[wellknown.LabelExternalJobId]
 	if jobID != "" && node != "" {
-		sb.markPodGroupScheduled(ctx, s.slurmJobIR, jobID)
-		phNode := make(sets.Set[string])
-		phNode.Insert(node)
-		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
+		// Confirm the external job still holds the annotated node before
+		// trusting the annotation, so the pod cannot bind to a node its
+		// job no longer holds.
+		annotatedJob, err := sb.slurmControl.GetJob(ctx, pod)
+		if err != nil {
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		annotatedNodes, _ := hostlist.Expand(annotatedJob.Nodes)
+		if annotatedJob.JobId != 0 && slices.Contains(annotatedNodes, node) {
+			sb.markPodGroupScheduled(ctx, s.slurmJobIR, jobID)
+			phNode := make(sets.Set[string])
+			phNode.Insert(node)
+			return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
+		}
+		// Stale annotation: clear it and fall through to the normal flow.
+		logger.V(3).Info("Pod node annotation names a node its job does not hold; clearing",
+			"pod", klog.KObj(pod), "node", node)
+		toUpdate := pod.DeepCopy()
+		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = ""
+		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
+			logger.Error(err, "failed to clear stale node annotation")
+			return nil, fwk.NewStatus(fwk.Error, ErrorPodUpdateFailed.Error())
+		}
+		pod.Annotations[wellknown.AnnotationExternalJobNode] = ""
 	}
 
 	// Determine if an external job for the pod exists in Slurm
@@ -424,6 +436,24 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	// If no external job exists, we should create one with the list
 	// of nodes that passed Filter plugins.
 	if externalJob.JobId == 0 {
+		// A job claiming this pod may already exist without the pod's label
+		// referencing it. Adopt it rather than submitting a duplicate
+		// external job. This is the only path that lists every Slurm job,
+		// and it only runs when a job is about to be created.
+		podToJob, err := sb.slurmControl.GetJobsForPods(ctx)
+		if err != nil {
+			logger.Error(err, "error listing jobs before submit")
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		if claimed, ok := (*podToJob)[pod.Namespace+"/"+pod.Name]; ok && claimed.JobId != 0 {
+			logger.Info("adopting existing external job for pod",
+				"pod", klog.KObj(pod), "jobId", claimed.JobId)
+			if err := sb.labelPodsWithJobId(ctx, claimed.JobId, s.slurmJobIR); err != nil {
+				return nil, fwk.NewStatus(fwk.Error, err.Error())
+			}
+			sb.activatePod(logger, pod)
+			return nil, fwk.NewStatus(fwk.Success)
+		}
 		jobid, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
 		if err != nil {
 			invalidConfigErr := findMatchingError(err, func(err error) bool {
@@ -671,48 +701,4 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 		return fwk.NewStatus(fwk.Success, "")
 	}
 	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
-}
-
-func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) error {
-	logger := klog.FromContext(ctx)
-	logger.V(5).Info("validatePodToJob func", "pod", klog.KObj(pod))
-	namespacedName := types.NamespacedName{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-	}
-	podToJob, err := sb.slurmControl.GetJobsForPods(ctx)
-	if err != nil {
-		logger.Error(err, "error populating podToJob")
-		return err
-	}
-	if val, ok := (*podToJob)[namespacedName.String()]; ok {
-		toUpdate := pod.DeepCopy()
-		// If the pod has a JobId set, validate it against podToJob
-		if pod.Labels[wellknown.LabelExternalJobId] != "" &&
-			val.JobId != slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]) {
-			logger.V(3).Info("Pod jobId label does not match Slurm", "pod", klog.KObj(pod),
-				"jobId label", pod.Labels[wellknown.LabelExternalJobId],
-				"slurm job", val)
-			toUpdate.Labels[wellknown.LabelExternalJobId] = strconv.Itoa(int(val.JobId))
-		}
-		// If the pod has a Node set, validate it against podToJob
-		nodes, _ := hostlist.Expand(val.Nodes)
-		if pod.Annotations[wellknown.AnnotationExternalJobNode] != "" &&
-			!slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode]) {
-			logger.V(3).Info("Pod node annotation does not match Slurm nodes", "pod", klog.KObj(pod),
-				"node annotation", pod.Annotations[wellknown.AnnotationExternalJobNode],
-				"slurm job", val)
-			toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = ""
-		}
-		if !reflect.DeepEqual(pod, toUpdate) {
-			if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
-				logger.Error(err, "failed to update pod with slurm job id")
-				return ErrorPodUpdateFailed
-			}
-			// Update pod to reflect patch
-			pod.Labels[wellknown.LabelExternalJobId] = toUpdate.Labels[wellknown.LabelExternalJobId]
-			pod.Annotations[wellknown.AnnotationExternalJobNode] = toUpdate.Annotations[wellknown.AnnotationExternalJobNode]
-		}
-	}
-	return nil
 }

@@ -1407,174 +1407,146 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 	}
 }
 
-func TestSlurmBridge_validatePodToJob(t *testing.T) {
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
-	type fields struct {
-		Client       kubeclient.Client
-		slurmControl slurmcontrol.SlurmControlInterface
-		handle       fwk.Handle
+// PreFilter must confirm the node annotation against the external job and
+// clear it when the job no longer holds that node.
+func TestSlurmBridge_PreFilterAnnotationLiveCheck(t *testing.T) {
+	ctx := context.Background()
+	cs := clientsetfake.NewClientset()
+	informerFactory := informers.NewSharedInformerFactory(cs, 0)
+	registeredPlugins := []tf.RegisterPluginFunc{
+		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
+		tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
 	}
-	type args struct {
-		ctx context.Context
-		pod *corev1.Pod
+	f, err := tf.NewFramework(ctx, registeredPlugins, "slurm-bridge",
+		fwkruntime.WithInformerFactory(informerFactory))
+	if err != nil {
+		t.Fatal(err)
 	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    *corev1.Pod
-		wantErr bool
-	}{
-		{
-			name: "Fail to get jobs",
-			fields: fields{
-				Client: kubefake.NewFakeClient(),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
-							return ErrorNoKubeNode
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: nil,
-			},
-			args: args{
-				ctx: context.TODO(),
-				pod: pod.DeepCopy(),
-			},
-			want:    pod.DeepCopy(),
-			wantErr: true,
-		},
-		{
-			name: "Matching slurm job exists",
-			fields: fields{
-				Client: kubefake.NewFakeClient(),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
-								AdminComment: func() *string {
-									pi := externaljobinfo.ExternalJobInfo{
-										Pods: []string{"/pod1"},
-									}
-									return ptr.To(pi.ToString())
-								}(),
-								JobId: ptr.To[int32](1),
-								Nodes: ptr.To(""),
-							}},
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithLists(list).
-						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: nil,
-			},
-			args: args{
-				ctx: context.TODO(),
-				pod: pod.DeepCopy(),
-			},
-			want:    pod.DeepCopy(),
-			wantErr: false,
-		},
-		{
-			name: "Matching slurm job does not exist but patch fails",
-			fields: fields{
-				Client: kubefake.NewFakeClient(),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
-								AdminComment: func() *string {
-									pi := externaljobinfo.ExternalJobInfo{
-										Pods: []string{"/pod1"},
-									}
-									return ptr.To(pi.ToString())
-								}(),
-								JobId: ptr.To[int32](2),
-								Nodes: ptr.To(""),
-							}},
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithLists(list).
-						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: nil,
-			},
-			args: args{
-				ctx: context.TODO(),
-				pod: pod.DeepCopy(),
-			},
-			want:    pod.DeepCopy(),
-			wantErr: true,
-		},
-		{
-			name: "Matching slurm job does not exist",
-			fields: fields{
-				Client: kubefake.NewFakeClient(pod),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
-								AdminComment: func() *string {
-									pi := externaljobinfo.ExternalJobInfo{
-										Pods: []string{"/pod1"},
-									}
-									return ptr.To(pi.ToString())
-								}(),
-								JobId: ptr.To[int32](2),
-								Nodes: ptr.To(""),
-							}},
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithLists(list).
-						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: nil,
-			},
-			args: args{
-				ctx: context.TODO(),
-				pod: func() *corev1.Pod {
-					pod.Annotations = map[string]string{
-						wellknown.AnnotationExternalJobNode: "node2",
-					}
-					return pod.DeepCopy()
-				}(),
-			},
-			want: func() *corev1.Pod {
-				pod.Annotations = map[string]string{
-					wellknown.AnnotationExternalJobNode: "",
-				}
-				pod.Labels = map[string]string{
-					wellknown.LabelExternalJobId: "2",
-				}
-				return pod.DeepCopy()
+
+	makePod := func() *corev1.Pod {
+		return st.MakePod().Name("pod1").
+			Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).
+			Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node2"}).Obj()
+	}
+	newControl := func(state api.V0044JobInfoJobState, nodes string) slurmcontrol.SlurmControlInterface {
+		jobs := &types.V0044JobInfoList{Items: []types.V0044JobInfo{
+			{V0044JobInfo: api.V0044JobInfo{
+				JobId:    ptr.To[int32](1),
+				JobState: &[]api.V0044JobInfoJobState{state},
+				Nodes:    ptr.To(nodes),
+			}},
+		}}
+		c := fake.NewClientBuilder().WithLists(jobs).Build()
+		return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+	}
+
+	t.Run("annotation preserved when the live job holds the node", func(t *testing.T) {
+		pod := makePod()
+		sb := &SlurmBridge{
+			Client:       kubefake.NewFakeClient(pod.DeepCopy()),
+			slurmControl: newControl(api.V0044JobInfoJobStateRUNNING, "node2"),
+			handle:       f,
+		}
+		result, status := sb.PreFilter(ctx, framework.NewCycleState(), pod, nil)
+		if !status.IsSuccess() {
+			t.Fatalf("PreFilter() status = %v, want Success", status)
+		}
+		if result == nil || !result.NodeNames.Has("node2") {
+			t.Fatalf("PreFilter() result = %v, want early return with node2", result)
+		}
+	})
+
+	t.Run("stale annotation cleared when the job is gone", func(t *testing.T) {
+		pod := makePod()
+		sb := &SlurmBridge{
+			Client:       kubefake.NewFakeClient(pod.DeepCopy()),
+			slurmControl: newControl(api.V0044JobInfoJobStateCANCELLED, "node2"),
+			handle:       f,
+		}
+		result, status := sb.PreFilter(ctx, framework.NewCycleState(), pod, nil)
+		if !status.IsSuccess() {
+			t.Fatalf("PreFilter() status = %v, want Success (fall-through)", status)
+		}
+		if result != nil {
+			t.Fatalf("PreFilter() result = %v, want nil (no early return on stale annotation)", result)
+		}
+		if pod.Annotations[wellknown.AnnotationExternalJobNode] != "" {
+			t.Errorf("annotation = %q, want cleared", pod.Annotations[wellknown.AnnotationExternalJobNode])
+		}
+	})
+}
+
+// PostFilter must adopt an existing job that claims the pod instead of
+// submitting a duplicate external job.
+func TestSlurmBridge_PostFilterAdoptsExistingJob(t *testing.T) {
+	ctx := context.Background()
+	pod := st.MakePod().Name("pod1").Obj() // no job-id label
+	cs := clientsetfake.NewClientset()
+	informerFactory := informers.NewSharedInformerFactory(cs, 0)
+	registeredPlugins := []tf.RegisterPluginFunc{
+		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
+		tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
+	}
+	activator := &activateRecorder{}
+	f, err := tf.NewFramework(ctx, registeredPlugins, "slurm-bridge",
+		fwkruntime.WithInformerFactory(informerFactory),
+		fwkruntime.WithPodActivator(activator),
+		fwkruntime.WithSnapshotSharedLister(internalcache.NewSnapshot(
+			[]*corev1.Pod{pod},
+			[]*corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}})))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jobs := &types.V0044JobInfoList{Items: []types.V0044JobInfo{
+		{V0044JobInfo: api.V0044JobInfo{
+			JobId:    ptr.To[int32](5),
+			JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+			Nodes:    ptr.To(""),
+			AdminComment: func() *string {
+				pi := externaljobinfo.ExternalJobInfo{Pods: []string{"/pod1"}}
+				return ptr.To(pi.ToString())
 			}(),
-			wantErr: false,
+		}},
+	}}
+	nodes := &types.V0044NodeList{Items: []types.V0044Node{
+		{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
+	}}
+	intercept := interceptor.Funcs{
+		Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
+			t.Error("SubmitJob called: expected adoption of the existing job, not a duplicate submit")
+			return errors.New("unexpected create")
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sb := &SlurmBridge{
-				Client:       tt.fields.Client,
-				slurmControl: tt.fields.slurmControl,
-				handle:       tt.fields.handle,
-			}
-			if err := sb.validatePodToJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
-				t.Errorf("SlurmBridge.validatePodToJob() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if !apiequality.Semantic.DeepEqual(tt.args.pod, tt.want) {
-				t.Errorf("SlurmBridge.validatePodToJob() pod = %v, want %v", tt.args.pod, tt.want)
-			}
-		})
+	c := fake.NewClientBuilder().WithLists(jobs, nodes).WithInterceptorFuncs(intercept).Build()
+
+	kubeClient := kubefake.NewFakeClient(pod.DeepCopy())
+	sb := &SlurmBridge{
+		Client:       kubeClient,
+		slurmControl: slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge"),
+		handle:       f,
+	}
+	state := framework.NewCycleState()
+	s := &stateData{}
+	s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(kubeClient, sb.draRegistry, ctx, pod)
+	state.Write(stateKey, s)
+
+	m := framework.NewNodeToStatus(map[string]*fwk.Status{
+		"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+	}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable))
+
+	_, status := sb.PostFilter(ctx, state, pod, m)
+	if !status.IsSuccess() {
+		t.Fatalf("PostFilter() status = %v, want Success", status)
+	}
+	if len(activator.pods) == 0 {
+		t.Error("pod was not activated after adoption")
+	}
+	got := &corev1.Pod{}
+	if err := kubeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Labels[wellknown.LabelExternalJobId] != "5" {
+		t.Errorf("pod label = %q, want adopted job id \"5\"", got.Labels[wellknown.LabelExternalJobId])
 	}
 }

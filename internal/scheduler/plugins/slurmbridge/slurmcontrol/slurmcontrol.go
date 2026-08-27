@@ -5,7 +5,6 @@ package slurmcontrol
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
@@ -17,6 +16,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -131,7 +131,9 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 
 	err := r.Get(ctx, jobId, job)
 	if err != nil {
-		if err.Error() == http.StatusText(http.StatusNotFound) {
+		// A missing job is a normal outcome: the pod's labeled job is gone
+		// and the caller will adopt an existing job or submit a new one.
+		if utils.IsSlurmJobNotFoundErr(err) {
 			return &jobOut, nil
 		}
 		logger.Error(err, "could not get job for pod", "pod", klog.KObj(pod))
