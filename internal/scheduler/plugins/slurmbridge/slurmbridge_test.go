@@ -49,6 +49,13 @@ import (
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
+func slurmNode(name string, partitions ...string) types.V0044Node {
+	return types.V0044Node{V0044Node: api.V0044Node{
+		Name:       ptr.To(name),
+		Partitions: ptr.To(api.V0044CsvString(partitions)),
+	}}
+}
+
 type activateRecorder struct {
 	pods map[string]*corev1.Pod
 }
@@ -611,8 +618,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 	newUpdateRaceSlurmControl := func(nodesAfterUpdate string) slurmcontrol.SlurmControlInterface {
 		nodes := &types.V0044NodeList{
 			Items: []types.V0044Node{
-				{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+				slurmNode("node1", "slurm-bridge"),
+				slurmNode("node2", "slurm-bridge"),
 			},
 		}
 		base := fake.NewClientBuilder().
@@ -798,8 +805,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -838,8 +845,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -863,7 +870,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Error, ErrorPodUpdateFailed.Error()),
 		},
 		{
-			name: "Creating an external job succeeds",
+			name: "Creating an external job excludes only infeasible nodes in job partition",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -884,8 +891,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
+							slurmNode("node3", "other"),
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -945,8 +953,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -1001,8 +1009,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -1105,8 +1113,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					}
 					nodes := &types.V0044NodeList{
 						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node1")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node2")}},
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
 						},
 					}
 					c := fake.NewClientBuilder().
