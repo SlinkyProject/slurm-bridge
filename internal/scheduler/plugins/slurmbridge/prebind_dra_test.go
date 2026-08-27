@@ -12,6 +12,7 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -47,6 +48,7 @@ func TestSlurmBridge_PreBind_GetResourcesUsesSlurmNodeName(t *testing.T) {
 	sb := &SlurmBridge{
 		Client:       fake.NewClientBuilder().WithObjects(node).Build(),
 		slurmControl: spy,
+		draRegistry:  dra.DefaultRegistry(),
 	}
 
 	if st := sb.PreBind(ctx, nil, pod, node.Name); st != nil && st.Code() != fwk.Success {

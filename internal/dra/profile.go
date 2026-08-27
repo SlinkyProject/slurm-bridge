@@ -39,3 +39,17 @@ type DeviceProfile struct {
 	Selector string
 	Backend  Backend
 }
+
+// UsesCoreBitmap reports whether Slurm allocates the profile through its CPU
+// bitmap.
+func (p DeviceProfile) UsesCoreBitmap() bool {
+	_, ok := p.Backend.(CoreBitmapBackend)
+	return ok
+}
+
+// UsesIndexedGRES reports whether Slurm allocates the profile as an indexed
+// generic resource.
+func (p DeviceProfile) UsesIndexedGRES() bool {
+	_, ok := p.Backend.(IndexedGRESBackend)
+	return ok
+}

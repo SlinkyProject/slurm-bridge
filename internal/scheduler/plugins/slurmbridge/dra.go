@@ -26,8 +26,7 @@ import (
 
 // manageResourceClaim creates DRA ResourceClaims for Slurm GRES allocations
 // resolved through an indexed-GRES DeviceProfile or the legacy driver-specific
-// path. It also creates a CPU claim when the pod explicitly requests the CPU
-// DRA resource.
+// path. Core-bitmap profiles are allocated from Slurm's CPU bitmap.
 func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) error {
 	claim, requestMappings, claimResources, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
 	if err != nil {
@@ -81,7 +80,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, nil, errors.New("expected node resources")
 	}
 
-	profileResources, nonProfileResources, err := splitGRESResources(*resources)
+	indexedGRESResources, remainingResources, err := splitGRESResources(sb.draRegistry, *resources)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -90,27 +89,31 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, profileResources.Gres)
+	profileRequests = profileRequestsWithoutLegacyAllocations(profileRequests, remainingResources.Gres)
+	coreBitmapAllocation, err := allocateCoreBitmapProfile(profileRequests)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	podRequestsCPUDRA := podRequestsCPUDRAExtendedResource(pod)
+	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, indexedGRESResources.Gres)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	var nodeInfo *nodeinfo.NodeInfo
 	var allocatedRequests []resourcev1.DeviceRequest
-	if podRequestsCPUDRA {
+	if coreBitmapAllocation != nil {
 		nodeInfo, err = nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &nonProfileResources)
+		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		if !hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String()) {
-			return nil, nil, nil, fmt.Errorf("pod requests CPU DRA resource %q but no CPU device request was generated", nodeinfo.DraDriverCpu_ExtendedResourceName)
+			return nil, nil, nil, fmt.Errorf("pod requests core-bitmap DeviceClass %q but no CPU device request was generated", coreBitmapAllocation.DeviceClassName)
 		}
 	}
-	legacyRequests, err := legacyGPUDeviceRequests(ctx, sb.Client, nonProfileResources.Gres)
+	legacyRequests, err := legacyGPUDeviceRequests(ctx, sb.Client, remainingResources.Gres)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -120,17 +123,28 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	for _, allocation := range indexedGRESAllocations {
 		delete(requestedCounts, allocation.DeviceClassName)
 	}
-	claimResources, err := subsetGRESResources(nonProfileResources, requestedCounts, deviceClassNames(allocatedRequests))
+	if coreBitmapAllocation != nil {
+		delete(requestedCounts, coreBitmapAllocation.DeviceClassName)
+	}
+	claimResources, err := subsetGRESResources(remainingResources, requestedCounts, deviceClassNames(allocatedRequests))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	var deviceRequests []resourcev1.DeviceRequest
 	if nodeInfo != nil {
-		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources)
+		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		cpuRequest := deviceRequestNamed(deviceRequests, coreBitmapAllocation.RequestName)
+		if cpuRequest == nil || cpuRequest.Exactly == nil {
+			return nil, nil, nil, fmt.Errorf("pod requests core-bitmap DeviceClass %q but no exact CPU device request was generated", coreBitmapAllocation.DeviceClassName)
+		}
+		if cpuRequest.Exactly.Count < coreBitmapAllocation.Count {
+			return nil, nil, nil, fmt.Errorf("not enough CPUs in Slurm allocation for DeviceClass %q: requested %d, allocated %d", coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count, cpuRequest.Exactly.Count)
+		}
+		coreBitmapAllocation.AllocatedCount = cpuRequest.Exactly.Count
 	}
 	legacyRequests, err = legacyGPUDeviceRequests(ctx, sb.Client, claimResources.Gres)
 	if err != nil {
@@ -175,6 +189,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 
 	return claim, mappings, &claimAllocation{
 		NodeResources:          claimResources,
+		CoreBitmapAllocation:   coreBitmapAllocation,
 		IndexedGRESAllocations: indexedGRESAllocations,
 	}, nil
 }
@@ -192,14 +207,16 @@ func (sb *SlurmBridge) bindClaim(
 	if resources == nil || resources.NodeResources == nil {
 		return errors.New("expected claim allocation resources")
 	}
-	claimIncludesCPUDRARequest := claimRequestsCPUDRA(claim)
 	var devices []resourcev1.DeviceRequestAllocationResult
-	if claimIncludesCPUDRARequest {
+	if resources.CoreBitmapAllocation != nil {
+		if err := sb.verifyCoreBitmapRequest(ctx, claim, resources.CoreBitmapAllocation); err != nil {
+			return err
+		}
 		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 		if err != nil {
 			return err
 		}
-		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources)
+		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName)
 		if err != nil {
 			return err
 		}
@@ -214,6 +231,9 @@ func (sb *SlurmBridge) bindClaim(
 		return err
 	}
 	devices = append(devices, indexedGRESDevices...)
+	if err := validateDeviceProfileAllocationCounts(resources, devices); err != nil {
+		return err
+	}
 
 	toUpdate := claim.DeepCopy()
 
@@ -254,13 +274,35 @@ func (sb *SlurmBridge) bindClaim(
 	return nil
 }
 
+func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {
+	expected := make(map[string]int64)
+	if allocation.CoreBitmapAllocation != nil {
+		expected[allocation.CoreBitmapAllocation.RequestName] = allocation.CoreBitmapAllocation.AllocatedCount
+	}
+	for _, indexed := range allocation.IndexedGRESAllocations {
+		expected[indexed.RequestName] = indexed.Count
+	}
+	actual := make(map[string]int64, len(expected))
+	for _, result := range results {
+		if _, profileRequest := expected[result.Request]; profileRequest {
+			actual[result.Request]++
+		}
+	}
+	for requestName, expectedCount := range expected {
+		if actual[requestName] != expectedCount {
+			return fmt.Errorf("DeviceProfile request %q allocated %d devices, expected exactly %d", requestName, actual[requestName], expectedCount)
+		}
+	}
+	return nil
+}
+
 func validateDeviceClassRequests(pod *corev1.Pod) error {
 	requestingContainer := make(map[string]string)
 	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
 	for _, container := range containers {
 		for resourceName, quantity := range container.Resources.Requests {
 			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
-			if !ok || className == nodeinfo.DraDriverCpu || quantity.Value() <= 0 {
+			if !ok || quantity.Value() <= 0 {
 				continue
 			}
 			if existing, ok := requestingContainer[className]; ok && existing != container.Name {
@@ -272,9 +314,16 @@ func validateDeviceClassRequests(pod *corev1.Pod) error {
 	return nil
 }
 
-func validateDeviceClassRequestsForPods(pods []corev1.Pod) error {
+func (sb *SlurmBridge) validateDeviceClassRequestsForPods(ctx context.Context, pods []corev1.Pod) error {
 	for i := range pods {
 		pod := &pods[i]
+		profileRequests, err := sb.deviceProfileRequests(ctx, pod)
+		if err != nil {
+			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
+		}
+		if _, err := allocateCoreBitmapProfile(profileRequests); err != nil {
+			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
+		}
 		if err := validateDeviceClassRequests(pod); err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
@@ -288,7 +337,7 @@ func deviceClassRequestCounts(pod *corev1.Pod) map[string]int64 {
 	for _, container := range containers {
 		for resourceName, quantity := range container.Resources.Requests {
 			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
-			if !ok || className == nodeinfo.DraDriverCpu || quantity.Value() <= 0 {
+			if !ok || quantity.Value() <= 0 {
 				continue
 			}
 			counts[className] = quantity.Value()
@@ -323,7 +372,7 @@ func subsetGRESResources(resources slurmcontrol.NodeResources, requestedCounts m
 func deviceClassNames(requests []resourcev1.DeviceRequest) map[string]struct{} {
 	deviceClasses := make(map[string]struct{})
 	for _, request := range requests {
-		if request.Exactly != nil && request.Exactly.DeviceClassName != nodeinfo.DraDriverCpu {
+		if request.Exactly != nil {
 			deviceClasses[request.Exactly.DeviceClassName] = struct{}{}
 		}
 	}
@@ -358,10 +407,8 @@ func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1
 				continue
 			}
 
-			className := strings.TrimPrefix(resourceName, resourcev1.ResourceDeviceClassPrefix)
-			if resourceName == nodeinfo.DraDriverCpu_ExtendedResourceName {
-				className = nodeinfo.DraDriverCpu
-			} else if className == resourceName {
+			className, ok := strings.CutPrefix(resourceName, resourcev1.ResourceDeviceClassPrefix)
+			if !ok {
 				continue
 			}
 
@@ -380,39 +427,17 @@ func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1
 	return mappings, nil
 }
 
-func podRequestsCPUDRAExtendedResource(pod *corev1.Pod) bool {
-	if pod == nil {
-		return false
-	}
-	containers := slices.Clone(pod.Spec.InitContainers)
-	containers = append(containers, pod.Spec.Containers...)
-	for _, container := range containers {
-		if quantity, ok := container.Resources.Requests[corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName)]; ok && !quantity.IsZero() {
-			return true
-		}
-	}
-	return false
-}
-
 func hasDeviceRequestNamed(requests []resourcev1.DeviceRequest, name string) bool {
-	for _, request := range requests {
-		if request.Name == name {
-			return true
-		}
-	}
-	return false
+	return deviceRequestNamed(requests, name) != nil
 }
 
-func claimRequestsCPUDRA(claim *resourcev1.ResourceClaim) bool {
-	if claim == nil {
-		return false
-	}
-	for _, req := range claim.Spec.Devices.Requests {
-		if req.Name == corev1.ResourceCPU.String() && req.Exactly != nil && req.Exactly.DeviceClassName == nodeinfo.DraDriverCpu {
-			return true
+func deviceRequestNamed(requests []resourcev1.DeviceRequest, name string) *resourcev1.DeviceRequest {
+	for i := range requests {
+		if requests[i].Name == name {
+			return &requests[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // patchPodExtendedResourceClaimStatus updates the pod's status with information about

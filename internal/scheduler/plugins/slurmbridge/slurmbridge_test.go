@@ -43,6 +43,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -475,6 +476,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
+				draRegistry:   dra.DefaultRegistry(),
 			}
 			got, got1 := sb.PreFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.nodeinfo)
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
@@ -543,12 +545,13 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 
 	kubeClient := kubefake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
+		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy(), exampleGPUDeviceClass("gpu.example.com")).
 		Build()
 	slurmClient := fake.NewClientBuilder().Build()
 	sb := &SlurmBridge{
 		Client:       kubeClient,
 		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
+		draRegistry:  dra.DefaultRegistry(),
 	}
 
 	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
@@ -654,6 +657,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		Client:        kubeClient,
 		schedulerName: "slurm-bridge-scheduler",
 		slurmControl:  slurmControl,
+		draRegistry:   dra.DefaultRegistry(),
 	}
 
 	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
@@ -1182,9 +1186,10 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
+				draRegistry:   dra.DefaultRegistry(),
 			}
 			s := &stateData{}
-			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, tt.args.ctx, tt.args.pod)
+			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, sb.draRegistry, tt.args.ctx, tt.args.pod)
 			tt.args.state.Write(stateKey, s)
 			got, got1 := sb.PostFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.m)
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
@@ -1393,6 +1398,7 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 				Client:       tt.fields.Client,
 				slurmControl: tt.fields.slurmControl,
 				handle:       tt.fields.handle,
+				draRegistry:  dra.DefaultRegistry(),
 			}
 			if err := sb.deleteExternalJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("SlurmBridge.deleteExternalJob() error = %v, wantErr %v", err, tt.wantErr)

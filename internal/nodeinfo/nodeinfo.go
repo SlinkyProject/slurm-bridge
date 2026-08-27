@@ -4,8 +4,10 @@
 package nodeinfo
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -24,34 +26,33 @@ type NodeInfo struct {
 	CpuMap CPUMap
 }
 
-func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequest, error) {
+func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequest, error) {
 	var requests []resourcev1.DeviceRequest
 
 	if resources == nil {
 		return requests, nil
 	}
 
-	exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
+	exists, err := deviceClassExists(ctx, kubeclient, deviceClassName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
-		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
 		}
-		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
-		if cpuSet.Size() > 0 {
-			cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuSet.List()), " ", ",")
+		if len(cpuIDs) > 0 {
+			cpuSetString := strings.ReplaceAll(fmt.Sprint(cpuIDs), " ", ",")
 			requests = append(requests, resourcev1.DeviceRequest{
 				Name: corev1.ResourceCPU.String(),
 				Exactly: &resourcev1.ExactDeviceRequest{
-					DeviceClassName: DraDriverCpu,
+					DeviceClassName: deviceClassName,
 					AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-					Count:           int64(cpuSet.Size()),
+					Count:           int64(len(cpuIDs)),
 					Selectors: []resourcev1.DeviceSelector{
 						{
 							CEL: &resourcev1.CELDeviceSelector{
@@ -67,27 +68,26 @@ func (n *NodeInfo) GetCPUDeviceRequests(ctx context.Context, kubeclient client.C
 	return requests, nil
 }
 
-func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources) ([]resourcev1.DeviceRequestAllocationResult, error) {
+func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kubeclient client.Client, resources *slurmcontrol.NodeResources, deviceClassName string) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	var devices []resourcev1.DeviceRequestAllocationResult
 
 	if resources == nil {
 		return devices, nil
 	}
 
-	exists, err := deviceClassExists(ctx, kubeclient, DraDriverCpu)
+	exists, err := deviceClassExists(ctx, kubeclient, deviceClassName)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
-		return nil, fmt.Errorf("CPU DRA resource requested but DeviceClass %q was not found", DraDriverCpu)
+		return nil, fmt.Errorf("core-bitmap resource requested but DeviceClass %q was not found", deviceClassName)
 	}
 	if resources.CoreBitmap != "" {
-		bitmap, err := bitmaputil.NewFrom(resources.CoreBitmap)
+		cpuIDs, err := n.allocatedCPUDeviceIDs(resources.CoreBitmap)
 		if err != nil {
 			return nil, err
 		}
-		cpuSet := n.CpuMap.ToMachineCPUs(bitmap)
-		for _, cpuID := range cpuSet.List() {
+		for _, cpuID := range cpuIDs {
 			cpuInfo, ok := n.CpuMap.CPUInfoMap[cpuID]
 			if !ok {
 				return nil, fmt.Errorf("cpu ID %d from Slurm allocation not found on node", cpuID)
@@ -104,33 +104,150 @@ func (n *NodeInfo) GetCPUDeviceRequestAllocationResults(ctx context.Context, kub
 	return devices, nil
 }
 
+func (n *NodeInfo) allocatedCPUDeviceIDs(coreBitmap string) ([]int, error) {
+	bitmap, err := bitmaputil.NewFrom(coreBitmap)
+	if err != nil {
+		return nil, err
+	}
+	return n.CpuMap.ToMachineCPUs(bitmap).List(), nil
+}
+
 func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string) (*NodeInfo, error) {
 	resourceSliceList := &resourcev1.ResourceSliceList{}
 	if err := kubeclient.List(ctx, resourceSliceList); err != nil {
 		return nil, err
 	}
-	return NewNodeInfoFromResourceSlices(nodeName, resourceSliceList.Items), nil
+	return NewNodeInfoFromResourceSlices(nodeName, resourceSliceList.Items)
 }
 
 // NewNodeInfoFromResourceSlices builds CPU topology from an existing
 // ResourceSlice snapshot.
-func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.ResourceSlice) *NodeInfo {
+func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.ResourceSlice) (*NodeInfo, error) {
 	nodeInfo := &NodeInfo{}
-	for _, resourceSlice := range resourceSlices {
-		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
-			continue
+	pool, cpuSlices, err := selectCPUResourcePool(nodeName, resourceSlices)
+	if err != nil {
+		return nil, err
+	}
+
+	var cpuInfos []*CPUInfo
+	deviceSlices := make(map[string]string)
+	cpuIDSlices := make(map[int]string)
+	for _, resourceSlice := range cpuSlices {
+		sliceCPUInfos, err := NewCPUInfos(resourceSlice)
+		if err != nil {
+			return nil, err
 		}
-		pool := resourceSlice.Spec.Pool.Name
-		switch resourceSlice.Spec.Driver {
-		case DraDriverCpu:
-			cpuInfos := NewCPUInfos(&resourceSlice)
-			nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
-		default:
-			continue
+		for _, cpuInfo := range sliceCPUInfos {
+			if previousSlice, found := deviceSlices[cpuInfo.Name]; found {
+				return nil, fmt.Errorf("DRA CPU resource pool %q contains duplicate device name %q in ResourceSlices %q and %q", pool, cpuInfo.Name, previousSlice, resourceSlice.Name)
+			}
+			if previousSlice, found := cpuIDSlices[cpuInfo.CpuID]; found {
+				return nil, fmt.Errorf("DRA CPU resource pool %q contains duplicate CPU ID %d in ResourceSlices %q and %q", pool, cpuInfo.CpuID, previousSlice, resourceSlice.Name)
+			}
+			deviceSlices[cpuInfo.Name] = resourceSlice.Name
+			cpuIDSlices[cpuInfo.CpuID] = resourceSlice.Name
+		}
+		cpuInfos = append(cpuInfos, sliceCPUInfos...)
+	}
+	if len(cpuInfos) != 0 {
+		if err := validateCPUCoreTopology(pool, cpuInfos); err != nil {
+			return nil, err
+		}
+		nodeInfo.CpuMap = NewCPUMap(pool, cpuInfos)
+	}
+
+	return nodeInfo, nil
+}
+
+type cpuCoreID struct {
+	socket int
+	core   int
+}
+
+func validateCPUCoreTopology(pool string, cpuInfos []*CPUInfo) error {
+	coreTypes := make(map[cpuCoreID]CoreType)
+	threadsPerCore := make(map[cpuCoreID]int)
+	for _, cpuInfo := range cpuInfos {
+		core := cpuCoreID{socket: cpuInfo.SocketID, core: cpuInfo.CoreID}
+		if coreType, found := coreTypes[core]; found && coreType != cpuInfo.CoreType {
+			return fmt.Errorf("DRA CPU resource pool %q has inconsistent core types for socket %d core %d", pool, core.socket, core.core)
+		}
+		coreTypes[core] = cpuInfo.CoreType
+		if cpuInfo.CoreType != CoreTypeEfficiency {
+			threadsPerCore[core]++
 		}
 	}
 
-	return nodeInfo
+	wantThreads := 0
+	for core, threads := range threadsPerCore {
+		if wantThreads == 0 {
+			wantThreads = threads
+			continue
+		}
+		if threads != wantThreads {
+			return fmt.Errorf("DRA CPU resource pool %q has non-uniform topology: socket %d core %d has %d threads, expected %d", pool, core.socket, core.core, threads, wantThreads)
+		}
+	}
+	if wantThreads == 0 {
+		return fmt.Errorf("DRA CPU resource pool %q contains no Slurm-compatible CPU devices", pool)
+	}
+	return nil
+}
+
+type cpuPoolSnapshot struct {
+	generation         int64
+	resourceSliceCount int64
+	slices             []*resourcev1.ResourceSlice
+}
+
+func selectCPUResourcePool(nodeName string, resourceSlices []resourcev1.ResourceSlice) (string, []*resourcev1.ResourceSlice, error) {
+	snapshotsByPool := make(map[string]*cpuPoolSnapshot)
+	for i := range resourceSlices {
+		resourceSlice := &resourceSlices[i]
+		if resourceSlice.Spec.Driver != DraDriverCpu || ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName {
+			continue
+		}
+
+		pool := resourceSlice.Spec.Pool
+		snapshot, ok := snapshotsByPool[pool.Name]
+		if !ok || pool.Generation > snapshot.generation {
+			snapshotsByPool[pool.Name] = &cpuPoolSnapshot{
+				generation:         pool.Generation,
+				resourceSliceCount: pool.ResourceSliceCount,
+				slices:             []*resourcev1.ResourceSlice{resourceSlice},
+			}
+			continue
+		}
+		if pool.Generation < snapshot.generation {
+			continue
+		}
+		if pool.ResourceSliceCount != snapshot.resourceSliceCount {
+			return "", nil, fmt.Errorf("DRA CPU resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", pool.Name, snapshot.generation, snapshot.resourceSliceCount, pool.ResourceSliceCount)
+		}
+		snapshot.slices = append(snapshot.slices, resourceSlice)
+	}
+
+	poolNames := make([]string, 0, len(snapshotsByPool))
+	for pool := range snapshotsByPool {
+		poolNames = append(poolNames, pool)
+	}
+	slices.SortFunc(poolNames, cmp.Compare)
+	if len(poolNames) > 1 {
+		return "", nil, fmt.Errorf("DRA CPU inventory for node %q spans multiple resource pools %q", nodeName, poolNames)
+	}
+	if len(poolNames) == 0 {
+		return "", nil, nil
+	}
+
+	pool := poolNames[0]
+	snapshot := snapshotsByPool[pool]
+	if int64(len(snapshot.slices)) != snapshot.resourceSliceCount {
+		return "", nil, fmt.Errorf("DRA CPU resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", pool, snapshot.generation, len(snapshot.slices), snapshot.resourceSliceCount)
+	}
+	slices.SortFunc(snapshot.slices, func(a, b *resourcev1.ResourceSlice) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	return pool, snapshot.slices, nil
 }
 
 func deviceClassExists(ctx context.Context, kubeclient client.Client, deviceClassName string) (bool, error) {

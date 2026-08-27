@@ -97,15 +97,16 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if len(pod.Spec.TopologySpreadConstraints) > 0 {
 		return nil, fmt.Errorf("spec.topologySpreadConstraints is not supported by the slurm-bridge scheduler")
 	}
-	if err := validateCPUResources(pod); err != nil {
+	if err := validatePositiveResourceQuantities(pod); err != nil {
 		return nil, err
 	}
-	// TODO(killianmuldoon) Change this to a hard error before merging
-	warnings := r.validateDRAResourceWarnings(ctx, pod)
+	if err := r.validateDRAResources(ctx, pod); err != nil {
+		return nil, err
+	}
 	if err := validateAnnotationConflicts(pod); err != nil {
 		return nil, err
 	}
-	return warnings, nil
+	return nil, nil
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -125,8 +126,9 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
-	// TODO(killianmuldoon) Change this to a hard error before merging
-	warnings := r.validateDRAResourceWarnings(ctx, newPod)
+	if err := r.validateDRAResources(ctx, newPod); err != nil {
+		return nil, err
+	}
 	if err := validateAnnotationConflicts(newPod); err != nil {
 		return nil, err
 	}
@@ -142,7 +144,7 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 			return nil, fmt.Errorf("can't update a running pod's external node annotation")
 		}
 	}
-	return warnings, nil
+	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
@@ -173,22 +175,21 @@ func (r *PodAdmission) isManagedNamespace(ctx context.Context, namespace string)
 	return slices.Contains(r.ManagedNamespaces, namespace), nil
 }
 
-func validateCPUResources(pod *corev1.Pod) error {
+func podRequestsNativeCPU(pod *corev1.Pod) bool {
 	containers := slices.Clone(pod.Spec.InitContainers)
 	containers = append(containers, pod.Spec.Containers...)
 
-	var hasNativeCPU, hasCPUDRA bool
 	if pod.Spec.Resources != nil {
-		hasNativeCPU = resourceIsSet(*pod.Spec.Resources, corev1.ResourceCPU)
+		if resourceIsSet(*pod.Spec.Resources, corev1.ResourceCPU) {
+			return true
+		}
 	}
 	for _, container := range containers {
-		hasNativeCPU = hasNativeCPU || resourceIsSet(container.Resources, corev1.ResourceCPU)
-		hasCPUDRA = hasCPUDRA || resourceIsSet(container.Resources, corev1.ResourceName(nodeinfo.DraDriverCpu_ExtendedResourceName))
+		if resourceIsSet(container.Resources, corev1.ResourceCPU) {
+			return true
+		}
 	}
-	if hasNativeCPU && hasCPUDRA {
-		return fmt.Errorf("can't specify both native %q and CPU DRA resource %q", corev1.ResourceCPU, nodeinfo.DraDriverCpu_ExtendedResourceName)
-	}
-	return nil
+	return false
 }
 
 func resourceIsSet(resources corev1.ResourceRequirements, name corev1.ResourceName) bool {
@@ -197,9 +198,38 @@ func resourceIsSet(resources corev1.ResourceRequirements, name corev1.ResourceNa
 	return requested || limited
 }
 
-func (r *PodAdmission) validateDRAResourceWarnings(ctx context.Context, pod *corev1.Pod) admission.Warnings {
-	if err := r.validateDRAResources(ctx, pod); err != nil {
-		return admission.Warnings{err.Error()}
+func validatePositiveResourceQuantities(pod *corev1.Pod) error {
+	if pod.Spec.Resources != nil {
+		if err := validatePositiveResourceRequirements(*pod.Spec.Resources, "pod"); err != nil {
+			return err
+		}
+	}
+	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
+	for _, container := range containers {
+		if err := validatePositiveResourceRequirements(container.Resources, fmt.Sprintf("container %q", container.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePositiveResourceRequirements(resources corev1.ResourceRequirements, owner string) error {
+	for _, resourceList := range []struct {
+		field string
+		list  corev1.ResourceList
+	}{
+		{field: "request", list: resources.Requests},
+		{field: "limit", list: resources.Limits},
+	} {
+		for resourceName, quantity := range resourceList.list {
+			name := resourceName.String()
+			if resourceName != corev1.ResourceCPU && !strings.HasPrefix(name, resourcev1.ResourceDeviceClassPrefix) {
+				continue
+			}
+			if quantity.Sign() <= 0 {
+				return fmt.Errorf("%s resource %s %q must be greater than zero", owner, resourceList.field, resourceName)
+			}
+		}
 	}
 	return nil
 }
@@ -218,18 +248,21 @@ func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod
 	}
 
 	registry := dra.DefaultRegistry()
+	hasNativeCPU := podRequestsNativeCPU(pod)
 	for _, className := range slices.Sorted(maps.Keys(classNames)) {
 		deviceClass := &resourcev1.DeviceClass{}
 		if err := r.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
 			return fmt.Errorf("get device class %q: %w", className, err)
 		}
-		if len(deviceClass.Spec.Config) != 0 {
-			return fmt.Errorf("device class %q configuration is not supported", className)
-		}
-		// TODO: Persist the resolved DeviceProfile and verify that the live
-		// DeviceClass still maps to it when scheduling and binding the claim.
-		if _, err := registry.MatchDeviceClass(deviceClass); err != nil {
+		// TODO: Persist the admitted DeviceProfile if DeviceClasses may be repointed
+		// while a workload is scheduling. The current flow assumes DeviceClass
+		// selectors remain stable and re-resolves them during scheduling.
+		profile, err := registry.MatchDeviceClass(deviceClass)
+		if err != nil {
 			return err
+		}
+		if profile.UsesCoreBitmap() && hasNativeCPU {
+			return fmt.Errorf("can't specify both native %q and core-bitmap DeviceClass %q", corev1.ResourceCPU, className)
 		}
 	}
 	return nil

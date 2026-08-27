@@ -61,6 +61,12 @@ func (n NodeInventory) GRES() ([]GRESInventory, error) {
 	var inventory []GRESInventory
 	for _, profileInventory := range n.Profiles {
 		profile := profileInventory.Profile
+		if profile.UsesCoreBitmap() {
+			continue
+		}
+		if !profile.UsesIndexedGRES() {
+			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
+		}
 		gres, err := profile.GRES()
 		if err != nil {
 			return nil, err

@@ -102,6 +102,36 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 	})
 
+	t.Run("classifies CPU devices without turning them into GRES", func(t *testing.T) {
+		slice := resourceSlice("node-a", "dra.cpu", "node-a", "cpudev001", "cpudev000")
+
+		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		profile, _ := DefaultRegistry().LookupByName("cpu")
+		want := NodeInventory{
+			NodeName: "node-a",
+			Profiles: []ProfileInventory{{
+				Profile: profile,
+				Devices: []DeviceIdentity{
+					deviceIDForTest("dra.cpu", "node-a", "cpudev000"),
+					deviceIDForTest("dra.cpu", "node-a", "cpudev001"),
+				},
+			}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("BuildNodeInventory() = %#v, want %#v", got, want)
+		}
+		gres, err := got.GRES()
+		if err != nil {
+			t.Fatalf("NodeInventory.GRES() error = %v", err)
+		}
+		if len(gres) != 0 {
+			t.Fatalf("NodeInventory.GRES() = %#v, want no CPU GRES", gres)
+		}
+	})
+
 	t.Run("returns an empty inventory without matching devices", func(t *testing.T) {
 		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-b", "gpu.example.com", "pool-a", "gpu-0"),
@@ -219,11 +249,9 @@ func TestBuildNodeInventory(t *testing.T) {
 			Selector: `device.driver == "gpu.example.com" && device.attributes["gpu.example.com"].model == "b"`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
 		}
-		registry := &Registry{
-			byName: map[string]DeviceProfile{
-				profileA.Name: profileA,
-				profileB.Name: profileB,
-			},
+		registry, err := newRegistry(profileA, profileB)
+		if err != nil {
+			t.Fatalf("newRegistry() error = %v", err)
 		}
 		slice := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-b", "gpu-unsupported", "gpu-a")
 		models := []string{"b", "unsupported", "a"}
@@ -264,11 +292,10 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 		profileB := profileA
 		profileB.Name = "gpu-b"
-		registry := &Registry{
-			byName: map[string]DeviceProfile{
-				profileA.Name: profileA,
-				profileB.Name: profileB,
-			},
+		profileB.Selector = `device.driver == "gpu.example.com" && true`
+		registry, registryErr := newRegistry(profileA, profileB)
+		if registryErr != nil {
+			t.Fatalf("newRegistry() error = %v", registryErr)
 		}
 		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0"),

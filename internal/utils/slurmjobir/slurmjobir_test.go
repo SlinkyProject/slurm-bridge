@@ -6,6 +6,7 @@ package slurmjobir
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -172,7 +174,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := TranslateToSlurmJobIR(tt.args.client, tt.args.ctx, tt.args.pod)
+			got, err := TranslateToSlurmJobIR(tt.args.client, dra.DefaultRegistry(), tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TranslateToSlurmJobIR() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -237,7 +239,7 @@ func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *tes
 		}).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}
@@ -303,7 +305,7 @@ func TestTranslateToSlurmJobIRPrefersSupportedWorkloadBelowReadableAncestor(t *t
 		WithObjects(deployment, jobSet, job, pod).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}
@@ -369,20 +371,6 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 			cpuPerTask: ptr.To(int32(8)),
 			memPerNode: ptr.To(int64(400)),
 		},
-		{
-			name: "CPU DRA request sets CPUs per task",
-			args: args{
-				slurmJobIR: &SlurmJobIR{
-					Pods: corev1.PodList{
-						Items: []corev1.Pod{
-							podWithGPU(cpuDRADeviceClassExtendedName, "4"),
-						},
-					},
-					JobInfo: SlurmJobIRJobInfo{},
-				},
-			},
-			cpuPerTask: ptr.To(int32(4)),
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -419,7 +407,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 	}
 }
 
-func TestTranslatorParseGPUResources(t *testing.T) {
+func TestTranslatorParseDeviceResources(t *testing.T) {
 	type args struct {
 		slurmJobIR *SlurmJobIR
 	}
@@ -503,7 +491,7 @@ func TestTranslatorParseGPUResources(t *testing.T) {
 					},
 				},
 			},
-			want: ptr.To("gres/gpu:gpu.nvidia.com=1"),
+			want: ptr.To("gres/gpu:gpu-nvidia=1"),
 		},
 		{
 			name: "CPU DRA Extended Resource Claim is ignored for GRES",
@@ -530,17 +518,30 @@ func TestTranslatorParseGPUResources(t *testing.T) {
 					},
 				},
 			},
-			want: ptr.To("gres/gpu:gpu.nvidia.com=2"),
+			want: ptr.To("gres/gpu:gpu-nvidia=2"),
 		},
 	}
+	cpuClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "dra.cpu"},
+		Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+		}}},
+	}
+	nvidiaClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu.nvidia.com"},
+		Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
+		}}},
+	}
 	translator := translator{
-		Reader: fake.NewClientBuilder().Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(cpuClass, nvidiaClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := translator.parseGPUResources(tt.args.slurmJobIR); err != nil {
-				t.Fatalf("translator.parseGPUResources() error = %v", err)
+			if err := translator.parseDeviceResources(tt.args.slurmJobIR); err != nil {
+				t.Fatalf("translator.parseDeviceResources() error = %v", err)
 			}
 			if !apiequality.Semantic.DeepEqual(tt.want, tt.args.slurmJobIR.JobInfo.Gres) {
 				var gotGres, wantGres interface{}
@@ -554,13 +555,13 @@ func TestTranslatorParseGPUResources(t *testing.T) {
 				} else {
 					wantGres = nil
 				}
-				t.Errorf("translator.parseGPUResources() Gres = %v, want %v", gotGres, wantGres)
+				t.Errorf("translator.parseDeviceResources() Gres = %v, want %v", gotGres, wantGres)
 			}
 		})
 	}
 }
 
-func TestTranslatorParseGPUResourcesUsesDeviceProfile(t *testing.T) {
+func TestTranslatorParseDeviceResourcesUsesIndexedGRESProfile(t *testing.T) {
 	const className = "example-gpus"
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
@@ -574,19 +575,83 @@ func TestTranslatorParseGPUResourcesUsesDeviceProfile(t *testing.T) {
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseGPUResources(ir); err != nil {
-		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	if err := translator.parseDeviceResources(ir); err != nil {
+		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
 	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=2" {
-		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=2")
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=2")
 	}
 }
 
-func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
+func TestTranslatorParseDeviceResourcesUsesCoreBitmapAlias(t *testing.T) {
+	const className = "my-cpus"
+	deviceClass := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: className},
+		Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+		}}},
+	}
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
+	}}}
+	translator := translator{
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	if err := translator.parseDeviceResources(ir); err != nil {
+		t.Fatalf("translator.parseDeviceResources() error = %v", err)
+	}
+	if ir.JobInfo.CpuPerTask == nil || *ir.JobInfo.CpuPerTask != 2 {
+		t.Fatalf("translator.parseDeviceResources() CpuPerTask = %v, want 2", ir.JobInfo.CpuPerTask)
+	}
+	if ir.JobInfo.Gres != nil {
+		t.Fatalf("translator.parseDeviceResources() Gres = %q, want nil", *ir.JobInfo.Gres)
+	}
+}
+
+func TestTranslatorParseDeviceResourcesFailsClosedForUnresolvedDeviceClass(t *testing.T) {
+	const className = "my-cpus"
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
+	}}}
+	translator := translator{
+		Reader:      fake.NewClientBuilder().Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	err := translator.parseDeviceResources(ir)
+	if err == nil || !strings.Contains(err.Error(), `DeviceClass "my-cpus" was not found`) {
+		t.Fatalf("translator.parseDeviceResources() error = %v, want missing DeviceClass error", err)
+	}
+}
+
+func TestTranslatorParseDeviceResourcesFailsClosedForNonMatchingDeviceClass(t *testing.T) {
+	const className = "my-cpus"
+	deviceClass := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: className}}
+	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "1"),
+	}}}
+	translator := translator{
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
+	}
+
+	err := translator.parseDeviceResources(ir)
+	if err == nil || !strings.Contains(err.Error(), `device class "my-cpus" must have exactly one selector`) {
+		t.Fatalf("translator.parseDeviceResources() error = %v, want profile mismatch error", err)
+	}
+}
+
+func TestTranslatorParseDeviceResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 	const className = "gpu.nvidia.com"
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: className},
@@ -601,19 +666,20 @@ func TestTranslatorParseGPUResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseGPUResources(ir); err != nil {
-		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	if err := translator.parseDeviceResources(ir); err != nil {
+		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
 	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
-		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
 	}
 }
 
-func TestTranslatorParseGPUResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(t *testing.T) {
+func TestTranslatorParseDeviceResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(t *testing.T) {
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu.nvidia.com"},
 		Spec: resourcev1.DeviceClassSpec{
@@ -627,19 +693,20 @@ func TestTranslatorParseGPUResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(
 		podWithGPU(nvidiaDevicePlugin, "2"),
 	}}}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(deviceClass).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(deviceClass).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseGPUResources(ir); err != nil {
-		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	if err := translator.parseDeviceResources(ir); err != nil {
+		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
 	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu=2" {
-		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu=2")
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu=2")
 	}
 }
 
-func TestTranslatorParseGPUResourcesCombinesProfileAliases(t *testing.T) {
+func TestTranslatorParseDeviceResourcesCombinesProfileAliases(t *testing.T) {
 	newClass := func(name string) *resourcev1.DeviceClass {
 		return &resourcev1.DeviceClass{
 			ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -665,15 +732,16 @@ func TestTranslatorParseGPUResourcesCombinesProfileAliases(t *testing.T) {
 		},
 	}
 	translator := translator{
-		Reader: fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
-		ctx:    context.Background(),
+		Reader:      fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
+		ctx:         context.Background(),
+		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseGPUResources(ir); err != nil {
-		t.Fatalf("translator.parseGPUResources() error = %v", err)
+	if err := translator.parseDeviceResources(ir); err != nil {
+		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
 	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=3" {
-		t.Fatalf("translator.parseGPUResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=3")
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=3")
 	}
 }
 

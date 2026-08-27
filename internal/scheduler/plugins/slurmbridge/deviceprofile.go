@@ -33,34 +33,32 @@ type indexedGRESAllocation struct {
 	Indexes     []int
 }
 
+type coreBitmapAllocation struct {
+	deviceProfileRequest
+	RequestName    string
+	AllocatedCount int64
+}
+
 type claimAllocation struct {
 	NodeResources          *slurmcontrol.NodeResources
+	CoreBitmapAllocation   *coreBitmapAllocation
 	IndexedGRESAllocations []indexedGRESAllocation
 }
 
 func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Pod) ([]deviceProfileRequest, error) {
 	counts := deviceClassRequestCounts(pod)
 	requests := make([]deviceProfileRequest, 0, len(counts))
-	registry := dra.DefaultRegistry()
 	for _, className := range slices.Sorted(maps.Keys(counts)) {
-		// TODO: Replace the missing/non-matching DeviceClass fallbacks below with
-		// explicit, versioned legacy handling during upgrades. New profile claim
-		// creation must fail closed if the live DeviceClass cannot be resolved.
 		deviceClass := &resourcev1.DeviceClass{}
 		if err := sb.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
 			if apierrors.IsNotFound(err) {
-				continue
+				return nil, fmt.Errorf("DeviceClass %q was not found", className)
 			}
 			return nil, fmt.Errorf("get DeviceClass %q: %w", className, err)
 		}
-		profile, err := registry.MatchDeviceClass(deviceClass)
+		profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
 		if err != nil {
-			// DeviceClasses outside the profile registry continue through the
-			// existing driver-specific allocation path.
-			continue
-		}
-		if len(deviceClass.Spec.Config) != 0 {
-			return nil, fmt.Errorf("DeviceClass %q configuration is not supported", className)
+			return nil, err
 		}
 		requests = append(requests, deviceProfileRequest{
 			DeviceClassName: className,
@@ -71,11 +69,44 @@ func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Po
 	return requests, nil
 }
 
+func profileRequestsWithoutLegacyAllocations(requests []deviceProfileRequest, resources []slurmcontrol.GresLayout) []deviceProfileRequest {
+	legacyClasses := make(map[string]struct{})
+	for _, resource := range resources {
+		if isLegacyGPUDriver(resource.Type) {
+			legacyClasses[resource.Type] = struct{}{}
+		}
+	}
+	filtered := make([]deviceProfileRequest, 0, len(requests))
+	for _, request := range requests {
+		if _, legacy := legacyClasses[request.DeviceClassName]; !legacy {
+			filtered = append(filtered, request)
+		}
+	}
+	return filtered
+}
+
+func allocateCoreBitmapProfile(requests []deviceProfileRequest) (*coreBitmapAllocation, error) {
+	var allocation *coreBitmapAllocation
+	for _, request := range requests {
+		if !request.Profile.UsesCoreBitmap() {
+			continue
+		}
+		if allocation != nil {
+			return nil, fmt.Errorf("multiple DeviceClasses %q and %q resolve to the core-bitmap backend", allocation.DeviceClassName, request.DeviceClassName)
+		}
+		allocation = &coreBitmapAllocation{
+			deviceProfileRequest: request,
+			RequestName:          corev1.ResourceCPU.String(),
+		}
+	}
+	return allocation, nil
+}
+
 func allocateIndexedGRESProfiles(requests []deviceProfileRequest, gresResources []slurmcontrol.GresLayout) ([]indexedGRESAllocation, error) {
 	profileGRES := make(map[string]dra.GRES, len(requests))
 	indexedRequests := make([]deviceProfileRequest, 0, len(requests))
 	for _, request := range requests {
-		if _, ok := request.Profile.Backend.(dra.IndexedGRESBackend); !ok {
+		if !request.Profile.UsesIndexedGRES() {
 			continue
 		}
 		gres, err := request.Profile.GRES()
@@ -104,11 +135,7 @@ func allocateIndexedGRESProfiles(requests []deviceProfileRequest, gresResources 
 	for _, request := range indexedRequests {
 		indexes, allocated := indexesByProfile[request.Profile.Name]
 		if !allocated {
-			// TODO: Replace this implicit fallback with an explicit check for a job
-			// created by the legacy flow. A new indexed-GRES profile request without
-			// matching allocated profile GRES must fail closed.
-			// A legacy-formatted allocation, if present, is handled separately.
-			continue
+			return nil, fmt.Errorf("DeviceClass %q resolves to DeviceProfile %q but the Slurm allocation has no matching indexed GRES", request.DeviceClassName, request.Profile.Name)
 		}
 		start := cursors[request.Profile.Name]
 		if request.Count > int64(len(indexes)-start) {
@@ -144,42 +171,33 @@ func expandGRESIndexes(gres slurmcontrol.GresLayout) ([]int, error) {
 }
 
 // splitGRESResources classifies allocated Slurm GRES by their actual
-// representation. A GRES type which is a registered DeviceProfile is handled
-// exclusively by the profile path, even when no request currently resolves to
-// it. All other GRES remain available to their existing non-profile paths,
-// including classic device plugins and legacy DRA compatibility.
-//
-// TODO: Distinguish explicitly versioned legacy driver-named GPU GRES from
-// other non-profile GRES. New unknown DRA GPU GRES must fail closed instead of
-// implicitly entering the compatibility path.
-func splitGRESResources(resources slurmcontrol.NodeResources) (profileResources, nonProfileResources slurmcontrol.NodeResources, err error) {
-	profileResources = resources
-	profileResources.Gres = nil
-	nonProfileResources = resources
-	nonProfileResources.Gres = nil
+// representation. A GRES type which is a registered indexed-GRES
+// DeviceProfile is handled exclusively by the profile path, even when no
+// request currently resolves to it. Core-bitmap profiles have no GRES
+// representation, so their profile names do not claim the GRES type namespace.
+// All other GRES remain available to their existing allocation paths,
+// including classic device plugins and unrelated custom GRES. Legacy DRA
+// compatibility recognizes only the explicitly supported driver-named types
+// in legacy.go.
+func splitGRESResources(registry *dra.Registry, resources slurmcontrol.NodeResources) (indexedGRESResources, remainingResources slurmcontrol.NodeResources, err error) {
+	indexedGRESResources = resources
+	indexedGRESResources.Gres = nil
+	remainingResources = resources
+	remainingResources.Gres = nil
 
-	registry := dra.DefaultRegistry()
 	for _, resource := range resources.Gres {
-		profile, registered := registry.LookupByName(resource.Type)
-		if !registered {
-			nonProfileResources.Gres = append(nonProfileResources.Gres, resource)
-			continue
-		}
-
-		profileGRES, err := profile.GRES()
+		_, owned, err := registry.MatchIndexedGRES(dra.GRES{Name: resource.Name, Type: resource.Type})
 		if err != nil {
 			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, err
 		}
-		if resource.Name != profileGRES.Name {
-			return slurmcontrol.NodeResources{}, slurmcontrol.NodeResources{}, fmt.Errorf(
-				"allocated Slurm GRES type %q uses name %q, expected %q for DeviceProfile %q",
-				resource.Type, resource.Name, profileGRES.Name, profile.Name,
-			)
+		if !owned {
+			remainingResources.Gres = append(remainingResources.Gres, resource)
+			continue
 		}
-		profileResources.Gres = append(profileResources.Gres, resource)
+		indexedGRESResources.Gres = append(indexedGRESResources.Gres, resource)
 	}
 
-	return profileResources, nonProfileResources, nil
+	return indexedGRESResources, remainingResources, nil
 }
 
 func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations []indexedGRESAllocation) ([]resourcev1.DeviceRequest, []indexedGRESAllocation) {
@@ -210,6 +228,49 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 	return requests, allocations
 }
 
+func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation deviceProfileRequest, requestName string) (dra.DeviceProfile, error) {
+	var claimRequest *resourcev1.DeviceRequest
+	for i := range claim.Spec.Devices.Requests {
+		request := &claim.Spec.Devices.Requests[i]
+		if request.Name == requestName {
+			claimRequest = request
+			break
+		}
+	}
+	if claimRequest == nil || claimRequest.Exactly == nil || claimRequest.Exactly.DeviceClassName != allocation.DeviceClassName {
+		return dra.DeviceProfile{}, fmt.Errorf("ResourceClaim is missing DeviceProfile request %q for DeviceClass %q", requestName, allocation.DeviceClassName)
+	}
+	if claimRequest.Exactly.Count != allocation.Count {
+		return dra.DeviceProfile{}, fmt.Errorf("ResourceClaim DeviceProfile request %q has count %d, expected exactly %d", requestName, claimRequest.Exactly.Count, allocation.Count)
+	}
+
+	deviceClass := &resourcev1.DeviceClass{}
+	if err := sb.Get(ctx, client.ObjectKey{Name: allocation.DeviceClassName}, deviceClass); err != nil {
+		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q while binding: %w", allocation.DeviceClassName, err)
+	}
+	profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
+	if err != nil {
+		return dra.DeviceProfile{}, fmt.Errorf("verify DeviceClass %q while binding: %w", allocation.DeviceClassName, err)
+	}
+	if profile.Name != allocation.Profile.Name {
+		return dra.DeviceProfile{}, fmt.Errorf("DeviceClass %q changed from DeviceProfile %q to %q before binding", allocation.DeviceClassName, allocation.Profile.Name, profile.Name)
+	}
+	return profile, nil
+}
+
+func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *coreBitmapAllocation) error {
+	effectiveRequest := allocation.deviceProfileRequest
+	effectiveRequest.Count = allocation.AllocatedCount
+	profile, err := sb.verifyDeviceProfileRequest(ctx, claim, effectiveRequest, allocation.RequestName)
+	if err != nil {
+		return err
+	}
+	if !profile.UsesCoreBitmap() {
+		return fmt.Errorf("DeviceClass %q no longer resolves to the core-bitmap backend", allocation.DeviceClassName)
+	}
+	return nil
+}
+
 func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *claimAllocation) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	if len(allocation.IndexedGRESAllocations) == 0 {
 		return nil, nil
@@ -219,32 +280,14 @@ func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *
 		return nil, err
 	}
 
-	requests := make(map[string]resourcev1.DeviceRequest, len(claim.Spec.Devices.Requests))
-	for _, request := range claim.Spec.Devices.Requests {
-		requests[request.Name] = request
-	}
-
 	var results []resourcev1.DeviceRequestAllocationResult
-	registry := dra.DefaultRegistry()
 	for _, profileAllocation := range allocation.IndexedGRESAllocations {
-		request, ok := requests[profileAllocation.RequestName]
-		if !ok || request.Exactly == nil || request.Exactly.DeviceClassName != profileAllocation.DeviceClassName {
-			return nil, fmt.Errorf("ResourceClaim is missing DeviceProfile request %q for DeviceClass %q", profileAllocation.RequestName, profileAllocation.DeviceClassName)
-		}
-
-		deviceClass := &resourcev1.DeviceClass{}
-		if err := sb.Get(ctx, client.ObjectKey{Name: profileAllocation.DeviceClassName}, deviceClass); err != nil {
-			return nil, fmt.Errorf("get DeviceClass %q while binding: %w", profileAllocation.DeviceClassName, err)
-		}
-		profile, err := registry.MatchDeviceClass(deviceClass)
+		profile, err := sb.verifyDeviceProfileRequest(ctx, claim, profileAllocation.deviceProfileRequest, profileAllocation.RequestName)
 		if err != nil {
-			return nil, fmt.Errorf("verify DeviceClass %q while binding: %w", profileAllocation.DeviceClassName, err)
+			return nil, err
 		}
-		if len(deviceClass.Spec.Config) != 0 {
-			return nil, fmt.Errorf("DeviceClass %q configuration is not supported", profileAllocation.DeviceClassName)
-		}
-		if profile.Name != profileAllocation.Profile.Name {
-			return nil, fmt.Errorf("DeviceClass %q changed from DeviceProfile %q to %q before binding", profileAllocation.DeviceClassName, profileAllocation.Profile.Name, profile.Name)
+		if !profile.UsesIndexedGRES() {
+			return nil, fmt.Errorf("DeviceClass %q no longer resolves to the indexed-GRES backend", profileAllocation.DeviceClassName)
 		}
 
 		devices, err := applied.Devices(profile.Name, profileAllocation.Indexes)
