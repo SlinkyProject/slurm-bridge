@@ -98,7 +98,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/getkin/kin-openapi/openapi3
 - Name: github.com/getkin/kin-openapi/openapi3
-- Version: v0.140.0
+- Version: v0.144.0
 - License: MIT
 
 ### github.com/go-logr/logr
@@ -198,12 +198,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/google/cel-go
 - Name: github.com/google/cel-go
-- Version: v0.28.1
+- Version: v0.30.0
 - License: Apache-2.0
 
 ### github.com/google/cel-go
 - Name: github.com/google/cel-go
-- Version: v0.28.1
+- Version: v0.30.0
 - License: BSD-3-Clause
 
 ### github.com/google/gnostic-models
@@ -273,17 +273,17 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/oasdiff/yaml
 - Name: github.com/oasdiff/yaml
-- Version: v0.1.0
+- Version: v0.1.1
 - License: BSD-3-Clause
 
 ### github.com/oasdiff/yaml
 - Name: github.com/oasdiff/yaml
-- Version: v0.1.0
+- Version: v0.1.1
 - License: MIT
 
 ### github.com/oasdiff/yaml3
 - Name: github.com/oasdiff/yaml3
-- Version: v0.0.13
+- Version: v0.0.14
 - License: MIT
 
 ### github.com/opencontainers/go-digest
@@ -358,7 +358,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.etcd.io/etcd/client/pkg/v3
 - Name: go.etcd.io/etcd/client/pkg/v3
-- Version: v3.6.12
+- Version: v3.6.14
 - License: Apache-2.0
 
 ### go.etcd.io/etcd/client/v3
