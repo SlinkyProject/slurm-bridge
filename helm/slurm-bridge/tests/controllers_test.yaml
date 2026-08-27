@@ -40,12 +40,20 @@ tests:
       - matchRegex:
           path: data["config.yaml"]
           pattern: '(?s)deviceProfiles:.*gresName: accelerator.*driver: accelerator.example.com.*name: custom-accelerator'
-  - it: renders the default PCI-backed DRANET RDMA profile
+  - it: renders a null registry by default so components use built-in profiles
     template: configmap.yaml
     asserts:
       - matchRegex:
           path: data["config.yaml"]
-          pattern: '(?s)name: dranet-rdma.*pciAddress.*rdma\s+==\s+true'
+          pattern: '(?m)^\s*deviceProfiles:\s*null\s*$'
+  - it: preserves an explicitly empty DRA device profile registry
+    template: configmap.yaml
+    set:
+      sharedConfig.deviceProfiles: []
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*deviceProfiles:\s*\[\]\s*$'
   - it: image pull policy is configurable
     template: controllers/deployment.yaml
     set:
