@@ -492,10 +492,28 @@ function dra-driver-nvidia-gpu::install() {
 	local version="0.5.0"
 	local chart="oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu"
 	local config_dir="$SCRIPT_DIR/dra-driver-nvidia-gpu"
+	local values_args=(--values "$config_dir/values.yaml")
+
+	if $MOCK_NVML; then
+		values_args+=(--values "$config_dir/mock-values.yaml")
+	fi
 
 	helm upgrade --install dra-driver-nvidia-gpu "$chart" \
 		--version "$version" \
 		--namespace dra-driver-nvidia-gpu \
+		--create-namespace \
+		"${values_args[@]}" \
+		--wait --timeout=180s
+}
+
+function nvml-mock::install() {
+	local version="0.3.0"
+	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock"
+	local config_dir="$SCRIPT_DIR/nvml-mock"
+
+	helm upgrade --install nvml-mock "$chart" \
+		--version "$version" \
+		--namespace nvml-mock \
 		--create-namespace \
 		--values "$config_dir/values.yaml" \
 		--wait --timeout=180s
@@ -529,6 +547,7 @@ HELM OPTIONS:
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
+	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
 
 SLURM OPTIONS:
 	--slurm-node-mode=MODE
@@ -584,6 +603,9 @@ function main() {
 		dra-example-driver::install
 	fi
 	if $OPT_DRA_DRIVER_NVIDIA_GPU; then
+		if $MOCK_NVML; then
+			nvml-mock::install
+		fi
 		dra-driver-nvidia-gpu::install
 	fi
 	if $OPT_PREREQS; then
@@ -605,9 +627,18 @@ OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
+MOCK_NVML="${MOCK_NVML:-false}"
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-main}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
+
+case "$MOCK_NVML" in
+true | false) ;;
+*)
+	echo "MOCK_NVML must be either true or false" >&2
+	exit 1
+	;;
+esac
 
 SHORT="+h"
 LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"

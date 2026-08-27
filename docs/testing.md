@@ -53,6 +53,19 @@ This installs the CPU, example GPU, and NVIDIA GPU DRA drivers. Each driver can
 still be installed individually with `--dra-driver-cpu`,
 `--dra-example-driver`, or `--dra-driver-nvidia-gpu`.
 
+NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
+installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to
+install [`nvml-mock`](https://github.com/NVIDIA/k8s-test-infra/tree/main/deployments/nvml-mock)
+on the managed Kind workers before the NVIDIA DRA driver:
+
+```sh
+MOCK_NVML=true make kind-start
+```
+
+The fixture exposes eight fake A100 GPUs per managed worker. `MOCK_NVML`
+defaults to `false` and must be set to either `true` or `false`. It only has an
+effect when the NVIDIA DRA driver is selected directly or through `--extras`.
+
 Examples remain individually selectable:
 
 ```sh

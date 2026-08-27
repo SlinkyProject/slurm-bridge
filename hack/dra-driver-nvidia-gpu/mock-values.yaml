@@ -1,0 +1,9 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+
+nvidiaDriverRoot: /var/lib/nvml-mock/driver
+
+kubeletPlugin:
+  # Kind workers have no physical PCI device for the chart's default affinity.
+  affinity: null
