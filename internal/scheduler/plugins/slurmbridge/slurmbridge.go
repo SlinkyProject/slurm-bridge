@@ -411,7 +411,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		logger.Error(err, "error getting nodes that SlurmBridge can use")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
-	slurmNodeNames, err := sb.slurmControl.GetNodeNames(ctx)
+	slurmNodeNames, err := sb.slurmControl.GetNodeNames(ctx, s.slurmJobIR.JobInfo.Partition)
 	if err != nil {
 		logger.Error(err, "error getting Slurm nodes")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
