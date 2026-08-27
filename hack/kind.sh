@@ -488,6 +488,18 @@ function dra-driver-cpu::install() {
 	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
 }
 
+function dra-driver-nvidia-gpu::install() {
+	local version="0.5.0"
+	local chart="oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu"
+	local config_dir="$SCRIPT_DIR/dra-driver-nvidia-gpu"
+
+	helm upgrade --install dra-driver-nvidia-gpu "$chart" \
+		--version "$version" \
+		--namespace dra-driver-nvidia-gpu \
+		--create-namespace \
+		--values "$config_dir/values.yaml" \
+		--wait --timeout=180s
+}
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
@@ -496,6 +508,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
+	        [--dra-driver-nvidia-gpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -510,11 +523,12 @@ KIND OPTIONS:
 
 HELM OPTIONS:
 	--all               Equivalent of: --core --extras
-	--extras            Equivalent of: --dra-driver-cpu --dra-example-driver
+	--extras            Install all DRA driver fixtures below.
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
+	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 
 SLURM OPTIONS:
 	--slurm-node-mode=MODE
@@ -569,6 +583,9 @@ function main() {
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install
 	fi
+	if $OPT_DRA_DRIVER_NVIDIA_GPU; then
+		dra-driver-nvidia-gpu::install
+	fi
 	if $OPT_PREREQS; then
 		slurm-bridge::prerequisites
 	elif $OPT_CORE; then
@@ -587,12 +604,13 @@ OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
+OPT_DRA_DRIVER_NVIDIA_GPU=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-main}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -673,6 +691,10 @@ while :; do
 		OPT_DRA_EXAMPLE_DRIVER=true
 		shift
 		;;
+	--dra-driver-nvidia-gpu)
+		OPT_DRA_DRIVER_NVIDIA_GPU=true
+		shift
+		;;
 	--all)
 		OPT_CORE=true
 		OPT_EXTRAS=true
@@ -697,6 +719,7 @@ done
 if $OPT_EXTRAS; then
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
+	OPT_DRA_DRIVER_NVIDIA_GPU=true
 fi
 
 main "$@"

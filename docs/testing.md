@@ -49,14 +49,16 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This is equivalent to `--dra-driver-cpu --dra-example-driver`. Each flag can
-still be used individually.
+This installs the CPU, example GPU, and NVIDIA GPU DRA drivers. Each driver can
+still be installed individually with `--dra-driver-cpu`,
+`--dra-example-driver`, or `--dra-driver-nvidia-gpu`.
 
 Examples remain individually selectable:
 
 ```sh
 kubectl apply -f hack/examples/job/single.yaml
 kubectl apply -f hack/examples/dra/gpu-example/job.yaml
+kubectl apply -f hack/examples/dra/nvidia/job.yaml
 ```
 
 ## Demo
