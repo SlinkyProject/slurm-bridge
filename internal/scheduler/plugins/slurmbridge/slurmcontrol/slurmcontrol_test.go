@@ -653,7 +653,8 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 		partition string
 	}
 	type args struct {
-		ctx context.Context
+		ctx       context.Context
+		partition *string
 	}
 	tests := []struct {
 		name    string
@@ -697,16 +698,23 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "List nodes",
+			name: "List nodes using configured partitions",
 			fields: fields{
+				partition: "slurm-bridge, gpu",
 				Client: func() client.Client {
 					nodes := &slurmtypes.V0044NodeList{
 						Items: []slurmtypes.V0044Node{
 							{V0044Node: api.V0044Node{
-								Name: ptr.To("node1"),
+								Name:       ptr.To("node1"),
+								Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
 							}},
 							{V0044Node: api.V0044Node{
-								Name: ptr.To("node2"),
+								Name:       ptr.To("node2"),
+								Partitions: ptr.To(api.V0044CsvString{"other", "gpu"}),
+							}},
+							{V0044Node: api.V0044Node{
+								Name:       ptr.To("node3"),
+								Partitions: ptr.To(api.V0044CsvString{"other"}),
 							}},
 						},
 					}
@@ -721,6 +729,39 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			want:    []string{"node1", "node2"},
 			wantErr: false,
 		},
+		{
+			name: "List nodes using job partition overrides",
+			fields: fields{
+				partition: "slurm-bridge",
+				Client: func() client.Client {
+					nodes := &slurmtypes.V0044NodeList{
+						Items: []slurmtypes.V0044Node{
+							{V0044Node: api.V0044Node{
+								Name:       ptr.To("node1"),
+								Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
+							}},
+							{V0044Node: api.V0044Node{
+								Name:       ptr.To("node2"),
+								Partitions: ptr.To(api.V0044CsvString{"other", "gpu"}),
+							}},
+							{V0044Node: api.V0044Node{
+								Name:       ptr.To("node3"),
+								Partitions: ptr.To(api.V0044CsvString{"batch"}),
+							}},
+						},
+					}
+					return fake.NewClientBuilder().
+						WithLists(nodes).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:       context.Background(),
+				partition: ptr.To("gpu,batch"),
+			},
+			want:    []string{"node2", "node3"},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -729,7 +770,7 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 				mcsLabel:  tt.fields.mcsLabel,
 				partition: tt.fields.partition,
 			}
-			got, err := r.GetNodeNames(tt.args.ctx)
+			got, err := r.GetNodeNames(tt.args.ctx, tt.args.partition)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.GetNodeNames() error = %v, wantErr %v", err, tt.wantErr)
 				return
