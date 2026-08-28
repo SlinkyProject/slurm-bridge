@@ -300,6 +300,22 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	}
 }
 
+// allocatedNodeRejectedByKubernetes returns true only when PreFilter observed a
+// Slurm allocation and a Kubernetes Filter plugin rejected the node assigned to
+// this pod. Without the node annotation, Slurm may have allocated the job after
+// PreFilter ran; that valid allocation must be preserved for the next cycle.
+func allocatedNodeRejectedByKubernetes(pod *corev1.Pod, externalJob *slurmcontrol.ExternalJob, m fwk.NodeToStatusReader) bool {
+	if externalJob.JobId == 0 || externalJob.Nodes == "" {
+		return false
+	}
+	assignedNode := pod.Annotations[wellknown.AnnotationExternalJobNode]
+	if assignedNode == "" {
+		return false
+	}
+	status := m.Get(assignedNode)
+	return status.Code() != fwk.Success && status.Plugin() != "" && status.Plugin() != Name
+}
+
 // PostFilter will create the Slurm external job once the pod has been
 // processed by the PreFilter and Filter plugins. This allows the rest of
 // the kubernetes plugins to have a say in which pods would be feasible for
@@ -317,6 +333,15 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	if err != nil {
 		logger.Error(err, "error checking for Slurm job")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	if allocatedNodeRejectedByKubernetes(pod, externalJob, m) {
+		logger.Info("Slurm allocation rejected by Kubernetes, deleting external job for retry",
+			"pod", klog.KObj(pod), "jobId", externalJob.JobId, "nodes", externalJob.Nodes)
+		if err := sb.deleteExternalJob(ctx, pod); err != nil {
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
+		sb.activatePod(logger, pod)
+		return nil, fwk.NewStatus(fwk.Success)
 	}
 
 	// Create the Slurm external job based on the nodes that have
@@ -336,6 +361,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 	slurmNodes := sets.New(slurmNodeNames...)
+	feasibleSlurmNodes := sets.New[string]()
 	for _, node := range feasibleNodes {
 		status := m.Get(node.Node().Name)
 		// If the Unschedulable code was set by SlurmBridge
@@ -345,16 +371,18 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		if status.Plugin() == Name {
 			slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
 			if slurmNodes.Has(slurmName) {
-				s.slurmJobIR.JobInfo.Nodes = append(s.slurmJobIR.JobInfo.Nodes, slurmName)
+				feasibleSlurmNodes.Insert(slurmName)
 			}
 		}
 	}
 
 	// If this situation occurs, the best we can do is trigger another
 	// scheduling cycle.
-	if len(s.slurmJobIR.JobInfo.Nodes) < len(s.slurmJobIR.Pods.Items) {
+	if feasibleSlurmNodes.Len() < len(s.slurmJobIR.Pods.Items) {
 		return nil, fwk.NewStatus(fwk.Success)
 	}
+	s.slurmJobIR.JobInfo.ExcNodes = slurmNodes.Difference(feasibleSlurmNodes).UnsortedList()
+	slices.Sort(s.slurmJobIR.JobInfo.ExcNodes)
 
 	// If no external job exists, we should create one with the list
 	// of nodes that passed Filter plugins.
