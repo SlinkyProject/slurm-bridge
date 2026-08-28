@@ -6,6 +6,7 @@ package slurmbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
