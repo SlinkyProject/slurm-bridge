@@ -20,7 +20,7 @@ KWOK_CHART_VERSION="0.3.0"
 KUBE_PROMETHEUS_STACK_CHART_REPO="https://prometheus-community.github.io/helm-charts"
 KUBE_PROMETHEUS_STACK_CHART_VERSION="88.6.2"
 
-MIN_KIND_VERSION="0.32.0"
+MIN_KIND_VERSION="0.33.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
 
 function tool::version_ge() {

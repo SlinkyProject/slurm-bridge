@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 # SPDX-License-Identifier: Apache-2.0
 # https://kind.sigs.k8s.io/docs/user/configuration/
-# Kubernetes 1.37 configuration. The Workload API is served as v1beta1.
+# Kubernetes 1.36 configuration. The Workload API is served as v1alpha2.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 featureGates:
@@ -33,7 +33,7 @@ nodes:
         kind: ClusterConfiguration
         apiServer:
           extraArgs:
-            runtime-config: "scheduling.k8s.io/v1beta1=true"
+            runtime-config: "scheduling.k8s.io/v1alpha2=true"
             feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
   - role: worker
   - role: worker

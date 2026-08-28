@@ -18,7 +18,7 @@
     - [Scheduler-managed Pod metadata](#scheduler-managed-pod-metadata)
   - [Pod grouping](#pod-grouping)
     - [Other controller owners](#other-controller-owners)
-  - [PodGroup (1.36+)](#podgroup-136)
+  - [PodGroup (1.36)](#podgroup-136)
   - [JobSets](#jobsets)
   - [PodGroup coscheduling](#podgroup-coscheduling)
   - [LeaderWorkerSet](#leaderworkerset)
@@ -35,12 +35,12 @@ workloads through Kubernetes. Most workloads that can be submitted to
 batch workload primitive.
 
 At this time, `slurm-bridge` has scheduling support for [Jobs],
-[JobSets](#jobsets), [Pods], [PodGroup (1.36+)](#podgroup-136)
+[JobSets](#jobsets), [Pods], [PodGroup (1.36)](#podgroup-136)
 (`scheduling.k8s.io/v1alpha2`), [PodGroup coscheduling](#podgroup-coscheduling)
 (scheduler-plugins), and [LeaderWorkerSets]. If your workload requires or
 benefits from co-scheduled pod launch (e.g. MPI, multi-node), prefer
-[PodGroup (1.36+)](#podgroup-136) on Kubernetes **1.36+** or
-[PodGroup coscheduling](#podgroup-coscheduling) on older clusters.
+[PodGroup (1.36)](#podgroup-136) on Kubernetes **1.36** or
+[PodGroup coscheduling](#podgroup-coscheduling) on other clusters.
 
 ## Using the `slurm-bridge` Scheduler
 
@@ -338,13 +338,13 @@ scheduler cannot read the Deployment, and the Pod is still scheduled. If the
 ReplicaSet itself cannot be retrieved, scheduling fails because no controller in
 the chain was successfully resolved.
 
-## PodGroup (1.36+)
+## PodGroup (1.36)
 
 PodGroup is a built-in Kubernetes API introduced in **1.36**. This section
-applies to clusters running **1.36+** with the **`GenericWorkload`** feature
-gate and **`scheduling.k8s.io/v1alpha2`** API enabled (see
-[`hack/kind.yaml`](../hack/kind.yaml) and `make kind-start`). After slurm-bridge
-assigns nodes to the gang, PodGroup `STATUS` becomes **Scheduled**
+applies to clusters running **1.36** with the **`GenericWorkload`** feature gate
+and **`scheduling.k8s.io/v1alpha2`** API enabled (see
+[`hack/kind-1.36.yaml`](../hack/kind-1.36.yaml)). After slurm-bridge assigns
+nodes to the gang, PodGroup `STATUS` becomes **Scheduled**
 (`PodGroupScheduled=True`); it is not tied to Job completion.
 
 A [**Workload**][workload-api] defines immutable **`podGroupTemplates`** (gang
@@ -436,11 +436,11 @@ marked as completed.
 
 ## PodGroup coscheduling
 
-This is **not** the same API as [PodGroup (1.36+)](#podgroup-136) above. It uses
+This is **not** the same API as [PodGroup (1.36)](#podgroup-136) above. It uses
 the **scheduler-plugins** CRD `scheduling.x-k8s.io/v1alpha1` and requires
-installing on clusters **before 1.36** (or where the built-in PodGroup API is
-unavailable) the [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree
-CoScheduling controller:
+installing on clusters where the supported built-in PodGroup API is unavailable
+the [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
+controller:
 
 ```sh
 helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins scheduler-plugins \
@@ -452,7 +452,7 @@ Pods join the group via the label `scheduling.x-k8s.io/pod-group` (see
 [`hack/examples/podgroup-coscheduling/`](../hack/examples/podgroup-coscheduling/)).
 Gang size is `spec.minMember` on the PodGroup object.
 
-|                 | PodGroup (1.36+)                      | PodGroup coscheduling                 |
+|                 | PodGroup (1.36)                       | PodGroup coscheduling                 |
 | --------------- | ------------------------------------- | ------------------------------------- |
 | API group       | `scheduling.k8s.io/v1alpha2`          | `scheduling.x-k8s.io/v1alpha1`        |
 | Install         | Feature gate + runtime config         | CRD + helm chart                      |
