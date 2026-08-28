@@ -6,7 +6,9 @@ package slurmcontrol
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -33,7 +35,7 @@ type SlurmControlInterface interface {
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
-	GetNodeNames(ctx context.Context) ([]string, error)
+	GetNodeNames(ctx context.Context, partition *string) ([]string, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 }
@@ -255,14 +257,24 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 	return ptr.Deref(job.JobId, 0), nil
 }
 
-func (r *realSlurmControl) GetNodeNames(ctx context.Context) ([]string, error) {
+func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
 	list := &slurmtypes.V0044NodeList{}
 	if err := r.List(ctx, list); err != nil {
 		return nil, err
 	}
-	nodeNames := make([]string, len(list.Items))
-	for i, node := range list.Items {
-		nodeNames[i] = ptr.Deref(node.Name, "")
+	partitionNames := strings.Split(ptr.Deref(partition, r.partition), ",")
+	for i := range partitionNames {
+		partitionNames[i] = strings.TrimSpace(partitionNames[i])
+	}
+	nodeNames := make([]string, 0, len(list.Items))
+	for _, node := range list.Items {
+		partitions := ptr.Deref(node.Partitions, api.V0044CsvString{})
+		for _, partitionName := range partitionNames {
+			if slices.Contains(partitions, partitionName) {
+				nodeNames = append(nodeNames, ptr.Deref(node.Name, ""))
+				break
+			}
+		}
 	}
 	return nodeNames, nil
 }
