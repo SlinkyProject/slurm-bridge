@@ -166,6 +166,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
 	}
 	job := &slurmtypes.V0044JobInfo{}
+	excludedNodes := append(api.V0044CsvString{}, slurmJobIR.JobInfo.ExcNodes...)
 	jobSubmit := api.V0044JobSubmitReq{
 		Job: &api.V0044JobDescMsg{
 			Account:                 slurmJobIR.JobInfo.Account,
@@ -173,6 +174,12 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
 			Constraints:             slurmJobIR.JobInfo.Constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
+			ExcludedNodes: func() *api.V0044CsvString {
+				if len(excludedNodes) == 0 && !update {
+					return nil
+				}
+				return &excludedNodes
+			}(),
 			Flags: &[]api.V0044JobDescMsgFlags{
 				api.V0044JobDescMsgFlagsEXTERNALJOB,
 			},
@@ -191,10 +198,9 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 					return &api.V0044Uint64NoValStruct{Set: ptr.To(false)}
 				}
 			}(),
-			MinimumNodes:  slurmJobIR.JobInfo.MinNodes,
-			Name:          slurmJobIR.JobInfo.JobName,
-			Nodes:         ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
-			RequiredNodes: ptr.To(api.V0044CsvString(slurmJobIR.JobInfo.Nodes)),
+			MinimumNodes: slurmJobIR.JobInfo.MinNodes,
+			Name:         slurmJobIR.JobInfo.JobName,
+			Nodes:        ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
 			Partition: func() *string {
 				if slurmJobIR.JobInfo.Partition == nil {
 					return &r.partition

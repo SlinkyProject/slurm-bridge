@@ -507,6 +507,14 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
 							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job.RequiredNodes != nil {
+								return fmt.Errorf("expected RequiredNodes to be nil, got %v", *jobSubmit.Job.RequiredNodes)
+							}
+							want := ptr.To(api.V0044CsvString{"node2"})
+							if !reflect.DeepEqual(jobSubmit.Job.ExcludedNodes, want) {
+								return fmt.Errorf("ExcludedNodes = %v, want %v", jobSubmit.Job.ExcludedNodes, want)
+							}
 							return nil
 						},
 					}
@@ -518,7 +526,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			args: args{
 				ctx:        context.Background(),
 				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{},
+				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: []string{"node2"}}},
 			},
 			want:    1,
 			wantErr: false,
@@ -533,6 +541,9 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil || len(*jobSubmit.Job.Shared) != 1 {
 								return fmt.Errorf("expected Shared to have one element, got %v", jobSubmit.Job.Shared)
+							}
+							if jobSubmit.Job.ExcludedNodes != nil {
+								return fmt.Errorf("expected ExcludedNodes to be nil, got %v", *jobSubmit.Job.ExcludedNodes)
 							}
 							if (*jobSubmit.Job.Shared)[0] != api.V0044JobDescMsgSharedNone {
 								return fmt.Errorf("expected Shared SharedNone (exclusive), got %v", (*jobSubmit.Job.Shared)[0])
