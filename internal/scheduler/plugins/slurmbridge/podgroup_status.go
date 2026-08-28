@@ -7,7 +7,6 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
@@ -16,10 +15,6 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
-
-func isPodGroupRoot(pom *metav1.PartialObjectMetadata) bool {
-	return pom.APIVersion == "scheduling.k8s.io/v1alpha2" && pom.Kind == "PodGroup"
-}
 
 func podsHaveSlurmNodeAssignments(pods *corev1.PodList, jobID string) bool {
 	if len(pods.Items) == 0 || jobID == "" {
@@ -34,21 +29,22 @@ func podsHaveSlurmNodeAssignments(pods *corev1.PodList, jobID string) bool {
 	return true
 }
 
-// markPodGroupScheduled sets PodGroupScheduled=True so kubectl shows STATUS Scheduled.
+// markPodGroupScheduled sets the served API version's scheduled condition to True.
 // kube-scheduler normally writes this when it admits a gang; slurm-bridge must do the same.
 func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, jobID string) {
-	if slurmJobIR == nil || !isPodGroupRoot(&slurmJobIR.RootPOM) || jobID == "" {
+	if slurmJobIR == nil || sb.workloadAPI == nil || slurmJobIR.RootPOM.TypeMeta != sb.workloadAPI.PodGroupTypeMeta || jobID == "" {
 		return
 	}
 
 	logger := klog.FromContext(ctx)
-	pg := &schedulingv1alpha2.PodGroup{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.Namespace, Name: slurmJobIR.RootPOM.Name}
+	pg := &slurmjobir.PodGroup{TypeMeta: sb.workloadAPI.PodGroupTypeMeta}
 	if err := sb.Get(ctx, key, pg); err != nil {
 		logger.V(4).Info("skip PodGroup status update", "podGroup", key, "err", err)
 		return
 	}
-	if cond := apimeta.FindStatusCondition(pg.Status.Conditions, schedulingv1alpha2.PodGroupScheduled); cond != nil && cond.Status == metav1.ConditionTrue {
+	conditionType := sb.workloadAPI.ScheduledCondition
+	if cond := apimeta.FindStatusCondition(pg.Status.Conditions, conditionType); cond != nil && cond.Status == metav1.ConditionTrue {
 		return
 	}
 
@@ -60,17 +56,17 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 		return
 	}
 
-	toUpdate := pg.DeepCopy()
+	updated := pg.DeepCopyObject().(*slurmjobir.PodGroup)
 	now := metav1.Now()
-	apimeta.SetStatusCondition(&toUpdate.Status.Conditions, metav1.Condition{
-		Type:               schedulingv1alpha2.PodGroupScheduled,
+	apimeta.SetStatusCondition(&updated.Status.Conditions, metav1.Condition{
+		Type:               conditionType,
 		Status:             metav1.ConditionTrue,
-		ObservedGeneration: pg.Generation,
+		ObservedGeneration: pg.GetGeneration(),
 		LastTransitionTime: now,
 		Reason:             "Scheduled",
 		Message:            "Pod group admitted by " + sb.schedulerName,
 	})
-	if err := sb.Status().Patch(ctx, toUpdate, client.StrategicMergeFrom(pg)); err != nil {
+	if err := sb.Status().Patch(ctx, updated, client.StrategicMergeFrom(pg)); err != nil {
 		logger.Error(err, "failed to patch PodGroup status", "podGroup", key)
 		return
 	}

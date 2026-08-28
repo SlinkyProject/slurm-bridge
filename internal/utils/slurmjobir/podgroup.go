@@ -9,7 +9,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -21,9 +20,6 @@ import (
 )
 
 var (
-	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
-	podgroup_v1alpha2 = metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"}
-
 	ErrorPodGroupCouldNotGet = errors.New("could not get podgroup")
 	ErrorPodGroupNoPods      = errors.New("no pods for scheduling group found")
 )
@@ -41,7 +37,7 @@ func podGroupName(pod *corev1.Pod) (string, bool) {
 // Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 func (t *translator) parsePodGroupSlurmAnnotations(
 	slurmJobIR *SlurmJobIR,
-	pg *schedulingv1alpha2.PodGroup,
+	pg *PodGroup,
 	controllerPOM *metav1.PartialObjectMetadata,
 ) error {
 	if err := parseAnnotations(slurmJobIR, pg.GetAnnotations()); err != nil {
@@ -64,12 +60,12 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 			return err
 		}
 	}
-	ref := pg.Spec.PodGroupTemplateRef
-	if ref == nil || ref.Workload == nil || ref.Workload.WorkloadName == "" {
+	workloadName := pg.workloadName()
+	if workloadName == "" {
 		return nil
 	}
-	wl := &schedulingv1alpha2.Workload{}
-	key := client.ObjectKey{Namespace: pg.Namespace, Name: ref.Workload.WorkloadName}
+	key := client.ObjectKey{Namespace: pg.GetNamespace(), Name: workloadName}
+	wl := &Workload{TypeMeta: metav1.TypeMeta{APIVersion: t.workloadAPI.PodGroupTypeMeta.APIVersion, Kind: "Workload"}}
 	if err := t.Get(t.ctx, key, wl); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -85,10 +81,10 @@ func (t *translator) applySlurmAnnotations(
 	pod *corev1.Pod,
 	rootPOM *metav1.PartialObjectMetadata,
 ) error {
-	if slurmJobIR.RootPOM.TypeMeta != podgroup_v1alpha2 {
+	if !isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
 		return parseAnnotations(slurmJobIR, rootPOM.Annotations)
 	}
-	pg := &schedulingv1alpha2.PodGroup{}
+	pg := &PodGroup{TypeMeta: t.workloadAPI.PodGroupTypeMeta}
 	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), pg); err != nil {
 		return err
 	}
@@ -116,22 +112,22 @@ func schedulingGroupsMatch(a, b *corev1.PodSchedulingGroup) bool {
 // PreFilterPodGroup enforces gang scheduling MinCount (and external-job consistency)
 // for pods that reference a scheduling.k8s.io PodGroup via spec.schedulingGroup.
 func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
-	pg := &schedulingv1alpha2.PodGroup{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.GetNamespace(), Name: slurmJobIR.RootPOM.GetName()}
+	pg := &PodGroup{TypeMeta: t.workloadAPI.PodGroupTypeMeta}
 	if err := t.Get(t.ctx, key, pg); err != nil {
 		return fwk.NewStatus(fwk.Error, ErrorPodGroupCouldNotGet.Error())
 	}
-	if pg.Spec.SchedulingPolicy.Gang == nil {
+	minCount := pg.gangMinCount()
+	if minCount == nil {
 		return fwk.NewStatus(fwk.Success)
 	}
-	minCount := pg.Spec.SchedulingPolicy.Gang.MinCount
 	var numPodsWaiting int32
 	for _, p := range slurmJobIR.Pods.Items {
 		if p.Labels[wellknown.LabelExternalJobId] == pod.Labels[wellknown.LabelExternalJobId] {
 			numPodsWaiting++
 		}
 	}
-	if numPodsWaiting < minCount {
+	if numPodsWaiting < *minCount {
 		if pod.Labels[wellknown.LabelExternalJobId] == "" {
 			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
 		}
