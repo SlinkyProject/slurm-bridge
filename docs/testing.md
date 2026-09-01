@@ -49,14 +49,26 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This is equivalent to `--dra-driver-cpu --dra-example-driver`. Each flag can
-still be used individually.
+This installs the CPU, example GPU, and NVIDIA GPU DRA drivers. Each driver can
+still be installed individually with `--dra-driver-cpu`, `--dra-example-driver`,
+or `--dra-driver-nvidia-gpu`.
+
+NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
+installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to
+install
+[`nvml-mock`](https://github.com/NVIDIA/k8s-test-infra/tree/main/deployments/nvml-mock)
+on the managed Kind workers before the NVIDIA DRA driver:
+
+```sh
+MOCK_NVML=true make kind-start
+```
 
 Examples remain individually selectable:
 
 ```sh
 kubectl apply -f hack/examples/job/single.yaml
 kubectl apply -f hack/examples/dra/gpu-example/job.yaml
+kubectl apply -f hack/examples/dra/nvidia/job.yaml
 ```
 
 ## Demo
