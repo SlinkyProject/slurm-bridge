@@ -1,0 +1,21 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "slurm-bridge.scheduler.name" . }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
+  labels:
+    {{- include "slurm-bridge.scheduler.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "slurm-bridge.scheduler.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https-metrics
+      protocol: TCP
+      port: 10259
+      targetPort: 10259

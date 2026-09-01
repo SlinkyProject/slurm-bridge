@@ -43,6 +43,18 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: exposes metrics over HTTP
+    template: admission/service.yaml
+    set:
+      admission.enabled: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            protocol: TCP
+            port: 8080
+            targetPort: 8080
   - it: does not expose the Slurm JWT to admission
     template: admission/deployment.yaml
     set:

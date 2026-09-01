@@ -6,6 +6,7 @@ templates:
   - scheduler/deployment.yaml
   - scheduler/configmap.yaml
   - scheduler/rbac.yaml
+  - scheduler/service.yaml
   - scheduler/serviceaccount.yaml
   - configmap.yaml
 release:
@@ -39,11 +40,35 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
-  - it: scheduler can update its leader election lease
+  - it: exposes authenticated metrics over HTTPS
+    template: scheduler/service.yaml
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: https-metrics
+            protocol: TCP
+            port: 10259
+            targetPort: 10259
+  - it: provides a metrics reader role without binding it
     template: scheduler/rbac.yaml
     documentSelector:
-      path: kind
-      value: ClusterRole
+      path: metadata.name
+      value: test-release-slurm-bridge-metrics-reader
+    asserts:
+      - equal:
+          path: kind
+          value: ClusterRole
+      - contains:
+          path: rules
+          content:
+            nonResourceURLs:
+              - /metrics
+            verbs:
+              - get
+  - it: scheduler can update its leader election lease
+    template: scheduler/rbac.yaml
+    documentIndex: 0
     asserts:
       - contains:
           path: rules
