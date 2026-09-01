@@ -10,7 +10,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -267,16 +266,16 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 }
 
 func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *corev1.Node) (*nodeinfo.NodeInfo, []dra.GRESInventory, error) {
-	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := r.List(ctx, resourceSlices); err != nil {
-		return nil, nil, err
-	}
-
-	nodeInfo, err := nodeinfo.NewNodeInfoFromResourceSlices(node.Name, resourceSlices.Items)
+	resourceSlices, err := nodeutils.GetResourceSlicesForNode(ctx, r.Client, node.Name)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodeInventory, err := dra.BuildNodeInventory(ctx, r.draRegistry, node, resourceSlices.Items)
+
+	nodeInfo, err := nodeinfo.NewNodeInfoFromResourceSlices(node.Name, resourceSlices)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeInventory, err := dra.BuildNodeInventory(ctx, r.draRegistry, node, resourceSlices)
 	if err != nil {
 		return nil, nil, err
 	}
