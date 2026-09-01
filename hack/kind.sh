@@ -14,6 +14,8 @@ SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
+KWOK_CHART_REPO="https://kwok.sigs.k8s.io/charts/"
+KWOK_CHART_VERSION="0.3.0"
 
 MIN_KIND_VERSION="0.32.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
@@ -354,6 +356,22 @@ function storage::install_default_local_path() {
 	fi
 }
 
+function kwok::install() {
+	echo "[kwok] Installing the KWOK controller and fast stage configuration..."
+	helm repo add kwok "$KWOK_CHART_REPO" --force-update
+	helm upgrade --install kwok kwok/kwok \
+		--version "$KWOK_CHART_VERSION" \
+		--namespace kube-system --create-namespace \
+		--set hostNetwork=true \
+		--wait --timeout=120s
+	helm upgrade --install kwok-stage-fast kwok/stage-fast \
+		--version "$KWOK_CHART_VERSION" \
+		--namespace kube-system --create-namespace \
+		--wait --timeout=120s
+	kubectl rollout status deployment/kwok-controller \
+		--namespace kube-system --timeout=120s
+}
+
 function slurm-stack::prerequisites() {
 	local chartName
 	chartName="cert-manager"
@@ -570,7 +588,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
-	        [--dra-driver-nvidia-gpu]
+	        [--dra-driver-nvidia-gpu] [--kwok]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -592,6 +610,7 @@ HELM OPTIONS:
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
+	--kwok              Install KWOK and its fast stage configuration.
 
 SLURM OPTIONS:
 	--slurm-node-mode=MODE
@@ -640,6 +659,9 @@ function main() {
 
 	make -C "$ROOT_DIR" values-dev || true
 
+	if $OPT_KWOK; then
+		kwok::install
+	fi
 	if $OPT_DRA_DRIVER_CPU; then
 		dra-driver-cpu::install
 	fi
@@ -674,6 +696,7 @@ OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
 MOCK_NVML="${MOCK_NVML:-false}"
+OPT_KWOK=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-main}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
@@ -687,7 +710,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,kwok,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -770,6 +793,10 @@ while :; do
 		;;
 	--dra-driver-nvidia-gpu)
 		OPT_DRA_DRIVER_NVIDIA_GPU=true
+		shift
+		;;
+	--kwok)
+		OPT_KWOK=true
 		shift
 		;;
 	--all)
