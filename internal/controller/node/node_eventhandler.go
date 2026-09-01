@@ -49,14 +49,11 @@ func (h *nodeEventHandler) Generic(ctx context.Context, evt event.GenericEvent, 
 		return
 	}
 
-	nodeList := &corev1.NodeList{}
-	if err := h.List(ctx, nodeList); err != nil {
-		logger.Error(err, "failed to list nodes")
+	name, ok, err := nodeutils.GetNodeNameForSlurmName(ctx, h.Reader, node.GetName())
+	if err != nil {
+		logger.Error(err, "failed to resolve node")
 		return
 	}
-	nodeNameMap := nodeutils.MakeNodeNameMap(ctx, nodeList)
-
-	name, ok := nodeNameMap[node.GetName()]
 	if !ok {
 		name = node.GetName()
 	}
