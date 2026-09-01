@@ -29,6 +29,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/ratelimiter"
 )
 
 const (
@@ -117,6 +118,7 @@ func (r *NodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WatchesRawSource(source.Channel(r.EventCh, nodeEventHandler)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
+			RateLimiter:             ratelimiter.Build[reconcile.Request](),
 		}).
 		Complete(r)
 }

@@ -26,6 +26,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/ratelimiter"
 )
 
 const (
@@ -111,6 +112,7 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WatchesRawSource(source.Channel(r.EventCh, podEventHandler)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
+			RateLimiter:             ratelimiter.Build[reconcile.Request](),
 		}).
 		Complete(r)
 }
