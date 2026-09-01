@@ -13,7 +13,10 @@ configFiles:
           - switch: s1
           - switch: s2
 controller:
-  extraConf: GresTypes=gpu
+  extraConf: |
+    GresTypes=gpu
+    MCSPlugin=mcs/label
+    MCSParameters=ondemand,ondemandselect
 nodesets:
   slinky:
     enabled: false

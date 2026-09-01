@@ -204,6 +204,9 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		}
 	}
 	cfg := config.UnmarshalOrDie(data)
+	if err := cfg.ValidateScheduler(); err != nil {
+		return nil, err
+	}
 
 	client, err := client.New(handle.KubeConfig(), client.Options{})
 	if err != nil {

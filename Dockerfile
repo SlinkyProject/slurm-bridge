@@ -3,7 +3,7 @@
 
 ################################################################################
 
-FROM --platform=${BUILDPLATFORM} golang:1.26 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.26.6 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG SKAFFOLD_GO_GCFLAGS

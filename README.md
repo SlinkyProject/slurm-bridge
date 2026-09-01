@@ -34,7 +34,10 @@ This project enables the best of both workload managers. It contains a
 [Kubernetes] scheduler to manage select workloads from Kubernetes, which allows
 for co-location of Kubernetes and Slurm workloads within the same cluster. This
 means the same hardware can be used to run both traditional HPC and cloud-like
-workloads, reducing operating costs.
+workloads, reducing operating costs. On hybrid nodes, the hardware is shared
+over time: a physical node must not run native Slurm user workloads and
+Slurm-bridge-managed Kubernetes user workloads simultaneously. Kubernetes and
+Slurm system daemons are expected to remain co-located on those nodes.
 
 Using `slurm-bridge`, workloads can be submitted from within a Kubernetes
 context as a `Pod`, `PodGroup`, `Job`, `JobSet`, or `LeaderWorkerSet` and from a
@@ -75,7 +78,8 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Limitations
 
-- Exclusive, whole node allocations are made for each pod.
+- Bridge jobs use exclusive, whole-node allocations by default. Workloads that
+  request non-exclusive placement always use Slurm MCS workload isolation.
 - Only supports the following DRA drivers:
   - [DRA Driver CPU][dra-driver-cpu] for CPUs.
   - [NVIDIA DRA Driver][nvidia-dra-driver] for GPUs.

@@ -30,46 +30,36 @@ import (
 
 func Test_sharedFromExclusiveAnnotation(t *testing.T) {
 	tests := []struct {
-		name          string
-		slurmJobIR    *slurmjobir.SlurmJobIR
-		wantExclusive bool
+		name       string
+		slurmJobIR *slurmjobir.SlurmJobIR
+		wantShared api.V0044JobDescMsgShared
 	}{
 		{
-			name:          "nil slurmJobIR defaults to exclusive",
-			slurmJobIR:    nil,
-			wantExclusive: true,
+			name:       "nil slurmJobIR defaults to exclusive",
+			slurmJobIR: nil,
+			wantShared: api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:          "slurmJobIR with Exclusive nil defaults to exclusive",
-			slurmJobIR:    &slurmjobir.SlurmJobIR{},
-			wantExclusive: true,
+			name:       "slurmJobIR with Exclusive nil defaults to exclusive",
+			slurmJobIR: &slurmjobir.SlurmJobIR{},
+			wantShared: api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:          "slurmJobIR.Exclusive true",
-			slurmJobIR:    &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(true)}},
-			wantExclusive: true,
+			name:       "slurmJobIR.Exclusive true",
+			slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(true)}},
+			wantShared: api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:          "slurmJobIR.Exclusive false yields non-exclusive (empty Shared)",
-			slurmJobIR:    &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
-			wantExclusive: false,
+			name:       "slurmJobIR.Exclusive false uses MCS sharing",
+			slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
+			wantShared: api.V0044JobDescMsgSharedMcs,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := sharedFromExclusiveAnnotation(tt.slurmJobIR)
-			if got == nil {
-				t.Fatalf("sharedFromExclusiveAnnotation() = nil")
-			}
-			if tt.wantExclusive {
-				if len(*got) != 1 {
-					t.Fatalf("sharedFromExclusiveAnnotation() = %v, want single element (exclusive)", got)
-				}
-				if (*got)[0] != api.V0044JobDescMsgSharedNone {
-					t.Errorf("sharedFromExclusiveAnnotation() Shared = %v, want SharedNone", (*got)[0])
-				}
-			} else if len(*got) != 0 {
-				t.Errorf("sharedFromExclusiveAnnotation() = %v, want empty (non-exclusive)", got)
+			if got == nil || len(*got) != 1 || (*got)[0] != tt.wantShared {
+				t.Errorf("sharedFromExclusiveAnnotation() = %v, want [%v]", got, tt.wantShared)
 			}
 		})
 	}
@@ -464,6 +454,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 func Test_realSlurmControl_SubmitJob(t *testing.T) {
 	type fields struct {
 		Client    client.Client
+		mcsLabel  string
 		partition string
 	}
 	type args struct {
@@ -598,8 +589,9 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Submit external job slurmJobIR.Exclusive false yields empty Shared (non-exclusive)",
+			name: "Submit external job slurmJobIR.Exclusive false yields SharedMcs",
 			fields: fields{
+				mcsLabel: "kubernetes",
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
@@ -608,8 +600,11 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil {
 								return fmt.Errorf("expected Shared to be set, got %v", jobSubmit.Job.Shared)
 							}
-							if len(*jobSubmit.Job.Shared) != 0 {
-								return fmt.Errorf("expected Shared empty (non-exclusive), got len=%d %v", len(*jobSubmit.Job.Shared), *jobSubmit.Job.Shared)
+							if len(*jobSubmit.Job.Shared) != 1 || (*jobSubmit.Job.Shared)[0] != api.V0044JobDescMsgSharedMcs {
+								return fmt.Errorf("expected Shared MCS, got %v", *jobSubmit.Job.Shared)
+							}
+							if jobSubmit.Job.McsLabel == nil || *jobSubmit.Job.McsLabel != "kubernetes" {
+								return fmt.Errorf("expected MCS label kubernetes, got %v", jobSubmit.Job.McsLabel)
 							}
 							return nil
 						},
@@ -632,6 +627,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
 				Client:    tt.fields.Client,
+				mcsLabel:  tt.fields.mcsLabel,
 				partition: tt.fields.partition,
 			}
 			got, err := r.SubmitJob(tt.args.ctx, tt.args.pod, tt.args.slurmJobIR)

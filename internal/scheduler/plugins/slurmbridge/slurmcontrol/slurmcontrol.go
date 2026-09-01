@@ -73,7 +73,7 @@ func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V00
 	if exclusive {
 		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
 	}
-	return &[]api.V0044JobDescMsgShared{}
+	return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedMcs}
 }
 
 // DeleteSlurmJob will delete an external job
