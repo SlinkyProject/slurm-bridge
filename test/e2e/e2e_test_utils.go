@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 
 const (
 	slurmNodeModeEnvironment    = "SLURM_NODE_MODE"
+	mockNVMLEnvironment         = "MOCK_NVML"
 	slurmNodeModeExternal       = slurmNodeMode("external")
 	slurmNodeModeHybrid         = slurmNodeMode("hybrid")
 	slurmNamespace              = "slurm"
@@ -84,6 +86,18 @@ func parseSlurmNodeModeFromEnvironment() (slurmNodeMode, error) {
 		value = string(slurmNodeModeExternal)
 	}
 	return parseSlurmNodeMode(value)
+}
+
+func parseMockNVMLFromEnvironment() (bool, error) {
+	value := os.Getenv(mockNVMLEnvironment)
+	if value == "" {
+		return false, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean, got %q: %w", mockNVMLEnvironment, value, err)
+	}
+	return enabled, nil
 }
 
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
@@ -674,7 +688,7 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 		Feature()
 }
 
-func testSlurmBridgeNvidiaGPUResourceScheduling() types.Feature {
+func testSlurmBridgeNvidiaGPUResourceScheduling(required bool) types.Feature {
 	podName := envconf.RandomName("pod-dra-nvidia-e2e", 32)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -721,6 +735,9 @@ func testSlurmBridgeNvidiaGPUResourceScheduling() types.Feature {
 				t.Fatalf("failed to list NVIDIA GPU nodes: %v", err)
 			}
 			if len(gpuNodes.Items) == 0 {
+				if required {
+					t.Fatal("MOCK_NVML is enabled, but no Slurm Bridge worker exposes NVIDIA GPUs")
+				}
 				t.Skip("no Slurm Bridge worker exposes NVIDIA GPUs")
 			}
 

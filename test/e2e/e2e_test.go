@@ -17,13 +17,17 @@ func TestScheduling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	requireNvidiaGPU, err := parseMockNVMLFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	testFeatures := []types.Feature{
 		testSlurmBridgeReadiness(nodeMode),
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(false),
-		testSlurmBridgeNvidiaGPUResourceScheduling(),
+		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
 	}
 	if nodeMode == slurmNodeModeExternal {
 		testFeatures = append(testFeatures, testSlurmBridgeDRAResourceScheduling(true))

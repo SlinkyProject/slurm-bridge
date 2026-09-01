@@ -37,6 +37,22 @@ func TestParseSlurmNodeMode(t *testing.T) {
 	}
 }
 
+func TestParseMockNVMLFromEnvironment(t *testing.T) {
+	t.Setenv(mockNVMLEnvironment, "true")
+	enabled, err := parseMockNVMLFromEnvironment()
+	if err != nil {
+		t.Fatalf("parseMockNVMLFromEnvironment() error = %v", err)
+	}
+	if !enabled {
+		t.Fatal("parseMockNVMLFromEnvironment() = false, want true")
+	}
+
+	t.Setenv(mockNVMLEnvironment, "invalid")
+	if _, err := parseMockNVMLFromEnvironment(); err == nil {
+		t.Fatal("parseMockNVMLFromEnvironment() accepted an invalid value")
+	}
+}
+
 func TestSlurmNodeStates(t *testing.T) {
 	t.Parallel()
 
