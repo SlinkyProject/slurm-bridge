@@ -8,10 +8,9 @@ alertmanager:
 defaultRules:
   create: false
 
-# Enable this when a local dashboard is useful. The stack configures Prometheus
-# as Grafana's default data source.
 grafana:
-  enabled: false
+  enabled: true
+  defaultDashboardsEnabled: false
 
 kubeApiServer:
   enabled: false

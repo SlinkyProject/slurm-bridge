@@ -385,6 +385,7 @@ function metrics::install() {
 		--values "$config_dir/values.yaml" \
 		--wait --timeout=300s
 	kubectl apply -f "$config_dir/slurm-bridge.yaml"
+	kubectl apply -f "$config_dir/grafana-dashboard.yaml"
 	kubectl wait --for=create pod \
 		--namespace monitoring \
 		--selector=app.kubernetes.io/name=prometheus \
@@ -393,8 +394,16 @@ function metrics::install() {
 		--namespace monitoring \
 		--selector=app.kubernetes.io/name=prometheus \
 		--timeout=300s
+	kubectl wait --for=condition=Available deployment/prometheus-grafana \
+		--namespace monitoring \
+		--timeout=300s
 	echo "[metrics] Ready. Forward the Prometheus UI with:"
 	echo "kubectl --namespace monitoring port-forward service/prometheus-kube-prometheus-prometheus 9090:9090"
+	echo "[metrics] Forward the Grafana UI with:"
+	echo "kubectl --namespace monitoring port-forward service/prometheus-grafana 3000:80"
+	echo "[metrics] Grafana username: admin"
+	echo "[metrics] Read the Grafana password with:"
+	echo "kubectl --namespace monitoring get secret prometheus-grafana --output=jsonpath='{.data.admin-password}' | base64 --decode"
 }
 
 function slurm-stack::prerequisites() {
