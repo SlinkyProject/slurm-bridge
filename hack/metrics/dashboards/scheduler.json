@@ -1,0 +1,1326 @@
+{
+  "editable": true,
+  "links": [
+    {
+      "asDropdown": false,
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": true,
+      "title": "Upstream Kubernetes scheduler dashboard",
+      "type": "link",
+      "url": "https://github.com/kubernetes-monitoring/kubernetes-mixin/blob/master/dashboards/scheduler.libsonnet"
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "interval": "1m",
+      "options": {
+        "colorMode": "none"
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(up{service=\"slurm-bridge-scheduler\"})",
+          "instant": true
+        }
+      ],
+      "title": "Up",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{cluster}} {{instance}} e2e"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(scheduler_pod_scheduling_sli_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}} pod scheduling SLI"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(scheduler_scheduling_algorithm_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{cluster}} {{instance}} scheduling algorithm"
+        }
+      ],
+      "title": "Scheduling Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 10,
+        "x": 14,
+        "y": 0
+      },
+      "id": 3,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "legendFormat": "{{cluster}} {{instance}} e2e"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "legendFormat": "{{cluster}} {{instance}} binding"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "legendFormat": "{{cluster}} {{instance}} scheduling algorithm"
+        }
+      ],
+      "title": "Scheduling latency 99th Quantile",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 7
+      },
+      "id": 4,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"2..\"}[$__rate_interval]))",
+          "legendFormat": "2xx"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"3..\"}[$__rate_interval]))",
+          "legendFormat": "3xx"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"4..\"}[$__rate_interval]))",
+          "legendFormat": "4xx"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"5..\"}[$__rate_interval]))",
+          "legendFormat": "5xx"
+        }
+      ],
+      "title": "Kube API Request Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 8,
+        "y": 7
+      },
+      "id": 5,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\", instance=~\"$instance\", verb=\"POST\"}[$__rate_interval])) by (verb, le))",
+          "legendFormat": "{{verb}}"
+        }
+      ],
+      "title": "Post Request Latency 99th Quantile",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 6,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\", instance=~\"$instance\", verb=\"GET\"}[$__rate_interval])) by (verb, le))",
+          "legendFormat": "{{verb}}"
+        }
+      ],
+      "title": "Get Request Latency 99th Quantile",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 21
+      },
+      "id": 7,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "process_resident_memory_bytes{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "title": "Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 21
+      },
+      "id": 8,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "rate(process_cpu_seconds_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "title": "CPU usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 21
+      },
+      "id": 9,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "go_goroutines{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "title": "Goroutines",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 28
+      },
+      "id": 10,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "scheduler_pending_pods{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "legendFormat": "{{queue}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pending pods",
+      "type": "timeseries",
+      "description": "Pods currently held in each scheduler queue."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 28
+      },
+      "id": 11,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "scheduler_unschedulable_pods{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "legendFormat": "{{plugin}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Unschedulable pods by plugin",
+      "type": "timeseries",
+      "description": "Pods rejected by each scheduling plugin. A pod can be counted against more than one plugin."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 28
+      },
+      "id": 12,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "scheduler_cache_size{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "legendFormat": "{{type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scheduler cache",
+      "type": "timeseries",
+      "description": "Objects currently held in the scheduler cache."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 35
+      },
+      "id": 13,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (result) (rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scheduling outcomes",
+      "type": "timeseries",
+      "description": "Completed scheduling attempts grouped by result."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      },
+      "id": 14,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (extension_point) (rate(scheduler_plugin_evaluation_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval]))",
+          "legendFormat": "{{extension_point}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "SlurmBridge plugin evaluations",
+      "type": "timeseries",
+      "description": "Rate at which the scheduler evaluates the SlurmBridge plugin."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 35
+      },
+      "id": 15,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "rate(scheduler_preemption_attempts_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])",
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Preemption attempts",
+      "type": "timeseries",
+      "description": "Scheduler preemption attempts per second."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "id": 16,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{extension_point}} / {{status}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.90, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "legendFormat": "p90 {{extension_point}} / {{status}}",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{extension_point}} / {{status}}",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "SlurmBridge plugin latency",
+      "type": "timeseries",
+      "description": "Sampled execution latency for the SlurmBridge plugin by extension point and status."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "id": 17,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_framework_extension_point_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "{{extension_point}} / {{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Framework extension-point latency",
+      "type": "timeseries",
+      "description": "99th percentile execution latency across all plugins in each scheduler extension point."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "id": 18,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Scheduling attempts per pod",
+      "type": "timeseries",
+      "description": "Distribution of attempts required before a pod is successfully scheduled."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "id": 19,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (queue, event) (rate(scheduler_queue_incoming_pods_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{queue}} / {{event}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Incoming pods by queue and event",
+      "type": "timeseries",
+      "description": "Rate of pods entering scheduler queues, grouped by queue and triggering event."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 56
+      },
+      "id": 20,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "workqueue_depth{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scheduler workqueue depth",
+      "type": "timeseries",
+      "description": "Current depth of scheduler client workqueues."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 56
+      },
+      "id": 21,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "rate(workqueue_retries_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])",
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scheduler workqueue retries",
+      "type": "timeseries",
+      "description": "Retry rate for scheduler client workqueues."
+    },
+    {
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 56
+      },
+      "id": 22,
+      "interval": "1m",
+      "options": {
+        "legend": {
+          "asTable": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "v13.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (verb, le) (rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "{{verb}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Kube API request latency",
+      "type": "timeseries",
+      "description": "99th percentile Kubernetes API client latency by verb."
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "kubernetes",
+    "scheduler",
+    "slurm-bridge"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".+",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "instance",
+        "name": "instance",
+        "query": "label_values(up{service=\"slurm-bridge-scheduler\"}, instance)",
+        "refresh": 2,
+        "type": "query",
+        "definition": "label_values(up{service=\"slurm-bridge-scheduler\"}, instance)",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Slurm Bridge / Scheduler",
+  "uid": "slurm-bridge-scheduler",
+  "description": "Kubernetes scheduler and SlurmBridge plugin health, throughput, latency, and queues. Adapted from the Kubernetes monitoring mixin scheduler dashboard."
+}

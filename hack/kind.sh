@@ -384,8 +384,7 @@ function metrics::install() {
 		--namespace monitoring --create-namespace \
 		--values "$config_dir/values.yaml" \
 		--wait --timeout=300s
-	kubectl apply -f "$config_dir/slurm-bridge.yaml"
-	kubectl apply -f "$config_dir/grafana-dashboard.yaml"
+	kubectl apply --kustomize "$config_dir"
 	kubectl wait --for=create pod \
 		--namespace monitoring \
 		--selector=app.kubernetes.io/name=prometheus \
