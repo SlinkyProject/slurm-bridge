@@ -518,6 +518,14 @@ function nvml-mock::install() {
 		--values "$config_dir/values.yaml" \
 		--wait --timeout=180s
 }
+
+function nvml-mock::uninstall() {
+	helm uninstall nvml-mock \
+		--namespace nvml-mock \
+		--ignore-not-found \
+		--wait --timeout=180s
+}
+
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
@@ -605,6 +613,8 @@ function main() {
 	if $OPT_DRA_DRIVER_NVIDIA_GPU; then
 		if $MOCK_NVML; then
 			nvml-mock::install
+		else
+			nvml-mock::uninstall
 		fi
 		dra-driver-nvidia-gpu::install
 	fi

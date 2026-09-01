@@ -2,6 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 # SPDX-License-Identifier: Apache-2.0
 
+image:
+  tag: 0.3.0
+
 gpu:
   profile: a100
   count: 8
