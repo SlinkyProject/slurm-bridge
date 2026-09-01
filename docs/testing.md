@@ -35,9 +35,6 @@ Use a separate cluster for hybrid mode because an installed cluster cannot
 switch node modes in place:
 
 ```sh
-KUBECONFIG=/tmp/slurm-bridge-hybrid.kubeconfig \
-BUILDX_CONFIG=/tmp/slurm-bridge-hybrid-buildx \
-SKAFFOLD_CACHE_FILE=/tmp/slurm-bridge-hybrid-skaffold-cache \
 KIND_CLUSTER_NAME=slurm-bridge-hybrid \
 SLURM_NODE_MODE=hybrid \
 make kind-start test-e2e
