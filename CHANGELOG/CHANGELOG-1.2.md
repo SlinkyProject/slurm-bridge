@@ -1,3 +1,20 @@
+## v1.2.2
+
+### Fixed
+
+- Add a 5m timeout to all slurm rest calls.
+- GO-2026-5026 GO-2026-5942 GO-2026-5972 GO-2026-6088 GO-2026-6089 GO-2026-6090
+  GO-2026-6091 GO-2026-6218.
+- Slurm annotations can now be set on jobsets with PodGroups.
+- GO-2026-6094 GO-2026-6095 GO-2026-6107 GO-2026-6112 GO-2026-6274 GO-2026-6275.
+- External jobs shouldn't require all nodes.
+- GO-2026-6303.
+
+### Changed
+
+- PostFilter now uses list to scan slurm nodes.
+- Limit excluded nodes to nodes belonging to the target slurm partition.
+
 ## v1.2.1
 
 ### Added
