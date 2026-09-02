@@ -30,8 +30,19 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
+type patchCountingClient struct {
+	client.Client
+	patchCalls int
+}
+
+func (c *patchCountingClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	c.patchCalls++
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
 var _ = Describe("syncTaint()", func() {
 	var controllerReconciler *NodeReconciler
+	var k8sClient *patchCountingClient
 
 	BeforeEach(func() {
 		nodeList := &corev1.NodeList{
@@ -41,7 +52,7 @@ var _ = Describe("syncTaint()", func() {
 				{ObjectMeta: metav1.ObjectMeta{Name: "annotated-1", Labels: map[string]string{wellknown.LabelSlurmNodeName: "bridged-1"}}},
 			},
 		}
-		k8sClient := fake.NewFakeClient(nodeList)
+		k8sClient = &patchCountingClient{Client: fake.NewFakeClient(nodeList)}
 		Expect(k8sClient).NotTo(BeNil())
 
 		slurmNodeList := &slurmtypes.V0044NodeList{
@@ -78,6 +89,7 @@ var _ = Describe("syncTaint()", func() {
 			taint := utils.NewTaintNodeBridged(schedulerName)
 			isTainted := taints.TaintExists(checkNode.Spec.Taints, taint)
 			Expect(isTainted).To(BeFalse())
+			Expect(k8sClient.patchCalls).To(Equal(0))
 		})
 
 		It("Should taint bridged node", func() {
@@ -98,6 +110,12 @@ var _ = Describe("syncTaint()", func() {
 			taint := utils.NewTaintNodeBridged(schedulerName)
 			isTainted := taints.TaintExists(checkNode.Spec.Taints, taint)
 			Expect(isTainted).To(BeTrue())
+			Expect(k8sClient.patchCalls).To(Equal(1))
+
+			By("syncTaint() again")
+			err = controllerReconciler.syncTaint(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.patchCalls).To(Equal(1))
 		})
 
 		It("Should taint bridged node with annotation", func() {
