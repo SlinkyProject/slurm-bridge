@@ -521,7 +521,7 @@ function dra-driver-cpu::install() {
 	# The upstream v0.2.0 chart does not expose a nodeSelector value.
 	kubectl -n kube-system patch daemonset dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
-	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
 function dra-driver-nvidia-gpu::install() {
