@@ -89,10 +89,11 @@ push-charts: build-chart ## Push OCI packages.
 ##@ Deployment
 
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
+SLURM_NODE_MODE ?= external
 
 .PHONY: kind-start
 kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
-	./hack/kind.sh --all $(KIND_CLUSTER_NAME)
+	./hack/kind.sh --all --slurm-node-mode="$(SLURM_NODE_MODE)" "$(KIND_CLUSTER_NAME)"
 
 .PHONY: kind-stop
 kind-stop: ## Delete the development Kind cluster.
@@ -532,7 +533,7 @@ test: fmt vet envtest ## Run tests.
 .PHONY: test-e2e
 test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the current Kubernetes context.
 	mkdir -p "$(E2E_ARTIFACTS_DIR)"
-	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" $(GOTESTSUM) \
+	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
 		--format testname \
 		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
 		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \

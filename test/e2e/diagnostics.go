@@ -73,6 +73,8 @@ func captureFailureDiagnostics(t *testing.T, failure string, namespaces ...strin
 		capturePodLogs(t, namespaceDir, namespace)
 
 		if namespace == "slurm" {
+			captureKubectl(t, namespaceDir, "nodesets.yaml", "get", "nodesets.slinky.slurm.net",
+				"--namespace", namespace, "-o", "yaml")
 			captureKubectl(t, namespaceDir, "slurm-jobs.txt", "exec", "--namespace", namespace,
 				"slurm-controller-0", "--", "scontrol", "show", "jobs", "--details")
 			captureKubectl(t, namespaceDir, "slurm-nodes.txt", "exec", "--namespace", namespace,
