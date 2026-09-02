@@ -463,7 +463,7 @@ function slurm::configure_hybrid_dra_inventory() {
 	fi
 
 	kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
-		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=180s
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
 
 	for node in $bridge_nodes; do
 		example_devices=""
