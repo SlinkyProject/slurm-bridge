@@ -543,12 +543,14 @@ function dra-driver-nvidia-gpu::install() {
 }
 
 function nvml-mock::install() {
-	local version="0.3.0"
-	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock"
+	local digest="sha256:99e0de7e7c3292e9f814e15841c6c7a5bec8f64ce07620dd9f5c05ccb68b516e"
+	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@${digest}"
 	local config_dir="$SCRIPT_DIR/nvml-mock"
 
+	# Upstream republishes the 0.3.0 chart tag from main, so its templates can
+	# get ahead of the 0.3.0 image pinned in values.yaml. Pin the original 0.3.0
+	# release chart so the chart and image remain compatible.
 	helm upgrade --install nvml-mock "$chart" \
-		--version "$version" \
 		--namespace nvml-mock \
 		--create-namespace \
 		--values "$config_dir/values.yaml" \
