@@ -89,20 +89,20 @@ function sys::check() {
 	if ! command -v kubectl >/dev/null 2>&1; then
 		echo "'kubectl' is recommended: https://kubernetes.io/docs/reference/kubectl/"
 	fi
-	if [[ $OSTYPE == "linux"* ]]; then
-		if [ "$(/usr/sbin/sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
+	if [[ $OSTYPE == "linux"* ]] && command -v sysctl >/dev/null 2>&1; then
+		if [ "$(sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
 			echo "Recommended to increase 'kernel.keys.maxkeys':"
 			echo "  $ sudo sysctl -w kernel.keys.maxkeys=2000"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.file-max)" -lt 10000000 ]; then
+		if [ "$(sysctl -n fs.file-max)" -lt 10000000 ]; then
 			echo "Recommended to increase 'fs.file-max':"
 			echo "  $ sudo sysctl -w fs.file-max=10000000"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
+		if [ "$(sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_instances':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_instances=65535"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
+		if [ "$(sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_watches':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_watches=1048576"
 		fi
@@ -463,7 +463,7 @@ function slurm::configure_hybrid_dra_inventory() {
 	fi
 
 	kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
-		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=180s
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
 
 	for node in $bridge_nodes; do
 		example_devices=""
@@ -521,7 +521,7 @@ function dra-driver-cpu::install() {
 	# The upstream v0.2.0 chart does not expose a nodeSelector value.
 	kubectl -n kube-system patch daemonset dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
-	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
 function dra-driver-nvidia-gpu::install() {
@@ -543,12 +543,14 @@ function dra-driver-nvidia-gpu::install() {
 }
 
 function nvml-mock::install() {
-	local version="0.3.0"
-	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock"
+	local digest="sha256:99e0de7e7c3292e9f814e15841c6c7a5bec8f64ce07620dd9f5c05ccb68b516e"
+	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@${digest}"
 	local config_dir="$SCRIPT_DIR/nvml-mock"
 
+	# Upstream republishes the 0.3.0 chart tag from main, so its templates can
+	# get ahead of the 0.3.0 image pinned in values.yaml. Pin the original 0.3.0
+	# release chart so the chart and image remain compatible.
 	helm upgrade --install nvml-mock "$chart" \
-		--version "$version" \
 		--namespace nvml-mock \
 		--create-namespace \
 		--values "$config_dir/values.yaml" \

@@ -26,9 +26,6 @@ nodesets:
     scalingMode: DaemonSet
     slurmd:
       env: []
-      image:
-        repository: ghcr.io/slinkyproject/slurmd
-        tag: 25.11-ubuntu24.04
       args: []
       resources: {}
       volumeMounts: []
