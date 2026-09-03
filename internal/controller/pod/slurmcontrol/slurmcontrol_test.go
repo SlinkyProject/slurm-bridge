@@ -14,10 +14,27 @@ import (
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
+	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+// staleCacheClient simulates a cached Get() that misses because the informer
+// hasn't synced yet, while a RefreshCache Get() reaches the real (found) object.
+type staleCacheClient struct {
+	client.Client
+}
+
+func (s *staleCacheClient) Get(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+	options := &client.GetOptions{}
+	options.ApplyOptions(opts)
+	if !options.RefreshCache {
+		return slurmerrors.ErrObjectNotFound
+	}
+	return s.Client.Get(ctx, key, obj, opts...)
+}
 
 func Test_realSlurmControl_GetJob(t *testing.T) {
 	ctx := context.Background()
@@ -39,6 +56,50 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not found",
 			fields: fields{
 				Client: fake.NewFakeClient(),
+			},
+			args: args{
+				ctx: ctx,
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							wellknown.LabelExternalJobId: "1",
+						},
+					},
+				},
+			},
+			want:    false,
+			wantErr: false,
+		},
+		{
+			name: "Job not found in cache but found on refresh",
+			fields: fields{
+				Client: func() client.Client {
+					obj := &types.V0044JobInfo{
+						V0044JobInfo: api.V0044JobInfo{
+							JobId:    ptr.To[int32](1),
+							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+						},
+					}
+					return &staleCacheClient{Client: fake.NewClientBuilder().WithObjects(obj).Build()}
+				}(),
+			},
+			args: args{
+				ctx: ctx,
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							wellknown.LabelExternalJobId: "1",
+						},
+					},
+				},
+			},
+			want:    true,
+			wantErr: false,
+		},
+		{
+			name: "Job not found in cache nor on refresh",
+			fields: fields{
+				Client: &staleCacheClient{Client: fake.NewFakeClient()},
 			},
 			args: args{
 				ctx: ctx,
