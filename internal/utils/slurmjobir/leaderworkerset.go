@@ -34,7 +34,7 @@ func (t *translator) PreFilterLWS(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.
 	}
 
 	// Determine if there are enough LWS pods for the group
-	if int32(len(slurmJobIR.Pods.Items)) < *lws.Spec.LeaderWorkerTemplate.Size { //nolint:gosec
+	if int32(len(slurmJobIR.AllPods())) < *lws.Spec.LeaderWorkerTemplate.Size { //nolint:gosec
 		if pod.Labels[wellknown.LabelExternalJobId] == "" {
 			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
 		} else {
@@ -52,24 +52,35 @@ func (t *translator) fromLws(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 		return nil, err
 	}
 
+	size := ptr.Deref(lws.Spec.LeaderWorkerTemplate.Size, 1)
+
 	slurmJobIR := &SlurmJobIR{}
-	// From the current pod's annotations we can construct the list
-	// of pods that belong to this LWS group.
-	if err := t.List(t.ctx, &slurmJobIR.Pods,
-		&client.ListOptions{LabelSelector: labels.SelectorFromSet(
-			labels.Set{lwsv1.GroupUniqueHashLabelKey: pod.Labels[lwsv1.GroupUniqueHashLabelKey]},
-		)}); err != nil {
+
+	// List all pods in the LWS group before splitting leaders from workers.
+	var groupPods corev1.PodList
+	if err := t.List(t.ctx, &groupPods,
+		&client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(
+				labels.Set{lwsv1.GroupUniqueHashLabelKey: pod.Labels[lwsv1.GroupUniqueHashLabelKey]},
+			),
+			Namespace: rootPOM.GetNamespace()},
+	); err != nil {
 		return nil, err
 	}
 
-	if len(slurmJobIR.Pods.Items) == 0 {
+	if len(groupPods.Items) == 0 {
 		return nil, ErrorLWSNoPods
 	}
 
-	slurmJobIR.JobInfo.JobName = ptr.To(pod.Labels[lwsv1.SetNameLabelKey] + "-" + pod.Labels[lwsv1.GroupIndexLabelKey])
-	slurmJobIR.JobInfo.MaxNodes = ptr.To(int32(*lws.Spec.LeaderWorkerTemplate.Size))
-	slurmJobIR.JobInfo.MinNodes = ptr.To(int32(*lws.Spec.LeaderWorkerTemplate.Size))
-	slurmJobIR.JobInfo.TasksPerNode = ptr.To(int32(1))
-
+	component := SlurmJobComponent{
+		Pods: groupPods,
+		JobInfo: SlurmJobIRJobInfo{
+			JobName:      ptr.To(pod.Labels[lwsv1.SetNameLabelKey] + "-" + pod.Labels[lwsv1.GroupIndexLabelKey]),
+			MinNodes:     ptr.To(size),
+			MaxNodes:     ptr.To(size),
+			TasksPerNode: ptr.To(int32(1)),
+		},
+	}
+	slurmJobIR.Components = []SlurmJobComponent{component}
 	return slurmJobIR, nil
 }

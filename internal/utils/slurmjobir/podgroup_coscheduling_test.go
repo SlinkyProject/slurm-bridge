@@ -6,6 +6,7 @@ package slurmjobir
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -140,11 +141,12 @@ func Test_translator_fromPodGroupCoscheduling(t *testing.T) {
 		rootPOM *metav1.PartialObjectMetadata
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    *SlurmJobIR
-		wantErr bool
+		name              string
+		fields            fields
+		args              args
+		want              *SlurmJobIR
+		wantErr           bool
+		wantValidationErr bool
 	}{
 		{
 			name: "PodGroup does not exist",
@@ -225,20 +227,62 @@ func Test_translator_fromPodGroupCoscheduling(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					CpuPerTask:   ptr.To((int32(22))),
-					MemPerNode:   ptr.To((int64(1))),
-					MinNodes:     ptr.To((int32(1))),
-					MaxNodes:     ptr.To((int32(1))),
-					TasksPerNode: ptr.To((int32(1))),
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{
-						*newPodGroupCoschedulingPod("foo", "foo"),
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							CpuPerTask:   ptr.To((int32(22))),
+							MemPerNode:   ptr.To((int64(1))),
+							MinNodes:     ptr.To((int32(1))),
+							MaxNodes:     ptr.To((int32(1))),
+							TasksPerNode: ptr.To((int32(1))),
+						},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{
+								*newPodGroupCoschedulingPod("foo", "foo"),
+							},
+						},
 					},
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "Empty pod list returns an invalid single-component IR",
+			fields: fields{
+				Reader: func() client.Reader {
+					scheme := runtime.NewScheme()
+					utilruntime.Must(sched.AddToScheme(scheme))
+					utilruntime.Must(corev1.AddToScheme(scheme))
+					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+						newPodGroupCoscheduling("foo", int32(1), sched.PodGroupStatus{}),
+					).Build()
+				}(),
+				ctx: context.Background(),
+			},
+			args: args{
+				pod: newPodGroupCoschedulingPod("foo", "foo"),
+				rootPOM: &metav1.PartialObjectMetadata{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "foo",
+						Namespace: metav1.NamespaceDefault,
+					},
+				},
+			},
+			want: &SlurmJobIR{
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							CpuPerTask:   ptr.To(int32(22)),
+							MemPerNode:   ptr.To(int64(1)),
+							MinNodes:     ptr.To(int32(1)),
+							MaxNodes:     ptr.To(int32(0)),
+							TasksPerNode: ptr.To(int32(1)),
+						},
+						Pods: corev1.PodList{},
+					},
+				},
+			},
+			wantValidationErr: true,
 		},
 	}
 	for _, tt := range tests {
@@ -255,7 +299,72 @@ func Test_translator_fromPodGroupCoscheduling(t *testing.T) {
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("translator.fromPodGroupCoscheduling() = %v, want %v", got, &tt.want)
 			}
+			if tt.wantValidationErr && got != nil {
+				if err := got.Validate(); err == nil {
+					t.Error("SlurmJobIR.Validate() error = nil, want empty-component validation error")
+				}
+			}
 		})
+	}
+}
+
+func Test_translator_fromPodGroupCoschedulingScopesPodsToNamespace(t *testing.T) {
+	const (
+		namespaceA   = "namespace-a"
+		namespaceB   = "namespace-b"
+		podGroupName = "shared"
+	)
+
+	podGroup := newPodGroupCoscheduling(podGroupName, 1, sched.PodGroupStatus{})
+	podGroup.Namespace = namespaceA
+	podA1 := newPodGroupCoschedulingPod("pod-a-1", podGroupName)
+	podA1.Namespace = namespaceA
+	podA2 := newPodGroupCoschedulingPod("pod-a-2", podGroupName)
+	podA2.Namespace = namespaceA
+	podB := newPodGroupCoschedulingPod("pod-b", podGroupName)
+	podB.Namespace = namespaceB
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(sched.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		podGroup,
+		podA1,
+		podA2,
+		podB,
+	).Build()
+	tr := &translator{Reader: reader, ctx: context.Background()}
+	rootPOM := &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+		Namespace: namespaceA,
+		Name:      podGroupName,
+	}}
+
+	got, err := tr.fromPodGroupCoscheduling(podA1, rootPOM)
+	if err != nil {
+		t.Fatalf("translator.fromPodGroupCoscheduling() error = %v, want nil", err)
+	}
+	if got == nil || len(got.Components) != 1 {
+		t.Fatalf("translator.fromPodGroupCoscheduling() = %#v, want one component", got)
+	}
+
+	component := got.Components[0]
+	gotPodNames := make([]string, 0, len(component.Pods.Items))
+	for _, pod := range component.Pods.Items {
+		gotPodNames = append(gotPodNames, pod.Name)
+		if pod.Namespace != namespaceA {
+			t.Errorf("translator.fromPodGroupCoscheduling() pod namespace = %q, want %q", pod.Namespace, namespaceA)
+		}
+	}
+	slices.Sort(gotPodNames)
+	wantPodNames := []string{"pod-a-1", "pod-a-2"}
+	if !apiequality.Semantic.DeepEqual(gotPodNames, wantPodNames) {
+		t.Errorf("translator.fromPodGroupCoscheduling() pod names = %v, want %v", gotPodNames, wantPodNames)
+	}
+	if maxNodes := ptr.Deref(component.JobInfo.MaxNodes, 0); maxNodes != 2 {
+		t.Errorf("translator.fromPodGroupCoscheduling() MaxNodes = %d, want 2", maxNodes)
+	}
+	if tasksPerNode := ptr.Deref(component.JobInfo.TasksPerNode, 0); tasksPerNode != 1 {
+		t.Errorf("translator.fromPodGroupCoscheduling() TasksPerNode = %d, want 1", tasksPerNode)
 	}
 }
 
@@ -462,9 +571,13 @@ func Test_translator_PreFilterPodGroupCoscheduling(t *testing.T) {
 							Namespace: "default",
 						},
 					},
-					Pods: corev1.PodList{
-						Items: []corev1.Pod{
-							*newPodGroupCoschedulingPod("pod", "pg"),
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{
+								Items: []corev1.Pod{
+									*newPodGroupCoschedulingPod("pod", "pg"),
+								},
+							},
 						},
 					},
 				},

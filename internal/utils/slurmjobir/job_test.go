@@ -123,19 +123,23 @@ func Test_translator_fromJob(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					MinNodes:   ptr.To(int32(1)),
-					CpuPerTask: ptr.To(int32(22)),
-					MemPerNode: ptr.To(int64(1)),
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "foo",
-							Namespace: metav1.NamespaceDefault,
-							Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							MinNodes:   ptr.To(int32(1)),
+							CpuPerTask: ptr.To(int32(22)),
+							MemPerNode: ptr.To(int64(1)),
 						},
-					}},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      "foo",
+									Namespace: metav1.NamespaceDefault,
+									Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+								},
+							}},
+						},
+					},
 				},
 			},
 			wantErr: false,
@@ -172,20 +176,24 @@ func Test_translator_fromJob(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					MinNodes:   ptr.To(int32(1)),
-					CpuPerTask: ptr.To(int32(22)),
-					MemPerNode: ptr.To(int64(1)),
-					TimeLimit:  ptr.To(int32(2)), // 90s rounds up to 2 min
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "foo",
-							Namespace: metav1.NamespaceDefault,
-							Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							MinNodes:   ptr.To(int32(1)),
+							CpuPerTask: ptr.To(int32(22)),
+							MemPerNode: ptr.To(int64(1)),
+							TimeLimit:  ptr.To(int32(2)), // 90s rounds up to 2 min
 						},
-					}},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      "foo",
+									Namespace: metav1.NamespaceDefault,
+									Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+								},
+							}},
+						},
+					},
 				},
 			},
 			wantErr: false,
@@ -222,20 +230,24 @@ func Test_translator_fromJob(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					MinNodes:   ptr.To(int32(1)),
-					CpuPerTask: ptr.To(int32(22)),
-					MemPerNode: ptr.To(int64(1)),
-					// TimeLimit intentionally unset: 0 in Slurm means unlimited.
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "foo",
-							Namespace: metav1.NamespaceDefault,
-							Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							MinNodes:   ptr.To(int32(1)),
+							CpuPerTask: ptr.To(int32(22)),
+							MemPerNode: ptr.To(int64(1)),
+							// TimeLimit intentionally unset: 0 in Slurm means unlimited.
 						},
-					}},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:      "foo",
+									Namespace: metav1.NamespaceDefault,
+									Labels:    map[string]string{batchv1.JobNameLabel: "foo"},
+								},
+							}},
+						},
+					},
 				},
 			},
 			wantErr: false,

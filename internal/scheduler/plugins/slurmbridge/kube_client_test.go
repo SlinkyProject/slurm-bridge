@@ -222,18 +222,23 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("TranslateToSlurmJobIR: %v", err)
 			}
-			if len(ir.Pods.Items) != 1 || ptr.Deref(ir.JobInfo.QOS, "") != "workload-qos" {
+			componentIndex := ir.ComponentOf(pod.Namespace, pod.Name)
+			if componentIndex < 0 {
+				t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
+			}
+			component := &ir.Components[componentIndex]
+			if len(component.Pods.Items) != 1 || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" {
 				t.Fatalf("unexpected translation: %#v", ir)
 			}
 			if status := slurmjobir.PreFilter(sb.Client, dra.DefaultRegistry(), workloadAPI, ctx, pod, ir); !status.IsSuccess() {
 				t.Fatalf("PreFilter: %v", status)
 			}
-			sb.markPodGroupScheduled(ctx, ir, "5")
+			sb.markPodGroupScheduled(ctx, ir, component, "5")
 			if condition := apimeta.FindStatusCondition(pg.Status.Conditions, workloadAPI.ScheduledCondition); condition == nil || condition.Status != metav1.ConditionTrue {
 				t.Fatalf("scheduled condition = %#v, want True", condition)
 			}
-			if podGroupGets != 3 || statusPatches != 1 || workloadGets != 1 {
-				t.Fatalf("requests: PodGroup GETs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 3, 1, 1", podGroupGets, statusPatches, workloadGets)
+			if podGroupGets != 4 || statusPatches != 1 || workloadGets != 1 {
+				t.Fatalf("requests: PodGroup GETs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 4, 1, 1", podGroupGets, statusPatches, workloadGets)
 			}
 		})
 	}

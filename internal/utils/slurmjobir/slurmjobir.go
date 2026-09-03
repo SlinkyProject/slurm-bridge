@@ -6,6 +6,7 @@ package slurmjobir
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -16,20 +17,24 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	resourcehelper "k8s.io/component-helpers/resource"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 const (
 	nvidiaDevicePlugin = "nvidia.com/gpu"
 	amdDevicePlugin    = "amd.com/gpu"
 )
+
+type SlurmJobComponent struct {
+	JobInfo SlurmJobIRJobInfo
+	Pods    corev1.PodList
+}
 
 type SlurmJobIRJobInfo struct {
 	Account      *string
@@ -43,6 +48,7 @@ type SlurmJobIRJobInfo struct {
 	MemPerNode   *int64 // memory in megabytes
 	MinNodes     *int32
 	MaxNodes     *int32
+	Nodes        []string
 	ExcNodes     []string
 	Partition    *string
 	Priority     *int32
@@ -56,9 +62,8 @@ type SlurmJobIRJobInfo struct {
 
 // Slurm Job Intermediate Representation (IR)
 type SlurmJobIR struct {
-	RootPOM metav1.PartialObjectMetadata
-	Pods    corev1.PodList
-	JobInfo SlurmJobIRJobInfo
+	RootPOM    metav1.PartialObjectMetadata
+	Components []SlurmJobComponent
 }
 
 type translator struct {
@@ -168,19 +173,85 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 		return nil, err
 	}
 	slurmJobIR.RootPOM = *rootPOM
-	parsePodsCpuAndMemory(slurmJobIR)
-	if err := t.parseDeviceResources(slurmJobIR); err != nil {
-		return nil, err
+	for i := range slurmJobIR.Components {
+		parsePodsCpuAndMemory(&slurmJobIR.Components[i])
+		if err := t.parseDeviceResources(&slurmJobIR.Components[i]); err != nil {
+			return nil, err
+		}
 	}
 	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM, pg)
 	return slurmJobIR, err
 }
 
+// AllPods returns all pods for the provided SlurmJobIR
+func (ir *SlurmJobIR) AllPods() []corev1.Pod {
+	var pods []corev1.Pod
+	for _, c := range ir.Components {
+		pods = append(pods, c.Pods.Items...)
+	}
+	return pods
+}
+
+// AllNodes returns all nodes for the provided SlurmJobIR
+func (ir *SlurmJobIR) AllNodes() []string {
+	var nodes []string
+	for _, c := range ir.Components {
+		nodes = append(nodes, c.JobInfo.Nodes...)
+	}
+	return nodes
+}
+
+func (ir *SlurmJobIR) IsHetJob() bool { return len(ir.Components) > 1 }
+
+// ComponentOf returns the index of the component that owns the namespaced pod,
+// or -1 when the pod is absent or belongs to multiple components.
+func (ir *SlurmJobIR) ComponentOf(namespace, podName string) int {
+	componentIndex := -1
+	for i, c := range ir.Components {
+		for _, p := range c.Pods.Items {
+			if p.Namespace != namespace || p.Name != podName {
+				continue
+			}
+			if componentIndex != -1 && componentIndex != i {
+				return -1
+			}
+			componentIndex = i
+		}
+	}
+	return componentIndex
+}
+
+func (ir *SlurmJobIR) Validate() error {
+	if ir == nil {
+		return errors.New("nil SlurmJobIR is not valid")
+	}
+	if len(ir.Components) == 0 {
+		return errors.New("SlurmJobIR has no components")
+	}
+	podComponents := make(map[types.NamespacedName]int)
+	for i, component := range ir.Components {
+		if len(component.Pods.Items) == 0 {
+			return errors.New("SlurmJobIR has components with zero pods")
+		}
+		for _, pod := range component.Pods.Items {
+			key := types.NamespacedName{
+				Namespace: pod.Namespace,
+				Name:      pod.Name,
+			}
+			if previousComponent, exists := podComponents[key]; exists && previousComponent != i {
+				return fmt.Errorf("pod %s belongs to multiple SlurmJobIR components", key)
+			}
+			podComponents[key] = i
+		}
+	}
+	return nil
+}
+
 /* Set CPU and Memory for the external job based on the maximum Pod CPU and Memory (including overhead) */
-func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
+func parsePodsCpuAndMemory(slurmJobComponent *SlurmJobComponent) {
 	var cpuMax resource.Quantity
 	var memMax resource.Quantity
-	for _, p := range slurmJobIR.Pods.Items {
+	for _, p := range slurmJobComponent.Pods.Items {
 		lim := resourcehelper.PodLimits(&p, resourcehelper.PodResourcesOptions{})
 		req := resourcehelper.PodRequests(&p, resourcehelper.PodResourcesOptions{})
 		if req.Cpu().Cmp(cpuMax) == 1 {
@@ -200,31 +271,31 @@ func parsePodsCpuAndMemory(slurmJobIR *SlurmJobIR) {
 	// will use the default values of the partition. Slurm does not support
 	// unbounded cpu or memory.
 	if cpuMax.Value() > 0 {
-		slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(cpuMax.Value())) //nolint:gosec
+		slurmJobComponent.JobInfo.CpuPerTask = ptr.To(int32(cpuMax.Value())) //nolint:gosec
 	}
 	if memMax.Value() > 0 {
-		slurmJobIR.JobInfo.MemPerNode = ptr.To(GetMemoryFromQuantity(&memMax))
+		slurmJobComponent.JobInfo.MemPerNode = ptr.To(GetMemoryFromQuantity(&memMax))
 	}
 }
 
 // parseDeviceResources resolves DRA extended resources to DeviceProfiles and
 // dispatches their Slurm representation by backend. Core-bitmap quantities
 // contribute to CPUs per task; indexed-GRES quantities contribute to GRES.
-func (t *translator) parseDeviceResources(slurmJobIR *SlurmJobIR) error {
+func (t *translator) parseDeviceResources(slurmJobComponent *SlurmJobComponent) error {
 	maxByGRES := make(map[dra.GRES]resource.Quantity)
-	for i := range slurmJobIR.Pods.Items {
-		podGRES, coreBitmapCPU, err := t.podDeviceResources(&slurmJobIR.Pods.Items[i])
+	for i := range slurmJobComponent.Pods.Items {
+		podGRES, coreBitmapCPU, err := t.podDeviceResources(&slurmJobComponent.Pods.Items[i])
 		if err != nil {
 			return err
 		}
 		mergeMaxGRESQuantities(maxByGRES, podGRES)
-		if coreBitmapCPU.Value() > 0 && (slurmJobIR.JobInfo.CpuPerTask == nil || coreBitmapCPU.Value() > int64(*slurmJobIR.JobInfo.CpuPerTask)) {
-			slurmJobIR.JobInfo.CpuPerTask = ptr.To(int32(coreBitmapCPU.Value())) //nolint:gosec
+		if coreBitmapCPU.Value() > 0 && (slurmJobComponent.JobInfo.CpuPerTask == nil || coreBitmapCPU.Value() > int64(*slurmJobComponent.JobInfo.CpuPerTask)) {
+			slurmJobComponent.JobInfo.CpuPerTask = ptr.To(int32(coreBitmapCPU.Value())) //nolint:gosec
 		}
 	}
 
 	if gres := formatGRESResources(maxByGRES); gres != "" {
-		slurmJobIR.JobInfo.Gres = ptr.To(gres)
+		slurmJobComponent.JobInfo.Gres = ptr.To(gres)
 	}
 	return nil
 }
@@ -369,81 +440,4 @@ func formatGRESResources(resources map[dra.GRES]resource.Quantity) string {
 		entries[i] = name + "=" + quantity.String()
 	}
 	return strings.Join(entries, ",")
-}
-
-func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
-	if slurmJobIR == nil || anno == nil {
-		return nil
-	}
-
-	for key, value := range anno {
-		switch key {
-		case wellknown.AnnotationAccount:
-			slurmJobIR.JobInfo.Account = &value
-		case wellknown.AnnotationConstraints:
-			slurmJobIR.JobInfo.Constraints = &value
-		case wellknown.AnnotationGres:
-			slurmJobIR.JobInfo.Gres = &value
-		case wellknown.AnnotationGroupId:
-			slurmJobIR.JobInfo.GroupId = &value
-		case wellknown.AnnotationCpuPerTask:
-			rs, err := resource.ParseQuantity(value)
-			if err != nil {
-				return err
-			}
-			val := int32(rs.Value()) //nolint:gosec // disable G115
-			slurmJobIR.JobInfo.CpuPerTask = &val
-		case wellknown.AnnotationExclusive:
-			v := strings.TrimSpace(strings.ToLower(value))
-			exclusive := v != "false"
-			slurmJobIR.JobInfo.Exclusive = &exclusive
-		case wellknown.AnnotationJobName:
-			slurmJobIR.JobInfo.JobName = &value
-		case wellknown.AnnotationLicenses:
-			slurmJobIR.JobInfo.Licenses = &value
-		case wellknown.AnnotationMaxNodes:
-			num, err := ConvStrTo32(value)
-			if err != nil {
-				return err
-			}
-			slurmJobIR.JobInfo.MaxNodes = num
-		case wellknown.AnnotationMemPerNode:
-			rs, err := resource.ParseQuantity(value)
-			if err != nil {
-				return err
-			}
-			val := rs.Value()
-			val /= 1048576 // value for 1024x1024 to follow what we need for slurm job IR
-			slurmJobIR.JobInfo.MemPerNode = &val
-		case wellknown.AnnotationMinNodes:
-			num, err := ConvStrTo32(value)
-			if err != nil {
-				return err
-			}
-			slurmJobIR.JobInfo.MinNodes = num
-		case wellknown.AnnotationPartition:
-			slurmJobIR.JobInfo.Partition = &value
-		case wellknown.AnnotationPriority:
-			num, err := ConvStrTo32(value)
-			if err != nil {
-				return err
-			}
-			slurmJobIR.JobInfo.Priority = num
-		case wellknown.AnnotationQOS:
-			slurmJobIR.JobInfo.QOS = &value
-		case wellknown.AnnotationReservation:
-			slurmJobIR.JobInfo.Reservation = &value
-		case wellknown.AnnotationTimeLimit:
-			minutes, err := timelimit.Parse(value)
-			if err != nil {
-				return err
-			}
-			slurmJobIR.JobInfo.TimeLimit = &minutes
-		case wellknown.AnnotationUserId:
-			slurmJobIR.JobInfo.UserId = &value
-		case wellknown.AnnotationWckey:
-			slurmJobIR.JobInfo.Wckey = &value
-		}
-	}
-	return nil
 }

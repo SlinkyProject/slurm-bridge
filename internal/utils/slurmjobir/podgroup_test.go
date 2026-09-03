@@ -96,11 +96,11 @@ func Test_translator_fromPodGroup(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			if len(got.Pods.Items) != 2 {
-				t.Errorf("fromPodGroup() len(pods) = %d, want 2", len(got.Pods.Items))
+			if len(got.Components[0].Pods.Items) != 2 {
+				t.Errorf("fromPodGroup() len(pods) = %d, want 2", len(got.Components[0].Pods.Items))
 			}
-			if got.JobInfo.JobName == nil || *got.JobInfo.JobName != "pg1" {
-				t.Errorf("fromPodGroup() JobName = %v, want pg1", got.JobInfo.JobName)
+			if got.Components[0].JobInfo.JobName == nil || *got.Components[0].JobInfo.JobName != "pg1" {
+				t.Errorf("fromPodGroup() JobName = %v, want pg1", got.Components[0].JobInfo.JobName)
 			}
 		})
 	}
@@ -140,7 +140,11 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 							Name:      "pg1",
 						},
 					},
-					Pods: corev1.PodList{Items: []corev1.Pod{*p1, *p2}},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{Items: []corev1.Pod{*p1, *p2}},
+						},
+					},
 				},
 			},
 			want: fwk.NewStatus(fwk.Success),
@@ -158,8 +162,11 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 							Name:      "pg1",
 						},
 					},
-					Pods: corev1.PodList{Items: []corev1.Pod{*p1}},
-				},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{Items: []corev1.Pod{*p1}},
+						},
+					}},
 			},
 			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
 		},
@@ -180,7 +187,11 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 							Name:      "pg2",
 						},
 					},
-					Pods: corev1.PodList{Items: []corev1.Pod{*podWithSchedulingGroup("default", "p1", "pg2")}},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{Items: []corev1.Pod{*podWithSchedulingGroup("default", "p1", "pg2")}},
+						},
+					},
 				},
 			},
 			want: fwk.NewStatus(fwk.Success),
@@ -535,35 +546,35 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 				t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 			}
 			if tt.wantJobName != "" {
-				if got.JobInfo.JobName == nil || *got.JobInfo.JobName != tt.wantJobName {
-					t.Errorf("JobName = %q, want %q", ptr.Deref(got.JobInfo.JobName, ""), tt.wantJobName)
+				if got.Components[0].JobInfo.JobName == nil || *got.Components[0].JobInfo.JobName != tt.wantJobName {
+					t.Errorf("JobName = %q, want %q", ptr.Deref(got.Components[0].JobInfo.JobName, ""), tt.wantJobName)
 				}
 			}
 			if tt.wantTimeLimit != nil {
-				if got.JobInfo.TimeLimit == nil || *got.JobInfo.TimeLimit != *tt.wantTimeLimit {
-					t.Errorf("TimeLimit = %v, want %v", got.JobInfo.TimeLimit, *tt.wantTimeLimit)
+				if got.Components[0].JobInfo.TimeLimit == nil || *got.Components[0].JobInfo.TimeLimit != *tt.wantTimeLimit {
+					t.Errorf("TimeLimit = %v, want %v", got.Components[0].JobInfo.TimeLimit, *tt.wantTimeLimit)
 				}
 			}
 			if tt.wantPartition != nil {
-				if got.JobInfo.Partition == nil || *got.JobInfo.Partition != *tt.wantPartition {
-					t.Errorf("Partition = %v, want %v", got.JobInfo.Partition, *tt.wantPartition)
+				if got.Components[0].JobInfo.Partition == nil || *got.Components[0].JobInfo.Partition != *tt.wantPartition {
+					t.Errorf("Partition = %v, want %v", got.Components[0].JobInfo.Partition, *tt.wantPartition)
 				}
 			}
 			if tt.wantQOS != nil {
-				if got.JobInfo.QOS == nil || *got.JobInfo.QOS != *tt.wantQOS {
-					t.Errorf("QOS = %v, want %v", got.JobInfo.QOS, *tt.wantQOS)
+				if got.Components[0].JobInfo.QOS == nil || *got.Components[0].JobInfo.QOS != *tt.wantQOS {
+					t.Errorf("QOS = %v, want %v", got.Components[0].JobInfo.QOS, *tt.wantQOS)
 				}
 			}
 			if tt.wantAccount != nil {
-				if got.JobInfo.Account == nil || *got.JobInfo.Account != *tt.wantAccount {
-					t.Errorf("Account = %v, want %v", got.JobInfo.Account, *tt.wantAccount)
+				if got.Components[0].JobInfo.Account == nil || *got.Components[0].JobInfo.Account != *tt.wantAccount {
+					t.Errorf("Account = %v, want %v", got.Components[0].JobInfo.Account, *tt.wantAccount)
 				}
 			}
-			if tt.wantNoAccount && got.JobInfo.Account != nil {
-				t.Errorf("Account = %q, want intermediate Job annotation ignored", *got.JobInfo.Account)
+			if tt.wantNoAccount && got.Components[0].JobInfo.Account != nil {
+				t.Errorf("Account = %q, want intermediate Job annotation ignored", *got.Components[0].JobInfo.Account)
 			}
-			if tt.wantNoWckey && got.JobInfo.Wckey != nil {
-				t.Errorf("Wckey = %q, want Pod annotation ignored", *got.JobInfo.Wckey)
+			if tt.wantNoWckey && got.Components[0].JobInfo.Wckey != nil {
+				t.Errorf("Wckey = %q, want Pod annotation ignored", *got.Components[0].JobInfo.Wckey)
 			}
 		})
 	}

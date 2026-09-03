@@ -52,7 +52,7 @@ func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *
 	// Ensure there are enough pods to satisfy MinMembers. Don't count pods
 	// that may already have an external job annotation.
 	numPodsWaiting := 0
-	for _, p := range slurmJobIR.Pods.Items {
+	for _, p := range slurmJobIR.AllPods() {
 		if p.Labels[wellknown.LabelExternalJobId] ==
 			pod.Labels[wellknown.LabelExternalJobId] {
 			numPodsWaiting++
@@ -95,33 +95,38 @@ func (t *translator) fromPodGroupCoscheduling(pod *corev1.Pod, rootPOM *metav1.P
 		return nil, err
 	}
 
-	slurmJobIR := &SlurmJobIR{}
+	component := SlurmJobComponent{}
 
-	if err := t.List(t.ctx, &slurmJobIR.Pods,
-		&client.ListOptions{LabelSelector: labels.SelectorFromSet(
-			labels.Set{sched.PodGroupLabel: pod.Labels[sched.PodGroupLabel]},
-		)}); err != nil {
+	if err := t.List(t.ctx, &component.Pods,
+		&client.ListOptions{
+			LabelSelector: labels.SelectorFromSet(
+				labels.Set{sched.PodGroupLabel: pod.Labels[sched.PodGroupLabel]},
+			),
+			Namespace: rootPOM.Namespace,
+		}); err != nil {
 		return nil, err
 	}
 
 	if podGroup.Spec.MinResources.Memory().Value() != 0 {
 		val := GetMemoryFromQuantity(podGroup.Spec.MinResources.Memory())
-		slurmJobIR.JobInfo.MemPerNode = &val
+		component.JobInfo.MemPerNode = &val
 	}
 
 	if podGroup.Spec.MinResources.Cpu().Value() != 0 {
 		val := int32(podGroup.Spec.MinResources.Cpu().Value()) //nolint:gosec // disable G115
-		slurmJobIR.JobInfo.CpuPerTask = &val
+		component.JobInfo.CpuPerTask = &val
 	}
 
 	if podGroup.Spec.MinMember > 0 {
-		slurmJobIR.JobInfo.MinNodes = &podGroup.Spec.MinMember
+		component.JobInfo.MinNodes = &podGroup.Spec.MinMember
 	}
 
-	maxNodes := int32(len(slurmJobIR.Pods.Items)) //nolint:gosec // disable G115
-	slurmJobIR.JobInfo.MaxNodes = &maxNodes
+	maxNodes := int32(len(component.Pods.Items)) //nolint:gosec // disable G115
+	component.JobInfo.MaxNodes = &maxNodes
 	tasksPerNode := int32(1)
-	slurmJobIR.JobInfo.TasksPerNode = &tasksPerNode
+	component.JobInfo.TasksPerNode = &tasksPerNode
 
-	return slurmJobIR, nil
+	return &SlurmJobIR{
+		Components: []SlurmJobComponent{component},
+	}, nil
 }

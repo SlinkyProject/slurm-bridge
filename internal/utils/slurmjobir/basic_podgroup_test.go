@@ -101,17 +101,22 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					componentIndex := ir.ComponentOf(pod.Namespace, pod.Name)
+					if componentIndex < 0 {
+						t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
+					}
+					component := &ir.Components[componentIndex]
 					if ir.RootPOM.TypeMeta != wantRoot {
 						t.Errorf("root = %v, want %v", ir.RootPOM.TypeMeta, wantRoot)
 					}
-					if len(ir.Pods.Items) != 1 || ir.Pods.Items[0].Name != pod.Name || ptr.Deref(ir.JobInfo.MinNodes, 0) != 1 {
-						t.Errorf("allocation includes siblings: pods=%v minNodes=%v", ir.Pods.Items, ir.JobInfo.MinNodes)
+					if len(component.Pods.Items) != 1 || component.Pods.Items[0].Name != pod.Name || ptr.Deref(component.JobInfo.MinNodes, 0) != 1 {
+						t.Errorf("allocation includes siblings: pods=%v minNodes=%v", component.Pods.Items, component.JobInfo.MinNodes)
 					}
-					if ptr.Deref(ir.JobInfo.TimeLimit, 0) != 2 {
-						t.Errorf("TimeLimit = %v, want Job deadline translated to 2 minutes", ir.JobInfo.TimeLimit)
+					if ptr.Deref(component.JobInfo.TimeLimit, 0) != 2 {
+						t.Errorf("TimeLimit = %v, want Job deadline translated to 2 minutes", component.JobInfo.TimeLimit)
 					}
-					if ptr.Deref(ir.JobInfo.Account, "") != "group-account" || ptr.Deref(ir.JobInfo.Partition, "") != wantPartition || ptr.Deref(ir.JobInfo.QOS, "") != "workload-qos" || ir.JobInfo.Wckey != nil {
-						t.Errorf("annotation precedence changed: %#v", ir.JobInfo)
+					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != wantPartition || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
+						t.Errorf("annotation precedence changed: %#v", component.JobInfo)
 					}
 					if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); !status.IsSuccess() {
 						t.Errorf("Basic Job should schedule independently: %v", status)
@@ -163,15 +168,20 @@ func TestTranslateToSlurmJobIR_BasicPodGroupOwnerScheduling(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if ir.RootPOM.TypeMeta != wantRoot || len(ir.Pods.Items) != wantPods || ptr.Deref(ir.JobInfo.MaxNodes, 0) != wantMaxNodes {
-						t.Errorf("owner scheduling changed: root=%v pods=%d maxNodes=%v", ir.RootPOM.TypeMeta, len(ir.Pods.Items), ir.JobInfo.MaxNodes)
+					componentIndex := ir.ComponentOf(pod.Namespace, pod.Name)
+					if componentIndex < 0 {
+						t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
 					}
-					if ptr.Deref(ir.JobInfo.Partition, "") != wantPartition {
-						t.Errorf("Partition = %v, want %q", ir.JobInfo.Partition, wantPartition)
+					component := &ir.Components[componentIndex]
+					if ir.RootPOM.TypeMeta != wantRoot || len(component.Pods.Items) != wantPods || ptr.Deref(component.JobInfo.MaxNodes, 0) != wantMaxNodes {
+						t.Errorf("owner scheduling changed: root=%v pods=%d maxNodes=%v", ir.RootPOM.TypeMeta, len(component.Pods.Items), component.JobInfo.MaxNodes)
+					}
+					if ptr.Deref(component.JobInfo.Partition, "") != wantPartition {
+						t.Errorf("Partition = %v, want %q", component.JobInfo.Partition, wantPartition)
 					}
 					if lwsOwner {
 						// Basic PodGroup membership must not bypass LWS readiness.
-						ir.Pods.Items = ir.Pods.Items[:1]
+						component.Pods.Items = component.Pods.Items[:1]
 						if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); status.IsSuccess() {
 							t.Error("incomplete LWS group passed PreFilter")
 						}
@@ -204,12 +214,17 @@ func TestTranslateToSlurmJobIR_GangPodGroupReadiness(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				componentIndex := ir.ComponentOf(pod.Namespace, pod.Name)
+				if componentIndex < 0 {
+					t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
+				}
+				component := &ir.Components[componentIndex]
 				wantPods, wantCode := 1, fwk.Error
 				if ready {
 					wantPods, wantCode = 2, fwk.Success
 				}
-				if ir.RootPOM.TypeMeta != api.PodGroupTypeMeta || len(ir.Pods.Items) != wantPods || ptr.Deref(ir.JobInfo.MinNodes, 0) != int32(wantPods) {
-					t.Errorf("gang allocation changed: root=%v pods=%d minNodes=%v", ir.RootPOM.TypeMeta, len(ir.Pods.Items), ir.JobInfo.MinNodes)
+				if ir.RootPOM.TypeMeta != api.PodGroupTypeMeta || len(component.Pods.Items) != wantPods || ptr.Deref(component.JobInfo.MinNodes, 0) != int32(wantPods) {
+					t.Errorf("gang allocation changed: root=%v pods=%d minNodes=%v", ir.RootPOM.TypeMeta, len(component.Pods.Items), component.JobInfo.MinNodes)
 				}
 				if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); status.Code() != wantCode {
 					t.Errorf("PreFilter = %v, want code %v", status, wantCode)

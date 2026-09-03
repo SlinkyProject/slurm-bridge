@@ -14,10 +14,16 @@ var (
 )
 
 func (t *translator) fromPod(pod *corev1.Pod) (*SlurmJobIR, error) {
-	slurmJobIR := &SlurmJobIR{}
-	slurmJobIR.Pods.Items = append(slurmJobIR.Pods.Items, *pod)
+	slurmJobIR := new(SlurmJobIR)
+	slurmJobComponent := new(SlurmJobComponent)
+
+	slurmJobComponent.Pods.Items = append(slurmJobComponent.Pods.Items, *pod)
 	tasks := int32(1)
-	slurmJobIR.JobInfo.TasksPerNode = &tasks
-	slurmJobIR.JobInfo.MaxNodes = &tasks
+	slurmJobComponent.JobInfo.TasksPerNode = &tasks
+	slurmJobComponent.JobInfo.MaxNodes = &tasks
+
+	slurmJobIR.Components = []SlurmJobComponent{
+		*slurmJobComponent,
+	}
 	return slurmJobIR, nil
 }
