@@ -12,6 +12,10 @@ const (
 	// the pod's external job.
 	LabelExternalJobId = SchedulerPrefix + "slurm-jobid"
 
+	// LabelExternalHetJobId indicates the Slurm Heterogeneous JobId which
+	// corresponds to the pod's external job.
+	LabelExternalHetJobId = SchedulerPrefix + "slurm-het-jobid"
+
 	// LabelExternalNode indicates that the labeled Kubernetes node should be
 	// registered in Slurm as an external node. When this label is present, the
 	// node controller will add the node to Slurm. If the label is removed, the
