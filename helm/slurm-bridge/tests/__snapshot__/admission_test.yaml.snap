@@ -138,6 +138,10 @@ manifests should match snapshot:
           port: 8081
           protocol: TCP
           targetPort: 8081
+        - name: metrics
+          port: 8080
+          protocol: TCP
+          targetPort: 8080
       selector:
         app.kubernetes.io/instance: test-release
         app.kubernetes.io/name: slurm-bridge-admission

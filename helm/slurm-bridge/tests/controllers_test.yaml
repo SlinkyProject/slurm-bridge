@@ -33,6 +33,16 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: exposes metrics over HTTP
+    template: controllers/service.yaml
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            protocol: TCP
+            port: 8080
+            targetPort: 8080
   - it: leader election can be enabled
     template: controllers/deployment.yaml
     set:

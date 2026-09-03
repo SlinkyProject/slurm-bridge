@@ -95,8 +95,9 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: server.Options{
-			BindAddress: "0",
-			TLSOpts:     tlsOpts,
+			BindAddress:   flags.metricsAddr,
+			SecureServing: flags.secureMetrics,
+			TLSOpts:       tlsOpts,
 		},
 		WebhookServer: webhook.NewServer(webhook.Options{
 			TLSOpts: tlsOpts,
