@@ -26,7 +26,9 @@ type Registry struct {
 	byIndexedGRESType map[string]DeviceProfile
 }
 
-func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
+// NewRegistry validates profiles and indexes them by name and canonical
+// selector.
+func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 	registry := &Registry{
 		byName:            make(map[string]DeviceProfile, len(profiles)),
 		bySelector:        make(map[string]DeviceProfile, len(profiles)),
@@ -34,57 +36,6 @@ func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
 		byIndexedGRESType: make(map[string]DeviceProfile),
 	}
 	coreBitmapProfile := ""
-	for _, profile := range profiles {
-		if profile.Name == "" {
-			return nil, fmt.Errorf("device profile for driver %q has an empty name", profile.Driver)
-		}
-		if profile.Driver == "" {
-			return nil, fmt.Errorf("device profile %q has an empty driver", profile.Name)
-		}
-		if profile.Selector == "" {
-			return nil, fmt.Errorf("device profile %q has an empty selector", profile.Name)
-		}
-		if existing, ok := registry.byName[profile.Name]; ok {
-			return nil, fmt.Errorf("device profiles %q and %q have duplicate name %q", existing.Driver, profile.Driver, profile.Name)
-		}
-		if existing, ok := registry.bySelector[profile.Selector]; ok {
-			return nil, fmt.Errorf("device profiles %q and %q have duplicate selector %q", existing.Name, profile.Name, profile.Selector)
-		}
-
-		switch backend := profile.Backend.(type) {
-		case CoreBitmapBackend:
-			if coreBitmapProfile != "" {
-				return nil, fmt.Errorf("device profiles %q and %q both use the core-bitmap backend", coreBitmapProfile, profile.Name)
-			}
-			coreBitmapProfile = profile.Name
-		case IndexedGRESBackend:
-			if backend.GRESName == "" {
-				return nil, fmt.Errorf("device profile %q has an empty Slurm GRES name", profile.Name)
-			}
-			registry.byIndexedGRESType[profile.Name] = profile
-		default:
-			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
-		}
-
-		registry.byName[profile.Name] = profile
-		registry.bySelector[profile.Selector] = profile
-		registry.byDriver[profile.Driver] = append(registry.byDriver[profile.Driver], profile)
-	}
-	for driver := range registry.byDriver {
-		slices.SortFunc(registry.byDriver[driver], func(a, b DeviceProfile) int {
-			return cmp.Compare(a.Name, b.Name)
-		})
-	}
-	return registry, nil
-}
-
-// NewRegistry validates profiles and indexes them by name and canonical
-// selector.
-func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
-	seen := &Registry{
-		byName:     make(map[string]DeviceProfile, len(profiles)),
-		bySelector: make(map[string]DeviceProfile, len(profiles)),
-	}
 	for i, profile := range profiles {
 		if profile.Name == "" {
 			return nil, fmt.Errorf("device profile %d has an empty name", i)
@@ -92,7 +43,7 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 		if !deviceProfileNamePattern.MatchString(profile.Name) {
 			return nil, fmt.Errorf("device profile name %q must start and end with an alphanumeric character and contain only alphanumeric characters, '.', '_' or '-'", profile.Name)
 		}
-		if _, exists := seen.byName[profile.Name]; exists {
+		if _, exists := registry.byName[profile.Name]; exists {
 			return nil, fmt.Errorf("duplicate device profile name %q", profile.Name)
 		}
 		if profile.Driver == "" {
@@ -118,7 +69,7 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 		if compiled.MaxCost > resourcev1.CELSelectorExpressionMaxCost {
 			return nil, fmt.Errorf("selector for device profile %q is too complex: estimated cost %d exceeds limit %d", profile.Name, compiled.MaxCost, resourcev1.CELSelectorExpressionMaxCost)
 		}
-		if existing, exists := seen.bySelector[profile.Selector]; exists {
+		if existing, exists := registry.bySelector[profile.Selector]; exists {
 			return nil, fmt.Errorf("device profiles %q and %q have the same selector", existing.Name, profile.Name)
 		}
 		if profile.Backend == nil {
@@ -126,18 +77,29 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 		}
 		switch profile.Backend.(type) {
 		case CoreBitmapBackend:
+			if coreBitmapProfile != "" {
+				return nil, fmt.Errorf("device profiles %q and %q both use the core-bitmap backend", coreBitmapProfile, profile.Name)
+			}
+			coreBitmapProfile = profile.Name
 		case IndexedGRESBackend:
 			if _, err := profile.GRES(); err != nil {
 				return nil, err
 			}
+			registry.byIndexedGRESType[profile.Name] = profile
 		default:
 			return nil, fmt.Errorf("device profile %q has unsupported backend %T", profile.Name, profile.Backend)
 		}
 
-		seen.byName[profile.Name] = profile
-		seen.bySelector[profile.Selector] = profile
+		registry.byName[profile.Name] = profile
+		registry.bySelector[profile.Selector] = profile
+		registry.byDriver[profile.Driver] = append(registry.byDriver[profile.Driver], profile)
 	}
-	return newRegistry(profiles...)
+	for driver := range registry.byDriver {
+		slices.SortFunc(registry.byDriver[driver], func(a, b DeviceProfile) int {
+			return cmp.Compare(a.Name, b.Name)
+		})
+	}
+	return registry, nil
 }
 
 // DefaultRegistry returns a registry containing the profiles currently
