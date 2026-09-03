@@ -214,8 +214,8 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 	for _, request := range requests {
 		usedNames[request.Name] = struct{}{}
 	}
-	namedAllocations := make([]indexedGRESAllocation, 0, len(allocations))
-	for _, allocation := range allocations {
+	for i := range allocations {
+		allocation := &allocations[i]
 		gres, _ := allocation.Profile.GRES()
 		requestName := gres.Name
 		for suffix := 2; ; suffix++ {
@@ -226,7 +226,6 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 		}
 		usedNames[requestName] = struct{}{}
 		allocation.RequestName = requestName
-		namedAllocations = append(namedAllocations, allocation)
 		requests = append(requests, resourcev1.DeviceRequest{
 			Name: requestName,
 			Exactly: &resourcev1.ExactDeviceRequest{
@@ -236,7 +235,7 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 			},
 		})
 	}
-	return requests, namedAllocations
+	return requests, allocations
 }
 
 func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation deviceProfileRequest, requestName string) (dra.DeviceProfile, error) {
