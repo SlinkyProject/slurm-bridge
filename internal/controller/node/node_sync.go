@@ -210,6 +210,8 @@ func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request) e
 //   - If the k8s node has the LabelExternalNode label, register it in Slurm.
 //   - If the k8s node does not have the label (or it was removed): drain the node in Slurm
 //     first; only after the Slurm node has finished draining do we remove it from Slurm.
+//   - If the unlabeled k8s node overlaps a non-external Slurm node, reconcile
+//     the bridge-owned Extra inventory without changing the node's lifecycle.
 func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile.Request) error {
 
 	node := &corev1.Node{}
@@ -238,7 +240,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		if exists {
 			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo, draInventory)
 			if err != nil {
-				return err
+				return r.recordIncompatibleSlurmGRESError(ctx, node, err)
 			}
 			if needsRecreate {
 				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
@@ -247,24 +249,50 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			}
 		}
 		if err := r.slurmControl.AddNode(ctx, node, nodeInfo, draInventory); err != nil {
+			return r.recordIncompatibleSlurmGRESError(ctx, node, err)
+		}
+		return r.clearSlurmGRESCompatibilityCondition(ctx, node)
+	} else {
+		exists, err := r.slurmControl.NodeExists(ctx, node)
+		if err != nil {
 			return err
 		}
-	} else {
-		isExternal, err := r.slurmControl.IsNodeExternal(ctx, node)
-		if apierrors.IsNotFound(err) {
-			return nil
+		if !exists {
+			return r.clearSlurmGRESCompatibilityCondition(ctx, node)
 		}
+		isExternal, err := r.slurmControl.IsNodeExternal(ctx, node)
 		if err != nil {
 			return err
 		}
 		if isExternal {
+			if err := r.clearSlurmGRESCompatibilityCondition(ctx, node); err != nil {
+				return err
+			}
 			if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
 				return err
 			}
+			return nil
 		}
-	}
 
-	return nil
+		// An existing non-external Slurm node which overlaps a Kubernetes node
+		// is hybrid. Do not create, drain, or remove it; only reconcile the
+		// Extra inventory that slurm-bridge owns on the existing node.
+		_, draInventory, err := r.nodeRegistrationInventories(ctx, node)
+		if err != nil {
+			return r.recordSlurmGRESCompatibilityError(ctx, node, err)
+		}
+		if err := r.slurmControl.UpdateHybridNode(ctx, node, draInventory); err != nil {
+			return r.recordSlurmGRESCompatibilityError(ctx, node, err)
+		}
+		_, err = r.setSlurmGRESCompatibilityCondition(
+			ctx,
+			node,
+			corev1.ConditionTrue,
+			reasonSlurmGRESCompatible,
+			"Slurm GRES configuration is compatible with the Kubernetes DRA inventory.",
+		)
+		return err
+	}
 }
 
 func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *corev1.Node) (*nodeinfo.NodeInfo, []dra.GRESInventory, error) {

@@ -127,6 +127,12 @@ manifests should match snapshot:
       - apiGroups:
           - ""
         resources:
+          - nodes/status
+        verbs:
+          - patch
+      - apiGroups:
+          - ""
+        resources:
           - pods
         verbs:
           - delete

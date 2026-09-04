@@ -416,3 +416,136 @@ var _ = Describe("syncState()", func() {
 		})
 	})
 })
+
+var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
+	It("patches the bridge-owned DRA inventory on an unlabeled hybrid node", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0"},
+			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionTrue,
+			}}},
+		}
+		resourceSlice := &resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0-gpus"},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.example.com",
+				NodeName: ptr.To(node.Name),
+				Pool: resourcev1.ResourcePool{
+					Name:               node.Name,
+					Generation:         1,
+					ResourceSliceCount: 1,
+				},
+				Devices: []resourcev1.Device{{Name: "gpu-0"}},
+			},
+		}
+		kubeClient := fake.NewClientBuilder().WithObjects(node, resourceSlice).Build()
+
+		var gotExtra string
+		updateFn := func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			update := req.(api.V0044UpdateNodeMsg)
+			if update.Extra != nil {
+				gotExtra = *update.Extra
+			}
+			return nil
+		}
+		slurmClient := slurmclientfake.NewClientBuilder().
+			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+				Name: ptr.To(node.Name),
+				Gres: ptr.To("gpu:gpu-example:1,nic:infiniband:1"),
+			}}).
+			WithUpdateFn(updateFn).
+			Build()
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+
+		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(gotExtra).To(Equal(
+			`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`,
+		))
+		updatedNode := &corev1.Node{}
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
+		condition := findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Status).To(Equal(corev1.ConditionTrue))
+		Expect(condition.Reason).To(Equal(reasonSlurmGRESCompatible))
+		Expect(findNodeCondition(updatedNode.Status.Conditions, corev1.NodeReady)).NotTo(BeNil())
+	})
+
+	It("publishes the required gres.conf inventory when the hybrid node is incompatible", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0"}}
+		resourceSlice := &resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0-gpus"},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.example.com",
+				NodeName: ptr.To(node.Name),
+				Pool: resourcev1.ResourcePool{
+					Name:               node.Name,
+					Generation:         1,
+					ResourceSliceCount: 1,
+				},
+				Devices: []resourcev1.Device{{Name: "gpu-0"}},
+			},
+		}
+		kubeClient := fake.NewClientBuilder().WithObjects(node, resourceSlice).Build()
+		slurmClient := slurmclientfake.NewClientBuilder().
+			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+				Name: ptr.To(node.Name),
+				Gres: ptr.To("gpu:gpu-example:2"),
+			}}).
+			Build()
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		eventRecorder := record.NewFakeRecorder(1)
+		r.eventRecorder = eventRecorder
+
+		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
+		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
+		updatedNode := &corev1.Node{}
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
+		condition := findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Status).To(Equal(corev1.ConditionFalse))
+		Expect(condition.Reason).To(Equal(reasonIncompatibleSlurmGRES))
+		Expect(condition.Message).To(ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu-example Count=1"))
+		Expect(eventRecorder.Events).To(Receive(And(
+			ContainSubstring("IncompatibleSlurmGRES"),
+			ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu-example Count=1"),
+		)))
+
+		err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
+		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
+		Consistently(eventRecorder.Events).ShouldNot(Receive())
+	})
+
+	It("clears the compatibility condition when the node is no longer hybrid", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "not-hybrid"},
+			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				},
+				{
+					Type:   wellknown.NodeConditionSlurmGRESCompatible,
+					Status: corev1.ConditionFalse,
+				},
+			}},
+		}
+		kubeClient := fake.NewClientBuilder().WithObjects(node).Build()
+		r := NewReconciler(
+			kubeClient,
+			slurmclientfake.NewClientBuilder().Build(),
+			schedulerName,
+			make(chan event.GenericEvent),
+			nil,
+		)
+
+		Expect(r.syncNodeRegistration(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: node.Name},
+		})).To(Succeed())
+		updatedNode := &corev1.Node{}
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
+		Expect(findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)).To(BeNil())
+		Expect(findNodeCondition(updatedNode.Status.Conditions, corev1.NodeReady)).NotTo(BeNil())
+	})
+})

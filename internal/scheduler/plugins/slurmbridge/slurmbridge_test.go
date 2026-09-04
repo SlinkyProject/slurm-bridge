@@ -1409,14 +1409,21 @@ func TestSlurmBridge_PreFilterExtensions(t *testing.T) {
 
 func TestSlurmBridge_Filter(t *testing.T) {
 	ctx := context.Background()
-	nodeInfo := framework.NewNodeInfo()
-	nodeInfo.SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
+	nodeInfoFor := func(node *corev1.Node) *framework.NodeInfo {
+		nodeInfo := framework.NewNodeInfo()
+		nodeInfo.SetNode(node)
+		return nodeInfo
+	}
+	nodeInfo := nodeInfoFor(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
+	incompatibleMessage := "Slurm GRES does not match DRA inventory"
+	testSchedulerName := "slurm-bridge-scheduler"
 	podWithAnnotation := st.MakePod().Name("foo").Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
 	podWithoutAnnotation := st.MakePod().Name("foo").Obj()
 	type fields struct {
-		client       kubeclient.Client
-		slurmControl slurmcontrol.SlurmControlInterface
-		handle       fwk.Handle
+		client        kubeclient.Client
+		schedulerName string
+		slurmControl  slurmcontrol.SlurmControlInterface
+		handle        fwk.Handle
 	}
 	type args struct {
 		ctx      context.Context
@@ -1459,13 +1466,83 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			},
 			want: fwk.NewStatus(fwk.Unschedulable, "node does not match annotation"),
 		},
+		{
+			name: "Node has incompatible Slurm GRES",
+			fields: fields{
+				slurmControl: slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+			},
+			args: args{
+				ctx:   ctx,
+				state: nil,
+				pod:   podWithAnnotation.DeepCopy(),
+				nodeInfo: nodeInfoFor(&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+					Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+						Type:    wellknown.NodeConditionSlurmGRESCompatible,
+						Status:  corev1.ConditionFalse,
+						Reason:  "IncompatibleSlurmGRES",
+						Message: incompatibleMessage,
+					}},
+					},
+				}),
+			},
+			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, incompatibleMessage),
+		},
+		{
+			name: "Hybrid node compatibility has not been verified",
+			fields: fields{
+				schedulerName: testSchedulerName,
+				slurmControl:  slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+			},
+			args: args{
+				ctx:   ctx,
+				state: nil,
+				pod:   podWithAnnotation.DeepCopy(),
+				nodeInfo: nodeInfoFor(&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+					Spec: corev1.NodeSpec{Taints: []corev1.Taint{{
+						Key:    utils.TaintKeyBridgedNode,
+						Value:  testSchedulerName,
+						Effect: corev1.TaintEffectNoExecute,
+					}},
+					},
+				}),
+			},
+			want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorSlurmGRESUnverified.Error()),
+		},
+		{
+			name: "External node does not require compatibility condition",
+			fields: fields{
+				schedulerName: testSchedulerName,
+				slurmControl:  slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+			},
+			args: args{
+				ctx:   ctx,
+				state: nil,
+				pod:   podWithAnnotation.DeepCopy(),
+				nodeInfo: nodeInfoFor(&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node1",
+						Labels: map[string]string{wellknown.LabelExternalNode: "true"},
+					},
+					Spec: corev1.NodeSpec{Taints: []corev1.Taint{{
+						Key:    utils.TaintKeyBridgedNode,
+						Value:  testSchedulerName,
+						Effect: corev1.TaintEffectNoExecute,
+					}},
+					},
+				}),
+			},
+			want: fwk.NewStatus(fwk.Success, ""),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sb := &SlurmBridge{
-				Client:       tt.fields.client,
-				slurmControl: tt.fields.slurmControl,
-				handle:       tt.fields.handle,
+				Client:        tt.fields.client,
+				schedulerName: tt.fields.schedulerName,
+				slurmControl:  tt.fields.slurmControl,
+				handle:        tt.fields.handle,
 			}
 			got := sb.Filter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.nodeInfo)
 			if got.Code() != tt.want.Code() {

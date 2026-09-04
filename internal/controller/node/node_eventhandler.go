@@ -22,7 +22,6 @@ import (
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 type nodeEventHandler struct {
@@ -96,9 +95,6 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 	requests := make([]reconcile.Request, 0)
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
-		if _, external := node.Labels[wellknown.LabelExternalNode]; !external {
-			continue
-		}
 		matches, err := dra.ResourceSliceMatchesNode(node, resourceSlice)
 		if err != nil {
 			logger.Error(err, "failed to match ResourceSlice to node", "resourceSlice", client.ObjectKeyFromObject(resourceSlice), "node", client.ObjectKeyFromObject(node))

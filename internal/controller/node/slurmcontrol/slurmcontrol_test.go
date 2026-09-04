@@ -754,7 +754,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "node exists, different gres (slurm has gres, desired empty)",
+			name: "hybrid node preserves unmanaged gres",
 			client: fake.NewClientBuilder().WithObjects(
 				&types.V0044Node{
 					V0044Node: api.V0044Node{
@@ -762,6 +762,22 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:driver:1"),
+					},
+				},
+			).Build(),
+			node: makeNode("worker-0", 4, 8),
+			want: false,
+		},
+		{
+			name: "external node recreates for different gres",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:driver:1"),
+						State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 					},
 				},
 			).Build(),
@@ -800,7 +816,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
 			draInventory: testExampleDRAInventory(),
-			want:         true,
+			want:         false,
 		},
 		{
 			name: "node exists with removed profile inventory",
@@ -815,7 +831,56 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
-			want: true,
+			want: false,
+		},
+		{
+			name: "hybrid node accepts additional gres",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:gpu-example:2,nic:infiniband:1"),
+					},
+				},
+			).Build(),
+			node:         makeNode("worker-0", 4, 8),
+			draInventory: testExampleDRAInventory(),
+			want:         false,
+		},
+		{
+			name: "hybrid node accepts gres topology suffix",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:gpu-example:2(S:0-1)"),
+					},
+				},
+			).Build(),
+			node:         makeNode("worker-0", 4, 8),
+			draInventory: testExampleDRAInventory(),
+			want:         false,
+		},
+		{
+			name: "hybrid node rejects incompatible gres with configuration hint",
+			client: fake.NewClientBuilder().WithObjects(
+				&types.V0044Node{
+					V0044Node: api.V0044Node{
+						Name:       ptr.To("worker-0"),
+						Cpus:       ptr.To(int32(4)),
+						RealMemory: ptr.To(int64(8192)),
+						Gres:       ptr.To("gpu:gpu-example:1,nic:infiniband:1"),
+					},
+				},
+			).Build(),
+			node:         makeNode("worker-0", 4, 8),
+			draInventory: testExampleDRAInventory(),
+			wantErr:      true,
+			wantErrText:  "NodeName=worker-0 Name=gpu Type=gpu-example Count=2",
 		},
 		{
 			name: "node exists with unrelated extra and no profile inventory",
@@ -1392,6 +1457,147 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 	}
 	if comment != nil {
 		t.Errorf("AddNode() comment = %q, want nil", ptr.Deref(comment, ""))
+	}
+}
+
+func Test_realSlurmControl_AddNode_updatesExistingHybridNodeInventory(t *testing.T) {
+	wantExtra, err := dra.EncodeAppliedInventory(testExampleDRAInventory())
+	if err != nil {
+		t.Fatalf("EncodeAppliedInventory: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		currentExtra string
+		wantExtra    string
+	}{
+		{
+			name:      "sets missing inventory",
+			wantExtra: wantExtra,
+		},
+		{
+			name:         "replaces stale owned inventory",
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":[]}}`,
+			wantExtra:    wantExtra,
+		},
+		{
+			name:         "clears removed owned inventory",
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":[]}}`,
+			wantExtra:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var updates []api.V0044UpdateNodeMsg
+			f := interceptor.Funcs{
+				Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+					if update, ok := req.(api.V0044UpdateNodeMsg); ok {
+						updates = append(updates, update)
+					}
+					return nil
+				},
+			}
+			slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
+				Name:       ptr.To("test-node"),
+				Cpus:       ptr.To(int32(4)),
+				RealMemory: ptr.To(int64(8192)),
+			}}
+			var inventory []dra.GRESInventory
+			if tt.wantExtra != "" {
+				slurmNode.Gres = ptr.To("gpu:gpu-example:2,nic:infiniband:1")
+				inventory = testExampleDRAInventory()
+			}
+			if tt.currentExtra != "" {
+				slurmNode.Extra = ptr.To(tt.currentExtra)
+			}
+			r := &realSlurmControl{Client: fake.NewClientBuilder().
+				WithObjects(slurmNode).
+				WithInterceptorFuncs(f).
+				Build()}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+
+			if err := r.AddNode(context.Background(), node, nil, inventory); err != nil {
+				t.Fatalf("AddNode: %v", err)
+			}
+			if len(updates) != 1 {
+				t.Fatalf("AddNode() updates = %d, want 1", len(updates))
+			}
+			if got := ptr.Deref(updates[0].Extra, "missing"); got != tt.wantExtra {
+				t.Errorf("AddNode() Extra = %q, want %q", got, tt.wantExtra)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
+	slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
+		Name: ptr.To("test-node"),
+		Gres: ptr.To("gpu:gpu-example:1"),
+	}}
+	r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(slurmNode).Build()}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+
+	err := r.AddNode(context.Background(), node, nil, testExampleDRAInventory())
+	if err == nil {
+		t.Fatal("AddNode() error = nil, want incompatible GRES error")
+	}
+	var incompatible *IncompatibleGRESConfigurationError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("AddNode() error = %T, want *IncompatibleGRESConfigurationError", err)
+	}
+	if want := "NodeName=test-node Name=gpu Type=gpu-example Count=2"; !strings.Contains(err.Error(), want) {
+		t.Errorf("AddNode() error = %q, want containing %q", err, want)
+	}
+}
+
+func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		slurmNode *types.V0044Node
+		inventory []dra.GRESInventory
+	}{
+		{
+			name:      "absent node",
+			inventory: testExampleDRAInventory(),
+		},
+		{
+			name: "external node",
+			slurmNode: &types.V0044Node{V0044Node: api.V0044Node{
+				Name:  ptr.To("test-node"),
+				State: ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+			}},
+			inventory: testExampleDRAInventory(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mutated := false
+			f := interceptor.Funcs{
+				Create: func(_ context.Context, _ object.Object, _ any, _ ...slurmclient.CreateOption) error {
+					mutated = true
+					return nil
+				},
+				Update: func(_ context.Context, _ object.Object, _ any, _ ...slurmclient.UpdateOption) error {
+					mutated = true
+					return nil
+				},
+			}
+			builder := fake.NewClientBuilder().WithInterceptorFuncs(f)
+			if tt.slurmNode != nil {
+				builder.WithObjects(tt.slurmNode)
+			}
+			r := &realSlurmControl{Client: builder.Build()}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+
+			if err := r.UpdateHybridNode(context.Background(), node, tt.inventory); err != nil {
+				t.Fatalf("UpdateHybridNode: %v", err)
+			}
+			if mutated {
+				t.Fatal("UpdateHybridNode() mutated a node outside hybrid scope")
+			}
+		})
 	}
 }
 
