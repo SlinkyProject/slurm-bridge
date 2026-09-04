@@ -1,108 +1,89 @@
-# Running slurm-bridge locally
+# Developing Slurm Bridge
 
-## Table of Contents
+## Local Kind cluster
 
-<!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
-
-- [Running slurm-bridge locally](#running-slurm-bridge-locally)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Pre-requisites](#pre-requisites)
-  - [Setting up your environment](#setting-up-your-environment)
-  - [Installing `slurm-bridge` within your environment](#installing-slurm-bridge-within-your-environment)
-  - [Cleaning up](#cleaning-up)
-
-<!-- mdformat-toc end -->
-
-## Overview
-
-You may want to run `slurm-bridge` on a single machine in order to test the
-software or familiarize yourself with it prior to installing it on your cluster.
-This should only be done for testing and evaluation purposes and should not be
-used for production environments.
-
-We have provided a script to do this using [Kind](https://kind.sigs.k8s.io/) and
-the
-[`hack/kind.sh`](https://github.com/SlinkyProject/slurm-bridge/blob/main/hack/kind.sh)
-script.
-
-This document assumes a basic understanding of
-[Kubernetes architecture](https://kubernetes.io/docs/concepts/architecture/). It
-is highly recommended that those who are unfamiliar with the core concepts of
-Kubernetes review the documentation on
-[Kubernetes](https://kubernetes.io/docs/concepts/overview/),
-[pods](https://kubernetes.io/docs/concepts/workloads/pods/), and
-[nodes](https://kubernetes.io/docs/concepts/architecture/nodes/) before getting
-started.
-
-## Pre-requisites
-
-- [go 1.17+](https://go.dev/) must be installed on your system
-
-## Setting up your environment
-
-1. Install [Kind](https://kind.sigs.k8s.io/) using `go install`:
-
-   ```bash
-   go install sigs.k8s.io/kind@v0.29.0
-   ```
-
-   If you get `kind: command not found` when running the next step, you may need
-   to add GOPATH to your PATH:
-
-   ```sh
-   export GOPATH=$HOME/go
-   export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
-   ```
-
-1. Confirm that kind is working properly by running the following commands:
-
-   ```bash
-   kind create cluster
-
-   kubectl get nodes --all-namespaces
-
-   kind delete cluster
-   ```
-
-1. Clone the
-   [`slurm-bridge`](https://github.com/SlinkyProject/slurm-bridge/tree/main)
-   repo and enter it:
-
-   ```bash
-   git clone git@github.com:SlinkyProject/slurm-bridge.git
-   cd slurm-bridge
-   ```
-
-## Installing `slurm-bridge` within your environment
-
-Provided with `slurm-bridge` is the script `hack/kind.sh` that interfaces with
-kind to deploy the `slurm-bridge` helm chart within your local environment.
-
-1. Create your cluster using `hack/kind.sh`:
-
-   ```bash
-   hack/kind.sh --bridge
-   ```
-
-1. Familiarize yourself with and use your test environment:
-
-   ```bash
-   kubectl get pods --namespace=slurm-bridge
-   kubectl get pods --namespace=slurm
-   kubectl get pods --namespace=slinky
-   ```
-
-At this point, you should have a kind cluster running `slurm-bridge`.
-
-## Cleaning up
-
-`hack/kind.sh` provides a mechanism by which to destroy your test environment.
-
-Run:
+The workstation needs Make, Docker, Kind, Skaffold, Helm, kubectl, and Go.
+Create a development cluster and deploy the complete bridge stack:
 
 ```sh
-hack/kind.sh --delete
+make kind-start
 ```
 
-To destroy your kind cluster.
+Use `make deploy` for a one-time rebuild. Delete the cluster with:
+
+```sh
+make kind-stop
+```
+
+The generated `helm/slurm-bridge/values-dev.yaml` file is a sparse, untracked
+override. Add only values needed for development. Skaffold resets the release to
+the current chart defaults before applying these overrides. If an older file is
+a full copy of `values.yaml`, replace it with `{}` so it does not pin defaults
+from an older checkout.
+
+## Remote cluster
+
+Install a compatible released Slinky stack first. The workstation running the
+deployment needs Kubernetes API access, push access to a registry, and a
+registry namespace that the cluster can pull from.
+
+Select the Kubernetes context and registry, then deploy the local checkout:
+
+```sh
+export SKAFFOLD_KUBE_CONTEXT=my-remote-cluster
+export SKAFFOLD_DEFAULT_REPO=ghcr.io/my-user
+make deploy
+```
+
+Skaffold builds and pushes the bridge images, then Helm upgrades Slurm Bridge
+using the current chart defaults and `values-dev.yaml` overrides. Existing
+release values are not retained, so add any required cluster-specific values to
+`values-dev.yaml` before deploying.
+
+## Specialized fixtures
+
+Install all optional Kind development fixtures:
+
+```sh
+./hack/kind.sh --extras slurm-bridge-dev
+```
+
+This is equivalent to `--dra-driver-cpu --dra-example-driver`. Each flag can
+still be used individually.
+
+Examples remain individually selectable:
+
+```sh
+kubectl apply -f hack/examples/job/single.yaml
+kubectl apply -f hack/examples/dra/gpu-example/job.yaml
+```
+
+## Demo
+
+Create the core stack, install all optional fixtures, and run a curated set of
+finite example workloads:
+
+```sh
+make demo-start
+```
+
+Watch the workloads and their corresponding Slurm jobs until interrupted with
+`Ctrl+C`:
+
+```sh
+./hack/demo_watch.sh
+```
+
+Stopping the watcher does not remove the demo workloads. Remove them with:
+
+```sh
+make demo-stop
+```
+
+The cluster remains available for development. Delete it with `make kind-stop`.
+
+Optional system diagnostics remain a direct command:
+
+```sh
+sudo ./hack/sysctl.sh
+```

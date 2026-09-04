@@ -1,0 +1,37 @@
+---
+configFiles:
+  gres.conf: |
+    NodeName=kind-worker[4-9] Name=gpu Type=gpu.example.com File=/dev/tty[10-17] Count=8
+controller:
+  extraConf: GresTypes=gpu
+nodesets:
+  slinky:
+    enabled: false
+  slurm-bridge:
+    enabled: true
+    scalingMode: DaemonSet
+    slurmd:
+      env: []
+      image:
+        repository: ghcr.io/slinkyproject/slurmd
+        tag: 25.11-ubuntu24.04
+      args: []
+      resources: {}
+      volumeMounts: []
+    logfile:
+      image:
+        repository: docker.io/library/alpine
+        tag: latest
+      resources: {}
+    extraConf: Gres=gpu:gpu.example.com:8
+    partition:
+      enabled: true
+    podSpec:
+      nodeSelector:
+        scheduler.slinky.slurm.net/slurm-bridge: worker
+        kubernetes.io/os: linux
+      tolerations:
+        - key: slinky.slurm.net/managed-node
+          operator: Equal
+          value: slurm-bridge-scheduler
+          effect: NoExecute
