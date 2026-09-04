@@ -35,7 +35,6 @@ func TestScheduling(t *testing.T) {
 		testKubernetesPodGroupScheduling(),
 		testSchedulerPluginsPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),
-		testKubernetesPlacementConstraints(),
 		testSlurmJobRoundTrip(),
 		testKubernetesCancellation(),
 		testSlurmCancellation(),

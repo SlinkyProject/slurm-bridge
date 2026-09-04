@@ -46,9 +46,9 @@ DaemonSet-mode hybrid `slurmd` pods, as requested. Hybrid runs also include a
 native `sbatch` feature labeled `slurm-node-mode=hybrid`, which verifies that a
 job submitted directly to Slurm completes on one of those hybrid workers.
 
-After the serial readiness check, independent workload features run in
-parallel. Slurm may queue jobs when the suite temporarily asks for more nodes
-than are available, so each feature allows up to ten minutes for an allocation.
+After the serial readiness check, independent workload features run in parallel.
+Slurm may queue jobs when the suite temporarily asks for more nodes than are
+available, so each feature allows up to ten minutes for an allocation.
 
 Use `E2E_RUN` with a Go test regular expression to select one feature. Set
 `E2E_CLEANUP=false` to leave the successful workload in place for debugging:
