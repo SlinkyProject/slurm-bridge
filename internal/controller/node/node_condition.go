@@ -30,11 +30,10 @@ func (r *NodeReconciler) setSlurmGRESCompatibilityCondition(
 	status corev1.ConditionStatus,
 	reason string,
 	message string,
-) (bool, error) {
+) error {
 	condition := findNodeCondition(node.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
-	transitioned := condition == nil || condition.Status != status
 	if condition != nil && condition.Status == status && condition.Reason == reason && condition.Message == message {
-		return false, nil
+		return nil
 	}
 
 	now := metav1.Now()
@@ -55,11 +54,11 @@ func (r *NodeReconciler) setSlurmGRESCompatibilityCondition(
 	setNodeCondition(&patched.Status.Conditions, updated)
 	if err := r.Status().Patch(ctx, patched, client.StrategicMergeFrom(node)); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, nil
+			return nil
 		}
-		return false, fmt.Errorf("patching Slurm GRES compatibility condition on Kubernetes node %q: %w", node.Name, err)
+		return fmt.Errorf("patching Slurm GRES compatibility condition on Kubernetes node %q: %w", node.Name, err)
 	}
-	return transitioned, nil
+	return nil
 }
 
 func (r *NodeReconciler) clearSlurmGRESCompatibilityCondition(ctx context.Context, node *corev1.Node) error {
@@ -82,20 +81,17 @@ func (r *NodeReconciler) clearSlurmGRESCompatibilityCondition(ctx context.Contex
 func (r *NodeReconciler) recordSlurmGRESCompatibilityError(ctx context.Context, node *corev1.Node, err error) error {
 	var incompatibleGRES *slurmcontrol.IncompatibleGRESConfigurationError
 	if errors.As(err, &incompatibleGRES) {
-		transitioned, conditionErr := r.setSlurmGRESCompatibilityCondition(
+		conditionErr := r.setSlurmGRESCompatibilityCondition(
 			ctx,
 			node,
 			corev1.ConditionFalse,
 			reasonIncompatibleSlurmGRES,
 			err.Error(),
 		)
-		if transitioned && conditionErr == nil && r.eventRecorder != nil {
-			r.eventRecorder.Event(node, corev1.EventTypeWarning, reasonIncompatibleSlurmGRES, err.Error())
-		}
 		return errors.Join(err, conditionErr)
 	}
 
-	_, conditionErr := r.setSlurmGRESCompatibilityCondition(
+	conditionErr := r.setSlurmGRESCompatibilityCondition(
 		ctx,
 		node,
 		corev1.ConditionUnknown,

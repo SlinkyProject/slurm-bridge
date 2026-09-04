@@ -103,12 +103,10 @@ For DRA-backed devices, the bridge node controller records the stable device
 inventory in the Slurm node's `Extra` field. The hybrid node's `gres.conf` must
 provide matching `Name`, `Type`, and `Count` values. Other GRES entries are
 allowed and remain available to native Slurm workloads. If the DRA-managed
-entries do not match, the controller emits an `IncompatibleSlurmGRES` warning
-event on the Kubernetes node with the required `gres.conf` inventory and sets
-its `SlinkySlurmGRESCompatible` condition to `False`. The bridge scheduler
-rejects the node until the controller verifies the corrected configuration and
-sets the condition to `True`. The warning event is emitted only when the
-condition transitions to `False`.
+entries do not match, the controller sets the Kubernetes node's
+`SlinkySlurmGRESCompatible` condition to `False` with the required `gres.conf`
+inventory. The bridge scheduler rejects the node until the controller verifies
+the corrected configuration and sets the condition to `True`.
 
 ### Topology
 

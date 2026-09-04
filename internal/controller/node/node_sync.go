@@ -284,7 +284,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		if err := r.slurmControl.UpdateHybridNode(ctx, node, draInventory); err != nil {
 			return r.recordSlurmGRESCompatibilityError(ctx, node, err)
 		}
-		_, err = r.setSlurmGRESCompatibilityCondition(
+		err = r.setSlurmGRESCompatibilityCondition(
 			ctx,
 			node,
 			corev1.ConditionTrue,

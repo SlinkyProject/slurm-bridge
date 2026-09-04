@@ -495,8 +495,6 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			}}).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
-		eventRecorder := record.NewFakeRecorder(1)
-		r.eventRecorder = eventRecorder
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
@@ -507,14 +505,9 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		Expect(condition.Status).To(Equal(corev1.ConditionFalse))
 		Expect(condition.Reason).To(Equal(reasonIncompatibleSlurmGRES))
 		Expect(condition.Message).To(ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu-example Count=1"))
-		Expect(eventRecorder.Events).To(Receive(And(
-			ContainSubstring("IncompatibleSlurmGRES"),
-			ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu-example Count=1"),
-		)))
 
 		err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
-		Consistently(eventRecorder.Events).ShouldNot(Receive())
 	})
 
 	It("clears the compatibility condition when the node is no longer hybrid", func() {
