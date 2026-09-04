@@ -500,11 +500,19 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Apply controller configuration before creating the NodeSet. Otherwise,
+		# NodeSet reconciliation can back off while slurmctld is restarting.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
 		slurm::configure_hybrid_dra_inventory
 		;;
 	*)
