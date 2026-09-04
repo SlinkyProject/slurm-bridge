@@ -108,6 +108,13 @@ entries do not match, the controller sets the Kubernetes node's
 inventory. The bridge scheduler rejects the node until the controller verifies
 the corrected configuration and sets the condition to `True`.
 
+The controller adds the `slurm_bridge_gres_compatible` Slurm feature to every
+external node and to hybrid nodes whose GRES configuration has been verified.
+Every Slurm job submitted by the bridge requires this feature. An incompatible
+hybrid node therefore remains available to native Slurm jobs while bridge jobs
+cannot be allocated to it. Other hybrid-node features and native job constraints
+are unaffected.
+
 ### Topology
 
 Slurm supports dynamic node topology with `topology.yaml`. The topology file

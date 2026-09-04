@@ -262,6 +262,17 @@ authorize label use, production clusters must also reserve that label from
 native users as described in
 [Production label authorization](config.md#production-label-authorization).
 
+Every bridge job requires the `slurm_bridge_gres_compatible` node feature, so
+the scheduler combines it with the `constraints` value using Slurm's AND
+operator. Slurm's constraint grammar does not allow nested parentheses, allows
+one set of matching-OR brackets, and only accepts a feature count outside
+brackets when it is the sole feature. Within those rules any expression is
+supported, including `a&b`, `a|b`, `a&(b|c)`, `[rack1|rack2]` and
+`[a100*2&h100*1]`. Admission rejects the few expressions that cannot be combined
+with an additional feature: a bare count such as `rack1*2`, and an OR outside
+parentheses mixed with parentheses or brackets such as `(a&b)|(c&d)`. Rewrite
+these with a single level of grouping, for example `[a&b|c&d]`.
+
 Annotations can update a Slurm job while it is pending. Slurm validates each
 change. If it rejects an update, the previous Slurm job value remains in effect.
 Once Slurm allocates the job, treat its annotations and Pod membership as fixed.

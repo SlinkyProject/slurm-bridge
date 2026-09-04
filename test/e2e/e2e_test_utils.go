@@ -190,23 +190,40 @@ func execInPod(ctx context.Context, config *envconf.Config, pod *corev1.Pod, com
 }
 
 func slurmNodeStates(output string) map[string]string {
+	return slurmNodeFieldValues(output, "State")
+}
+
+func slurmNodeAvailableFeatures(output string) map[string]string {
+	return slurmNodeFieldValues(output, "AvailableFeatures")
+}
+
+func slurmNodeFieldValues(output, fieldName string) map[string]string {
 	nodes := make(map[string]string)
 	for line := range strings.Lines(output) {
 		var name string
-		var state string
+		var value string
 		for field := range strings.FieldsSeq(line) {
 			if value, found := strings.CutPrefix(field, "NodeName="); found {
 				name = value
 			}
-			if value, found := strings.CutPrefix(field, "State="); found {
-				state = value
+			if fieldValue, found := strings.CutPrefix(field, fieldName+"="); found {
+				value = fieldValue
 			}
 		}
 		if name != "" {
-			nodes[name] = state
+			nodes[name] = value
 		}
 	}
 	return nodes
+}
+
+func csvContains(value, item string) bool {
+	for entry := range strings.SplitSeq(value, ",") {
+		if strings.TrimSpace(entry) == item {
+			return true
+		}
+	}
+	return false
 }
 
 func slurmJobNodeList(output string) (string, error) {
@@ -243,6 +260,7 @@ func bridgeNodesReadyForMode(
 	mode slurmNodeMode,
 	bridgeNodes []corev1.Node,
 	slurmStates map[string]string,
+	slurmFeatures map[string]string,
 	readyHybridNodes map[string]struct{},
 ) (bool, string) {
 	for i := range bridgeNodes {
@@ -250,6 +268,13 @@ func bridgeNodesReadyForMode(
 		state, registered := slurmStates[node.Name]
 		if !registered {
 			return false, fmt.Sprintf("Kubernetes bridge worker %s is not registered in Slurm", node.Name)
+		}
+		if !csvContains(slurmFeatures[node.Name], wellknown.SlurmFeatureGRESCompatible) {
+			return false, fmt.Sprintf(
+				"Kubernetes bridge worker %s does not have Slurm feature %s",
+				node.Name,
+				wellknown.SlurmFeatureGRESCompatible,
+			)
 		}
 
 		_, hasExternalLabel := node.Labels[wellknown.LabelExternalNode]
@@ -339,6 +364,7 @@ func testSlurmBridgeReadiness(nodeMode slurmNodeMode) types.Feature {
 					nodeMode,
 					bridgeNodes.Items,
 					slurmNodeStates(output),
+					slurmNodeAvailableFeatures(output),
 					readyHybridNodes,
 				)
 				lastObservation = observation
@@ -614,6 +640,13 @@ func testSlurmBridgePodScheduling() types.Feature {
 			}
 			if slurmNode != pod.Spec.NodeName {
 				t.Fatalf("Slurm allocated node %s, but Kubernetes bound the pod to %s", slurmNode, pod.Spec.NodeName)
+			}
+			constraints, err := slurmJobField(output, "Features")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !csvContains(constraints, wellknown.SlurmFeatureGRESCompatible) {
+				t.Fatalf("Slurm job Features=%q does not include %s", constraints, wellknown.SlurmFeatureGRESCompatible)
 			}
 			return ctx
 		}).
@@ -1099,10 +1132,18 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("condition includes the required gres.conf inventory", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("condition includes gres.conf inventory and Slurm feature is removed", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
+			}
+
+			controllerPod := &corev1.Pod{}
+			if err := crClient.Get(ctx, client.ObjectKey{
+				Namespace: slurmNamespace,
+				Name:      slurmControllerPodName,
+			}, controllerPod); err != nil {
+				t.Fatalf("failed to get Slurm controller pod: %v", err)
 			}
 
 			lastObservation := "no bridge worker condition observed"
@@ -1138,6 +1179,29 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 							expectedGRESConf,
 							condition.Message,
 						)
+					}
+					output, err := execInPod(
+						ctx,
+						config,
+						controllerPod,
+						"scontrol",
+						"show",
+						"node",
+						targetNodeName,
+						"--oneliner",
+					)
+					if err != nil {
+						lastObservation = fmt.Sprintf("query Slurm node %s: %v", targetNodeName, err)
+						return false, nil
+					}
+					features := slurmNodeAvailableFeatures(output)[targetNodeName]
+					if csvContains(features, wellknown.SlurmFeatureGRESCompatible) {
+						lastObservation = fmt.Sprintf(
+							"Slurm node %s still has feature %s",
+							targetNodeName,
+							wellknown.SlurmFeatureGRESCompatible,
+						)
+						return false, nil
 					}
 					return true, nil
 				}

@@ -17,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -1645,6 +1646,37 @@ func TestPodAdmission_NamespaceSelector(t *testing.T) {
 				if tt.pod.Spec.SchedulerName == SchedulerName {
 					t.Errorf("scheduler name is %q, but should not be", SchedulerName)
 				}
+			}
+		})
+	}
+}
+
+func TestValidateConstraintsAnnotation(t *testing.T) {
+	tests := []struct {
+		name        string
+		constraints *string
+		wantErr     bool
+	}{
+		{name: "no annotation"},
+		{name: "empty", constraints: ptr.To("")},
+		{name: "single feature", constraints: ptr.To("gpu")},
+		{name: "AND OR with parentheses", constraints: ptr.To("gpu&(rack-a|rack-b)")},
+		{name: "top-level OR", constraints: ptr.To("rack1|rack2")},
+		{name: "matching OR brackets", constraints: ptr.To("[rack1|rack2]")},
+		{name: "bracketed counts", constraints: ptr.To("[a100*2&h100*1]")},
+		{name: "bare feature count", constraints: ptr.To("rack1*2"), wantErr: true},
+		{name: "top-level OR with parentheses", constraints: ptr.To("(a&b)|(c&d)"), wantErr: true},
+		{name: "nested parentheses", constraints: ptr.To("a&(b&(c|d))"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{}
+			if tt.constraints != nil {
+				pod.Annotations = map[string]string{wellknown.AnnotationConstraints: *tt.constraints}
+			}
+			err := validateConstraintsAnnotation(pod)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateConstraintsAnnotation() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

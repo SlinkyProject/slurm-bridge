@@ -23,6 +23,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -118,6 +119,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateTimeLimitAnnotation(pod); err != nil {
 		return nil, err
 	}
+	if err := validateConstraintsAnnotation(pod); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -142,6 +146,9 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 		return nil, err
 	}
 	if err := validateAnnotationConflicts(newPod); err != nil {
+		return nil, err
+	}
+	if err := validateConstraintsAnnotation(newPod); err != nil {
 		return nil, err
 	}
 	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
@@ -339,6 +346,21 @@ func validateAnnotationConflicts(pod *corev1.Pod) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// validateConstraintsAnnotation rejects constraint expressions that cannot be
+// combined with the node feature every bridge job requires. Rejecting them at
+// admission surfaces the problem on the Pod instead of on every scheduling
+// cycle. The composition rules live in the slurmconstraint package.
+func validateConstraintsAnnotation(pod *corev1.Pod) error {
+	constraints, ok := pod.Annotations[wellknown.AnnotationConstraints]
+	if !ok {
+		return nil
+	}
+	if _, err := slurmconstraint.Compose(wellknown.SlurmFeatureGRESCompatible, constraints); err != nil {
+		return fmt.Errorf("annotation %q: %w", wellknown.AnnotationConstraints, err)
 	}
 	return nil
 }

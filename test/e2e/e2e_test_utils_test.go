@@ -94,6 +94,22 @@ NodeName=worker-2 CPUTot=8 State=ALLOCATED
 	}
 }
 
+func TestSlurmNodeAvailableFeatures(t *testing.T) {
+	t.Parallel()
+
+	output := `NodeName=worker-1 AvailableFeatures=gpu,slurm_bridge_gres_compatible State=IDLE
+NodeName=worker-2 AvailableFeatures=(null) State=ALLOCATED
+`
+	want := map[string]string{
+		"worker-1": "gpu,slurm_bridge_gres_compatible",
+		"worker-2": "(null)",
+	}
+
+	if got := slurmNodeAvailableFeatures(output); !maps.Equal(got, want) {
+		t.Fatalf("slurmNodeAvailableFeatures() = %v, want %v", got, want)
+	}
+}
+
 func TestSlurmJobNodeList(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +143,7 @@ func TestBridgeNodesReadyForMode(t *testing.T) {
 		slurmNodeModeExternal,
 		[]corev1.Node{externalNode},
 		map[string]string{"worker-1": "IDLE+EXTERNAL"},
+		map[string]string{"worker-1": wellknown.SlurmFeatureGRESCompatible},
 		nil,
 	); !ready {
 		t.Fatalf("external node was not ready: %s", observation)
@@ -137,6 +154,7 @@ func TestBridgeNodesReadyForMode(t *testing.T) {
 		slurmNodeModeHybrid,
 		[]corev1.Node{hybridNode},
 		map[string]string{"worker-2": "IDLE"},
+		map[string]string{"worker-2": "admin," + wellknown.SlurmFeatureGRESCompatible},
 		map[string]struct{}{"worker-2": {}},
 	); !ready {
 		t.Fatalf("hybrid node was not ready: %s", observation)
@@ -146,9 +164,20 @@ func TestBridgeNodesReadyForMode(t *testing.T) {
 		slurmNodeModeHybrid,
 		[]corev1.Node{externalNode},
 		map[string]string{"worker-1": "IDLE+EXTERNAL"},
+		map[string]string{"worker-1": wellknown.SlurmFeatureGRESCompatible},
 		map[string]struct{}{"worker-1": {}},
 	); ready {
 		t.Fatal("hybrid readiness accepted an external node")
+	}
+
+	if ready, _ := bridgeNodesReadyForMode(
+		slurmNodeModeHybrid,
+		[]corev1.Node{hybridNode},
+		map[string]string{"worker-2": "IDLE"},
+		map[string]string{"worker-2": "admin"},
+		map[string]struct{}{"worker-2": {}},
+	); ready {
+		t.Fatal("hybrid readiness accepted a node without the GRES compatibility feature")
 	}
 }
 

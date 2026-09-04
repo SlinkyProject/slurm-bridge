@@ -305,7 +305,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	memoryMB := memoryBytes / (1024 * 1024)
 
 	annotations := node.GetAnnotations()
-	features := ""
+	features := []string{wellknown.SlurmFeatureGRESCompatible}
 	if partitionsAnno, ok := annotations[wellknown.AnnotationExternalNodePartitions]; ok && partitionsAnno != "" {
 		partitions := splitPartitionList(partitionsAnno)
 		for _, partition := range partitions {
@@ -313,16 +313,14 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 				return fmt.Errorf("could not validate partition %q: %w", partition, err)
 			}
 		}
-		features = strings.Join(partitions, ",")
+		features = append(features, partitions...)
 	}
 
 	// Create node configuration string
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
 	nodeConf := fmt.Sprintf("NodeName=%s Sockets=1 CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
 		slurmNodeName, cpuConfig.coresPerSocket, cpuConfig.threadsPerCore, cpuConfig.cpus, memoryMB)
-	if features != "" {
-		nodeConf += fmt.Sprintf(" Feature=%s", features)
-	}
+	nodeConf += fmt.Sprintf(" Feature=%s", strings.Join(features, ","))
 	if topologySpec, ok := annotations[wellknown.AnnotationNodeTopologySpec]; ok && topologySpec != "" {
 		nodeConf += fmt.Sprintf(" Topology=%s", topologySpec)
 	}
@@ -377,10 +375,21 @@ func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.No
 	if slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL) {
 		return nil
 	}
+	return r.reconcileHybridNode(ctx, slurmNode, gresConfig)
+}
+
+func (r *realSlurmControl) reconcileHybridNode(
+	ctx context.Context,
+	slurmNode *slurmtypes.V0044Node,
+	gresConfig nodeGRESConfig,
+) error {
 	if err := validateHybridNodeGRES(string(slurmNode.GetKey()), ptr.Deref(slurmNode.Gres, ""), gresConfig); err != nil {
-		return err
+		return errors.Join(err, r.updateGRESCompatibilityFeature(ctx, slurmNode, false))
 	}
-	return r.updateNodeExtra(ctx, slurmNode, gresConfig.extra)
+	if err := r.updateNodeExtra(ctx, slurmNode, gresConfig.extra); err != nil {
+		return errors.Join(err, r.updateGRESCompatibilityFeature(ctx, slurmNode, false))
+	}
+	return r.updateGRESCompatibilityFeature(ctx, slurmNode, true)
 }
 
 type nodeCPUConfig struct {
@@ -460,17 +469,90 @@ func (r *realSlurmControl) updateExistingNode(
 	gresConfig nodeGRESConfig,
 ) error {
 	if !slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL) {
-		if err := validateHybridNodeGRES(string(slurmNode.GetKey()), ptr.Deref(slurmNode.Gres, ""), gresConfig); err != nil {
+		if err := r.reconcileHybridNode(ctx, slurmNode, gresConfig); err != nil {
 			return err
 		}
-		if err := r.updateNodeExtra(ctx, slurmNode, gresConfig.extra); err != nil {
-			return err
-		}
+		return r.updateNodeTopology(ctx, node, slurmNode)
 	}
 	if err := r.updateNodeFeatures(ctx, node, slurmNode); err != nil {
 		return err
 	}
 	return r.updateNodeTopology(ctx, node, slurmNode)
+}
+
+// updateGRESCompatibilityFeature adds or removes only the feature owned by
+// slurm-bridge, preserving all administrator-managed node features. Slurm
+// requires active features to be removed before their available feature.
+func (r *realSlurmControl) updateGRESCompatibilityFeature(
+	ctx context.Context,
+	slurmNode *slurmtypes.V0044Node,
+	compatible bool,
+) error {
+	available := updateFeatureList(
+		ptr.Deref(slurmNode.Features, api.V0044CsvString{}),
+		wellknown.SlurmFeatureGRESCompatible,
+		compatible,
+	)
+	active := updateFeatureList(
+		ptr.Deref(slurmNode.ActiveFeatures, api.V0044CsvString{}),
+		wellknown.SlurmFeatureGRESCompatible,
+		compatible,
+	)
+	availableChanged := !featuresEqual(slurmNode.Features, available)
+	activeChanged := !featuresEqual(slurmNode.ActiveFeatures, active)
+	if !availableChanged && !activeChanged {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+	logger.Info("Updating Slurm node GRES compatibility feature",
+		"slurmNode", slurmNode.GetKey(),
+		"compatible", compatible)
+
+	updateAvailable := func() error {
+		if !availableChanged {
+			return nil
+		}
+		features := api.V0044CsvString(available)
+		if err := r.Update(ctx, slurmNode, api.V0044UpdateNodeMsg{Features: ptr.To(features)}); err != nil {
+			return fmt.Errorf("could not update node available GRES compatibility feature: %w", err)
+		}
+		return nil
+	}
+	updateActive := func() error {
+		if !activeChanged {
+			return nil
+		}
+		features := api.V0044CsvString(active)
+		if err := r.Update(ctx, slurmNode, api.V0044UpdateNodeMsg{FeaturesAct: ptr.To(features)}); err != nil {
+			return fmt.Errorf("could not update node active GRES compatibility feature: %w", err)
+		}
+		return nil
+	}
+
+	if compatible {
+		if err := updateAvailable(); err != nil {
+			return err
+		}
+		return updateActive()
+	}
+	if err := updateActive(); err != nil {
+		return err
+	}
+	return updateAvailable()
+}
+
+func updateFeatureList(current []string, feature string, present bool) []string {
+	updated := make([]string, 0, len(current)+1)
+	for _, currentFeature := range current {
+		if currentFeature != feature {
+			updated = append(updated, currentFeature)
+		}
+	}
+	if present {
+		updated = append(updated, feature)
+	}
+	return updated
 }
 
 // validateHybridNodeGRES checks that every DRA-managed GRES entry is present
@@ -553,32 +635,45 @@ func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.
 	return nil
 }
 
-// updateNodeFeatures updates an existing Slurm node so its features match the
-// partitions annotation.
+// updateNodeFeatures updates an existing external Slurm node so its features
+// include GRES compatibility and, when configured, match the partitions
+// annotation.
 func (r *realSlurmControl) updateNodeFeatures(ctx context.Context, node *corev1.Node, slurmNode *slurmtypes.V0044Node) error {
 	logger := log.FromContext(ctx)
 
 	annotations := node.GetAnnotations()
-	partitionsAnno, ok := annotations[wellknown.AnnotationExternalNodePartitions]
-	if !ok || partitionsAnno == "" {
-		return nil
-	}
+	partitionsAnno, hasPartitions := annotations[wellknown.AnnotationExternalNodePartitions]
 	partitions := splitPartitionList(partitionsAnno)
-	for _, partition := range partitions {
-		if err := r.validatePartitionExists(ctx, partition); err != nil {
-			return fmt.Errorf("could not validate partition %q: %w", partition, err)
+	if hasPartitions && partitionsAnno != "" {
+		for _, partition := range partitions {
+			if err := r.validatePartitionExists(ctx, partition); err != nil {
+				return fmt.Errorf("could not validate partition %q: %w", partition, err)
+			}
 		}
 	}
-	if featuresEqual(slurmNode.Features, partitions) && featuresEqual(slurmNode.Partitions, partitions) {
+
+	features := ptr.Deref(slurmNode.Features, api.V0044CsvString{})
+	activeFeatures := ptr.Deref(slurmNode.ActiveFeatures, api.V0044CsvString{})
+	if hasPartitions && partitionsAnno != "" {
+		features = partitions
+		activeFeatures = partitions
+	}
+	features = updateFeatureList(features, wellknown.SlurmFeatureGRESCompatible, true)
+	activeFeatures = updateFeatureList(activeFeatures, wellknown.SlurmFeatureGRESCompatible, true)
+	partitionsMatch := !hasPartitions || partitionsAnno == "" || featuresEqual(slurmNode.Partitions, partitions)
+	if featuresEqual(slurmNode.Features, features) &&
+		featuresEqual(slurmNode.ActiveFeatures, activeFeatures) &&
+		partitionsMatch {
 		return nil
 	}
-	partitionsCsv := api.V0044CsvString(partitions)
+	featuresCsv := api.V0044CsvString(features)
+	activeFeaturesCsv := api.V0044CsvString(activeFeatures)
 	req := api.V0044UpdateNodeMsg{
-		Features:    ptr.To(partitionsCsv),
-		FeaturesAct: ptr.To(partitionsCsv),
+		Features:    ptr.To(featuresCsv),
+		FeaturesAct: ptr.To(activeFeaturesCsv),
 	}
-	logger.Info("Updating Slurm node features to match annotation", "node", klog.KObj(node),
-		"slurmNode", slurmNode.GetKey(), "features", partitions)
+	logger.Info("Updating Slurm external node features", "node", klog.KObj(node),
+		"slurmNode", slurmNode.GetKey(), "features", features)
 	if err := r.Update(ctx, slurmNode, req); err != nil {
 		return fmt.Errorf("could not update node features: %w", err)
 	}

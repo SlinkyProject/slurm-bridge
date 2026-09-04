@@ -20,6 +20,7 @@ import (
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -74,6 +75,16 @@ func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V00
 		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
 	}
 	return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedMcs}
+}
+
+// gresCompatibilityConstraint requires the GRES compatibility feature on every
+// bridge job while preserving the meaning of any user-supplied constraints.
+func gresCompatibilityConstraint(constraints *string) (*string, error) {
+	composed, err := slurmconstraint.Compose(wellknown.SlurmFeatureGRESCompatible, ptr.Deref(constraints, ""))
+	if err != nil {
+		return nil, err
+	}
+	return ptr.To(composed), nil
 }
 
 // DeleteSlurmJob will delete an external job
@@ -169,13 +180,17 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
 	}
 	job := &slurmtypes.V0044JobInfo{}
+	constraints, err := gresCompatibilityConstraint(slurmJobIR.JobInfo.Constraints)
+	if err != nil {
+		return 0, err
+	}
 	excludedNodes := append(api.V0044CsvString{}, slurmJobIR.JobInfo.ExcNodes...)
 	jobSubmit := api.V0044JobSubmitReq{
 		Job: &api.V0044JobDescMsg{
 			Account:                 slurmJobIR.JobInfo.Account,
 			AdminComment:            ptr.To(extInfo.ToString()),
 			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
-			Constraints:             slurmJobIR.JobInfo.Constraints,
+			Constraints:             constraints,
 			CurrentWorkingDirectory: ptr.To("/tmp"),
 			ExcludedNodes: func() *api.V0044CsvString {
 				if len(excludedNodes) == 0 && !update {
