@@ -51,7 +51,6 @@ var (
 	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
 	ErrorJobNotPendingNoNodes = errors.New("external job is no longer pending but has no nodes assigned")
 	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
-	ErrorSlurmGRESUnverified  = errors.New("node Slurm GRES compatibility has not been verified")
 )
 
 const slurmJobNotPending = "job is no longer pending execution"
@@ -732,40 +731,10 @@ func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo fwk.NodeInfo) *fwk.Status {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("filter func", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
-	if status := sb.filterSlurmGRESCompatibility(nodeInfo.Node()); status != nil {
-		return status
-	}
 	if pod.Annotations[wellknown.AnnotationExternalJobNode] == nodeInfo.Node().Name {
 		return fwk.NewStatus(fwk.Success, "")
 	}
 	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
-}
-
-func (sb *SlurmBridge) filterSlurmGRESCompatibility(node *corev1.Node) *fwk.Status {
-	for i := range node.Status.Conditions {
-		condition := &node.Status.Conditions[i]
-		if condition.Type != wellknown.NodeConditionSlurmGRESCompatible {
-			continue
-		}
-		if condition.Status == corev1.ConditionTrue {
-			return nil
-		}
-		reason := condition.Message
-		if reason == "" {
-			reason = condition.Reason
-		}
-		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, reason)
-	}
-
-	if _, external := node.Labels[wellknown.LabelExternalNode]; external {
-		return nil
-	}
-	for _, taint := range node.Spec.Taints {
-		if taint.Key == utils.TaintKeyBridgedNode && taint.Value == sb.schedulerName {
-			return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorSlurmGRESUnverified.Error())
-		}
-	}
-	return nil
 }
 
 func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) error {
