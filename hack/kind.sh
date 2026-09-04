@@ -396,7 +396,7 @@ function slurm-operator::install_from_source() {
 	echo "[slurm] Installing slurm-operator..."
 	(
 		cd "$operator_path/helm/slurm-operator"
-		skaffold run -p dev
+		skaffold run
 	)
 	slurm-operator::wait
 }
