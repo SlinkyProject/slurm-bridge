@@ -86,58 +86,46 @@ sign-images: push-images cosign-bin ## Sign pushed images with cosign keyless si
 push-charts: build-chart ## Push OCI packages.
 	$(foreach chart, $(wildcard ./*.tgz), $(HELM) push ${chart} oci://$(REGISTRY)/charts ;)
 
-##@ Demo
+##@ Deployment
 
-# Use a fixed cluster name for the demo; do not run on an existing cluster we did not create.
-KIND_CLUSTER_NAME ?= slurm-bridge-demo
+KIND_CLUSTER_NAME ?= slurm-bridge-dev
 
-.PHONY: demo-cluster-create
-demo-cluster-create: ## Spin up a kind cluster (slurm-bridge-demo) and install slurm-bridge using hack/kind.sh.
+.PHONY: kind-start
+kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack.
 	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
 
-.PHONY: demo-cluster-delete
-demo-cluster-delete: ## Delete the kind cluster.
+.PHONY: kind-stop
+kind-stop: ## Delete the development Kind cluster.
 	./hack/kind.sh --delete $(KIND_CLUSTER_NAME)
 
-.PHONY: install-dra
-install-dra: ## Add all DRA configs from hack/kind.sh (dra-driver-cpu and dra-example-driver).
-	./hack/kind.sh --dra-driver-cpu --dra-example-driver $(KIND_CLUSTER_NAME)
+DEMO_WORKLOADS := \
+	hack/examples/pod/sleep.yaml \
+	hack/examples/job/single.yaml \
+	hack/examples/jobset/single.yaml \
+	hack/examples/podgroup-coscheduling/sleep.yaml \
+	hack/examples/dra/gpu-example/job.yaml
 
-.PHONY: setup-sysctl
-setup-sysctl: ## Set kernel/sysctl values recommended for kind/demo (requires sudo).
-	./hack/sysctl.sh
+.PHONY: demo-start
+demo-start: kind-start ## Create the demo stack and run example workloads.
+	./hack/kind.sh --extras $(KIND_CLUSTER_NAME)
+	@set -e; for file in $(DEMO_WORKLOADS); do \
+		$(KUBECTL) delete --ignore-not-found -f "$$file"; \
+		$(KUBECTL) apply -f "$$file"; \
+	done
 
-# Exclude LWS (long-running) and DRA examples from main demo; DRA has its own demo-dra target.
-HACK_EXAMPLES ?= $(sort $(filter-out hack/examples/lws/lws.yaml $(wildcard hack/examples/dra/*.yaml),$(wildcard hack/examples/*/*.yaml)))
-HACK_EXAMPLES_DRA ?= $(sort $(wildcard hack/examples/dra/gpu-example/*.yaml))
+.PHONY: demo-stop
+demo-stop: ## Delete the demo workloads.
+	@set -e; for file in $(DEMO_WORKLOADS); do \
+		$(KUBECTL) delete --ignore-not-found -f "$$file"; \
+	done
 
-.PHONY: install-examples
-install-examples: ## run examples only-no cluster setup
-	for f in $(HACK_EXAMPLES); do $(KUBECTL) delete -f "$$f" --ignore-not-found; done; \
-    for f in $(HACK_EXAMPLES); do $(KUBECTL) apply -f "$$f"; done;
+.PHONY: prereqs
+prereqs: ## Install prerequisites into the current Kubernetes context.
+	./hack/kind.sh --existing-cluster --prereqs
 
-.PHONY: demo-examples
-demo-examples: demo-cluster-create install-examples ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --demo || true; fi
-
-.PHONY: demo-example-explainer
-demo-example-explainer: demo-cluster-create install-examples ## Run hack/examples YAMLs (except lws and dra) and watch (Ctrl+C to stop watch).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --explain || true; fi
-
-.PHONY: install-examples-dra
-install-examples-dra: ## install dra examples only-no cluster setup
-	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) delete -f "$$f" --ignore-not-found; done; \
-	for f in $(HACK_EXAMPLES_DRA); do $(KUBECTL) apply -f "$$f"; done;
-
-.PHONY: demo-examples-dra
-demo-examples-dra: install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --demo || true; fi
-
-.PHONY: demo-examples-dra-explainer
-demo-examples-dra-explainer: demo-cluster-create install-dra install-examples-dra ## Install DRA drivers and run DRA example pods and watch (Ctrl+C to stop).
-	if [ "$$(uname -s)" != "Darwin" ]; then ./hack/watch.sh --explain || true; fi
-
-##@ Deployment
+.PHONY: deploy
+deploy: values-dev ## Build and deploy Slurm Bridge to the current Kubernetes context.
+	cd helm/slurm-bridge && skaffold run
 
 # Get the OS to set platform specific commands
 UNAME_S ?= $(shell uname -s)
@@ -148,9 +136,11 @@ else
 endif
 
 .PHONY: values-dev
-values-dev: ## Safely initialize values-dev.yaml files for Helm charts.
-	find "helm/" -type f -name "values.yaml" | $(SED) 'p;s/\.yaml/-dev\.yaml/' | \
-		xargs -n2 sh -c 'test -f "$$1" || cp -v "$$0" "$$1"'
+values-dev: ## Initialize sparse values-dev.yaml overrides for Helm charts.
+	find "helm/" -type f -name "values.yaml" | while read -r file; do \
+		dev="$${file%.yaml}-dev.yaml"; \
+		test -f "$$dev" || printf '{}\n' > "$$dev"; \
+	done
 
 ##@ Build Dependencies
 
