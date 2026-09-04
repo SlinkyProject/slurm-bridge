@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -56,6 +57,7 @@ const (
 	slurmWorkerClusterValue     = "slurm"
 	slurmWorkerScalingModeLabel = "nodeset.slinky.slurm.net/scaling-mode"
 	slurmWorkerDaemonSetMode    = "DaemonSet"
+	slurmWorkerNodeSetName      = "slurm-worker-slurm-bridge"
 	slurmJobStateCancelled      = "CANCELLED" //nolint:misspell // Slurm API spelling.
 	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
 	draExampleGPUResource       = "deviceclass.resource.kubernetes.io/gpu.example.com"
@@ -64,6 +66,7 @@ const (
 	slurmBridgeReadinessTimeout = 3 * time.Minute
 	slurmWorkloadTimeout        = 10 * time.Minute
 	slurmCleanupTimeout         = 3 * time.Minute
+	hybridGRESConditionTimeout  = 8 * time.Minute
 )
 
 var (
@@ -980,6 +983,159 @@ func testHybridSlurmBatchScheduling() types.Feature {
 			}
 			if _, err := execInPod(ctx, config, controllerPod, "scancel", jobID); err != nil {
 				t.Logf("failed to cancel native Slurm job %s: %v", jobID, err)
+			}
+			return ctx
+		}).
+		Feature()
+}
+
+func testHybridGRESCompatibilityCondition() types.Feature {
+	const (
+		incompatibleExtraConf = "Gres=gpu:gpu-example:3,gpu:gpu-nvidia:8"
+		nodeSetAPIVersion     = "slinky.slurm.net/v1beta1"
+		nodeSetKind           = "NodeSet"
+	)
+
+	var originalExtraConf string
+	return features.New("Hybrid GRES compatibility condition").
+		WithLabel(slurmNodeModeLabel, string(slurmNodeModeHybrid)).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			nodeSet := &unstructured.Unstructured{}
+			nodeSet.SetAPIVersion(nodeSetAPIVersion)
+			nodeSet.SetKind(nodeSetKind)
+			key := client.ObjectKey{Namespace: slurmNamespace, Name: slurmWorkerNodeSetName}
+			if err := crClient.Get(ctx, key, nodeSet); err != nil {
+				t.Fatalf("failed to get hybrid NodeSet %s: %v", slurmWorkerNodeSetName, err)
+			}
+
+			var found bool
+			originalExtraConf, found, err = unstructured.NestedString(
+				nodeSet.Object,
+				"spec",
+				"extraConf",
+			)
+			if err != nil {
+				t.Fatalf("failed to read hybrid NodeSet extraConf: %v", err)
+			}
+			if !found {
+				t.Fatal("hybrid NodeSet has no spec.extraConf")
+			}
+			if err := unstructured.SetNestedField(
+				nodeSet.Object,
+				incompatibleExtraConf,
+				"spec",
+				"extraConf",
+			); err != nil {
+				t.Fatalf("failed to set incompatible hybrid NodeSet extraConf: %v", err)
+			}
+			if err := crClient.Update(ctx, nodeSet); err != nil {
+				t.Fatalf("failed to make hybrid NodeSet GRES incompatible: %v", err)
+			}
+			return ctx
+		}).
+		Assess("condition includes the required gres.conf inventory", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			lastObservation := "no bridge worker condition observed"
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				bridgeNodes := &corev1.NodeList{}
+				if err := crClient.List(ctx, bridgeNodes,
+					client.MatchingLabels{slurmBridgeWorkerLabel: "worker"},
+				); err != nil {
+					lastObservation = fmt.Sprintf("list Kubernetes bridge workers: %v", err)
+					return false, nil
+				}
+
+				for i := range bridgeNodes.Items {
+					node := &bridgeNodes.Items[i]
+					for _, condition := range node.Status.Conditions {
+						if condition.Type != wellknown.NodeConditionSlurmGRESCompatible ||
+							condition.Status != corev1.ConditionFalse {
+							continue
+						}
+
+						expectedGRESConf := fmt.Sprintf(
+							"NodeName=%s Name=gpu Type=gpu-example Count=4",
+							node.Name,
+						)
+						if condition.Reason != "IncompatibleSlurmGRES" {
+							return false, fmt.Errorf(
+								"node %s condition reason = %q, want IncompatibleSlurmGRES",
+								node.Name,
+								condition.Reason,
+							)
+						}
+						if !strings.Contains(condition.Message, expectedGRESConf) {
+							return false, fmt.Errorf(
+								"node %s condition message does not contain %q: %s",
+								node.Name,
+								expectedGRESConf,
+								condition.Message,
+							)
+						}
+						return true, nil
+					}
+				}
+				lastObservation = fmt.Sprintf(
+					"none of %d bridge workers has a False %s condition",
+					len(bridgeNodes.Items),
+					wellknown.NodeConditionSlurmGRESCompatible,
+				)
+				return false, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(hybridGRESConditionTimeout), wait.WithInterval(5*time.Second)); err != nil {
+				t.Fatalf(
+					"hybrid GRES incompatibility was not reported: %v; last observation: %s",
+					err,
+					lastObservation,
+				)
+			}
+			return ctx
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(
+					t,
+					"hybrid GRES compatibility condition",
+					slurmNamespace,
+					slinkyNamespace,
+				)
+			}
+			if originalExtraConf == "" {
+				return ctx
+			}
+
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Errorf("failed to get client while restoring hybrid NodeSet GRES: %v", err)
+				return ctx
+			}
+			nodeSet := &unstructured.Unstructured{}
+			nodeSet.SetAPIVersion(nodeSetAPIVersion)
+			nodeSet.SetKind(nodeSetKind)
+			key := client.ObjectKey{Namespace: slurmNamespace, Name: slurmWorkerNodeSetName}
+			if err := crClient.Get(ctx, key, nodeSet); err != nil {
+				t.Errorf("failed to get hybrid NodeSet while restoring GRES: %v", err)
+				return ctx
+			}
+			if err := unstructured.SetNestedField(
+				nodeSet.Object,
+				originalExtraConf,
+				"spec",
+				"extraConf",
+			); err != nil {
+				t.Errorf("failed to restore hybrid NodeSet extraConf: %v", err)
+				return ctx
+			}
+			if err := crClient.Update(ctx, nodeSet); err != nil {
+				t.Errorf("failed to restore hybrid NodeSet GRES: %v", err)
 			}
 			return ctx
 		}).
