@@ -16,12 +16,13 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -57,8 +58,10 @@ const (
 	slurmWorkerClusterValue     = "slurm"
 	slurmWorkerScalingModeLabel = "nodeset.slinky.slurm.net/scaling-mode"
 	slurmWorkerDaemonSetMode    = "DaemonSet"
-	slurmWorkerNodeSetName      = "slurm-worker-slurm-bridge"
 	slurmJobStateCancelled      = "CANCELLED" //nolint:misspell // Slurm API spelling.
+	draExampleDriverNamespace   = "dra-example-driver"
+	draExampleDriverDaemonSet   = "dra-example-driver-kubeletplugin"
+	draExampleGPUDriver         = "gpu.example.com"
 	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
 	draExampleGPUResource       = "deviceclass.resource.kubernetes.io/gpu.example.com"
 	draNvidiaGPUResource        = "deviceclass.resource.kubernetes.io/gpu.nvidia.com"
@@ -134,6 +137,9 @@ func e2eCleanupEnabled(t *testing.T) bool {
 
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
@@ -991,12 +997,16 @@ func testHybridSlurmBatchScheduling() types.Feature {
 
 func testHybridGRESCompatibilityCondition() types.Feature {
 	const (
-		incompatibleExtraConf = "Gres=gpu:gpu-example:3,gpu:gpu-nvidia:8"
-		nodeSetAPIVersion     = "slinky.slurm.net/v1beta1"
-		nodeSetKind           = "NodeSet"
+		disableDriverLabel = "e2e.slinky.slurm.net/disable-dra-example-driver"
+		syntheticGPUCount  = 5
 	)
 
-	var originalExtraConf string
+	var (
+		driverDisabled       bool
+		originalNodeSelector map[string]string
+		syntheticSlice       *resourcev1.ResourceSlice
+		targetNodeName       string
+	)
 	return features.New("Hybrid GRES compatibility condition").
 		WithLabel(slurmNodeModeLabel, string(slurmNodeModeHybrid)).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -1005,36 +1015,87 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 				t.Fatalf("failed to get client: %v", err)
 			}
 
-			nodeSet := &unstructured.Unstructured{}
-			nodeSet.SetAPIVersion(nodeSetAPIVersion)
-			nodeSet.SetKind(nodeSetKind)
-			key := client.ObjectKey{Namespace: slurmNamespace, Name: slurmWorkerNodeSetName}
-			if err := crClient.Get(ctx, key, nodeSet); err != nil {
-				t.Fatalf("failed to get hybrid NodeSet %s: %v", slurmWorkerNodeSetName, err)
+			bridgeNodes := &corev1.NodeList{}
+			if err := crClient.List(ctx, bridgeNodes,
+				client.MatchingLabels{slurmBridgeWorkerLabel: "worker"},
+			); err != nil {
+				t.Fatalf("failed to list Kubernetes bridge workers: %v", err)
+			}
+			if len(bridgeNodes.Items) == 0 {
+				t.Fatal("no Kubernetes bridge workers found")
+			}
+			for i := range bridgeNodes.Items {
+				for _, condition := range bridgeNodes.Items[i].Status.Conditions {
+					if condition.Type == wellknown.NodeConditionSlurmGRESCompatible &&
+						condition.Status == corev1.ConditionTrue {
+						targetNodeName = bridgeNodes.Items[i].Name
+						break
+					}
+				}
+				if targetNodeName != "" {
+					break
+				}
+			}
+			if targetNodeName == "" {
+				t.Fatal("no Kubernetes bridge worker has compatible Slurm GRES")
 			}
 
-			var found bool
-			originalExtraConf, found, err = unstructured.NestedString(
-				nodeSet.Object,
-				"spec",
-				"extraConf",
-			)
-			if err != nil {
-				t.Fatalf("failed to read hybrid NodeSet extraConf: %v", err)
+			driver := &appsv1.DaemonSet{}
+			driverKey := client.ObjectKey{
+				Namespace: draExampleDriverNamespace,
+				Name:      draExampleDriverDaemonSet,
 			}
-			if !found {
-				t.Fatal("hybrid NodeSet has no spec.extraConf")
+			if err := crClient.Get(ctx, driverKey, driver); err != nil {
+				t.Fatalf("failed to get DRA example driver DaemonSet: %v", err)
 			}
-			if err := unstructured.SetNestedField(
-				nodeSet.Object,
-				incompatibleExtraConf,
-				"spec",
-				"extraConf",
-			); err != nil {
-				t.Fatalf("failed to set incompatible hybrid NodeSet extraConf: %v", err)
+			originalNodeSelector = make(map[string]string, len(driver.Spec.Template.Spec.NodeSelector))
+			for key, value := range driver.Spec.Template.Spec.NodeSelector {
+				originalNodeSelector[key] = value
 			}
-			if err := crClient.Update(ctx, nodeSet); err != nil {
-				t.Fatalf("failed to make hybrid NodeSet GRES incompatible: %v", err)
+			base := driver.DeepCopy()
+			driver.Spec.Template.Spec.NodeSelector = map[string]string{disableDriverLabel: "true"}
+			if err := crClient.Patch(ctx, driver, client.MergeFrom(base)); err != nil {
+				t.Fatalf("failed to pause the DRA example driver: %v", err)
+			}
+			driverDisabled = true
+
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				resourceSlices := &resourcev1.ResourceSliceList{}
+				if err := crClient.List(ctx, resourceSlices); err != nil {
+					return false, err
+				}
+				for i := range resourceSlices.Items {
+					if resourceSlices.Items[i].Spec.Driver == draExampleGPUDriver {
+						return false, nil
+					}
+				}
+				return true, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(time.Second)); err != nil {
+				t.Fatalf("DRA example driver ResourceSlices were not removed: %v", err)
+			}
+
+			syntheticSlice = &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: envconf.RandomName("hybrid-gres-incompatible-e2e", 63),
+				},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver:   draExampleGPUDriver,
+					NodeName: &targetNodeName,
+					Pool: resourcev1.ResourcePool{
+						Name:               targetNodeName + "-e2e",
+						Generation:         1,
+						ResourceSliceCount: 1,
+					},
+				},
+			}
+			for i := range syntheticGPUCount {
+				syntheticSlice.Spec.Devices = append(
+					syntheticSlice.Spec.Devices,
+					resourcev1.Device{Name: fmt.Sprintf("gpu-%d", i)},
+				)
+			}
+			if err := crClient.Create(ctx, syntheticSlice); err != nil {
+				t.Fatalf("failed to create incompatible DRA inventory: %v", err)
 			}
 			return ctx
 		}).
@@ -1046,47 +1107,43 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 
 			lastObservation := "no bridge worker condition observed"
 			if err := wait.For(func(ctx context.Context) (bool, error) {
-				bridgeNodes := &corev1.NodeList{}
-				if err := crClient.List(ctx, bridgeNodes,
-					client.MatchingLabels{slurmBridgeWorkerLabel: "worker"},
-				); err != nil {
-					lastObservation = fmt.Sprintf("list Kubernetes bridge workers: %v", err)
+				node := &corev1.Node{}
+				if err := crClient.Get(ctx, client.ObjectKey{Name: targetNodeName}, node); err != nil {
+					lastObservation = fmt.Sprintf("get Kubernetes bridge worker %s: %v", targetNodeName, err)
 					return false, nil
 				}
 
-				for i := range bridgeNodes.Items {
-					node := &bridgeNodes.Items[i]
-					for _, condition := range node.Status.Conditions {
-						if condition.Type != wellknown.NodeConditionSlurmGRESCompatible ||
-							condition.Status != corev1.ConditionFalse {
-							continue
-						}
-
-						expectedGRESConf := fmt.Sprintf(
-							"NodeName=%s Name=gpu Type=gpu-example Count=4",
-							node.Name,
-						)
-						if condition.Reason != "IncompatibleSlurmGRES" {
-							return false, fmt.Errorf(
-								"node %s condition reason = %q, want IncompatibleSlurmGRES",
-								node.Name,
-								condition.Reason,
-							)
-						}
-						if !strings.Contains(condition.Message, expectedGRESConf) {
-							return false, fmt.Errorf(
-								"node %s condition message does not contain %q: %s",
-								node.Name,
-								expectedGRESConf,
-								condition.Message,
-							)
-						}
-						return true, nil
+				for _, condition := range node.Status.Conditions {
+					if condition.Type != wellknown.NodeConditionSlurmGRESCompatible ||
+						condition.Status != corev1.ConditionFalse {
+						continue
 					}
+
+					expectedGRESConf := fmt.Sprintf(
+						"NodeName=%s Name=gpu Type=gpu-example Count=%d",
+						node.Name,
+						syntheticGPUCount,
+					)
+					if condition.Reason != "IncompatibleSlurmGRES" {
+						return false, fmt.Errorf(
+							"node %s condition reason = %q, want IncompatibleSlurmGRES",
+							node.Name,
+							condition.Reason,
+						)
+					}
+					if !strings.Contains(condition.Message, expectedGRESConf) {
+						return false, fmt.Errorf(
+							"node %s condition message does not contain %q: %s",
+							node.Name,
+							expectedGRESConf,
+							condition.Message,
+						)
+					}
+					return true, nil
 				}
 				lastObservation = fmt.Sprintf(
-					"none of %d bridge workers has a False %s condition",
-					len(bridgeNodes.Items),
+					"bridge worker %s does not have a False %s condition",
+					node.Name,
 					wellknown.NodeConditionSlurmGRESCompatible,
 				)
 				return false, nil
@@ -1108,34 +1165,31 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 					slinkyNamespace,
 				)
 			}
-			if originalExtraConf == "" {
-				return ctx
-			}
-
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
-				t.Errorf("failed to get client while restoring hybrid NodeSet GRES: %v", err)
+				t.Errorf("failed to get client while restoring the DRA example driver: %v", err)
 				return ctx
 			}
-			nodeSet := &unstructured.Unstructured{}
-			nodeSet.SetAPIVersion(nodeSetAPIVersion)
-			nodeSet.SetKind(nodeSetKind)
-			key := client.ObjectKey{Namespace: slurmNamespace, Name: slurmWorkerNodeSetName}
-			if err := crClient.Get(ctx, key, nodeSet); err != nil {
-				t.Errorf("failed to get hybrid NodeSet while restoring GRES: %v", err)
-				return ctx
+			if syntheticSlice != nil {
+				if err := crClient.Delete(ctx, syntheticSlice); err != nil && !apierrors.IsNotFound(err) {
+					t.Errorf("failed to delete incompatible DRA inventory: %v", err)
+				}
 			}
-			if err := unstructured.SetNestedField(
-				nodeSet.Object,
-				originalExtraConf,
-				"spec",
-				"extraConf",
-			); err != nil {
-				t.Errorf("failed to restore hybrid NodeSet extraConf: %v", err)
-				return ctx
-			}
-			if err := crClient.Update(ctx, nodeSet); err != nil {
-				t.Errorf("failed to restore hybrid NodeSet GRES: %v", err)
+			if driverDisabled {
+				driver := &appsv1.DaemonSet{}
+				driverKey := client.ObjectKey{
+					Namespace: draExampleDriverNamespace,
+					Name:      draExampleDriverDaemonSet,
+				}
+				if err := crClient.Get(ctx, driverKey, driver); err != nil {
+					t.Errorf("failed to get DRA example driver DaemonSet while restoring it: %v", err)
+					return ctx
+				}
+				base := driver.DeepCopy()
+				driver.Spec.Template.Spec.NodeSelector = originalNodeSelector
+				if err := crClient.Patch(ctx, driver, client.MergeFrom(base)); err != nil {
+					t.Errorf("failed to restore DRA example driver DaemonSet: %v", err)
+				}
 			}
 			return ctx
 		}).
