@@ -63,7 +63,7 @@ func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Po
 			}
 			return nil, fmt.Errorf("get DeviceClass %q: %w", className, err)
 		}
-		profile, err := sb.draRegistry.MatchDeviceClass(deviceClass)
+		profile, err := sb.registry().MatchDeviceClass(deviceClass)
 		if err != nil {
 			return nil, err
 		}
