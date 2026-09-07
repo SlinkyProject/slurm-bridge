@@ -279,7 +279,8 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		// Extra inventory that slurm-bridge owns on the existing node.
 		_, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
-			return r.recordSlurmGRESCompatibilityError(ctx, node, err)
+			disableErr := r.slurmControl.DisableHybridNodeGRESCompatibility(ctx, node)
+			return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 		}
 		if err := r.slurmControl.UpdateHybridNode(ctx, node, draInventory); err != nil {
 			return r.recordSlurmGRESCompatibilityError(ctx, node, err)

@@ -49,6 +49,9 @@ type SlurmControlInterface interface {
 	// existing hybrid node. It never creates an absent node or modifies an
 	// external node.
 	UpdateHybridNode(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) error
+	// DisableHybridNodeGRESCompatibility removes the bridge-owned compatibility
+	// feature from an existing hybrid node without modifying its Extra inventory.
+	DisableHybridNodeGRESCompatibility(ctx context.Context, node *corev1.Node) error
 	// NodeNeedsRecreate returns true when an external Slurm node's CPU, memory,
 	// or GRES configuration must be applied by draining and recreating it. For
 	// hybrid nodes, it validates that the static GRES configuration can
@@ -376,6 +379,23 @@ func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.No
 		return nil
 	}
 	return r.reconcileHybridNode(ctx, slurmNode, gresConfig)
+}
+
+// DisableHybridNodeGRESCompatibility implements SlurmControlInterface.
+func (r *realSlurmControl) DisableHybridNodeGRESCompatibility(ctx context.Context, node *corev1.Node) error {
+	slurmNodeName := nodeutils.GetSlurmNodeName(node)
+	key := slurmobject.ObjectKey(slurmNodeName)
+	slurmNode := &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL) {
+		return nil
+	}
+	return r.updateGRESCompatibilityFeature(ctx, slurmNode, false)
 }
 
 func (r *realSlurmControl) reconcileHybridNode(

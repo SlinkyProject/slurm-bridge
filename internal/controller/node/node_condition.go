@@ -106,7 +106,12 @@ func (r *NodeReconciler) recordIncompatibleSlurmGRESError(ctx context.Context, n
 	if !errors.As(err, &incompatibleGRES) {
 		return err
 	}
-	return r.recordSlurmGRESCompatibilityError(ctx, node, err)
+	// A labeled node that is also slurmd-registered may already carry the
+	// compatibility feature from an earlier, compatible reconcile. Strip it
+	// so Slurm stops placing bridge jobs on the node while it is incompatible.
+	// This is a no-op for external and missing Slurm nodes.
+	disableErr := r.slurmControl.DisableHybridNodeGRESCompatibility(ctx, node)
+	return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 }
 
 func findNodeCondition(conditions []corev1.NodeCondition, conditionType corev1.NodeConditionType) *corev1.NodeCondition {
