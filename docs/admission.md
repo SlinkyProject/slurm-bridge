@@ -57,12 +57,11 @@ rather than allowing the scheduler to ignore the requested placement behavior.
 
 The `slurmjob.slinky.slurm.net/constraints` annotation is combined with the
 `slurm_bridge_gres_compatible` node feature that every bridge job requires. The
-admission controller rejects the few constraint expressions that Slurm's
-grammar does not allow to be combined with an additional feature, such as a
-bare feature count (`rack1*2`) or an OR outside parentheses mixed with
-parentheses or brackets (`(a&b)|(c&d)`), so the job fails at creation rather
-than on every scheduling cycle. See [supported Slurm job annotations] for the
-supported forms.
+admission controller rejects the few constraint expressions that Slurm's grammar
+does not allow to be combined with an additional feature, such as a bare feature
+count (`rack1*2`) or an OR outside parentheses mixed with parentheses or
+brackets (`(a&b)|(c&d)`), so the job fails at creation rather than on every
+scheduling cycle. See [supported Slurm job annotations] for the supported forms.
 
 Managed pods are also validated against the supported DRA DeviceClass set.
 Unsupported DeviceClass resources in requests or limits are rejected for init
@@ -91,5 +90,5 @@ sequenceDiagram
 <!-- Links -->
 
 [device resources]: workload.md#device-resources
-[supported slurm job annotations]: workload.md#supported-slurm-job-annotations
 [scheduler]: scheduler.md
+[supported slurm job annotations]: workload.md#supported-slurm-job-annotations

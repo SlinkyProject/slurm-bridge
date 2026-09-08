@@ -76,7 +76,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 	if node == nil {
 		return NodeInventory{}, fmt.Errorf("node must not be nil")
 	}
-	poolSnapshots, err := selectResourcePoolSnapshots(registry, resourceSlices)
+	poolSnapshots, err := selectResourcePoolSnapshots(registry, node, resourceSlices)
 	if err != nil {
 		return NodeInventory{}, err
 	}
@@ -115,7 +115,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 	}, nil
 }
 
-func selectResourcePoolSnapshots(registry *Registry, resourceSlices []resourcev1.ResourceSlice) ([]resourcePoolSnapshot, error) {
+func selectResourcePoolSnapshots(registry *Registry, node *corev1.Node, resourceSlices []resourcev1.ResourceSlice) ([]resourcePoolSnapshot, error) {
 	snapshotsByPool := make(map[resourcePoolID]*resourcePoolSnapshot)
 	profilesByDriver := make(map[string][]DeviceProfile)
 	for i := range resourceSlices {
@@ -132,7 +132,7 @@ func selectResourcePoolSnapshots(registry *Registry, resourceSlices []resourcev1
 			return nil, err
 		}
 	}
-	return completeResourcePoolSnapshots(snapshotsByPool)
+	return completeResourcePoolSnapshots(node, snapshotsByPool)
 }
 
 func addResourceSliceToSnapshot(
@@ -162,7 +162,12 @@ func addResourceSliceToSnapshot(
 	return nil
 }
 
-func completeResourcePoolSnapshots(snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
+// completeResourcePoolSnapshots returns the highest-generation snapshot of
+// every pool. An incomplete pool is an error only when one of its published
+// slices is accessible to the node; incomplete pools that belong entirely to
+// other nodes are dropped so that a driver mid-publish on one node does not
+// fail inventory for every node in the cluster.
+func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
 	poolIDs := make([]resourcePoolID, 0, len(snapshotsByPool))
 	for id := range snapshotsByPool {
 		poolIDs = append(poolIDs, id)
@@ -178,11 +183,33 @@ func completeResourcePoolSnapshots(snapshotsByPool map[resourcePoolID]*resourceP
 	for _, id := range poolIDs {
 		snapshot := snapshotsByPool[id]
 		if int64(len(snapshot.Slices)) != snapshot.ResourceSliceCount {
+			relevant, err := poolAccessibleToNode(node, snapshot)
+			if err != nil {
+				return nil, err
+			}
+			if !relevant {
+				continue
+			}
 			return nil, fmt.Errorf("DRA resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", id.Driver+"/"+id.Pool, snapshot.Generation, len(snapshot.Slices), snapshot.ResourceSliceCount)
 		}
 		snapshots = append(snapshots, *snapshot)
 	}
 	return snapshots, nil
+}
+
+// poolAccessibleToNode reports whether any published slice in the snapshot
+// exposes devices to the node.
+func poolAccessibleToNode(node *corev1.Node, snapshot *resourcePoolSnapshot) (bool, error) {
+	for _, resourceSlice := range snapshot.Slices {
+		devices, err := devicesAccessibleToNode(node, resourceSlice)
+		if err != nil {
+			return false, err
+		}
+		if len(devices) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func devicesAccessibleToNode(node *corev1.Node, resourceSlice *resourcev1.ResourceSlice) ([]*resourcev1.Device, error) {
