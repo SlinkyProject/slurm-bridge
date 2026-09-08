@@ -271,6 +271,30 @@ func assertSlurmNodeCount(
 	}
 }
 
+func assertKubernetesPodGroupScheduled(
+	ctx context.Context,
+	t *testing.T,
+	crClient client.Client,
+	podGroup *schedulingv1alpha2.PodGroup,
+) {
+	t.Helper()
+	if err := wait.For(func(ctx context.Context) (bool, error) {
+		observed := &schedulingv1alpha2.PodGroup{}
+		if err := crClient.Get(ctx, client.ObjectKeyFromObject(podGroup), observed); err != nil {
+			return false, err
+		}
+		for _, condition := range observed.Status.Conditions {
+			if condition.Type == schedulingv1alpha2.PodGroupScheduled {
+				return condition.Status == metav1.ConditionTrue, nil
+			}
+		}
+		return false, nil
+	}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(3*time.Second)); err != nil {
+		t.Errorf("PodGroup %s/%s never reported scheduled: %v",
+			podGroup.Namespace, podGroup.Name, err)
+	}
+}
+
 func podSlurmJobIDs(pods []corev1.Pod) []string {
 	seen := map[string]struct{}{}
 	for i := range pods {

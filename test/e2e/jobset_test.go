@@ -6,7 +6,6 @@ package e2e
 import (
 	"context"
 	"testing"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -14,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
@@ -180,20 +178,7 @@ func testSlurmBridgeJobSetPodGroupScheduling() types.Feature {
 			if len(nodes) != 2 {
 				t.Errorf("JobSet PodGroup pods use %d nodes, want 2: %v", len(nodes), nodes)
 			}
-			if err := wait.For(func(ctx context.Context) (bool, error) {
-				observed := &schedulingv1alpha2.PodGroup{}
-				if err := crClient.Get(ctx, client.ObjectKeyFromObject(podGroup), observed); err != nil {
-					return false, err
-				}
-				for _, condition := range observed.Status.Conditions {
-					if condition.Type == schedulingv1alpha2.PodGroupScheduled {
-						return condition.Status == metav1.ConditionTrue, nil
-					}
-				}
-				return false, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(3*time.Second)); err != nil {
-				t.Errorf("JobSet PodGroup never reported scheduled: %v", err)
-			}
+			assertKubernetesPodGroupScheduled(ctx, t, crClient, podGroup)
 			return ctx
 		}).
 		Assess("JobSet gang completes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
