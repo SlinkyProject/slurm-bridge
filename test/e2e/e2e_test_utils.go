@@ -946,7 +946,7 @@ func testHybridSlurmBatchScheduling() types.Feature {
 
 			output, err := execInPod(ctx, config, controllerPod,
 				"sbatch", "--parsable", "--partition="+slurmBridgePartition,
-				"--chdir=/tmp", "--output=/dev/null", "--wrap=/bin/true")
+				"--mem=100M", "--chdir=/tmp", "--output=/dev/null", "--wrap=/bin/true")
 			if err != nil {
 				t.Fatalf("failed to submit native Slurm job: %v", err)
 			}
