@@ -157,7 +157,7 @@ it. There are
 [example workload](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples)
 definitions in the `slurm-bridge` repo.
 
-Here's an example of a simple job, found in `hack/examples/single.yaml`:
+Here's an example of a simple job, found in `hack/examples/job/single.yaml`:
 
 ```yaml
 ---
@@ -168,18 +168,17 @@ metadata:
   namespace: slurm-bridge
   # slurm-bridge annotations on parent object
   annotations:
-    slinky.slurm.net/job-name: job-sleep-single
-    slinky.slurm.net/timelimit: "5"
-    slinky.slurm.net/account: foo
+    slurmjob.slinky.slurm.net/job-name: job-sleep-single
 spec:
   completions: 1
   parallelism: 1
   template:
     spec:
+      schedulerName: slurm-bridge-scheduler
       containers:
         - name: sleep
           image: busybox:stable
-          command: [sh, -c, sleep 30]
+          command: [sh, -c, sleep 3]
           resources:
             requests:
               cpu: '1'
@@ -189,6 +188,20 @@ spec:
               memory: 100Mi
       restartPolicy: Never
 ```
+
+`schedulerName: slurm-bridge-scheduler` is what routes the pod to
+`slurm-bridge`. In a namespace listed in the chart's
+`admission.managedNamespaces`, which defaults to just `slurm-bridge`, the
+admission controller rewrites `schedulerName` for you, so the field is optional
+there. The example sets it explicitly so the manifest also works when submitted
+to a namespace the admission controller does not manage.
+
+Every slurm-bridge annotation is prefixed with `slurmjob.slinky.slurm.net/` and
+must be set on the parent object. An annotation with any other prefix is
+silently ignored, so a typo in the prefix costs you the setting with no error to
+explain it. Any other Slurm job parameter is passed the same way, including the
+time limit, account, partition, QoS and GRES. See
+[Annotations](scheduler.md#annotations) for the supported keys.
 
 Let's run this job:
 
@@ -223,7 +236,7 @@ Labels:           batch.kubernetes.io/controller-uid=7cf47949-0099-4c1a-ab7e-d6e
                   batch.kubernetes.io/job-name=job-sleep-single
                   controller-uid=7cf47949-0099-4c1a-ab7e-d6e288283c82
                   job-name=job-sleep-single
-Annotations:      slinky.slurm.net/job-name: job-sleep-single
+Annotations:      slurmjob.slinky.slurm.net/job-name: job-sleep-single
 Parallelism:      1
 Completions:      1
 Completion Mode:  NonIndexed
@@ -324,7 +337,7 @@ Labels:           batch.kubernetes.io/controller-uid=8a03f5f6-f0c0-4216-ac0b-8c9
                   batch.kubernetes.io/job-name=job-sleep-single
                   controller-uid=8a03f5f6-f0c0-4216-ac0b-8c9b70c92eec
                   job-name=job-sleep-single
-Annotations:      slinky.slurm.net/job-name: job-sleep-single
+Annotations:      slurmjob.slinky.slurm.net/job-name: job-sleep-single
 Parallelism:      1
 Completions:      1
 Completion Mode:  NonIndexed

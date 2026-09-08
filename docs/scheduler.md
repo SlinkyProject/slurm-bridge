@@ -95,12 +95,14 @@ see the [annotations.go] source.
 
 | Annotation                             | Description                       | Example      |
 | -------------------------------------- | --------------------------------- | ------------ |
+| slurmjob.slinky.slurm.net/account      | Overrides the default account.    | "schedmd"    |
 | slurmjob.slinky.slurm.net/gres         | Overrides the default gres.       | "GPU:V100:2" |
 | slurmjob.slinky.slurm.net/job-name     | Sets the job name.                | "research"   |
 | slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes. | "3"          |
 | slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.        | "8Gi"        |
 | slurmjob.slinky.slurm.net/partition    | Overrides the default partition.  | "debug"      |
 | slurmjob.slinky.slurm.net/priority     | Sets the job priority.            | "100"        |
+| slurmjob.slinky.slurm.net/timelimit    | Sets the time limit in minutes.   | "5"          |
 
 An example of the annotations in use:
 
