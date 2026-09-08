@@ -90,7 +90,11 @@ func main() {
 		setupLog.Error(err, "unable to read config file", "file", flags.configFile)
 		os.Exit(1)
 	}
-	cfg := config.UnmarshalOrDie(data)
+	cfg, err := config.Unmarshal(data)
+	if err != nil {
+		setupLog.Error(err, "unable to parse config file", "file", flags.configFile)
+		os.Exit(1)
+	}
 	draRegistry, err := cfg.DRARegistry()
 	if err != nil {
 		setupLog.Error(err, "unable to configure DRA device profiles")

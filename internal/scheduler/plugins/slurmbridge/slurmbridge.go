@@ -203,7 +203,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 			return nil, err
 		}
 	}
-	cfg := config.UnmarshalOrDie(data)
+	cfg, err := config.Unmarshal(data)
+	if err != nil {
+		return nil, err
+	}
 	if err := cfg.ValidateScheduler(); err != nil {
 		return nil, err
 	}

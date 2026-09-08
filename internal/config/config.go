@@ -55,17 +55,9 @@ func (c *Config) ValidateScheduler() error {
 func Unmarshal(in []byte) (*Config, error) {
 	out := &Config{}
 	if err := yaml.UnmarshalStrict(in, out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse slurm-bridge config: %w", err)
 	}
 	return out, nil
-}
-
-func UnmarshalOrDie(in []byte) *Config {
-	cfg, err := Unmarshal(in)
-	if err != nil {
-		panic(err)
-	}
-	return cfg
 }
 
 // DRARegistry converts the user-facing profile configuration into the runtime

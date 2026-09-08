@@ -4,6 +4,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -147,6 +148,9 @@ schedulerName: second
 				t.Errorf("Unmarshal() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			if tt.wantErr && !strings.HasPrefix(err.Error(), "parse slurm-bridge config: ") {
+				t.Errorf("Unmarshal() error = %q, want contextual parse error", err)
+			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("Unmarshal() = %v, want %v", got, tt.want)
 			}
@@ -251,32 +255,6 @@ func TestConfigDRARegistryRejectsInvalidBackend(t *testing.T) {
 	}}}
 	if _, err := cfg.DRARegistry(); err == nil {
 		t.Fatal("Config.DRARegistry() error = nil, want unsupported backend error")
-	}
-}
-
-func TestUnmarshalOrDie(t *testing.T) {
-	type args struct {
-		in []byte
-	}
-	tests := []struct {
-		name string
-		args args
-		want *Config
-	}{
-		{
-			name: "Empty",
-			args: args{
-				in: []byte{},
-			},
-			want: &Config{},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := UnmarshalOrDie(tt.args.in); !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalOrDie() = %v, want %v", got, tt.want)
-			}
-		})
 	}
 }
 
