@@ -12,6 +12,7 @@ SLURM_BRIDGE_TMP="$(mktemp -d)"
 trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
+DRANET_INTERFACE_NAME="dranet0"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 KWOK_CHART_REPO="https://kwok.sigs.k8s.io/charts/"
@@ -137,6 +138,9 @@ function kind::start() {
 	kubectl config use-context kind-"$cluster_name"
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
 	kind::configure_nodes "$OPT_SLURM_NODE_MODE"
+	if $OPT_DRANET; then
+		kind::configure_dranet_interfaces
+	fi
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -191,6 +195,20 @@ function kind::configure_nodes() {
 			kubectl annotate node "$bridge_node" \
 				topology.slinky.slurm.net/spec=topo-switch:s2 --overwrite
 		fi
+	done
+}
+
+function kind::configure_dranet_interfaces() {
+	local bridge_nodes
+	local bridge_node
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	for bridge_node in $bridge_nodes; do
+		if ! docker exec "$bridge_node" ip link show "$DRANET_INTERFACE_NAME" >/dev/null 2>&1; then
+			docker exec "$bridge_node" ip link add "$DRANET_INTERFACE_NAME" type dummy
+		fi
+		docker exec "$bridge_node" ip link set dev "$DRANET_INTERFACE_NAME" up
 	done
 }
 
@@ -615,6 +633,32 @@ function nvml-mock::uninstall() {
 		--wait --timeout=180s
 }
 
+function dranet::install() {
+	local version="v1.4.0"
+	local chart="oci://registry.k8s.io/networking/charts/dranet"
+	local config_dir="$SCRIPT_DIR/dranet"
+
+	helm upgrade --install dranet "$chart" \
+		--version "$version" \
+		--namespace kube-system \
+		--values "$config_dir/values.yaml"
+	kubectl -n kube-system rollout status daemonset/dranet --timeout=120s
+}
+
+function dranet::configure_slurm_bridge() {
+	if ! helm::find slurm-bridge; then
+		echo "[dranet] Slurm Bridge is not installed; skipping device profile configuration."
+		return 0
+	fi
+
+	helm upgrade slurm-bridge "$ROOT_DIR/helm/slurm-bridge" \
+		--namespace slurm \
+		--reuse-values \
+		--values "$SCRIPT_DIR/dranet/e2e-values.yaml" \
+		--wait \
+		--timeout 120s
+}
+
 function main::help() {
 	cat <<EOF
 $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
@@ -623,7 +667,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
-	        [--dra-driver-nvidia-gpu] [--kwok] [--metrics]
+	        [--dra-driver-nvidia-gpu] [--dranet] [--kwok] [--metrics]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -645,6 +689,7 @@ HELM OPTIONS:
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
+	--dranet            Install DRA driver: DRANET
 	--kwok              Install KWOK and its fast stage configuration.
 	--metrics           Install metrics collection for Slurm Bridge.
 
@@ -712,10 +757,16 @@ function main() {
 		fi
 		dra-driver-nvidia-gpu::install
 	fi
+	if $OPT_DRANET; then
+		dranet::install
+	fi
 	if $OPT_PREREQS; then
 		slurm-bridge::prerequisites
 	elif $OPT_CORE; then
 		slurm-bridge::install
+	fi
+	if $OPT_DRANET; then
+		dranet::configure_slurm_bridge
 	fi
 	if $OPT_METRICS; then
 		metrics::install
@@ -735,6 +786,7 @@ OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
 MOCK_NVML="${MOCK_NVML:-false}"
+OPT_DRANET=false
 OPT_KWOK=false
 OPT_METRICS=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
@@ -750,7 +802,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -835,6 +887,10 @@ while :; do
 		OPT_DRA_DRIVER_NVIDIA_GPU=true
 		shift
 		;;
+	--dranet)
+		OPT_DRANET=true
+		shift
+		;;
 	--kwok)
 		OPT_KWOK=true
 		shift
@@ -868,6 +924,7 @@ if $OPT_EXTRAS; then
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
 	OPT_DRA_DRIVER_NVIDIA_GPU=true
+	OPT_DRANET=true
 fi
 
 main "$@"

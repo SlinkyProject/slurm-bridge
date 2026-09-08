@@ -9,6 +9,8 @@ manifests should match snapshot:
           - slurm-bridge
         mcsLabel: kubernetes
         partition: slurm-bridge
+        deviceProfiles:
+          null
     kind: ConfigMap
     metadata:
       labels:
@@ -91,7 +93,7 @@ manifests should match snapshot:
       template:
         metadata:
           annotations:
-            checksum/config: e52364aa50203cb6d54d245f9245986ec8c42fb8d70382ecdac7012ab7cd2b63
+            checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
             checksum/scheduler-config: cbda1f53c1cc2426d84a29c3f231b3c1b2d409828da5a52364e0a42c388be285
           labels:
             app.kubernetes.io/component: scheduler

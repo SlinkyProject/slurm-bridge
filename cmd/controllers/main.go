@@ -119,7 +119,16 @@ func main() {
 		setupLog.Error(err, "unable to read config file", "file", flags.configFile)
 		os.Exit(1)
 	}
-	cfg := config.UnmarshalOrDie(data)
+	cfg, err := config.Unmarshal(data)
+	if err != nil {
+		setupLog.Error(err, "unable to parse config file", "file", flags.configFile)
+		os.Exit(1)
+	}
+	draRegistry, err := cfg.DRARegistry()
+	if err != nil {
+		setupLog.Error(err, "unable to configure DRA device profiles")
+		os.Exit(1)
+	}
 
 	clientConfig := &slurmclient.Config{
 		Server:        cfg.SlurmRestApi,
@@ -134,7 +143,7 @@ func main() {
 	go slurmClient.Start(context.Background())
 
 	nodeEventCh := make(chan event.GenericEvent, 100)
-	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh).SetupWithManager(mgr); err != nil {
+	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh, draRegistry).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Node")
 		os.Exit(1)
 	}

@@ -1,0 +1,39 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: dranet0
+spec:
+  selectors:
+    - cel:
+        expression: >-
+          device.driver == 'dra.net' && has(device.attributes['dra.net'].ifName) &&
+          device.attributes['dra.net'].ifName == 'dranet0'
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-dranet
+  namespace: slurm-bridge
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: job-dranet
+spec:
+  template:
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      restartPolicy: Never
+      containers:
+        - name: network
+          image: busybox:stable
+          command: [sh, -c, ip link show dranet0; sleep 300]
+          resources:
+            requests:
+              cpu: '1'
+              memory: 16Mi
+              deviceclass.resource.kubernetes.io/dranet0: '1'
+            limits:
+              cpu: '1'
+              memory: 16Mi
+              deviceclass.resource.kubernetes.io/dranet0: '1'

@@ -6,10 +6,19 @@ package dra
 import (
 	"cmp"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apiserver/pkg/cel/environment"
+	dracel "k8s.io/dynamic-resource-allocation/cel"
 )
+
+const maxDeviceProfiles = 256
+
+var deviceProfileNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_.-]*[A-Za-z0-9])?$`)
 
 // Registry indexes supported DeviceProfiles by name and canonical selector.
 type Registry struct {
@@ -19,7 +28,13 @@ type Registry struct {
 	byIndexedGRESType map[string]DeviceProfile
 }
 
-func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
+// NewRegistry validates profiles and indexes them by name and canonical
+// selector.
+func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
+	if len(profiles) > maxDeviceProfiles {
+		return nil, fmt.Errorf("device profile registry contains %d profiles, maximum is %d", len(profiles), maxDeviceProfiles)
+	}
+
 	registry := &Registry{
 		byName:            make(map[string]DeviceProfile, len(profiles)),
 		bySelector:        make(map[string]DeviceProfile, len(profiles)),
@@ -27,32 +42,54 @@ func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
 		byIndexedGRESType: make(map[string]DeviceProfile),
 	}
 	coreBitmapProfile := ""
-	for _, profile := range profiles {
+	for i, profile := range profiles {
 		if profile.Name == "" {
-			return nil, fmt.Errorf("device profile for driver %q has an empty name", profile.Driver)
+			return nil, fmt.Errorf("device profile %d has an empty name", i)
+		}
+		if !deviceProfileNamePattern.MatchString(profile.Name) {
+			return nil, fmt.Errorf("device profile name %q must start and end with an alphanumeric character and contain only alphanumeric characters, '.', '_' or '-'", profile.Name)
+		}
+		if _, exists := registry.byName[profile.Name]; exists {
+			return nil, fmt.Errorf("duplicate device profile name %q", profile.Name)
 		}
 		if profile.Driver == "" {
 			return nil, fmt.Errorf("device profile %q has an empty driver", profile.Name)
 		}
+		if len(profile.Driver) > resourcev1.DriverNameMaxLength {
+			return nil, fmt.Errorf("device profile %q driver %q exceeds the maximum length of %d characters", profile.Name, profile.Driver, resourcev1.DriverNameMaxLength)
+		}
+		if problems := validation.IsDNS1123Subdomain(profile.Driver); len(problems) > 0 {
+			return nil, fmt.Errorf("device profile %q has invalid driver %q: %s", profile.Name, profile.Driver, strings.Join(problems, "; "))
+		}
 		if profile.Selector == "" {
 			return nil, fmt.Errorf("device profile %q has an empty selector", profile.Name)
 		}
-		if existing, ok := registry.byName[profile.Name]; ok {
-			return nil, fmt.Errorf("device profiles %q and %q have duplicate name %q", existing.Driver, profile.Driver, profile.Name)
+		if len(profile.Selector) > resourcev1.CELSelectorExpressionMaxLength {
+			return nil, fmt.Errorf("selector for device profile %q exceeds the maximum length of %d bytes", profile.Name, resourcev1.CELSelectorExpressionMaxLength)
 		}
-		if existing, ok := registry.bySelector[profile.Selector]; ok {
-			return nil, fmt.Errorf("device profiles %q and %q have duplicate selector %q", existing.Name, profile.Name, profile.Selector)
+		envType := environment.NewExpressions
+		compiled := dracel.GetCompiler(deviceProfileCELFeatures).CompileCELExpression(profile.Selector, dracel.Options{EnvType: &envType})
+		if compiled.Error != nil {
+			return nil, fmt.Errorf("compile selector for device profile %q: %w", profile.Name, compiled.Error)
 		}
-
-		switch backend := profile.Backend.(type) {
+		if compiled.MaxCost > resourcev1.CELSelectorExpressionMaxCost {
+			return nil, fmt.Errorf("selector for device profile %q is too complex: estimated cost %d exceeds limit %d", profile.Name, compiled.MaxCost, resourcev1.CELSelectorExpressionMaxCost)
+		}
+		if existing, exists := registry.bySelector[profile.Selector]; exists {
+			return nil, fmt.Errorf("device profiles %q and %q have the same selector", existing.Name, profile.Name)
+		}
+		if profile.Backend == nil {
+			return nil, fmt.Errorf("device profile %q has no backend", profile.Name)
+		}
+		switch profile.Backend.(type) {
 		case CoreBitmapBackend:
 			if coreBitmapProfile != "" {
 				return nil, fmt.Errorf("device profiles %q and %q both use the core-bitmap backend", coreBitmapProfile, profile.Name)
 			}
 			coreBitmapProfile = profile.Name
 		case IndexedGRESBackend:
-			if backend.GRESName == "" {
-				return nil, fmt.Errorf("device profile %q has an empty Slurm GRES name", profile.Name)
+			if _, err := profile.GRES(); err != nil {
+				return nil, err
 			}
 			registry.byIndexedGRESType[profile.Name] = profile
 		default:
@@ -69,14 +106,6 @@ func newRegistry(profiles ...DeviceProfile) (*Registry, error) {
 		})
 	}
 	return registry, nil
-}
-
-func mustNewRegistry(profiles ...DeviceProfile) *Registry {
-	registry, err := newRegistry(profiles...)
-	if err != nil {
-		panic(err)
-	}
-	return registry
 }
 
 // DefaultRegistry returns a registry containing the profiles currently
@@ -110,7 +139,24 @@ func DefaultRegistry() *Registry {
 			GRESName: "gpu",
 		},
 	}
-	return mustNewRegistry(cpu, exampleGPU, nvidiaGPU)
+	// DRANET v1.4 publishes pciAddress and rdma as device attributes:
+	// https://github.com/kubernetes-sigs/dranet/blob/v1.4.0/pkg/apis/attributes.go
+	dranetRDMA := DeviceProfile{
+		Name:   "dranet-rdma",
+		Driver: "dra.net",
+		Selector: `device.driver == 'dra.net' && ` +
+			`has(device.attributes['dra.net'].pciAddress) && ` +
+			`has(device.attributes['dra.net'].rdma) && ` +
+			`device.attributes['dra.net'].rdma == true`,
+		Backend: IndexedGRESBackend{
+			GRESName: "nic",
+		},
+	}
+	registry, err := NewRegistry([]DeviceProfile{cpu, exampleGPU, nvidiaGPU, dranetRDMA})
+	if err != nil {
+		panic(err)
+	}
+	return registry
 }
 
 // LookupByName returns the profile with the given stable profile name.

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -96,6 +97,49 @@ managedNamespaceSelector:
 			},
 			wantErr: false,
 		},
+		{
+			name: "Test deviceProfiles",
+			args: args{in: []byte(`
+deviceProfiles:
+  - name: custom-accelerator
+    driver: accelerator.example.com
+    selector: device.driver == 'accelerator.example.com'
+    backend:
+      type: indexed-gres
+      gresName: accelerator
+`)},
+			want: &Config{DeviceProfiles: []DeviceProfileConfig{{
+				Name:     "custom-accelerator",
+				Driver:   "accelerator.example.com",
+				Selector: `device.driver == 'accelerator.example.com'`,
+				Backend: DeviceProfileBackendConfig{
+					Type:     "indexed-gres",
+					GRESName: "accelerator",
+				},
+			}}},
+			wantErr: false,
+		},
+		{
+			name: "Reject unknown field",
+			args: args{in: []byte(`
+deviceProfiles:
+  - name: custom-accelerator
+    driver: accelerator.example.com
+    selector: device.driver == 'accelerator.example.com'
+    backend:
+      type: indexed-gres
+      gresNam: accelerator
+`)},
+			wantErr: true,
+		},
+		{
+			name: "Reject duplicate field",
+			args: args{in: []byte(`
+schedulerName: first
+schedulerName: second
+`)},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,6 +148,9 @@ managedNamespaceSelector:
 				t.Errorf("Unmarshal() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			if tt.wantErr && !strings.HasPrefix(err.Error(), "parse slurm-bridge config: ") {
+				t.Errorf("Unmarshal() error = %q, want contextual parse error", err)
+			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("Unmarshal() = %v, want %v", got, tt.want)
 			}
@@ -111,29 +158,103 @@ managedNamespaceSelector:
 	}
 }
 
-func TestUnmarshalOrDie(t *testing.T) {
-	type args struct {
-		in []byte
-	}
-	tests := []struct {
-		name string
-		args args
-		want *Config
-	}{
-		{
-			name: "Empty",
-			args: args{
-				in: []byte{},
-			},
-			want: &Config{},
+func TestConfigDRARegistry(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:     "custom-accelerator",
+		Driver:   "accelerator.example.com",
+		Selector: `device.driver == 'accelerator.example.com'`,
+		Backend: DeviceProfileBackendConfig{
+			Type:     "indexed-gres",
+			GRESName: "accelerator",
 		},
+	}}}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := UnmarshalOrDie(tt.args.in); !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("UnmarshalOrDie() = %v, want %v", got, tt.want)
+	profile, ok := registry.LookupByName("custom-accelerator")
+	if !ok {
+		t.Fatal("Config.DRARegistry() omitted configured profile")
+	}
+	gres, err := profile.GRES()
+	if err != nil {
+		t.Fatalf("DeviceProfile.GRES() error = %v", err)
+	}
+	if gres.Name != "accelerator" || gres.Type != "custom-accelerator" {
+		t.Fatalf("DeviceProfile.GRES() = %#v", gres)
+	}
+}
+
+func TestConfigDRARegistryUsesDefaultsWhenProfilesAreNil(t *testing.T) {
+	for _, input := range []string{"", "deviceProfiles: null\n"} {
+		cfg, err := Unmarshal([]byte(input))
+		if err != nil {
+			t.Fatalf("Unmarshal(%q) error = %v", input, err)
+		}
+		if cfg.DeviceProfiles != nil {
+			t.Fatalf("Unmarshal(%q) DeviceProfiles = %#v, want nil", input, cfg.DeviceProfiles)
+		}
+		registry, err := cfg.DRARegistry()
+		if err != nil {
+			t.Fatalf("Config.DRARegistry() error = %v", err)
+		}
+		for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+			if _, ok := registry.LookupByName(profileName); !ok {
+				t.Errorf("Config.DRARegistry() omitted default profile %q for input %q", profileName, input)
 			}
-		})
+		}
+	}
+}
+
+func TestConfigDRARegistryHonoursExplicitEmptyProfiles(t *testing.T) {
+	cfg, err := Unmarshal([]byte("deviceProfiles: []\n"))
+	if err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if cfg.DeviceProfiles == nil {
+		t.Fatal("Unmarshal() DeviceProfiles = nil, want explicit empty slice")
+	}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
+	}
+	for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+		if _, ok := registry.LookupByName(profileName); ok {
+			t.Errorf("Config.DRARegistry() unexpectedly included profile %q", profileName)
+		}
+	}
+}
+
+func TestConfigDRARegistrySupportsCoreBitmapBackend(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:     "custom-cpu",
+		Driver:   "cpu.example.com",
+		Selector: `device.driver == 'cpu.example.com'`,
+		Backend:  DeviceProfileBackendConfig{Type: "core-bitmap"},
+	}}}
+
+	registry, err := cfg.DRARegistry()
+	if err != nil {
+		t.Fatalf("Config.DRARegistry() error = %v", err)
+	}
+	profile, ok := registry.LookupByName("custom-cpu")
+	if !ok {
+		t.Fatal("Config.DRARegistry() omitted configured core-bitmap profile")
+	}
+	if !profile.UsesCoreBitmap() {
+		t.Fatalf("Config.DRARegistry() backend = %T, want core-bitmap", profile.Backend)
+	}
+}
+
+func TestConfigDRARegistryRejectsInvalidBackend(t *testing.T) {
+	cfg := &Config{DeviceProfiles: []DeviceProfileConfig{{
+		Name:    "broken",
+		Backend: DeviceProfileBackendConfig{Type: "unknown"},
+	}}}
+	if _, err := cfg.DRARegistry(); err == nil {
+		t.Fatal("Config.DRARegistry() error = nil, want unsupported backend error")
 	}
 }
 

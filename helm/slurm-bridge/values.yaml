@@ -171,6 +171,45 @@ controllers:
 sharedConfig:
   # -- The Slurm REST API URL in the form of: `[protocol]://[host]:[port]`
   slurmRestApi: http://slurm-restapi.slurm:6820
+  # -- DRA DeviceProfiles recognized by Slurm Bridge. A DeviceClass resolves to
+  # a profile when its single CEL selector exactly matches `selector`.
+  # `name` becomes the Slurm GRES type and must remain stable while allocations
+  # using the profile exist. `driver` must be a Kubernetes DRA driver name and
+  # `backend.type` must be `core-bitmap` or `indexed-gres`; indexed GRES names
+  # must be DNS-1123 labels of at most 60 characters. Leave this `null` to use
+  # the built-in profiles shown below, or set it to `[]` to disable all
+  # DeviceProfiles explicitly.
+  deviceProfiles: null
+  # deviceProfiles:
+  #   - name: cpu
+  #     driver: dra.cpu
+  #     selector: device.driver == "dra.cpu"
+  #     backend:
+  #       type: core-bitmap
+  #   - name: gpu-example
+  #     driver: gpu.example.com
+  #     selector: device.driver == 'gpu.example.com'
+  #     backend:
+  #       type: indexed-gres
+  #       gresName: gpu
+  #   - name: gpu-nvidia
+  #     driver: gpu.nvidia.com
+  #     selector: >-
+  #       device.driver == 'gpu.nvidia.com' &&
+  #       device.attributes['gpu.nvidia.com'].type == 'gpu'
+  #     backend:
+  #       type: indexed-gres
+  #       gresName: gpu
+  #   - name: dranet-rdma
+  #     driver: dra.net
+  #     selector: >-
+  #       device.driver == 'dra.net' &&
+  #       has(device.attributes['dra.net'].pciAddress) &&
+  #       has(device.attributes['dra.net'].rdma) &&
+  #       device.attributes['dra.net'].rdma == true
+  #     backend:
+  #       type: indexed-gres
+  #       gresName: nic
   # -- The Secret containing the Slurm JWT in the `auth-token` key. The token is
   # mounted and read before each Slurm REST API request to support rotation.
   slurmJwtSecret: slurm-bridge-token

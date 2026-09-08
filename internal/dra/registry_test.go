@@ -4,6 +4,7 @@
 package dra
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,12 +12,6 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-type registryUnsupportedBackend struct{}
-
-func (registryUnsupportedBackend) String() string {
-	return "unsupported"
-}
 
 func TestDefaultRegistry(t *testing.T) {
 	wants := []DeviceProfile{
@@ -38,6 +33,15 @@ func TestDefaultRegistry(t *testing.T) {
 			Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
 		},
+		{
+			Name:   "dranet-rdma",
+			Driver: "dra.net",
+			Selector: `device.driver == 'dra.net' && ` +
+				`has(device.attributes['dra.net'].pciAddress) && ` +
+				`has(device.attributes['dra.net'].rdma) && ` +
+				`device.attributes['dra.net'].rdma == true`,
+			Backend: IndexedGRESBackend{GRESName: "nic"},
+		},
 	}
 	registry := DefaultRegistry()
 
@@ -48,6 +52,151 @@ func TestDefaultRegistry(t *testing.T) {
 		if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("Registry.LookupBySelector() = (%#v, %t), want (%#v, true)", got, ok, want)
 		}
+	}
+}
+
+func TestNewRegistryRejectsDuplicates(t *testing.T) {
+	profile := DeviceProfile{
+		Name:     "gpu-example",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	}
+	tests := []struct {
+		name     string
+		profiles []DeviceProfile
+		wantErr  string
+	}{
+		{name: "duplicate name", profiles: []DeviceProfile{profile, profile}, wantErr: "duplicate device profile name"},
+		{name: "duplicate selector", profiles: []DeviceProfile{profile, {
+			Name: "other", Driver: "other.example.com", Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
+		}}, wantErr: "same selector"},
+		{name: "invalid selector", profiles: []DeviceProfile{{
+			Name: "broken", Driver: "gpu.example.com", Selector: `device.`, Backend: IndexedGRESBackend{GRESName: "gpu"},
+		}}, wantErr: "compile selector"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRegistry(tt.profiles)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("NewRegistry() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	t.Run("multiple core-bitmap profiles", func(t *testing.T) {
+		profileA := DeviceProfile{
+			Name:     "profile-a",
+			Driver:   "driver-a.example.com",
+			Selector: `device.driver == 'driver-a.example.com'`,
+			Backend:  CoreBitmapBackend{},
+		}
+		profileB := DeviceProfile{
+			Name:     "profile-b",
+			Driver:   "driver-b.example.com",
+			Selector: `device.driver == 'driver-b.example.com'`,
+			Backend:  CoreBitmapBackend{},
+		}
+		if _, err := NewRegistry([]DeviceProfile{profileA, profileB}); err == nil || !strings.Contains(err.Error(), "both use the core-bitmap backend") {
+			t.Fatalf("NewRegistry() error = %v, want multiple core-bitmap profiles error", err)
+		}
+	})
+}
+
+func TestNewRegistryRejectsInvalidConfiguredProfiles(t *testing.T) {
+	valid := DeviceProfile{
+		Name:     "gpu-example",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	}
+	expensiveSelector := "true"
+	for i := range 7 {
+		expensiveSelector = fmt.Sprintf("[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].all(x%d, %s)", i, expensiveSelector)
+	}
+	tests := []struct {
+		name    string
+		profile DeviceProfile
+		wantErr string
+	}{
+		{name: "empty name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Name = ""
+			return profile
+		}(), wantErr: "empty name"},
+		{name: "invalid name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Name = "gpu:example"
+			return profile
+		}(), wantErr: "device profile name"},
+		{name: "empty driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = ""
+			return profile
+		}(), wantErr: "empty driver"},
+		{name: "invalid driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = "not a driver"
+			return profile
+		}(), wantErr: "invalid driver"},
+		{name: "uppercase driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = "GPU.example.com"
+			return profile
+		}(), wantErr: "invalid driver"},
+		{name: "long driver", profile: func() DeviceProfile {
+			profile := valid
+			profile.Driver = strings.Repeat("a", resourcev1.DriverNameMaxLength+1)
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "empty selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = ""
+			return profile
+		}(), wantErr: "empty selector"},
+		{name: "long selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = strings.Repeat(" ", resourcev1.CELSelectorExpressionMaxLength+1)
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "expensive selector", profile: func() DeviceProfile {
+			profile := valid
+			profile.Selector = expensiveSelector
+			return profile
+		}(), wantErr: "too complex"},
+		{name: "nil backend", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = nil
+			return profile
+		}(), wantErr: "no backend"},
+		{name: "empty GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{}
+			return profile
+		}(), wantErr: "empty Slurm GRES name"},
+		{name: "invalid GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{GRESName: "GPU_name"}
+			return profile
+		}(), wantErr: "invalid Slurm GRES name"},
+		{name: "long GRES name", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = IndexedGRESBackend{GRESName: strings.Repeat("a", indexedGRESNameMaxLength()+1)}
+			return profile
+		}(), wantErr: "maximum length"},
+		{name: "unsupported backend", profile: func() DeviceProfile {
+			profile := valid
+			profile.Backend = unsupportedBackend{}
+			return profile
+		}(), wantErr: "unsupported backend"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRegistry([]DeviceProfile{tt.profile})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("NewRegistry() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -116,108 +265,37 @@ func TestRegistryMatchIndexedGRES(t *testing.T) {
 	}
 }
 
-func TestNewRegistryRejectsDuplicateKeys(t *testing.T) {
-	profile := DeviceProfile{
-		Name:     "profile-a",
-		Driver:   "driver-a",
-		Selector: `device.driver == 'driver-a'`,
-		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+func TestNewRegistryProfileLimit(t *testing.T) {
+	profiles := make([]DeviceProfile, maxDeviceProfiles)
+	for i := range profiles {
+		profiles[i] = DeviceProfile{
+			Name:     fmt.Sprintf("profile-%d", i),
+			Driver:   "devices.example.com",
+			Selector: fmt.Sprintf("device.driver == 'devices.example.com' && %d == %d", i, i),
+			Backend:  IndexedGRESBackend{GRESName: "device"},
+		}
 	}
 
-	t.Run("name", func(t *testing.T) {
-		duplicate := profile
-		duplicate.Driver = "driver-b"
-		duplicate.Selector = `device.driver == 'driver-b'`
-		if _, err := newRegistry(profile, duplicate); err == nil || !strings.Contains(err.Error(), "duplicate name") {
-			t.Fatalf("newRegistry() error = %v, want duplicate name error", err)
-		}
-	})
-
-	t.Run("selector", func(t *testing.T) {
-		duplicate := profile
-		duplicate.Name = "profile-b"
-		duplicate.Driver = "driver-b"
-		if _, err := newRegistry(profile, duplicate); err == nil || !strings.Contains(err.Error(), "duplicate selector") {
-			t.Fatalf("newRegistry() error = %v, want duplicate selector error", err)
-		}
-	})
-}
-
-func TestNewRegistryRejectsInvalidProfiles(t *testing.T) {
-	valid := DeviceProfile{
-		Name:     "profile-a",
-		Driver:   "driver-a.example.com",
-		Selector: `device.driver == 'driver-a.example.com'`,
-		Backend:  IndexedGRESBackend{GRESName: "gpu"},
-	}
-	tests := []struct {
-		name    string
-		mutate  func(*DeviceProfile)
-		wantErr string
-	}{
-		{
-			name:    "empty name",
-			mutate:  func(profile *DeviceProfile) { profile.Name = "" },
-			wantErr: "empty name",
-		},
-		{
-			name:    "empty driver",
-			mutate:  func(profile *DeviceProfile) { profile.Driver = "" },
-			wantErr: "empty driver",
-		},
-		{
-			name:    "empty selector",
-			mutate:  func(profile *DeviceProfile) { profile.Selector = "" },
-			wantErr: "empty selector",
-		},
-		{
-			name:    "nil backend",
-			mutate:  func(profile *DeviceProfile) { profile.Backend = nil },
-			wantErr: "unsupported backend",
-		},
-		{
-			name:    "unsupported backend",
-			mutate:  func(profile *DeviceProfile) { profile.Backend = registryUnsupportedBackend{} },
-			wantErr: "unsupported backend",
-		},
-		{
-			name:    "empty GRES name",
-			mutate:  func(profile *DeviceProfile) { profile.Backend = IndexedGRESBackend{} },
-			wantErr: "empty Slurm GRES name",
-		},
+	if _, err := NewRegistry(profiles); err != nil {
+		t.Fatalf("NewRegistry() with %d profiles returned error: %v", maxDeviceProfiles, err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			profile := valid
-			tt.mutate(&profile)
-			if _, err := newRegistry(profile); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("newRegistry() error = %v, want error containing %q", err, tt.wantErr)
-			}
-		})
+	profiles = append(profiles, DeviceProfile{})
+	if _, err := NewRegistry(profiles); err == nil || !strings.Contains(err.Error(), "maximum is 256") {
+		t.Fatalf("NewRegistry() error = %v, want profile limit error", err)
 	}
-
-	t.Run("multiple core-bitmap profiles", func(t *testing.T) {
-		profileA := valid
-		profileA.Backend = CoreBitmapBackend{}
-		profileB := DeviceProfile{
-			Name:     "profile-b",
-			Driver:   "driver-b.example.com",
-			Selector: `device.driver == 'driver-b.example.com'`,
-			Backend:  CoreBitmapBackend{},
-		}
-		if _, err := newRegistry(profileA, profileB); err == nil || !strings.Contains(err.Error(), "both use the core-bitmap backend") {
-			t.Fatalf("newRegistry() error = %v, want multiple core-bitmap profiles error", err)
-		}
-	})
 }
 
 func TestRegistryProfilesForDriver(t *testing.T) {
 	registry := DefaultRegistry()
-	profile, _ := registry.LookupByName("gpu-example")
+	gpuProfile, _ := registry.LookupByName("gpu-example")
+	dranetProfile, _ := registry.LookupByName("dranet-rdma")
 
-	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{profile}) {
-		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{profile})
+	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{gpuProfile}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{gpuProfile})
+	}
+	if got := registry.profilesForDriver("dra.net"); !reflect.DeepEqual(got, []DeviceProfile{dranetProfile}) {
+		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{dranetProfile})
 	}
 	if got := registry.profilesForDriver("unsupported.example.com"); len(got) != 0 {
 		t.Fatalf("Registry.profilesForDriver() = %#v, want no profiles", got)
@@ -239,6 +317,9 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	if !registry.SupportsDriver("dra.cpu") {
 		t.Fatal("Registry.SupportsDriver() = false for the CPU driver")
 	}
+	if !registry.SupportsDriver("dra.net") {
+		t.Fatal("Registry.SupportsDriver() = false for DRANET")
+	}
 	profileB := DeviceProfile{
 		Name:     "profile-b",
 		Driver:   "shared.example.com",
@@ -251,9 +332,9 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 		Selector: `device.driver == 'shared.example.com' && device.attributes['shared.example.com'].model == 'a'`,
 		Backend:  IndexedGRESBackend{GRESName: "gpu"},
 	}
-	registry, err := newRegistry(profileB, profileA)
+	registry, err := NewRegistry([]DeviceProfile{profileB, profileA})
 	if err != nil {
-		t.Fatalf("newRegistry() error = %v", err)
+		t.Fatalf("NewRegistry() error = %v", err)
 	}
 	if got := registry.profilesForDriver("shared.example.com"); !reflect.DeepEqual(got, []DeviceProfile{profileA, profileB}) {
 		t.Fatalf("Registry.profilesForDriver() = %#v, want profiles ordered by name", got)

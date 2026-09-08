@@ -25,3 +25,5 @@ data:
     {{- end }}
     mcsLabel: {{ .Values.schedulerConfig.mcsLabel }}
     partition: {{ .Values.schedulerConfig.partition }}
+    deviceProfiles:
+      {{- toYaml .Values.sharedConfig.deviceProfiles | nindent 6 }}

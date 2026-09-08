@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/dynamic-resource-allocation/structured"
 )
 
@@ -21,6 +24,12 @@ const (
 	appliedInventoryVersion = 1
 	devicePathPrefix        = "/dra/"
 )
+
+func indexedGRESNameMaxLength() int {
+	// Reserve enough space for the largest collision suffix that can occur in
+	// a ResourceClaim. Kubernetes limits each claim to 32 device requests.
+	return validation.DNS1123LabelMaxLength - 1 - len(strconv.Itoa(resourcev1.DeviceRequestsMaxSize))
+}
 
 // GRES identifies a Slurm generic resource by name and type.
 type GRES struct {
@@ -40,8 +49,17 @@ func (p DeviceProfile) GRES() (GRES, error) {
 		if backend.GRESName == "" {
 			return GRES{}, fmt.Errorf("device profile %q has an empty Slurm GRES name", p.Name)
 		}
+		if len(backend.GRESName) > indexedGRESNameMaxLength() {
+			return GRES{}, fmt.Errorf("device profile %q Slurm GRES name %q exceeds the maximum length of %d characters", p.Name, backend.GRESName, indexedGRESNameMaxLength())
+		}
+		if problems := validation.IsDNS1123Label(backend.GRESName); len(problems) > 0 {
+			return GRES{}, fmt.Errorf("device profile %q has invalid Slurm GRES name %q: it must be a Kubernetes DNS-1123 label because it is also used as a DRA request name: %s", p.Name, backend.GRESName, strings.Join(problems, "; "))
+		}
 		if p.Name == "" {
 			return GRES{}, fmt.Errorf("device profile for driver %q has an empty name", p.Driver)
+		}
+		if !deviceProfileNamePattern.MatchString(p.Name) {
+			return GRES{}, fmt.Errorf("device profile name %q is not a valid Slurm GRES type", p.Name)
 		}
 		return GRES{Name: backend.GRESName, Type: p.Name}, nil
 	default:

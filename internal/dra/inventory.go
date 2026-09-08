@@ -16,13 +16,27 @@ import (
 	"k8s.io/utils/ptr"
 )
 
-var deviceProfileCELCache = dracel.NewCache(10, dracel.Features{
+var deviceProfileCELFeatures = dracel.Features{
 	EnableConsumableCapacity: true,
 	EnableListTypeAttributes: true,
-})
+}
+
+var deviceProfileCELCache = dracel.NewCache(maxDeviceProfiles, deviceProfileCELFeatures)
 
 // DeviceIdentity is the stable DRA identity of a device.
 type DeviceIdentity = structured.DeviceID
+
+// OverlappingDeviceProfilesError reports a device which matched more than one
+// profile. Devices must resolve to exactly one profile so Slurm cannot account
+// for the same physical device through multiple GRES types.
+type OverlappingDeviceProfilesError struct {
+	Device   DeviceIdentity
+	Profiles [2]string
+}
+
+func (e *OverlappingDeviceProfilesError) Error() string {
+	return fmt.Sprintf("DRA device %q matches overlapping device profiles %q and %q", e.Device.String(), e.Profiles[0], e.Profiles[1])
+}
 
 // ProfileInventory contains the devices resolved to one DeviceProfile.
 // Devices are ordered by Slurm index: Devices[i] is allocated as index i.
@@ -247,7 +261,10 @@ func matchDeviceProfile(
 			continue
 		}
 		if matched {
-			return DeviceProfile{}, false, fmt.Errorf("DRA device %q matches overlapping device profiles %q and %q", identity.String(), matchedProfile.Name, profile.Name)
+			return DeviceProfile{}, false, &OverlappingDeviceProfilesError{
+				Device:   identity,
+				Profiles: [2]string{matchedProfile.Name, profile.Name},
+			}
 		}
 		matchedProfile = profile
 		matched = true

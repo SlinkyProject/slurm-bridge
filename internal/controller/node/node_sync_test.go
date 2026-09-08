@@ -10,8 +10,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/kubernetes/pkg/util/taints"
 	"k8s.io/utils/ptr"
 	"k8s.io/utils/set"
@@ -26,9 +28,58 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+var _ = Describe("nodeRegistrationInventories()", func() {
+	It("reports overlapping DRA profiles on the Node", func() {
+		profiles := []dra.DeviceProfile{
+			{
+				Name:     "gpu-a",
+				Driver:   "gpu.example.com",
+				Selector: `device.driver == "gpu.example.com"`,
+				Backend:  dra.IndexedGRESBackend{GRESName: "gpu"},
+			},
+			{
+				Name:     "gpu-b",
+				Driver:   "gpu.example.com",
+				Selector: `device.driver == "gpu.example.com" && true`,
+				Backend:  dra.IndexedGRESBackend{GRESName: "gpu"},
+			},
+		}
+		registry, err := dra.NewRegistry(profiles)
+		Expect(err).NotTo(HaveOccurred())
+
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
+		resourceSlice := &resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu-pool-a"},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver:   "gpu.example.com",
+				NodeName: ptr.To("node-a"),
+				Pool: resourcev1.ResourcePool{
+					Name:               "pool-a",
+					Generation:         1,
+					ResourceSliceCount: 1,
+				},
+				Devices: []resourcev1.Device{{Name: "gpu-0"}},
+			},
+		}
+		recorder := record.NewFakeRecorder(1)
+		r := &NodeReconciler{
+			Client:        fake.NewFakeClient(resourceSlice),
+			draRegistry:   registry,
+			eventRecorder: recorder,
+		}
+
+		_, _, err = r.nodeRegistrationInventories(context.Background(), node)
+		Expect(err).To(MatchError(ContainSubstring(`matches overlapping device profiles "gpu-a" and "gpu-b"`)))
+		Eventually(recorder.Events).Should(Receive(Equal(
+			`Warning OverlappingDRADeviceProfiles DRA device "gpu.example.com/pool-a/gpu-0" matches overlapping device profiles "gpu-a" and "gpu-b"`,
+		)))
+	})
+})
 
 var _ = Describe("syncTaint()", func() {
 	var controllerReconciler *NodeReconciler
@@ -55,7 +106,7 @@ var _ = Describe("syncTaint()", func() {
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh, nil)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 
@@ -223,7 +274,7 @@ var _ = Describe("syncState()", func() {
 		Expect(slurmClient).NotTo(BeNil())
 
 		eventCh := make(chan event.GenericEvent)
-		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh)
+		controllerReconciler = NewReconciler(k8sClient, slurmClient, schedulerName, eventCh, nil)
 		Expect(controllerReconciler).NotTo(BeNil())
 	})
 

@@ -5,12 +5,14 @@ package slurmbridge
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
@@ -48,6 +50,34 @@ func TestAllocateCoreBitmapProfileRejectsMultipleDeviceClasses(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), `multiple DeviceClasses "class-a" and "class-b"`) {
 		t.Fatalf("allocateCoreBitmapProfile() error = %v, want multiple DeviceClasses error", err)
+	}
+}
+
+func TestAppendIndexedGRESRequestsKeepsCollisionSuffixWithinDNSLabelLimit(t *testing.T) {
+	gresName := strings.Repeat("a", 60)
+	requests := []resourcev1.DeviceRequest{{Name: gresName}}
+	for suffix := 2; suffix < resourcev1.DeviceRequestsMaxSize; suffix++ {
+		requests = append(requests, resourcev1.DeviceRequest{Name: fmt.Sprintf("%s-%d", gresName, suffix)})
+	}
+	allocations := []indexedGRESAllocation{{deviceProfileRequest: deviceProfileRequest{
+		DeviceClassName: "class-a",
+		Profile: dra.DeviceProfile{
+			Name:    "profile-a",
+			Backend: dra.IndexedGRESBackend{GRESName: gresName},
+		},
+		Count: 1,
+	}}}
+
+	gotRequests, gotAllocations := appendIndexedGRESRequests(requests, allocations)
+	wantName := fmt.Sprintf("%s-%d", gresName, resourcev1.DeviceRequestsMaxSize)
+	if got := gotRequests[len(gotRequests)-1].Name; got != wantName {
+		t.Fatalf("request name = %q, want %q", got, wantName)
+	}
+	if got := gotAllocations[0].RequestName; got != wantName {
+		t.Fatalf("allocation request name = %q, want %q", got, wantName)
+	}
+	if problems := validation.IsDNS1123Label(wantName); len(problems) > 0 {
+		t.Fatalf("generated request name %q is not a DNS-1123 label: %v", wantName, problems)
 	}
 }
 

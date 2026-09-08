@@ -90,7 +90,16 @@ func main() {
 		setupLog.Error(err, "unable to read config file", "file", flags.configFile)
 		os.Exit(1)
 	}
-	cfg := config.UnmarshalOrDie(data)
+	cfg, err := config.Unmarshal(data)
+	if err != nil {
+		setupLog.Error(err, "unable to parse config file", "file", flags.configFile)
+		os.Exit(1)
+	}
+	draRegistry, err := cfg.DRARegistry()
+	if err != nil {
+		setupLog.Error(err, "unable to configure DRA device profiles")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -125,6 +134,7 @@ func main() {
 		ManagedNamespaces:        cfg.ManagedNamespaces,
 		ManagedNamespaceSelector: cfg.ManagedNamespaceSelector,
 		SchedulerName:            cfg.SchedulerName,
+		DRARegistry:              draRegistry,
 	}
 	if err := podAdmission.SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Pod")

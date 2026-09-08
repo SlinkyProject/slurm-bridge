@@ -66,7 +66,8 @@ more.
 
 ### Supported DRA DeviceClasses
 
-`slurm-bridge` supports the following DRA DeviceClass extended resources:
+`slurm-bridge` supports the following DRA DeviceClass extended resources out of
+the box:
 
 | DeviceClass       | Extended resource                                    | Device type |
 | ----------------- | ---------------------------------------------------- | ----------- |
@@ -75,10 +76,63 @@ more.
 | `gpu.example.com` | `deviceclass.resource.kubernetes.io/gpu.example.com` | Example GPU |
 
 For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
-ResourceClaim and records the allocated devices for the Pod. Managed Pods that
-request any other DeviceClass extended resource are rejected during admission.
-Validation covers requests and limits in both init containers and regular
-containers.
+ResourceClaim and records the allocated devices for the Pod. Additional indexed
+DeviceClasses are supported when they resolve to a configured device profile.
+Other DeviceClass extended resources are unsupported. Validation covers requests
+and limits in both init containers and regular containers.
+
+Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
+shared Slurm Bridge configuration. The Helm chart supplies the example GPU and
+PCI-backed DRANET profiles by default; operators can replace or extend the list
+through `sharedConfig.deviceProfiles`:
+
+```yaml
+sharedConfig:
+  deviceProfiles:
+    - name: custom-accelerator
+      driver: accelerator.example.com
+      selector: device.driver == 'accelerator.example.com'
+      backend:
+        type: indexed-gres
+        gresName: accelerator
+```
+
+The DeviceClass must have exactly one CEL selector and it must exactly match a
+configured profile selector. Profile names become Slurm GRES types: they must
+start and end with an alphanumeric character, may contain only alphanumeric
+characters, `.`, `_`, and `-`, and must remain stable while allocations using
+them exist. `driver` must be a valid lowercase Kubernetes DRA driver name, and
+`gresName` must be a DNS-1123 label of at most 60 characters because it is also
+used as the ResourceClaim request name. Every configured `backend.gresName` must
+also be listed in Slurm's `GresTypes`; for example, profiles using `gpu` and
+`nic` require `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory
+when its type is not listed. The bundled external and hybrid Kind configurations
+include `GresTypes=gpu,nic` by default. Selectors use the same length and
+estimated-cost limits as Kubernetes DeviceClass CEL selectors. Profiles for the
+same driver must be mutually exclusive. If a device matches more than one
+profile, the node controller leaves its Slurm GRES inventory unchanged and emits
+an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
+
+The default `dranet-rdma` profile maps PCI-backed devices with DRANET's `rdma`
+attribute set to the Slurm `nic` GRES. It includes InfiniBand, RoCE, and iWARP
+devices; it does not imply an InfiniBand link layer.
+
+The Kind DRANET e2e values extend those defaults with a fixture-only `dranet0`
+profile. It selects the dummy network interface created by
+`hack/kind.sh --dranet` by driver and interface name:
+
+```yaml
+sharedConfig:
+  deviceProfiles:
+    - name: dranet0
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' && has(device.attributes['dra.net'].ifName) &&
+        device.attributes['dra.net'].ifName == 'dranet0'
+      backend:
+        type: indexed-gres
+        gresName: nic
+```
 
 ### Legacy GPU device plugins
 

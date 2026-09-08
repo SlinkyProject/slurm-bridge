@@ -5,6 +5,7 @@ package dra
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -249,9 +250,9 @@ func TestBuildNodeInventory(t *testing.T) {
 			Selector: `device.driver == "gpu.example.com" && device.attributes["gpu.example.com"].model == "b"`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
 		}
-		registry, err := newRegistry(profileA, profileB)
+		registry, err := NewRegistry([]DeviceProfile{profileA, profileB})
 		if err != nil {
-			t.Fatalf("newRegistry() error = %v", err)
+			t.Fatalf("NewRegistry() error = %v", err)
 		}
 		slice := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-b", "gpu-unsupported", "gpu-a")
 		models := []string{"b", "unsupported", "a"}
@@ -283,6 +284,46 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 	})
 
+	t.Run("classifies the default DRANET RDMA profile", func(t *testing.T) {
+		slice := resourceSlice("node-a", "dra.net", "node-a", "rdma-ethernet", "infiniband", "dummy")
+		pciAddress := func(address string) resourcev1.DeviceAttribute {
+			return resourcev1.DeviceAttribute{StringValue: ptr.To(address)}
+		}
+		boolAttribute := func(value bool) resourcev1.DeviceAttribute {
+			return resourcev1.DeviceAttribute{BoolValue: ptr.To(value)}
+		}
+		slice.Spec.Devices[0].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			"dra.net/pciAddress": pciAddress("0000:01:00.0"),
+			"dra.net/rdma":       boolAttribute(true),
+		}
+		slice.Spec.Devices[1].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			"dra.net/pciAddress": pciAddress("0000:02:00.0"),
+			"dra.net/rdma":       boolAttribute(true),
+		}
+		slice.Spec.Devices[2].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			"dra.net/rdma": boolAttribute(false),
+		}
+
+		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		rdmaProfile, _ := DefaultRegistry().LookupByName("dranet-rdma")
+		want := NodeInventory{
+			NodeName: "node-a",
+			Profiles: []ProfileInventory{{
+				Profile: rdmaProfile,
+				Devices: []DeviceIdentity{
+					deviceIDForTest("dra.net", "node-a", "infiniband"),
+					deviceIDForTest("dra.net", "node-a", "rdma-ethernet"),
+				},
+			}},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("BuildNodeInventory() = %#v, want %#v", got, want)
+		}
+	})
+
 	t.Run("rejects overlapping profiles", func(t *testing.T) {
 		profileA := DeviceProfile{
 			Name:     "gpu-a",
@@ -293,15 +334,23 @@ func TestBuildNodeInventory(t *testing.T) {
 		profileB := profileA
 		profileB.Name = "gpu-b"
 		profileB.Selector = `device.driver == "gpu.example.com" && true`
-		registry, registryErr := newRegistry(profileA, profileB)
+		registry, registryErr := NewRegistry([]DeviceProfile{profileA, profileB})
 		if registryErr != nil {
-			t.Fatalf("newRegistry() error = %v", registryErr)
+			t.Fatalf("NewRegistry() error = %v", registryErr)
 		}
 		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0"),
 		})
 		if err == nil || !strings.Contains(err.Error(), `matches overlapping device profiles "gpu-a" and "gpu-b"`) {
 			t.Fatalf("BuildNodeInventory() error = %v, want overlapping profile error", err)
+		}
+		var overlapErr *OverlappingDeviceProfilesError
+		if !errors.As(err, &overlapErr) {
+			t.Fatalf("BuildNodeInventory() error = %T, want *OverlappingDeviceProfilesError", err)
+		}
+		wantDevice := deviceIDForTest("gpu.example.com", "pool-a", "gpu-0")
+		if overlapErr.Device != wantDevice || overlapErr.Profiles != [2]string{"gpu-a", "gpu-b"} {
+			t.Fatalf("BuildNodeInventory() overlap error = %#v, want device %q and profiles [gpu-a gpu-b]", overlapErr, wantDevice.String())
 		}
 	})
 
