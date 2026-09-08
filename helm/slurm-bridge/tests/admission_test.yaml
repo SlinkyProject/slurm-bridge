@@ -43,3 +43,35 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: applies the admission resources to the admission container
+    template: admission/deployment.yaml
+    set:
+      admission:
+        enabled: true
+        resources:
+          requests:
+            cpu: 1
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 4Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 1
+              memory: 1Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+  - it: does not apply the controllers resources to the admission container
+    template: admission/deployment.yaml
+    set:
+      admission.enabled: true
+      controllers.resources:
+        limits:
+          cpu: 9
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].resources
