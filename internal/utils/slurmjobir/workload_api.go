@@ -86,6 +86,7 @@ func (in *PodGroup) DeepCopyObject() runtime.Object {
 
 // TryRegisterWorkloadAPI discovers and registers one built-in Workload API
 // version. The beta version is preferred when both are advertised.
+// It returns (nil, nil) when neither version is served, since the API is optional.
 func TryRegisterWorkloadAPI(discovery workloadAPIResourceDiscovery, scheme *runtime.Scheme) (*WorkloadAPI, error) {
 	// TODO: Document the v1alpha2 cleanup and v1beta1 recreation steps required
 	// when upgrading a cluster from Kubernetes 1.36 to 1.37.
@@ -103,7 +104,7 @@ func TryRegisterWorkloadAPI(discovery workloadAPIResourceDiscovery, scheme *runt
 		}
 		return RegisterWorkloadAPIVersion(scheme, version)
 	}
-	return nil, nil
+	return nil, nil //nolint:nilnil // The optional Workload API is not served by this cluster.
 }
 
 func hasWorkloadAPIResources(resources *metav1.APIResourceList) bool {
