@@ -4,17 +4,22 @@ SPDX-License-Identifier: Apache-2.0
 */}}
 
 {{- if .Values.admission.enabled }}
-{{- if and .Values.admission.pdb .Values.admission.pdb.enabled }}
+{{- if and .Values.admission.pdb .Values.admission.pdb.enabled (gt (int .Values.admission.replicas) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "slurm-bridge.name" . }}-admission
   namespace: {{ include "slurm-bridge.namespace" . }}
 spec:
+  {{- if ne .Values.admission.pdb.maxUnavailable nil }}
   maxUnavailable: {{ .Values.admission.pdb.maxUnavailable }}
+  {{- else if ne .Values.admission.pdb.minAvailable nil }}
   minAvailable: {{ .Values.admission.pdb.minAvailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "slurm-bridge.admission.selectorLabels" . | nindent 6 }}
-{{- end }}{{- /* if .Values.admission.pdb && .Values.admission.pdb.enabled */}}
+{{- end }}{{- /* if .Values.admission.pdb && .Values.admission.pdb.enabled && replicas > 1 */}}
 {{- end }}{{- /* if .Values.admission.enabled */}}

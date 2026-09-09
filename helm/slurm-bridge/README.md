@@ -35,7 +35,7 @@ Kubernetes: `>= 1.34.0-0`
 | admission.managedNamespaces | list | `["slurm-bridge"]` | List of namespaces to be monitored by the pod admission controller. Pods created in any of these namespaces will have their `.spec.schedulerName` changed to slurm-bridge. |
 | admission.nodeSelector | map[string]string | `{}` | Node label selector for pod assignment. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector |
 | admission.pdb | object | `{"enabled":false,"maxUnavailable":null,"minAvailable":1}` | PodDisruptionBudget for the admission deployment |
-| admission.pdb.enabled | bool | `false` | Enable PodDisruptionBudget |
+| admission.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicas` is greater than 1, since a PDB over a single replica blocks node drains. |
 | admission.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
 | admission.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
 | admission.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
@@ -48,7 +48,7 @@ Kubernetes: `>= 1.34.0-0`
 | controllers.leaderElect | bool | `false` | Enables leader election. |
 | controllers.nodeSelector | map[string]string | `{}` | Node label selector for pod assignment. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector |
 | controllers.pdb | object | `{"enabled":false,"maxUnavailable":null,"minAvailable":1}` | PodDisruptionBudget for the controllers deployment |
-| controllers.pdb.enabled | bool | `false` | Enable PodDisruptionBudget |
+| controllers.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicas` is greater than 1, since a PDB over a single replica blocks node drains. |
 | controllers.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
 | controllers.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
 | controllers.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |

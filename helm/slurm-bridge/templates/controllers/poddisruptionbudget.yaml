@@ -3,16 +3,21 @@ SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- if and .Values.controllers.pdb .Values.controllers.pdb.enabled }}
+{{- if and .Values.controllers.pdb .Values.controllers.pdb.enabled (gt (int .Values.controllers.replicas) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "slurm-bridge.name" . }}-controllers
   namespace: {{ include "slurm-bridge.namespace" . }}
 spec:
+  {{- if ne .Values.controllers.pdb.maxUnavailable nil }}
   maxUnavailable: {{ .Values.controllers.pdb.maxUnavailable }}
+  {{- else if ne .Values.controllers.pdb.minAvailable nil }}
   minAvailable: {{ .Values.controllers.pdb.minAvailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "slurm-bridge.controllers.selectorLabels" . | nindent 6 }}
-{{- end }}{{- /* if .Values.controllers.pdb && .Values.controllers.pdb.enabled */}}
+{{- end }}{{- /* if .Values.controllers.pdb && .Values.controllers.pdb.enabled && replicas > 1 */}}
