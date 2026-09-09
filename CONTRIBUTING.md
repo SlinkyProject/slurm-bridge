@@ -89,6 +89,28 @@ for clone, build, and test instructions for this repository.
 
   ```
 
+### Release notes
+
+- Every merge request needs a release note. Add a `Changelog` trailer to at
+  least one commit, above your sign-off in the same trailer block:
+  ```
+  Changelog: Fixed - short description of the change
+  Signed-off-by: Your Name <your@email.com>
+  ```
+- The category is one of `Added`, `Fixed`, `Changed`, or `Removed`. When the
+  change needs no release note, use `Changelog: NONE`.
+- The trailer has to sit in the commit's final, contiguous trailer block. A
+  blank line above it is required; a blank line inside the block hides it from
+  Git, and therefore from CI.
+- CI rejects a merge request when no commit carries a valid trailer, and a
+  malformed trailer fails the check even when another commit has a valid one.
+- To add the trailer to a commit you already made, keep the sign-off last so
+  `-s` never has cause to append a second one:
+  ```bash
+  $ git -c trailer.Changelog.where=start commit --amend --no-edit --only \
+      --trailer "Changelog: NONE"
+  ```
+
 ### Community standards
 
 - [Code of Conduct](https://github.com/SlinkyProject/slurm-bridge/blob/main/CODE_OF_CONDUCT.md)
