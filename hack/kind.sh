@@ -345,7 +345,7 @@ function lws::install() {
 	chartName="lws"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.8.x"
+		local version="0.9.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi
@@ -473,7 +473,43 @@ function slurm-operator::install_from_source() {
 
 function slurm-operator::wait() {
 	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
-		-n slinky --timeout=120s
+		-n slinky --timeout=120s || return 1
+
+	# Pod readiness can precede Service routing updates. Exercise admission from
+	# the API server without persisting a resource or requiring a running Slurm.
+	echo "[slurm] Waiting for slurm-operator webhook admission..."
+	local deadline=$((SECONDS + 120))
+	local output=""
+	local request_timeout
+	while ((SECONDS < deadline)); do
+		request_timeout=$((deadline - SECONDS))
+		if ((request_timeout <= 0)); then
+			break
+		fi
+		if ((request_timeout > 10)); then
+			request_timeout=10
+		fi
+		if output="$(
+			kubectl create --dry-run=server --namespace=slinky \
+				--request-timeout="${request_timeout}s" -f - 2>&1 <<-EOF
+					apiVersion: slinky.slurm.net/v1beta1
+					kind: RestApi
+					metadata:
+					  generateName: slurm-operator-webhook-check-
+					spec:
+					  controllerRef:
+					    name: slurm-operator-webhook-check
+				EOF
+		)"; then
+			echo "[slurm] Slurm-operator webhook admission is ready."
+			return 0
+		fi
+		sleep 2
+	done
+
+	echo "[slurm] Timed out waiting for slurm-operator webhook admission after 120s." >&2
+	printf '%s\n' "$output" >&2
+	return 1
 }
 
 function slurm::install_from_source() {
@@ -500,11 +536,19 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Apply controller configuration before creating the NodeSet. Otherwise,
+		# NodeSet reconciliation can back off while slurmctld is restarting.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
 		slurm::configure_hybrid_dra_inventory
 		;;
 	*)
@@ -516,6 +560,7 @@ function slurm::configure_for_bridge() {
 
 function slurm::configure_hybrid_dra_inventory() {
 	local bridge_nodes
+	local dranet_device
 	local desired_nodes
 	local example_devices
 	local index
@@ -535,6 +580,7 @@ function slurm::configure_hybrid_dra_inventory() {
 		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
 
 	for node in $bridge_nodes; do
+		dranet_device="\"/dra/dra.net/$node/$DRANET_INTERFACE_NAME\""
 		example_devices=""
 		for index in 0 1 2 3; do
 			example_devices="${example_devices}${example_devices:+,}\"/dra/gpu.example.com/$node/gpu-$index\""
@@ -543,7 +589,10 @@ function slurm::configure_hybrid_dra_inventory() {
 		for index in 0 1 2 3 4 5 6 7; do
 			nvidia_devices="${nvidia_devices}${nvidia_devices:+,}\"/dra/gpu.nvidia.com/$node/gpu-$index\""
 		done
-		extra="slurm-bridge.dra-gres-map={\"v\":1,\"profiles\":{\"gpu-example\":[$example_devices],\"gpu-nvidia\":[$nvidia_devices]}}"
+		extra='slurm-bridge.dra-gres-map={"v":1,"profiles":{'
+		extra="${extra}\"dranet0\":[$dranet_device],"
+		extra="${extra}\"gpu-example\":[$example_devices],"
+		extra="${extra}\"gpu-nvidia\":[$nvidia_devices]}}"
 		kubectl exec -n slurm slurm-controller-0 -- \
 			scontrol update NodeName="$node" "Extra=$extra"
 	done

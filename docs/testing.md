@@ -46,6 +46,24 @@ DaemonSet-mode hybrid `slurmd` pods, as requested. Hybrid runs also include a
 native `sbatch` feature labeled `slurm-node-mode=hybrid`, which verifies that a
 job submitted directly to Slurm completes on one of those hybrid workers.
 
+After the serial readiness check, independent workload features run in parallel.
+Slurm may queue jobs when the suite temporarily asks for more nodes than are
+available, so each feature allows up to ten minutes for an allocation.
+
+Use `E2E_RUN` with a Go test regular expression to select one feature. Set
+`E2E_CLEANUP=false` to leave the successful workload in place for debugging:
+
+```sh
+MOCK_NVML=true \
+E2E_RUN='TestScheduling/Non-exclusive_DRA_resources_allocated_to_container$' \
+E2E_CLEANUP=false \
+make kind-start test-e2e
+```
+
+The cluster is never removed by `test-e2e`; `make kind-stop` remains explicit.
+Cancellation features still remove their workload because deletion is the
+behavior they validate.
+
 ## Remote cluster
 
 Install a compatible released Slinky stack first. The workstation running the

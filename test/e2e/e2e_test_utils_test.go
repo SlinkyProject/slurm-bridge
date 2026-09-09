@@ -53,6 +53,31 @@ func TestParseMockNVMLFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestParseE2ECleanupFromEnvironment(t *testing.T) {
+	t.Setenv(e2eCleanupEnvironment, "")
+	enabled, err := parseE2ECleanupFromEnvironment()
+	if err != nil {
+		t.Fatalf("parseE2ECleanupFromEnvironment() error = %v", err)
+	}
+	if !enabled {
+		t.Fatal("parseE2ECleanupFromEnvironment() = false by default, want true")
+	}
+
+	t.Setenv(e2eCleanupEnvironment, "false")
+	enabled, err = parseE2ECleanupFromEnvironment()
+	if err != nil {
+		t.Fatalf("parseE2ECleanupFromEnvironment() error = %v", err)
+	}
+	if enabled {
+		t.Fatal("parseE2ECleanupFromEnvironment() = true, want false")
+	}
+
+	t.Setenv(e2eCleanupEnvironment, "invalid")
+	if _, err := parseE2ECleanupFromEnvironment(); err == nil {
+		t.Fatal("parseE2ECleanupFromEnvironment() accepted an invalid value")
+	}
+}
+
 func TestSlurmNodeStates(t *testing.T) {
 	t.Parallel()
 

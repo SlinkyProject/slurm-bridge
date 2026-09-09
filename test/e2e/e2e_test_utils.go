@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,7 +18,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +38,7 @@ import (
 const (
 	slurmNodeModeEnvironment    = "SLURM_NODE_MODE"
 	mockNVMLEnvironment         = "MOCK_NVML"
+	e2eCleanupEnvironment       = "E2E_CLEANUP"
 	slurmNodeModeExternal       = slurmNodeMode("external")
 	slurmNodeModeHybrid         = slurmNodeMode("hybrid")
 	slurmNamespace              = "slurm"
@@ -61,6 +62,8 @@ const (
 	draNvidiaGPUResource        = "deviceclass.resource.kubernetes.io/gpu.nvidia.com"
 	nvidiaGPUPresentLabel       = "nvidia.com/gpu.present"
 	slurmBridgeReadinessTimeout = 3 * time.Minute
+	slurmWorkloadTimeout        = 10 * time.Minute
+	slurmCleanupTimeout         = 3 * time.Minute
 )
 
 var (
@@ -101,6 +104,31 @@ func parseMockNVMLFromEnvironment() (bool, error) {
 	return enabled, nil
 }
 
+func parseE2ECleanupFromEnvironment() (bool, error) {
+	value := os.Getenv(e2eCleanupEnvironment)
+	if value == "" {
+		return true, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean, got %q: %w", e2eCleanupEnvironment, value, err)
+	}
+	return enabled, nil
+}
+
+func e2eCleanupEnabled(t *testing.T) bool {
+	t.Helper()
+	enabled, err := parseE2ECleanupFromEnvironment()
+	if err != nil {
+		t.Errorf("invalid cleanup configuration: %v", err)
+		return true
+	}
+	if !enabled {
+		t.Logf("preserving test resources because %s=false", e2eCleanupEnvironment)
+	}
+	return enabled
+}
+
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
@@ -109,7 +137,7 @@ func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	if err := batchv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
-	if err := resourcev1.AddToScheme(scheme); err != nil {
+	if err := addReleaseSignalSchemes(scheme); err != nil {
 		return nil, err
 	}
 
@@ -375,7 +403,7 @@ func testSlurmBridgeJobScheduling() types.Feature {
 		},
 	}
 
-	return features.New("Slurm-scheduled job").
+	return features.New("Complete Kubernetes Job lifecycle").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -404,7 +432,7 @@ func testSlurmBridgeJobScheduling() types.Feature {
 				}
 				_, hasJobID := podList.Items[0].Labels[slurmJobIDLabel]
 				return hasJobID, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(10*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("pod never received Slurm job ID label: %v", err)
 			}
 			return ctx
@@ -428,7 +456,7 @@ func testSlurmBridgeJobScheduling() types.Feature {
 				}
 				pod = podList.Items[0]
 				return pod.Spec.NodeName != "", nil
-			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(10*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("job pod was never scheduled to a node: %v", err)
 			}
 
@@ -444,9 +472,45 @@ func testSlurmBridgeJobScheduling() types.Feature {
 			}
 			return ctx
 		}).
+		Assess("Job completes and releases its Slurm allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+			pods, err := waitForLabeledPods(ctx, crClient, slurmBridgeNamespace,
+				map[string]string{batchv1.JobNameLabel: jobName}, 1, func(pod *corev1.Pod) bool {
+					return pod.Status.Phase == corev1.PodSucceeded &&
+						!slices.Contains(pod.Finalizers, wellknown.FinalizerScheduler)
+				})
+			if err != nil {
+				t.Fatalf("Job pod did not complete finalizer processing: %v", err)
+			}
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				observed := &batchv1.Job{}
+				if err := crClient.Get(ctx, client.ObjectKeyFromObject(job), observed); err != nil {
+					return false, err
+				}
+				for _, condition := range observed.Status.Conditions {
+					if condition.Type == batchv1.JobComplete {
+						return condition.Status == corev1.ConditionTrue, nil
+					}
+				}
+				return false, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(2*time.Second)); err != nil {
+				t.Fatalf("Kubernetes Job did not report Complete: %v", err)
+			}
+			if err := waitForSlurmJobGone(ctx, config, crClient, pods[0].Labels[slurmJobIDLabel]); err != nil {
+				t.Fatalf("Slurm allocation remained active after Job completion: %v", err)
+			}
+			return ctx
+		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			if t.Failed() {
-				captureFailureDiagnostics(t, "Slurm-scheduled job", slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
+				captureFailureDiagnostics(t, "complete Kubernetes Job lifecycle",
+					slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
+			}
+			if !e2eCleanupEnabled(t) {
+				return ctx
 			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -508,7 +572,7 @@ func testSlurmBridgePodScheduling() types.Feature {
 					return false, err
 				}
 				return pod.Spec.NodeName != "" && pod.Labels[slurmJobIDLabel] != "", nil
-			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(10*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("pod was never scheduled to a node: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 
@@ -548,14 +612,15 @@ func testSlurmBridgePodScheduling() types.Feature {
 			if t.Failed() {
 				captureFailureDiagnostics(t, "Slurm-scheduled pod", slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
 			}
+			if !e2eCleanupEnabled(t) {
+				return ctx
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for pod cleanup: %v", err)
 				return ctx
 			}
-			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-				t.Errorf("failed to delete pod %s: %v", podName, err)
-			}
+			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
 			return ctx
 		}).
 		Feature()
@@ -624,7 +689,7 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 					return false, fmt.Errorf("DRA pod failed: %s", pod.Status.Message)
 				}
 				return pod.Status.Phase == corev1.PodRunning, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("DRA pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 
@@ -679,14 +744,15 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 				captureFailureDiagnostics(t, featureName,
 					slurmBridgeNamespace, slurmNamespace, slinkyNamespace, "kube-system", "dra-example-driver")
 			}
+			if !e2eCleanupEnabled(t) {
+				return ctx
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for DRA pod cleanup: %v", err)
 				return ctx
 			}
-			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-				t.Errorf("failed to delete DRA pod %s: %v", podName, err)
-			}
+			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
 			return ctx
 		}).
 		Feature()
@@ -763,7 +829,7 @@ func testSlurmBridgeNvidiaGPUResourceScheduling(required bool) types.Feature {
 					return false, fmt.Errorf("NVIDIA DRA pod failed: %s", pod.Status.Message)
 				}
 				return pod.Status.Phase == corev1.PodRunning, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("NVIDIA DRA pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 
@@ -802,14 +868,15 @@ func testSlurmBridgeNvidiaGPUResourceScheduling(required bool) types.Feature {
 				captureFailureDiagnostics(t, "NVIDIA DRA GPU allocated to container",
 					slurmBridgeNamespace, "slurm", "dra-driver-nvidia-gpu", "nvml-mock")
 			}
+			if !e2eCleanupEnabled(t) {
+				return ctx
+			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for NVIDIA DRA pod cleanup: %v", err)
 				return ctx
 			}
-			if err := crClient.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-				t.Errorf("failed to delete NVIDIA DRA pod %s: %v", podName, err)
-			}
+			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
 			return ctx
 		}).
 		Feature()
@@ -869,7 +936,7 @@ func testHybridSlurmBatchScheduling() types.Feature {
 				default:
 					return false, nil
 				}
-			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(time.Second)); err != nil {
 				t.Fatalf("native Slurm job %s did not complete: %v; last observation: %s", jobID, err, lastObservation)
 			}
 			jobCompleted = true
@@ -894,7 +961,7 @@ func testHybridSlurmBatchScheduling() types.Feature {
 			if t.Failed() {
 				captureFailureDiagnostics(t, "native Slurm batch job", slurmNamespace, slinkyNamespace)
 			}
-			if jobID == "" || jobCompleted {
+			if jobID == "" || jobCompleted || !e2eCleanupEnabled(t) {
 				return ctx
 			}
 

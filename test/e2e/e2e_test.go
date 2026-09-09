@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/types"
 )
 
-var testEnv = env.New()
+var testEnv = env.NewParallel()
 
 func TestScheduling(t *testing.T) {
 	nodeMode, err := parseSlurmNodeModeFromEnvironment()
@@ -21,10 +21,25 @@ func TestScheduling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := parseE2ECleanupFromEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = testEnv.Test(t, testSlurmBridgeReadiness(nodeMode))
 
 	testFeatures := []types.Feature{
-		testSlurmBridgeReadiness(nodeMode),
+		testAdmissionRoutingBoundaries(),
 		testSlurmBridgeJobScheduling(),
+		testSlurmBridgeParallelJobScheduling(),
+		testSlurmBridgeJobSetScheduling(),
+		testSlurmBridgeJobSetPodGroupScheduling(),
+		testKubernetesPodGroupScheduling(),
+		testSchedulerPluginsPodGroupScheduling(),
+		testLeaderWorkerSetScheduling(),
+		testLeaderWorkerSetPodGroupScheduling(),
+		testSlurmJobRoundTrip(),
+		testKubernetesCancellation(),
+		testSlurmCancellation(),
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(false),
 		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
@@ -36,5 +51,5 @@ func TestScheduling(t *testing.T) {
 		testFeatures = append(testFeatures, testHybridSlurmBatchScheduling())
 	}
 
-	_ = testEnv.Test(t, testFeatures...)
+	_ = testEnv.TestInParallel(t, testFeatures...)
 }

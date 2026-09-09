@@ -13,7 +13,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,7 +98,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 				pods := &corev1.PodList{}
 				if err := crClient.List(ctx, pods,
 					client.InNamespace(slurmBridgeNamespace),
-					client.MatchingLabels{"job-name": jobName},
+					client.MatchingLabels{batchv1.JobNameLabel: jobName},
 				); err != nil {
 					return false, err
 				}
@@ -111,7 +110,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 					return false, fmt.Errorf("DRANET pod failed: %s", pod.Status.Message)
 				}
 				return pod.Status.Phase == corev1.PodRunning, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("DRANET pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
 			}
 			return ctx
@@ -139,7 +138,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 					}
 				}
 				return false, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("ResourceClaim never allocated %s/%s/%s: %v", dranetDriver, pod.Spec.NodeName, dranetDeviceName, err)
 			}
 			return ctx
@@ -162,7 +161,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 						apimeta.IsStatusConditionTrue(status.Conditions, "NetworkReady"), nil
 				}
 				return false, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(5*time.Second)); err != nil {
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("DRANET allocation never reported network ready: %v; observed status: %s", err, statusJSON(claim.Status.Devices))
 			}
 			return ctx
@@ -196,33 +195,30 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			if t.Failed() {
-				captureFailureDiagnostics(t, "DRANET device allocated to container", slurmBridgeNamespace, slurmNamespace, "kube-system")
+			captureReleaseSignalDiagnostics(t, "DRANET device allocated to container",
+				slurmBridgeNamespace, slurmNamespace, "kube-system")
+			if !e2eCleanupEnabled(t) {
+				return ctx
 			}
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Errorf("failed to get client for DRANET cleanup: %v", err)
 				return ctx
 			}
-			if err := crClient.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
-				t.Errorf("failed to delete DRANET job %s: %v", jobName, err)
+			podList := &corev1.PodList{}
+			if err := crClient.List(ctx, podList,
+				client.InNamespace(slurmBridgeNamespace),
+				client.MatchingLabels{batchv1.JobNameLabel: jobName},
+			); err != nil {
+				t.Errorf("failed to list DRANET job pods for cleanup: %v", err)
 			}
-			if err := wait.For(func(ctx context.Context) (bool, error) {
-				podList := &corev1.PodList{}
-				if err := crClient.List(ctx, podList,
-					client.InNamespace(slurmBridgeNamespace),
-					client.MatchingLabels{"job-name": jobName},
-				); err != nil {
-					return false, err
-				}
-				return len(podList.Items) == 0, nil
-			}, wait.WithContext(ctx), wait.WithTimeout(time.Minute), wait.WithInterval(time.Second)); err != nil {
-				t.Errorf("DRANET job pod was not deleted: %v", err)
-				return ctx
+			pods := make([]*corev1.Pod, len(podList.Items))
+			for i := range podList.Items {
+				pods[i] = &podList.Items[i]
 			}
-			if err := crClient.Delete(ctx, deviceClass); err != nil && !apierrors.IsNotFound(err) {
-				t.Errorf("failed to delete DRANET DeviceClass %s: %v", deviceClassName, err)
-			}
+			deleteObject(t, ctx, crClient, job)
+			deletePodsAndAssertCleanup(ctx, t, config, crClient, pods...)
+			deleteObject(t, ctx, crClient, deviceClass)
 			return ctx
 		}).
 		Feature()

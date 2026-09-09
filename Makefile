@@ -153,6 +153,8 @@ values-dev: ## Initialize sparse values-dev.yaml overrides for Helm charts.
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
 E2E_ARTIFACTS_DIR ?= $(shell pwd)/e2e-artifacts
+E2E_CLEANUP ?= true
+E2E_RUN ?=
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -534,8 +536,8 @@ test: fmt vet envtest ## Run tests.
 .PHONY: test-e2e
 test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the current Kubernetes context.
 	mkdir -p "$(E2E_ARTIFACTS_DIR)"
-	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
+	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
 		--format testname \
 		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
 		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \
-		-- -count=1 -timeout 25m ./test/e2e
+		-- -count=1 -timeout 30m $(if $(strip $(E2E_RUN)),-run "$(E2E_RUN)",) ./test/e2e
