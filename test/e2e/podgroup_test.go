@@ -9,7 +9,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -20,36 +19,14 @@ import (
 	schedv1alpha1 "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
-func testKubernetesPodGroupScheduling() types.Feature {
+func testKubernetesPodGroupScheduling(api kubernetesPodGroupAPI) types.Feature {
+	featureName := "Kubernetes PodGroup workload (" + string(api) + ")"
 	workloadName := envconf.RandomName("workload-e2e", 40)
 	jobName := envconf.RandomName("podgroup-job-e2e", 40)
 	podGroupName := jobName + "-workers"
 	var slurmJobIDs []string
-	policy := schedulingv1alpha2.PodGroupSchedulingPolicy{
-		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
-	}
-	workload := &schedulingv1alpha2.Workload{
-		ObjectMeta: metav1.ObjectMeta{Name: workloadName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.WorkloadSpec{
-			ControllerRef: &schedulingv1alpha2.TypedLocalObjectReference{
-				APIGroup: "batch", Kind: "Job", Name: jobName,
-			},
-			PodGroupTemplates: []schedulingv1alpha2.PodGroupTemplate{{
-				Name: "workers", SchedulingPolicy: policy,
-			}},
-		},
-	}
-	podGroup := &schedulingv1alpha2.PodGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: podGroupName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.PodGroupSpec{
-			PodGroupTemplateRef: &schedulingv1alpha2.PodGroupTemplateReference{
-				Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
-					WorkloadName: workloadName, PodGroupTemplateName: "workers",
-				},
-			},
-			SchedulingPolicy: policy,
-		},
-	}
+	workload := newKubernetesWorkload(api, workloadName, "batch", "Job", jobName)
+	podGroup := newKubernetesPodGroup(api, podGroupName, workloadName)
 	template := slurmTestPodTemplate([]string{"sh", "-c", "sleep 10"})
 	template.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To(podGroupName)}
 	job := &batchv1.Job{
@@ -62,9 +39,10 @@ func testKubernetesPodGroupScheduling() types.Feature {
 		},
 	}
 
-	return features.New("Kubernetes 1.36 PodGroup workload").
+	return features.New(featureName).
+		WithLabel("workload-api", string(api)).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			skipKubernetesPodGroupOnUnsupportedVersion(t, config)
+			requireKubernetesPodGroupAPI(t, config, api)
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
@@ -115,7 +93,7 @@ func testKubernetesPodGroupScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			captureReleaseSignalDiagnostics(t, "Kubernetes 1.36 PodGroup workload",
+			captureReleaseSignalDiagnostics(t, featureName,
 				slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
 			if !e2eCleanupEnabled(t) {
 				return ctx

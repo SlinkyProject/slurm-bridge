@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,35 +100,13 @@ func testLeaderWorkerSetScheduling() types.Feature {
 		Feature()
 }
 
-func testLeaderWorkerSetPodGroupScheduling() types.Feature {
+func testLeaderWorkerSetPodGroupScheduling(api kubernetesPodGroupAPI) types.Feature {
+	featureName := "LeaderWorkerSet native PodGroup workload (" + string(api) + ")"
 	workloadName := envconf.RandomName("lws-workload-e2e", 40)
 	lwsName := envconf.RandomName("lws-podgroup-e2e", 40)
 	podGroupName := lwsName + "-workers"
-	policy := schedulingv1alpha2.PodGroupSchedulingPolicy{
-		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
-	}
-	workload := &schedulingv1alpha2.Workload{
-		ObjectMeta: metav1.ObjectMeta{Name: workloadName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.WorkloadSpec{
-			ControllerRef: &schedulingv1alpha2.TypedLocalObjectReference{
-				APIGroup: lwsv1.GroupVersion.Group, Kind: "LeaderWorkerSet", Name: lwsName,
-			},
-			PodGroupTemplates: []schedulingv1alpha2.PodGroupTemplate{{
-				Name: "workers", SchedulingPolicy: policy,
-			}},
-		},
-	}
-	podGroup := &schedulingv1alpha2.PodGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: podGroupName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.PodGroupSpec{
-			PodGroupTemplateRef: &schedulingv1alpha2.PodGroupTemplateReference{
-				Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
-					WorkloadName: workloadName, PodGroupTemplateName: "workers",
-				},
-			},
-			SchedulingPolicy: policy,
-		},
-	}
+	workload := newKubernetesWorkload(api, workloadName, lwsv1.GroupVersion.Group, "LeaderWorkerSet", lwsName)
+	podGroup := newKubernetesPodGroup(api, podGroupName, workloadName)
 	leaderTemplate := slurmTestPodTemplate([]string{"sh", "-c", "sleep 300"})
 	workerTemplate := slurmTestPodTemplate([]string{"sh", "-c", "sleep 300"})
 	for _, template := range []*corev1.PodTemplateSpec{&leaderTemplate, &workerTemplate} {
@@ -150,9 +127,10 @@ func testLeaderWorkerSetPodGroupScheduling() types.Feature {
 		},
 	}
 
-	return features.New("LeaderWorkerSet native PodGroup workload").
+	return features.New(featureName).
+		WithLabel("workload-api", string(api)).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			skipKubernetesPodGroupOnUnsupportedVersion(t, config)
+			requireKubernetesPodGroupAPI(t, config, api)
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
@@ -191,7 +169,7 @@ func testLeaderWorkerSetPodGroupScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			captureReleaseSignalDiagnostics(t, "LeaderWorkerSet native PodGroup workload",
+			captureReleaseSignalDiagnostics(t, featureName,
 				slurmBridgeNamespace, slurmNamespace, slinkyNamespace, "lws-system")
 			if !e2eCleanupEnabled(t) {
 				return ctx
