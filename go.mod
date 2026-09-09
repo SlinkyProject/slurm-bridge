@@ -7,6 +7,7 @@ require (
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
+	github.com/prometheus/common v0.67.5
 	github.com/puttsk/hostlist v0.1.0
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.3
@@ -102,7 +103,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

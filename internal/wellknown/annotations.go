@@ -67,8 +67,9 @@ const (
 	// AnnotationReservation sets the reservation
 	// for the Slurm external job.
 	AnnotationReservation = SlurmJobPrefix + "reservation"
-	// AnnotationTimelimit sets the Time Limit in minutes
-	// for the Slurm external job.
+	// AnnotationTimeLimit sets the Time Limit for the Slurm external job.
+	// The value is a duration ("90s", "2h", "1d"), a Slurm --time value
+	// ("1-12:00:00") or a bare integer, which means minutes.
 	AnnotationTimeLimit = SlurmJobPrefix + "timelimit"
 	// AnnotationUserId overrides the default userid
 	// for the Slurm external job.
