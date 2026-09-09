@@ -45,16 +45,38 @@ import (
 )
 
 var (
-	ErrorNoKubeNode           = errors.New("no more external nodes to annotate pods")
-	ErrorNoKubeNodeMatch      = errors.New("slurm node matches no Kube nodes")
-	ErrorPodUpdateFailed      = errors.New("failed to update pod")
-	ErrorNodeConfigInvalid    = errors.New("requested node configuration is not available")
-	ErrorNoNodesAssigned      = errors.New("no nodes assigned to job")
-	ErrorJobNotPendingNoNodes = errors.New("external job is no longer pending but has no nodes assigned")
-	ErrorPodWithResourceClaim = errors.New("can't schedule pod with a resource claim")
+	ErrorNoKubeNode              = errors.New("no more external nodes to annotate pods")
+	ErrorNoKubeNodeMatch         = errors.New("slurm node matches no Kube nodes")
+	ErrorPodUpdateFailed         = errors.New("failed to update pod")
+	ErrorNodeConfigInvalid       = errors.New("requested node configuration is not available")
+	ErrorNoNodesAssigned         = errors.New("no nodes assigned to job")
+	ErrorJobNotPendingNoNodes    = errors.New("external job is no longer pending but has no nodes assigned")
+	ErrorPodWithResourceClaim    = errors.New("can't schedule pod with a resource claim")
+	ErrorPodWithRequiredAffinity = errors.New("can't schedule pod with required affinity: use a Slurm partition or constraint instead")
 )
 
 const slurmJobNotPending = "job is no longer pending execution"
+
+// hasRequiredAffinity reports whether pod has a required (as opposed to
+// preferred) node or pod (anti-)affinity term.
+func hasRequiredAffinity(pod *corev1.Pod) bool {
+	affinity := pod.Spec.Affinity
+	if affinity == nil {
+		return false
+	}
+	if na := affinity.NodeAffinity; na != nil {
+		if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
+			return true
+		}
+	}
+	if pa := affinity.PodAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+		return true
+	}
+	if pa := affinity.PodAntiAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+		return true
+	}
+	return false
+}
 
 func findMatchingError(err error, matches func(error) bool) error {
 	if err == nil {
@@ -272,6 +294,22 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	if pod.Spec.ResourceClaims != nil {
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
 		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
+	}
+
+	// Required affinity is a hard constraint; honoring required NodeAffinity would
+	// mean growing the excluded-node list slurm-bridge already sends Slurm per pod
+	// (see #132: that list's churn is a known scheduling performance cost we're
+	// trying to reduce, not add to), and required PodAffinity/PodAntiAffinity would
+	// be silently violated today since InterPodAffinity never runs in this
+	// scheduler's profile. Reject rather than silently violate it; also enforced at
+	// admission for pods that bypass this scheduler. Use a Slurm partition or
+	// constraint instead.
+	//
+	// Preferred affinity is only a scoring hint, even upstream kube-scheduler
+	// treats it as best-effort, so it's fine to silently not act on it.
+	if hasRequiredAffinity(pod) {
+		logger.Error(ErrorPodWithRequiredAffinity, "required affinity is not supported")
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error())
 	}
 
 	s := &stateData{}
