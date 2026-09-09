@@ -89,10 +89,11 @@ push-charts: build-chart ## Push OCI packages.
 ##@ Deployment
 
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
+SLURM_NODE_MODE ?= external
 
 .PHONY: kind-start
-kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack.
-	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
+kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
+	./hack/kind.sh --all --slurm-node-mode="$(SLURM_NODE_MODE)" "$(KIND_CLUSTER_NAME)"
 
 .PHONY: kind-stop
 kind-stop: ## Delete the development Kind cluster.
@@ -146,6 +147,9 @@ values-dev: ## Initialize sparse values-dev.yaml overrides for Helm charts.
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
+E2E_ARTIFACTS_DIR ?= $(shell pwd)/e2e-artifacts
+E2E_CLEANUP ?= true
+E2E_RUN ?=
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -185,6 +189,7 @@ KUBECTL ?= kubectl
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOVULNCHECK ?= $(LOCALBIN)/govulncheck
+GOTESTSUM ?= $(LOCALBIN)/gotestsum
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 HELM_DOCS ?= $(LOCALBIN)/helm-docs
 PANDOC ?= $(LOCALBIN)/pandoc-$(PANDOC_VERSION)
@@ -203,6 +208,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.20.1
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 GOVULNCHECK_VERSION ?= v1.3.0
+GOTESTSUM_VERSION ?= v1.13.0
 # Written by `make govulncheck`: CSV (see file header comments). CI uploads as an artifact.
 GOVULNCHECK_REPORT ?= govulncheck-vulns.csv
 
@@ -228,6 +234,11 @@ $(ENVTEST): $(LOCALBIN)
 govulncheck-bin: $(GOVULNCHECK) ## Download govulncheck locally if necessary.
 $(GOVULNCHECK): $(LOCALBIN)
 	$(call go-install-tool,$(GOVULNCHECK),golang.org/x/vuln/cmd/govulncheck,$(GOVULNCHECK_VERSION))
+
+.PHONY: gotestsum-bin
+gotestsum-bin: $(GOTESTSUM) ## Download gotestsum locally if necessary.
+$(GOTESTSUM): $(LOCALBIN)
+	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VERSION))
 
 .PHONY: golangci-lint-bin
 golangci-lint-bin: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
@@ -517,3 +528,12 @@ test: fmt vet envtest ## Run tests.
 			echo "Total test coverage ($${percentage}%) is less than the coverage threshold ($(CODECOV_PERCENT)%)."; \
 			exit 1; \
 		fi
+
+.PHONY: test-e2e
+test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the current Kubernetes context.
+	mkdir -p "$(E2E_ARTIFACTS_DIR)"
+	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
+		--format testname \
+		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
+		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \
+		-- -count=1 -timeout 30m $(if $(strip $(E2E_RUN)),-run "$(E2E_RUN)",) ./test/e2e

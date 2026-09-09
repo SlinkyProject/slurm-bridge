@@ -221,6 +221,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.6.0
 - License: BSD-3-Clause
 
+### github.com/gorilla/websocket
+- Name: github.com/gorilla/websocket
+- Version: v1.5.4-0.20250319132907-e064f32e3674
+- License: BSD-2-Clause
+
 ### github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
 - Name: github.com/grpc-ecosystem/go-grpc-middleware/providers/prometheus
 - Version: v1.1.0
@@ -260,6 +265,16 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Name: github.com/kylelemons/godebug/diff
 - Version: v1.1.0
 - License: Apache-2.0
+
+### github.com/moby/spdystream
+- Name: github.com/moby/spdystream
+- Version: v0.5.1
+- License: Apache-2.0
+
+### github.com/moby/spdystream/spdy
+- Name: github.com/moby/spdystream/spdy
+- Version: v0.5.1
+- License: BSD-3-Clause
 
 ### github.com/moby/term
 - Name: github.com/moby/term
@@ -719,6 +734,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
 - Version: v0.24.0
+- License: Apache-2.0
+
+### sigs.k8s.io/e2e-framework
+- Name: sigs.k8s.io/e2e-framework
+- Version: v0.6.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/jobset/api/jobset/v1alpha2
