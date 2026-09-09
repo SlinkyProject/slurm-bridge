@@ -84,7 +84,8 @@ admission:
   replicas: 1
   # -- PodDisruptionBudget for the admission deployment
   pdb:
-    # -- Enable PodDisruptionBudget
+    # -- Enable PodDisruptionBudget. Only rendered when `replicas` is greater
+    # than 1, since a PDB over a single replica blocks node drains.
     enabled: false
      # -- Minimum pods that must remain available after eviction (int or quoted percent).
     minAvailable: 1
@@ -137,7 +138,8 @@ controllers:
   leaderElect: false
   # -- PodDisruptionBudget for the controllers deployment
   pdb:
-    # -- Enable PodDisruptionBudget
+    # -- Enable PodDisruptionBudget. Only rendered when `replicas` is greater
+    # than 1, since a PDB over a single replica blocks node drains.
     enabled: false
      # -- Minimum pods that must remain available after eviction (int or quoted percent).
     minAvailable: 1

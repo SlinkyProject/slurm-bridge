@@ -4,6 +4,7 @@
 suite: test admission
 templates:
   - admission/deployment.yaml
+  - admission/poddisruptionbudget.yaml
   - admission/rbac.yaml
   - admission/service.yaml
   - admission/webhook.yaml
@@ -87,6 +88,46 @@ tests:
     asserts:
       - isNull:
           path: spec.template.spec.containers[0].resources
+  - it: pdb is not rendered for a single replica, which would block node drains
+    template: admission/poddisruptionbudget.yaml
+    set:
+      admission:
+        enabled: true
+        replicas: 1
+        pdb:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: pdb defaults to minAvailable when maxUnavailable is unset
+    template: admission/poddisruptionbudget.yaml
+    set:
+      admission:
+        enabled: true
+        replicas: 2
+        pdb:
+          enabled: true
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - notExists:
+          path: spec.maxUnavailable
+  - it: pdb maxUnavailable takes precedence over minAvailable
+    template: admission/poddisruptionbudget.yaml
+    set:
+      admission:
+        enabled: true
+        replicas: 2
+        pdb:
+          enabled: true
+          maxUnavailable: 1
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - notExists:
+          path: spec.minAvailable
   - it: does not expose the Slurm JWT to admission
     template: admission/deployment.yaml
     set:
