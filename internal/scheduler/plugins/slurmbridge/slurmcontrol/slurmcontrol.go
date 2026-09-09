@@ -304,15 +304,20 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
 			CoreBitmap:     ptr.Deref(n.CoreBitmap, ""),
 			Channel:        ptr.Deref(ptr.Deref(n.Channel, api.V0044Uint32NoValStruct{}).Number, 0),
-			Gres:           make([]GresLayout, len(ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}))),
+			Gres:           make([]GresLayout, 0, len(ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}))),
 		}
-		for i, g := range ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}) {
-			nodeOut.Gres[i] = GresLayout{
+		for _, g := range ptr.Deref(n.Gres, api.V0044NodeGresLayoutList{}) {
+			// Slurm includes job GRES types with zero count and no index on
+			// nodes where that type is not allocated. They need no DRA claim.
+			if ptr.Deref(g.Count, 0) == 0 {
+				continue
+			}
+			nodeOut.Gres = append(nodeOut.Gres, GresLayout{
 				Name:  g.Name,
 				Type:  ptr.Deref(g.Type, ""),
 				Count: ptr.Deref(g.Count, 0),
 				Index: ptr.Deref(g.Index, ""),
-			}
+			})
 		}
 		return &nodeOut, nil
 	}
