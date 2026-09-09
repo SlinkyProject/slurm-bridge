@@ -92,10 +92,10 @@ for clone, build, and test instructions for this repository.
 ### Release notes
 
 - Every merge request needs a release note. Add a `Changelog` trailer to at
-  least one commit, in the same trailer block as your sign-off:
+  least one commit, above your sign-off in the same trailer block:
   ```
-  Signed-off-by: Your Name <your@email.com>
   Changelog: Fixed - short description of the change
+  Signed-off-by: Your Name <your@email.com>
   ```
 - The category is one of `Added`, `Fixed`, `Changed`, or `Removed`. When the
   change needs no release note, use `Changelog: NONE`.
@@ -104,9 +104,12 @@ for clone, build, and test instructions for this repository.
   Git, and therefore from CI.
 - CI rejects a merge request when no commit carries a valid trailer, and a
   malformed trailer fails the check even when another commit has a valid one.
-- Beware that `git commit --amend -s` appends a *second* `Signed-off-by` once
-  `Changelog` follows it, because the sign-off is no longer the final trailer.
-  When amending, keep the sign-off in the message you pass and omit `-s`.
+- To add the trailer to a commit you already made, keep the sign-off last so
+  `-s` never has cause to append a second one:
+  ```bash
+  $ git -c trailer.Changelog.where=start commit --amend --no-edit --only \
+      --trailer "Changelog: NONE"
+  ```
 
 ### Community standards
 
