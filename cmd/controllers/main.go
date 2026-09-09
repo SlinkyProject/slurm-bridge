@@ -25,6 +25,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
@@ -111,6 +112,11 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	if err := nodeutils.SetupFieldIndexers(mgr); err != nil {
+		setupLog.Error(err, "unable to set up field indexers")
 		os.Exit(1)
 	}
 
