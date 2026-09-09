@@ -36,6 +36,8 @@ deploy:
         chartPath: ./
         valuesFiles:
           - ./values-dev.yaml
+        setValues:
+          admission.managedNamespaces[0]: slurm-bridge
         setValueTemplates:
           scheduler.image.repository: '{{.IMAGE_REPO_slinky_slurm_net_slurm_bridge_scheduler}}'
           scheduler.image.tag: '{{.IMAGE_TAG_slinky_slurm_net_slurm_bridge_scheduler}}'
