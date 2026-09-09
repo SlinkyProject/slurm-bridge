@@ -226,6 +226,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.6.0
 - License: BSD-3-Clause
 
+### github.com/gorilla/websocket
+- Name: github.com/gorilla/websocket
+- Version: v1.5.4-0.20250319132907-e064f32e3674
+- License: BSD-2-Clause
+
 ### github.com/grpc-ecosystem/go-grpc-prometheus
 - Name: github.com/grpc-ecosystem/go-grpc-prometheus
 - Version: v1.2.0
@@ -261,6 +266,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v1.1.0
 - License: Apache-2.0
 
+### github.com/moby/spdystream
+- Name: github.com/moby/spdystream
+- Version: v0.5.0
+- License: Apache-2.0
+
 ### github.com/moby/term
 - Name: github.com/moby/term
 - Version: v0.5.2
@@ -279,6 +289,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 ### github.com/munnerz/goautoneg
 - Name: github.com/munnerz/goautoneg
 - Version: v0.0.0-20191010083416-a7dc8b61c822
+- License: BSD-3-Clause
+
+### github.com/mxk/go-flowrate/flowrate
+- Name: github.com/mxk/go-flowrate/flowrate
+- Version: v0.0.0-20140419014527-cca7078d478f
 - License: BSD-3-Clause
 
 ### github.com/oapi-codegen/runtime
@@ -709,6 +724,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
 - Version: v0.23.3
+- License: Apache-2.0
+
+### sigs.k8s.io/e2e-framework
+- Name: sigs.k8s.io/e2e-framework
+- Version: v0.6.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/jobset/api/jobset/v1alpha2

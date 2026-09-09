@@ -1,7 +1,7 @@
 ---
 configFiles:
   gres.conf: |
-    NodeName=kind-worker[4-9] Name=gpu Type=gpu.example.com File=/dev/tty[10-17] Count=8
+    Name=gpu Type=gpu.example.com File=/dev/tty[10-13] Count=4
 controller:
   extraConf: GresTypes=gpu
 nodesets:
@@ -23,7 +23,7 @@ nodesets:
         repository: docker.io/library/alpine
         tag: latest
       resources: {}
-    extraConf: Gres=gpu:gpu.example.com:8
+    extraConf: Gres=gpu:gpu.example.com:4
     partition:
       enabled: true
     podSpec:

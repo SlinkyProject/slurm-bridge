@@ -416,11 +416,19 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Apply controller configuration before creating the NodeSet. Otherwise,
+		# NodeSet reconciliation can back off while slurmctld is restarting.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
@@ -469,7 +477,7 @@ function dra-driver-cpu::install() {
 	# The upstream v0.2.0 chart does not expose a nodeSelector value.
 	kubectl -n kube-system patch daemonset dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
-	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
 function main::help() {
