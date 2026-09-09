@@ -3,6 +3,8 @@ configFiles:
   gres.conf: |
     Name=gpu Type=gpu-example File=/dev/tty[10-13] Count=4
     Name=gpu Type=gpu-nvidia File=/dev/tty[20-27] Count=8
+    # DRANET injects the interface; this file gives Slurm a stable fixture index.
+    Name=nic Type=dranet0 File=/dev/null Count=1
   topology.yaml: |
     ---
     - topology: topo-switch
@@ -34,7 +36,7 @@ nodesets:
         repository: docker.io/library/alpine
         tag: latest
       resources: {}
-    extraConf: Gres=gpu:gpu-example:4,gpu:gpu-nvidia:8
+    extraConf: Gres=gpu:gpu-example:4,gpu:gpu-nvidia:8,nic:dranet0:1
     partition:
       enabled: true
     podSpec:

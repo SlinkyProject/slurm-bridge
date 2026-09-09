@@ -524,6 +524,7 @@ function slurm::configure_for_bridge() {
 
 function slurm::configure_hybrid_dra_inventory() {
 	local bridge_nodes
+	local dranet_device
 	local desired_nodes
 	local example_devices
 	local index
@@ -543,6 +544,7 @@ function slurm::configure_hybrid_dra_inventory() {
 		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
 
 	for node in $bridge_nodes; do
+		dranet_device="\"/dra/dra.net/$node/$DRANET_INTERFACE_NAME\""
 		example_devices=""
 		for index in 0 1 2 3; do
 			example_devices="${example_devices}${example_devices:+,}\"/dra/gpu.example.com/$node/gpu-$index\""
@@ -551,7 +553,10 @@ function slurm::configure_hybrid_dra_inventory() {
 		for index in 0 1 2 3 4 5 6 7; do
 			nvidia_devices="${nvidia_devices}${nvidia_devices:+,}\"/dra/gpu.nvidia.com/$node/gpu-$index\""
 		done
-		extra="slurm-bridge.dra-gres-map={\"v\":1,\"profiles\":{\"gpu-example\":[$example_devices],\"gpu-nvidia\":[$nvidia_devices]}}"
+		extra='slurm-bridge.dra-gres-map={"v":1,"profiles":{'
+		extra="${extra}\"dranet0\":[$dranet_device],"
+		extra="${extra}\"gpu-example\":[$example_devices],"
+		extra="${extra}\"gpu-nvidia\":[$nvidia_devices]}}"
 		kubectl exec -n slurm slurm-controller-0 -- \
 			scontrol update NodeName="$node" "Extra=$extra"
 	done
