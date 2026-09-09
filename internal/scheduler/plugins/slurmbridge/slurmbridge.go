@@ -157,6 +157,10 @@ const (
 	stateKey fwk.StateKey = Name
 )
 
+// ConfigFile is the path to the slurm-bridge config file read by New, overridable via
+// cmd/scheduler/main.go's "--slurm-bridge-config" flag.
+var ConfigFile = config.ConfigFile
+
 // Name returns name of the plugin. It is used in logs, etc.
 func (sb *SlurmBridge) Name() string {
 	return Name
@@ -193,15 +197,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("creating new SlurmBridge plugin")
 
-	data, err := os.ReadFile(config.ConfigFile)
+	data, err := os.ReadFile(ConfigFile)
 	if err != nil {
-		logger.Error(err, "unable to read config file", "file", config.ConfigFile)
-		// Attempt to read fallback debug config path
-		data, err = os.ReadFile("/tmp/config.yaml.debug")
-		if err != nil {
-			logger.Error(err, "unable to read config file", "file", config.ConfigFile)
-			return nil, err
-		}
+		logger.Error(err, "unable to read config file", "file", ConfigFile)
+		return nil, err
 	}
 	cfg, err := config.Unmarshal(data)
 	if err != nil {

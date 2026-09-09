@@ -25,6 +25,10 @@ func main() {
 	command := app.NewSchedulerCommand(
 		app.WithPlugin(slurmbridge.Name, slurmbridge.New),
 	)
+	// kube-scheduler's own command already owns "--config" for the KubeSchedulerConfiguration
+	// file, so slurm-bridge's own config file path needs a distinct flag name.
+	command.Flags().StringVar(&slurmbridge.ConfigFile, "slurm-bridge-config", slurmbridge.ConfigFile,
+		"Path to the slurm-bridge config file.")
 	code := cli.Run(command)
 	os.Exit(code)
 }
