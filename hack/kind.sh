@@ -389,7 +389,43 @@ function slurm-operator::install_from_source() {
 
 function slurm-operator::wait() {
 	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
-		-n slinky --timeout=120s
+		-n slinky --timeout=120s || return 1
+
+	# Pod readiness can precede Service routing updates. Exercise admission from
+	# the API server without persisting a resource or requiring a running Slurm.
+	echo "[slurm] Waiting for slurm-operator webhook admission..."
+	local deadline=$((SECONDS + 120))
+	local output=""
+	local request_timeout
+	while ((SECONDS < deadline)); do
+		request_timeout=$((deadline - SECONDS))
+		if ((request_timeout <= 0)); then
+			break
+		fi
+		if ((request_timeout > 10)); then
+			request_timeout=10
+		fi
+		if output="$(
+			kubectl create --dry-run=server --namespace=slinky \
+				--request-timeout="${request_timeout}s" -f - 2>&1 <<-EOF
+					apiVersion: slinky.slurm.net/v1beta1
+					kind: RestApi
+					metadata:
+					  generateName: slurm-operator-webhook-check-
+					spec:
+					  controllerRef:
+					    name: slurm-operator-webhook-check
+				EOF
+		)"; then
+			echo "[slurm] Slurm-operator webhook admission is ready."
+			return 0
+		fi
+		sleep 2
+	done
+
+	echo "[slurm] Timed out waiting for slurm-operator webhook admission after 120s." >&2
+	printf '%s\n' "$output" >&2
+	return 1
 }
 
 function slurm::install_from_source() {
@@ -416,17 +452,50 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Apply controller configuration before creating the NodeSet. Otherwise,
+		# NodeSet reconciliation can back off while slurmctld is restarting.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
+		slurm::wait_for_hybrid_nodes
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
 		exit 1
 		;;
 	esac
+}
+
+function slurm::wait_for_hybrid_nodes() {
+	local bridge_nodes
+	local desired_nodes
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	desired_nodes="$(printf '%s\n' "$bridge_nodes" | sed '/^$/d' | wc -l | tr -d ' ')"
+	if [ "$desired_nodes" -eq 0 ]; then
+		echo "[slurm] No hybrid worker nodes found." >&2
+		exit 1
+	fi
+
+	if ! kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s; then
+		# Slurm startup failures can leave NodeSet reconciliation in backoff.
+		echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+		kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+			"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			--overwrite
+		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
+	fi
 }
 
 function slurm-bridge::secret() {
@@ -469,7 +538,7 @@ function dra-driver-cpu::install() {
 	# The upstream v0.2.0 chart does not expose a nodeSelector value.
 	kubectl -n kube-system patch daemonset dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
-	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
 function main::help() {
