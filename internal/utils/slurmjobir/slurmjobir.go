@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -420,11 +421,11 @@ func parseAnnotations(slurmJobIR *SlurmJobIR, anno map[string]string) error {
 		case wellknown.AnnotationReservation:
 			slurmJobIR.JobInfo.Reservation = &value
 		case wellknown.AnnotationTimeLimit:
-			num, err := ConvStrTo32(value)
+			minutes, err := timelimit.Parse(value)
 			if err != nil {
 				return err
 			}
-			slurmJobIR.JobInfo.TimeLimit = num
+			slurmJobIR.JobInfo.TimeLimit = &minutes
 		case wellknown.AnnotationUserId:
 			slurmJobIR.JobInfo.UserId = &value
 		case wellknown.AnnotationWckey:

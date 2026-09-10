@@ -23,6 +23,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -112,6 +113,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 		return nil, err
 	}
 	if err := validateAnnotationConflicts(pod); err != nil {
+		return nil, err
+	}
+	if err := validateTimeLimitAnnotation(pod); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -282,6 +286,19 @@ func addDeviceClassName(classNames map[string]struct{}, resourceName corev1.Reso
 		return
 	}
 	classNames[strings.TrimPrefix(name, resourcev1.ResourceDeviceClassPrefix)] = struct{}{}
+}
+
+// validateTimeLimitAnnotation rejects a time limit the scheduler would fail to
+// parse, so the user sees the error from kubectl apply rather than from a job
+// that never schedules. A time limit set on an owning workload instead of the
+// pod template is not visible here and is still only caught during translation.
+func validateTimeLimitAnnotation(pod *corev1.Pod) error {
+	if value, ok := pod.Annotations[wellknown.AnnotationTimeLimit]; ok {
+		if _, err := timelimit.Parse(value); err != nil {
+			return fmt.Errorf("annotation %q: %w", wellknown.AnnotationTimeLimit, err)
+		}
+	}
+	return nil
 }
 
 // validateAnnotationConflicts rejects Slurm annotation overrides that would

@@ -621,6 +621,45 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "PodWithValidTimeLimit",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationTimeLimit: "1-12:00:00",
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "PodWithInvalidTimeLimit",
+			fields: fields{
+				ManagedNamespaces: []string{namespace},
+			},
+			args: args{
+				ctx: context.TODO(),
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Annotations: map[string]string{
+							wellknown.AnnotationTimeLimit: "1.5h",
+						},
+					},
+				},
+			},
+			want:            nil,
+			wantErr:         true,
+			wantErrContains: wellknown.AnnotationTimeLimit,
+		},
+		{
 			name: "PodWithResourceClaim",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},

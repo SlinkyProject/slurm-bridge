@@ -822,6 +822,51 @@ func Test_parseAnnotations(t *testing.T) {
 			},
 		},
 		{
+			name: "TimeLimitDurationAnnotation",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationTimeLimit: "2h",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					TimeLimit: ptr.To(int32(120)),
+				},
+			},
+		},
+		{
+			name: "TimeLimitSlurmTimeAnnotation",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationTimeLimit: "1-00:30:00",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					TimeLimit: ptr.To(int32(1470)),
+				},
+			},
+		},
+		{
+			name: "TimeLimitSubMinuteAnnotation",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationTimeLimit: "30s",
+				},
+			},
+			wantErr: false,
+			wantRes: SlurmJobIR{
+				JobInfo: SlurmJobIRJobInfo{
+					TimeLimit: ptr.To(int32(1)),
+				},
+			},
+		},
+		{
 			name: "BadCpuPerTaskAnnotation",
 			args: args{
 				slurmJobIR: &SlurmJobIR{},
@@ -857,6 +902,16 @@ func Test_parseAnnotations(t *testing.T) {
 				slurmJobIR: &SlurmJobIR{},
 				anno: map[string]string{
 					wellknown.AnnotationTimeLimit: "foo",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "BadTimeLimitDurationAnnotation",
+			args: args{
+				slurmJobIR: &SlurmJobIR{},
+				anno: map[string]string{
+					wellknown.AnnotationTimeLimit: "1.5h",
 				},
 			},
 			wantErr: true,

@@ -102,7 +102,13 @@ see the [annotations.go] source.
 | slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.        | "8Gi"        |
 | slurmjob.slinky.slurm.net/partition    | Overrides the default partition.  | "debug"      |
 | slurmjob.slinky.slurm.net/priority     | Sets the job priority.            | "100"        |
-| slurmjob.slinky.slurm.net/timelimit    | Sets the time limit in minutes.   | "5"          |
+| slurmjob.slinky.slurm.net/timelimit    | Sets the job time limit.          | "30m"        |
+
+The time limit accepts a duration with a unit suffix (`s`, `m`, `h`, `d`, `w`),
+one of Slurm's `--time` formats (`MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM`,
+`D-HH:MM:SS`), or a bare integer, which is read as minutes. Slurm's time limit
+has minute granularity, so anything shorter than a minute is rounded up to one
+minute.
 
 An example of the annotations in use:
 
