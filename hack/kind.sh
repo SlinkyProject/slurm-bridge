@@ -576,8 +576,16 @@ function slurm::configure_hybrid_dra_inventory() {
 		exit 1
 	fi
 
-	kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
-		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
+	if ! kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s; then
+		# Slurm startup failures can leave NodeSet reconciliation in backoff.
+		echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+		kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+			"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			--overwrite
+		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
+	fi
 
 	for node in $bridge_nodes; do
 		dranet_device="\"/dra/dra.net/$node/$DRANET_INTERFACE_NAME\""
