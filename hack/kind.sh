@@ -287,8 +287,16 @@ function slurm-bridge::nodes() {
 	else
 		local replicas
 		replicas=$(kubectl get nodeset slurm-worker-slurm-bridge -n slurm -o jsonpath='{.spec.replicas}')
-		kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
-			-n slurm nodeset/slurm-worker-slurm-bridge --timeout=300s
+		if ! kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
+			-n slurm nodeset/slurm-worker-slurm-bridge --timeout=150s; then
+			# Slurm startup failures can leave NodeSet reconciliation in backoff.
+			echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+			kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+				"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+				--overwrite
+			kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
+				-n slurm nodeset/slurm-worker-slurm-bridge --timeout=150s
+		fi
 		kubectl get pods -n slurm -l nodeset.slinky.slurm.net/name=slurm-worker-slurm-bridge \
 			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}" | while read -r node hostname; do
 			if [[ -n $node && -n $hostname ]]; then
