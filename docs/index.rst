@@ -99,13 +99,39 @@ features:
 Compatibility
 -------------
 
-+------------+-----------------------------------------------------------------------------+
-| Software   | Minimum Version                                                             |
-+============+=============================================================================+
-| Kubernetes | `v1.35 <https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/>`__ |
-+------------+-----------------------------------------------------------------------------+
-| Slurm      | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__ |
-+------------+-----------------------------------------------------------------------------+
+Each minor release supports all Kubernetes minor versions that are
+`supported upstream <https://kubernetes.io/releases/>`__ when it is
+released, starting with Kubernetes 1.35. That set is recorded for the
+release branch. Support for newer Kubernetes minors may be backported in
+a patch release after end-to-end validation; these backports are
+optional.
+
++------------------------+--------------+--------------+--------------+
+| Release branch         | Kubernetes   | Kubernetes   | Kubernetes   |
+|                        | 1.35         | 1.36         | 1.37         |
++========================+==============+==============+==============+
+| ``main`` (1.3          | ✓            | ✓            | Planned      |
+| development)           |              |              |              |
++------------------------+--------------+--------------+--------------+
+| ``release-1.2``        | ✓            | ✓            | —            |
++------------------------+--------------+--------------+--------------+
+| ``release-1.1``        | ✓            | ✓            | —            |
++------------------------+--------------+--------------+--------------+
+| ``release-1.0``        | ✓            | ✓            | —            |
++------------------------+--------------+--------------+--------------+
+
+The grid applies to the latest patch release of each branch: ✓ means
+supported; — means unsupported. When a patch adds Kubernetes support,
+the entry records the first supporting patch version (for example,
+``✓ since 1.3.1``). The ``main`` row is provisional until the minor
+release. Kubernetes 1.37 support is planned for 1.3 and still requires
+compatibility changes and end-to-end validation.
+
+A successful Helm installation does not imply support beyond this grid.
+
+All listed branches require `Slurm
+25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__
+or newer.
 
 Limitations
 -----------
