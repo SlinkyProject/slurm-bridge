@@ -130,14 +130,22 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
 
-	// Built-in PodGroup: pods opt in via spec.schedulingGroup.
+	// Only Gang PodGroups replace the normal workload root. Basic PodGroups
+	// still supply annotations, but leave allocation membership to the owner.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
+	var pg *PodGroup
 	if pgName, ok := podGroupName(pod); ok {
 		if workloadAPI == nil {
 			return nil, fmt.Errorf("pod %s/%s uses spec.schedulingGroup but the built-in Workload API is not served", pod.Namespace, pod.Name)
 		}
-		rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
-		rootPOM.Name = pgName
+		pg = &PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
+		if err := t.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
+			return nil, err
+		}
+		if pg.Spec.SchedulingPolicy.Gang != nil {
+			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
+			rootPOM.Name = pgName
+		}
 	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
 		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
 		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
@@ -163,7 +171,7 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	if err := t.parseDeviceResources(slurmJobIR); err != nil {
 		return nil, err
 	}
-	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM)
+	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM, pg)
 	return slurmJobIR, err
 }
 

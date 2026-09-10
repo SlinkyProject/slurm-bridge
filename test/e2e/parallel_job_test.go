@@ -16,30 +16,38 @@ import (
 )
 
 func testSlurmBridgeParallelJobScheduling() types.Feature {
-	jobName := envconf.RandomName("job-parallel-e2e", 40)
+	return testSlurmBridgeJobAllocations("Parallel Kubernetes Job", 3)
+}
+
+func testSlurmBridgeSequentialJobScheduling() types.Feature {
+	return testSlurmBridgeJobAllocations("Sequential Kubernetes Job", 1)
+}
+
+func testSlurmBridgeJobAllocations(featureName string, parallelism int32) types.Feature {
+	jobName := envconf.RandomName("job-allocations-e2e", 40)
 	var slurmJobIDs []string
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: jobName, Namespace: slurmBridgeNamespace},
 		Spec: batchv1.JobSpec{
-			Parallelism:  ptr.To[int32](3),
+			Parallelism:  ptr.To(parallelism),
 			Completions:  ptr.To[int32](3),
 			BackoffLimit: ptr.To[int32](0),
 			Template:     slurmTestPodTemplate([]string{"sh", "-c", "sleep 5"}),
 		},
 	}
 
-	return features.New("Parallel Kubernetes Job").
+	return features.New(featureName).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
 			}
 			if err := crClient.Create(ctx, job); err != nil {
-				t.Fatalf("create parallel Job: %v", err)
+				t.Fatalf("create Job: %v", err)
 			}
 			return ctx
 		}).
-		Assess("parallel Slurm allocations match pod scheduling groups", func(
+		Assess("all Job pods receive independent Slurm allocations", func(
 			ctx context.Context,
 			t *testing.T,
 			config *envconf.Config,
@@ -51,51 +59,33 @@ func testSlurmBridgeParallelJobScheduling() types.Feature {
 			pods, err := waitForLabeledPods(ctx, crClient, slurmBridgeNamespace,
 				map[string]string{batchv1.JobNameLabel: jobName}, 3, podHasSlurmAllocation)
 			if err != nil {
-				t.Fatalf("parallel Job pods were not allocated: %v", err)
+				t.Fatalf("Job pods were not allocated: %v", err)
 			}
-			var podGroupName string
 			for i := range pods {
 				assertBridgePod(t, ctx, crClient, &pods[i])
-				groupName := ""
-				if group := pods[i].Spec.SchedulingGroup; group != nil {
-					groupName = ptr.Deref(group.PodGroupName, "")
-				}
-				if i == 0 {
-					podGroupName = groupName
-				}
-				if groupName != podGroupName {
-					t.Errorf("parallel Job pod %s references PodGroup %q, want %q",
-						pods[i].Name, groupName, podGroupName)
-				}
 			}
-			// WorkloadWithJob can create a PodGroup automatically. Grouped pods
-			// share one Slurm allocation; ungrouped pods each need their own.
-			wantJobs := len(pods)
-			if podGroupName != "" {
-				wantJobs = 1
-				t.Logf("parallel Job pods share PodGroup %q", podGroupName)
-			}
+			// WorkloadWithJob can create a Basic PodGroup for this Job. Its
+			// presence must not turn independent pods into a Slurm gang.
 			slurmJobIDs = podSlurmJobIDs(pods)
-			if len(slurmJobIDs) != wantJobs {
-				t.Errorf("parallel Job has %d distinct Slurm jobs, want %d: %v",
-					len(slurmJobIDs), wantJobs, slurmJobIDs)
+			if len(slurmJobIDs) != 3 {
+				t.Errorf("Job has %d distinct Slurm jobs, want 3: %v", len(slurmJobIDs), slurmJobIDs)
 			}
 			return ctx
 		}).
-		Assess("parallel Job completes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("Job completes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
 			}
 			if _, err := waitForLabeledPods(ctx, crClient, slurmBridgeNamespace,
 				map[string]string{batchv1.JobNameLabel: jobName}, 3, podFinishedAndReleased); err != nil {
-				t.Fatalf("parallel Job did not complete finalizer processing: %v", err)
+				t.Fatalf("Job did not complete finalizer processing: %v", err)
 			}
 			assertSlurmJobsGone(ctx, t, config, crClient, slurmJobIDs)
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			captureReleaseSignalDiagnostics(t, "parallel Kubernetes Job",
+			captureReleaseSignalDiagnostics(t, featureName,
 				slurmBridgeNamespace, slurmNamespace, slinkyNamespace)
 			if !e2eCleanupEnabled(t) {
 				return ctx

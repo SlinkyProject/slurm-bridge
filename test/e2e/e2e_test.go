@@ -31,6 +31,7 @@ func TestScheduling(t *testing.T) {
 		testAdmissionRoutingBoundaries(),
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgeParallelJobScheduling(),
+		testSlurmBridgeSequentialJobScheduling(),
 		testSlurmBridgeJobSetScheduling(),
 		testSchedulerPluginsPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),

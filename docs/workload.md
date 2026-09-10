@@ -360,9 +360,17 @@ sets `PodGroupScheduled=True` on 1.36 or `PodGroupInitiallyScheduled=True` on
 A [**Workload**][workload-api] defines **`podGroupTemplates`** (gang or basic
 scheduling). Workload controllers create runtime **`PodGroup`** objects from
 those templates. Pods opt in with **`spec.schedulingGroup.podGroupName`**
-pointing at their **`PodGroup`**. `slurm-bridge` reads the PodGroup, groups pods
-by scheduling group, and applies the same external-job flow as other
-co-scheduled workload types.
+pointing at their **`PodGroup`**. For a **Gang** policy, `slurm-bridge` groups
+pods by scheduling group and applies the same external-job flow as other
+co-scheduled workload types, including the `minCount` check.
+
+For a **Basic** policy, pods follow their normal owner-based scheduling path.
+Jobs and standalone Pods receive independent Slurm allocations, while
+LeaderWorkerSets retain their existing group scheduling. PodGroup and Workload
+annotations still apply with the precedence described below. This also covers
+the Basic PodGroups that Kubernetes 1.37 creates automatically for ordinary Jobs
+when `WorkloadWithJob` is enabled: completed or failed sibling Pods do not
+increase the allocation requested for the next Job Pod.
 
 Example manifest excerpts for Kubernetes **1.37**:
 
@@ -432,8 +440,9 @@ To override Slurm submission parameters, add optional
 `slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
 controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
 **Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
-job name defaults to the **PodGroup object name** (not the Workload name) and
-the partition defaults to the scheduler configuration. See
+job name for a Gang policy defaults to the **PodGroup object name** (not the
+Workload name); Basic policies retain the normal workload's naming behavior. The
+partition defaults to the scheduler configuration. See
 [Annotations](#annotations) for the full key list.
 
 If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are

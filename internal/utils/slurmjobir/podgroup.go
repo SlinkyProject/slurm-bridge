@@ -80,13 +80,14 @@ func (t *translator) applySlurmAnnotations(
 	slurmJobIR *SlurmJobIR,
 	pod *corev1.Pod,
 	rootPOM *metav1.PartialObjectMetadata,
+	pg *PodGroup,
 ) error {
-	if !isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
+	if pg == nil {
 		return parseAnnotations(slurmJobIR, rootPOM.Annotations)
 	}
-	pg := &PodGroup{TypeMeta: t.workloadAPI.PodGroupTypeMeta}
-	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), pg); err != nil {
-		return err
+	if !isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
+		// Basic scheduling retains the original root and its annotations.
+		return t.parsePodGroupSlurmAnnotations(slurmJobIR, pg, rootPOM)
 	}
 	c, ok := t.Reader.(client.Client)
 	if !ok {
