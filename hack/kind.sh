@@ -297,14 +297,26 @@ function slurm-bridge::nodes() {
 			kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
 				-n slurm nodeset/slurm-worker-slurm-bridge --timeout=150s
 		fi
-		kubectl get pods -n slurm -l nodeset.slinky.slurm.net/name=slurm-worker-slurm-bridge \
-			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}" | while read -r node hostname; do
-			if [[ -n $node && -n $hostname ]]; then
-				kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname" --overwrite
-			else
-				echo "Skipping node as one or both of 'node'/'hostname' is not set" >&2
+		local selector workers mapped=0
+		selector=$(kubectl get nodeset slurm-worker-slurm-bridge -n slurm -o jsonpath='{.status.selector}')
+		if [[ -z $selector ]]; then
+			echo "[slurm] Hybrid NodeSet has no pod selector." >&2
+			return 1
+		fi
+		workers=$(kubectl get pods -n slurm -l "$selector" \
+			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}")
+		while read -r node hostname; do
+			if [[ -z $node || -z $hostname ]]; then
+				echo "[slurm] Hybrid worker is missing its Kubernetes node or Slurm hostname." >&2
+				return 1
 			fi
-		done
+			kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname" --overwrite
+			mapped=$((mapped + 1))
+		done <<<"$workers"
+		if ((mapped != replicas)); then
+			echo "[slurm] Mapped $mapped hybrid workers, expected $replicas." >&2
+			return 1
+		fi
 	fi
 }
 
