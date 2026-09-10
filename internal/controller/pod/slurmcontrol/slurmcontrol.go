@@ -47,19 +47,21 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 	// "yes, still running"; a forced refresh pays a synchronous batch+poll cost on the
 	// hottest, most frequently repeated path in the controller for no correctness gain.
 	err := r.Get(ctx, jobId, job)
+	if err != nil && !errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		return false, err
+	}
+	if err == nil && job.GetStateAsSet().Has(api.V0044JobInfoJobStateRUNNING) {
+		return true, nil
+	}
+
+	// Any other outcome (not running, or not found) drives Pod deletion downstream, so
+	// recheck live before trusting a cached result that would delete the pod.
+	err = r.Get(ctx, jobId, job, &client.GetOptions{RefreshCache: true})
 	if err != nil {
-		if !errors.Is(err, slurmerrors.ErrObjectNotFound) {
-			return false, err
+		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+			return false, nil
 		}
-		// The cached read may just be stale. Since "not found" drives Pod deletion
-		// downstream, recheck with a live read before trusting it.
-		err = r.Get(ctx, jobId, job, &client.GetOptions{RefreshCache: true})
-		if err != nil {
-			if errors.Is(err, slurmerrors.ErrObjectNotFound) {
-				return false, nil
-			}
-			return false, err
-		}
+		return false, err
 	}
 	if job.GetStateAsSet().Has(api.V0044JobInfoJobStateRUNNING) {
 		return true, nil
