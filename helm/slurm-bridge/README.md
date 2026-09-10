@@ -65,8 +65,10 @@ Kubernetes: `>= 1.34.0-0`
 | scheduler.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | scheduler.leaderElect | bool | `false` | Enables leader election. |
 | scheduler.nodeSelector | map[string]string | `{}` | Node label selector for pod assignment. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector |
-| scheduler.pdb | object | `{"enabled":false}` | PodDisruptionBudget for the scheduler deployment |
-| scheduler.pdb.enabled | bool | `false` | Enable PodDisruptionBudget |
+| scheduler.pdb | object | `{"enabled":false,"maxUnavailable":null,"minAvailable":1}` | PodDisruptionBudget for the scheduler deployment |
+| scheduler.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicaCount` is greater than 1, since a PDB over a single replica blocks node drains. |
+| scheduler.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
+| scheduler.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
 | scheduler.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
 | scheduler.replicaCount | int | `1` | Set the number of replicas to deploy. |
 | scheduler.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
