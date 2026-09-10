@@ -39,7 +39,7 @@ func testSlurmBridgeParallelJobScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("all parallel pods receive independent Slurm allocations", func(
+		Assess("parallel Slurm allocations match pod scheduling groups", func(
 			ctx context.Context,
 			t *testing.T,
 			config *envconf.Config,
@@ -53,12 +53,32 @@ func testSlurmBridgeParallelJobScheduling() types.Feature {
 			if err != nil {
 				t.Fatalf("parallel Job pods were not allocated: %v", err)
 			}
+			var podGroupName string
 			for i := range pods {
 				assertBridgePod(t, ctx, crClient, &pods[i])
+				groupName := ""
+				if group := pods[i].Spec.SchedulingGroup; group != nil {
+					groupName = ptr.Deref(group.PodGroupName, "")
+				}
+				if i == 0 {
+					podGroupName = groupName
+				}
+				if groupName != podGroupName {
+					t.Errorf("parallel Job pod %s references PodGroup %q, want %q",
+						pods[i].Name, groupName, podGroupName)
+				}
+			}
+			// WorkloadWithJob can create a PodGroup automatically. Grouped pods
+			// share one Slurm allocation; ungrouped pods each need their own.
+			wantJobs := len(pods)
+			if podGroupName != "" {
+				wantJobs = 1
+				t.Logf("parallel Job pods share PodGroup %q", podGroupName)
 			}
 			slurmJobIDs = podSlurmJobIDs(pods)
-			if len(slurmJobIDs) != 3 {
-				t.Errorf("parallel Job has %d distinct Slurm jobs, want 3: %v", len(slurmJobIDs), slurmJobIDs)
+			if len(slurmJobIDs) != wantJobs {
+				t.Errorf("parallel Job has %d distinct Slurm jobs, want %d: %v",
+					len(slurmJobIDs), wantJobs, slurmJobIDs)
 			}
 			return ctx
 		}).
