@@ -40,6 +40,9 @@ started.
   Hybrid nodes run colocated [kubelet] and [slurmd]; external nodes do not
   require slurmd.
 
+  - To install a native `slurmd` on an existing Kubernetes worker, follow
+    [Host-installed Hybrid Slurm Nodes](native-hybrid-nodes.md).
+
 - The built-in Workload and PodGroup APIs enabled on Kubernetes 1.36 or 1.37.
   Kubernetes 1.35 requires disabling the bridge's `SlurmBridgeGenericWorkload`
   feature gate. See [Built-in PodGroup](podgroup.md) for cluster configuration.

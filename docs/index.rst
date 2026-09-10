@@ -272,6 +272,7 @@ limitations under the License.
     controllers.md
     jobset.md
     lws.md
+    native-hybrid-nodes.md
     podgroup-coscheduling.md
     podgroup.md
     quickstart.md
