@@ -373,7 +373,11 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, cs fwk.CycleState, pod *core
 		return nil
 	}
 
-	resources, err := sb.slurmControl.GetResources(ctx, pod, nodeName)
+	node := &corev1.Node{}
+	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	resources, err := sb.slurmControl.GetResources(ctx, pod, nodecontrollerutils.GetSlurmNodeName(node))
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
