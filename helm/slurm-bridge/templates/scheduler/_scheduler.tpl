@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 Scheduler name
 */}}
 {{- define "slurm-bridge.scheduler.name" -}}
-{{ print "slurm-bridge-scheduler" }}
+{{ .Values.schedulerConfig.schedulerName | default "slurm-bridge-scheduler" }}
 {{- end }}
 
 {{/*

@@ -82,6 +82,24 @@ tests:
               - get
               - list
               - update
+  - it: scheduler name is configurable
+    template: scheduler/deployment.yaml
+    set:
+      schedulerConfig:
+        schedulerName: my-scheduler
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-scheduler
+  - it: an empty scheduler name falls back to the default
+    template: scheduler/deployment.yaml
+    set:
+      schedulerConfig:
+        schedulerName: ""
+    asserts:
+      - equal:
+          path: metadata.name
+          value: slurm-bridge-scheduler
   - it: mounts the rotating Slurm JWT secret
     template: scheduler/deployment.yaml
     asserts:
