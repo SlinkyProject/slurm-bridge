@@ -125,9 +125,11 @@ JobSets, scheduler-plugins PodGroups, LeaderWorkerSets, Slurm annotations and
 resources, cancellation in both directions, and example GPU DRA allocation and
 cleanup. Allocations can queue for up to ten minutes while other features run.
 
-Release 1.0 always uses exclusive allocations. Native Kubernetes PodGroups, CPU
-DRA, and non-exclusive allocation tests are omitted because those features are
-absent from this release. The NVIDIA DRA fixture is also omitted.
+Release 1.0 always uses exclusive allocations. The example GPU test therefore
+expects all eight fixture GPUs in the container even though the pod requests
+only one. Native Kubernetes PodGroups, CPU DRA, and non-exclusive allocation
+tests are omitted because those features are absent from this release. The
+NVIDIA DRA fixture is also omitted.
 
 Use a Go test expression to select a feature and optionally retain its
 resources:

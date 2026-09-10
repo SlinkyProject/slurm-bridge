@@ -650,8 +650,11 @@ func testSlurmBridgeDRAResourceScheduling() types.Feature {
 				t.Fatalf("failed to read container environment: %v", err)
 			}
 			matches := exampleGPUDeviceEnvironment.FindAllStringSubmatch(environment, -1)
-			if len(matches) != 1 {
-				t.Fatalf("container has %d example GPU allocations, want 1", len(matches))
+			// Release 1.0 uses exclusive Slurm allocations, which include all eight
+			// GPUs on the fixture node even when the pod requests only one.
+			const wantDevices = 8
+			if len(matches) != wantDevices {
+				t.Fatalf("container has %d example GPU allocations, want %d", len(matches), wantDevices)
 			}
 			return ctx
 		}).

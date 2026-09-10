@@ -10,6 +10,8 @@ nodesets:
   slurm-bridge:
     enabled: true
     replicas: 6
+    updateStrategy:
+      type: RollingUpdate
     slurmd:
       env: []
       image:
