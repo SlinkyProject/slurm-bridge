@@ -21,6 +21,54 @@ the current chart defaults before applying these overrides. If an older file is
 a full copy of `values.yaml`, replace it with `{}` so it does not pin defaults
 from an older checkout.
 
+## End-to-end tests
+
+The end-to-end suite can exercise either supported Slurm node mode. External
+mode is the default:
+
+```sh
+make kind-start test-e2e
+```
+
+Use a separate cluster for hybrid mode because an installed cluster cannot
+switch node modes in place:
+
+```sh
+KIND_CLUSTER_NAME=slurm-bridge-hybrid \
+SLURM_NODE_MODE=hybrid \
+make kind-start test-e2e
+```
+
+`SLURM_NODE_MODE` is also passed into the test process. The readiness feature
+uses it to verify that the cluster actually contains external nodes or
+DaemonSet-mode hybrid `slurmd` pods, as requested. Hybrid runs also include a
+native `sbatch` feature labeled `slurm-node-mode=hybrid`, which verifies that a
+job submitted directly to Slurm completes on one of those hybrid workers.
+
+After the serial readiness check, independent workload features run in parallel.
+Slurm may queue jobs when the suite temporarily asks for more nodes than are
+available, so each feature allows up to ten minutes for an allocation.
+
+Use `E2E_RUN` with a Go test regular expression to select one feature. Set
+`E2E_CLEANUP=false` to leave the successful workload in place for debugging:
+
+```sh
+MOCK_NVML=true \
+E2E_RUN='TestScheduling/Non-exclusive_DRA_resources_allocated_to_container$' \
+E2E_CLEANUP=false \
+make kind-start test-e2e
+```
+
+The cluster is never removed by `test-e2e`; `make kind-stop` remains explicit.
+Cancellation features still remove their workload because deletion is the
+behavior they validate.
+
+Release 1.2 covers Jobs, JobSets, native and scheduler-plugins PodGroups,
+LeaderWorkerSets, admission routing, Slurm annotations, cancellation, and the
+CPU and GPU DRA drivers. DRANET requires configurable device profiles and is not
+part of this release's suite. Hybrid fixtures use DeviceClass names as Slurm
+GRES types, as required by the release 1.2 allocator.
+
 ## Remote cluster
 
 Install a compatible released Slinky stack first. The workstation running the
@@ -48,8 +96,19 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This is equivalent to `--dra-driver-cpu --dra-example-driver`. Each flag can
-still be used individually.
+This installs the CPU, example GPU, and NVIDIA GPU DRA drivers. Each driver can
+still be installed individually with `--dra-driver-cpu`, `--dra-example-driver`,
+or `--dra-driver-nvidia-gpu`.
+
+NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
+installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to
+install
+[`nvml-mock`](https://github.com/NVIDIA/k8s-test-infra/tree/main/deployments/nvml-mock)
+on the managed Kind workers before the NVIDIA DRA driver:
+
+```sh
+MOCK_NVML=true make kind-start
+```
 
 Examples remain individually selectable:
 

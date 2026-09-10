@@ -1,7 +1,8 @@
 ---
 configFiles:
   gres.conf: |
-    NodeName=kind-worker[4-9] Name=gpu Type=gpu.example.com File=/dev/tty[10-17] Count=8
+    Name=gpu Type=gpu.example.com File=/dev/tty[10-13] Count=4
+    Name=gpu Type=gpu.nvidia.com File=/dev/tty[20-27] Count=8
   topology.yaml: |
     ---
     - topology: topo-switch
@@ -13,7 +14,10 @@ configFiles:
           - switch: s1
           - switch: s2
 controller:
-  extraConf: GresTypes=gpu
+  extraConf: |
+    GresTypes=gpu
+    MCSPlugin=mcs/label
+    MCSParameters=ondemand,ondemandselect
 nodesets:
   slinky:
     enabled: false
@@ -22,9 +26,6 @@ nodesets:
     scalingMode: DaemonSet
     slurmd:
       env: []
-      image:
-        repository: ghcr.io/slinkyproject/slurmd
-        tag: 25.11-ubuntu24.04
       args: []
       resources: {}
       volumeMounts: []
@@ -33,7 +34,7 @@ nodesets:
         repository: docker.io/library/alpine
         tag: latest
       resources: {}
-    extraConf: Gres=gpu:gpu.example.com:8
+    extraConf: Gres=gpu:gpu.example.com:4,gpu:gpu.nvidia.com:8
     partition:
       enabled: true
     podSpec:

@@ -89,20 +89,20 @@ function sys::check() {
 	if ! command -v kubectl >/dev/null 2>&1; then
 		echo "'kubectl' is recommended: https://kubernetes.io/docs/reference/kubectl/"
 	fi
-	if [[ $OSTYPE == "linux"* ]]; then
-		if [ "$(/usr/sbin/sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
+	if [[ $OSTYPE == "linux"* ]] && command -v sysctl >/dev/null 2>&1; then
+		if [ "$(sysctl -n kernel.keys.maxkeys)" -lt 2000 ]; then
 			echo "Recommended to increase 'kernel.keys.maxkeys':"
 			echo "  $ sudo sysctl -w kernel.keys.maxkeys=2000"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.file-max)" -lt 10000000 ]; then
+		if [ "$(sysctl -n fs.file-max)" -lt 10000000 ]; then
 			echo "Recommended to increase 'fs.file-max':"
 			echo "  $ sudo sysctl -w fs.file-max=10000000"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
+		if [ "$(sysctl -n fs.inotify.max_user_instances)" -lt 65535 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_instances':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_instances=65535"
 		fi
-		if [ "$(/usr/sbin/sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
+		if [ "$(sysctl -n fs.inotify.max_user_watches)" -lt 1048576 ]; then
 			echo "Recommended to increase 'fs.inotify.max_user_watches':"
 			echo "  $ sudo sysctl -w fs.inotify.max_user_watches=1048576"
 		fi
@@ -323,7 +323,7 @@ function lws::install() {
 	chartName="lws"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.8.x"
+		local version="0.9.x"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi
@@ -404,7 +404,43 @@ function slurm-operator::install_from_source() {
 
 function slurm-operator::wait() {
 	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
-		-n slinky --timeout=120s
+		-n slinky --timeout=120s || return 1
+
+	# Pod readiness can precede Service routing updates. Exercise admission from
+	# the API server without persisting a resource or requiring a running Slurm.
+	echo "[slurm] Waiting for slurm-operator webhook admission..."
+	local deadline=$((SECONDS + 120))
+	local output=""
+	local request_timeout
+	while ((SECONDS < deadline)); do
+		request_timeout=$((deadline - SECONDS))
+		if ((request_timeout <= 0)); then
+			break
+		fi
+		if ((request_timeout > 10)); then
+			request_timeout=10
+		fi
+		if output="$(
+			kubectl create --dry-run=server --namespace=slinky \
+				--request-timeout="${request_timeout}s" -f - 2>&1 <<-EOF
+					apiVersion: slinky.slurm.net/v1beta1
+					kind: RestApi
+					metadata:
+					  generateName: slurm-operator-webhook-check-
+					spec:
+					  controllerRef:
+					    name: slurm-operator-webhook-check
+				EOF
+		)"; then
+			echo "[slurm] Slurm-operator webhook admission is ready."
+			return 0
+		fi
+		sleep 2
+	done
+
+	echo "[slurm] Timed out waiting for slurm-operator webhook admission after 120s." >&2
+	printf '%s\n' "$output" >&2
+	return 1
 }
 
 function slurm::install_from_source() {
@@ -431,17 +467,50 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Apply controller configuration before creating the NodeSet. Otherwise,
+		# NodeSet reconciliation can back off while slurmctld is restarting.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
+		slurm::wait_for_hybrid_nodes
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
 		exit 1
 		;;
 	esac
+}
+
+function slurm::wait_for_hybrid_nodes() {
+	local bridge_nodes
+	local desired_nodes
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	desired_nodes="$(printf '%s\n' "$bridge_nodes" | sed '/^$/d' | wc -l | tr -d ' ')"
+	if [ "$desired_nodes" -eq 0 ]; then
+		echo "[slurm] No hybrid worker nodes found." >&2
+		exit 1
+	fi
+
+	if ! kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s; then
+		# Slurm startup failures can leave NodeSet reconciliation in backoff.
+		echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+		kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+			"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			--overwrite
+		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
+	fi
 }
 
 function slurm-bridge::secret() {
@@ -469,7 +538,8 @@ EOF
 		--version "$version" \
 		--namespace dra-example-driver \
 		--create-namespace \
-		--values "$values"
+		--values "$values" \
+		--wait --timeout=120s
 }
 
 function dra-driver-cpu::install() {
@@ -484,7 +554,47 @@ function dra-driver-cpu::install() {
 	# The upstream v0.2.0 chart does not expose a nodeSelector value.
 	kubectl -n kube-system patch daemonset dracpu --type merge \
 		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
-	kubectl -n kube-system rollout status daemonset/dracpu --timeout=120s
+	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
+}
+
+function dra-driver-nvidia-gpu::install() {
+	local version="0.5.0"
+	local chart="oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu"
+	local config_dir="$SCRIPT_DIR/dra-driver-nvidia-gpu"
+	local values_args=(--values "$config_dir/values.yaml")
+
+	if $MOCK_NVML; then
+		values_args+=(--values "$config_dir/mock-values.yaml")
+	fi
+
+	helm upgrade --install dra-driver-nvidia-gpu "$chart" \
+		--version "$version" \
+		--namespace dra-driver-nvidia-gpu \
+		--create-namespace \
+		"${values_args[@]}" \
+		--wait --timeout=180s
+}
+
+function nvml-mock::install() {
+	local digest="sha256:99e0de7e7c3292e9f814e15841c6c7a5bec8f64ce07620dd9f5c05ccb68b516e"
+	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@${digest}"
+	local config_dir="$SCRIPT_DIR/nvml-mock"
+
+	# Upstream republishes the 0.3.0 chart tag from main, so its templates can
+	# get ahead of the 0.3.0 image pinned in values.yaml. Pin the original 0.3.0
+	# release chart so the chart and image remain compatible.
+	helm upgrade --install nvml-mock "$chart" \
+		--namespace nvml-mock \
+		--create-namespace \
+		--values "$config_dir/values.yaml" \
+		--wait --timeout=180s
+}
+
+function nvml-mock::uninstall() {
+	helm uninstall nvml-mock \
+		--namespace nvml-mock \
+		--ignore-not-found \
+		--wait --timeout=180s
 }
 
 function main::help() {
@@ -494,7 +604,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
-	        [--dra-example-driver] [--dra-driver-cpu]
+	        [--dra-example-driver] [--dra-driver-cpu] [--dra-driver-nvidia-gpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -509,11 +619,13 @@ KIND OPTIONS:
 
 HELM OPTIONS:
 	--all               Equivalent of: --core --extras
-	--extras            Equivalent of: --dra-driver-cpu --dra-example-driver
+	--extras            Install all DRA driver fixtures below.
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
 	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
 	--dra-example-driver Install DRA driver: dra-example-driver
+	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
+	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
 
 SLURM OPTIONS:
 	--slurm-node-mode=MODE
@@ -568,6 +680,14 @@ function main() {
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install
 	fi
+	if $OPT_DRA_DRIVER_NVIDIA_GPU; then
+		if $MOCK_NVML; then
+			nvml-mock::install
+		else
+			nvml-mock::uninstall
+		fi
+		dra-driver-nvidia-gpu::install
+	fi
 	if $OPT_PREREQS; then
 		slurm-bridge::prerequisites
 	elif $OPT_CORE; then
@@ -586,12 +706,22 @@ OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
+OPT_DRA_DRIVER_NVIDIA_GPU=false
+MOCK_NVML="${MOCK_NVML:-false}"
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-release-1.2}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
+case "$MOCK_NVML" in
+true | false) ;;
+*)
+	echo "MOCK_NVML must be either true or false" >&2
+	exit 1
+	;;
+esac
+
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -672,6 +802,10 @@ while :; do
 		OPT_DRA_EXAMPLE_DRIVER=true
 		shift
 		;;
+	--dra-driver-nvidia-gpu)
+		OPT_DRA_DRIVER_NVIDIA_GPU=true
+		shift
+		;;
 	--all)
 		OPT_CORE=true
 		OPT_EXTRAS=true
@@ -696,6 +830,7 @@ done
 if $OPT_EXTRAS; then
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
+	OPT_DRA_DRIVER_NVIDIA_GPU=true
 fi
 
 main "$@"

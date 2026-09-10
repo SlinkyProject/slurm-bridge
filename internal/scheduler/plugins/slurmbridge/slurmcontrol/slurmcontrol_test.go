@@ -946,7 +946,7 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Return GRES",
+			name: "Return only GRES allocated on the selected node",
 			fields: fields{
 				Client: func() client.Client {
 					f := interceptor.Funcs{
@@ -957,6 +957,11 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 									{
 										Node: "node2",
 										Gres: &api.V0044NodeGresLayoutList{
+											{
+												Count: ptr.To(int64(0)),
+												Name:  "gpu",
+												Type:  ptr.To("gpu.nvidia.com"),
+											},
 											{
 												Count: ptr.To(int64(2)),
 												Index: ptr.To("1-2"),

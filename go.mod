@@ -18,10 +18,16 @@ require (
 	k8s.io/kubernetes v1.36.0
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 	sigs.k8s.io/controller-runtime v0.24.0
+	sigs.k8s.io/e2e-framework v0.6.0
 	sigs.k8s.io/jobset v0.11.1
 	sigs.k8s.io/lws v0.8.0
 	sigs.k8s.io/scheduler-plugins v0.33.5
 	sigs.k8s.io/yaml v1.6.0
+)
+
+require (
+	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/moby/spdystream v0.5.1 // indirect
 )
 
 require (
