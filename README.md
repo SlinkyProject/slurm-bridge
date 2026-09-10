@@ -87,9 +87,12 @@ end-to-end validation; these backports are optional.
 ✓ means supported; — means unsupported. Use the latest patch release of each
 branch. Backported support is marked with the first supporting patch version.
 
-All listed branches require
-[Slurm 25.11](https://www.schedmd.com/slurm-version-25-11-0-is-now-available/)
-or newer.
+| Release branch |             Minimum Slurm (Data Parser)             |
+| :------------- | :-------------------------------------------------: |
+| `release-1.3`  | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `release-1.2`  | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `release-1.1`  | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `release-1.0`  | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 
 ## Limitations
 
@@ -176,6 +179,8 @@ specific language governing permissions and limitations under the License.
 [slinky]: https://slinky.ai/
 [slinky-docs]: https://slinky.schedmd.com/
 [slurm]: https://slurm.schedmd.com/overview.html
+[slurm-25.11]: https://www.schedmd.com/slurm-version-25-11-0-is-now-available/
+[slurm-data_parser]: https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle
 [slurm-fairshare]: https://slurm.schedmd.com/fair_tree.html
 [slurm-preempt]: https://slurm.schedmd.com/preempt.html
 [slurm-priority]: https://slurm.schedmd.com/priority_multifactor.html

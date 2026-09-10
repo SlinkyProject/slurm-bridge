@@ -119,9 +119,21 @@ Release branch  Kubernetes 1.35 Kubernetes 1.36 Kubernetes 1.37
 each branch. Backported support is marked with the first supporting
 patch version.
 
-All listed branches require `Slurm
-25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__
-or newer.
++-----------------+-----------------------------------------------------------------------------------+
+| Release branch  | Minimum Slurm (Data Parser)                                                       |
++=================+===================================================================================+
+| ``release-1.3`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
+|                 | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
++-----------------+-----------------------------------------------------------------------------------+
+| ``release-1.2`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
+|                 | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
++-----------------+-----------------------------------------------------------------------------------+
+| ``release-1.1`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
+|                 | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
++-----------------+-----------------------------------------------------------------------------------+
+| ``release-1.0`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
+|                 | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
++-----------------+-----------------------------------------------------------------------------------+
 
 Limitations
 -----------
