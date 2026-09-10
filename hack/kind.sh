@@ -480,12 +480,37 @@ function slurm::configure_for_bridge() {
 			--reuse-values \
 			--wait \
 			--set nodesets.slurm-bridge.enabled=true
+		slurm::wait_for_hybrid_nodes
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
 		exit 1
 		;;
 	esac
+}
+
+function slurm::wait_for_hybrid_nodes() {
+	local bridge_nodes
+	local desired_nodes
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	desired_nodes="$(printf '%s\n' "$bridge_nodes" | sed '/^$/d' | wc -l | tr -d ' ')"
+	if [ "$desired_nodes" -eq 0 ]; then
+		echo "[slurm] No hybrid worker nodes found." >&2
+		exit 1
+	fi
+
+	if ! kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s; then
+		# Slurm startup failures can leave NodeSet reconciliation in backoff.
+		echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+		kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+			"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			--overwrite
+		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
+	fi
 }
 
 function slurm-bridge::secret() {
