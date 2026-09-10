@@ -52,7 +52,3 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
-
-{{- define "slurm-bridge.scheduler.name" -}}
-{{ .Values.schedulerConfig.schedulerName | default (print "slurm-bridge-scheduler" .) }}
-{{- end }}
