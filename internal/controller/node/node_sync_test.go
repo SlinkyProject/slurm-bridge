@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -510,13 +511,22 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
 	})
 
-	It("removes the compatibility feature when DRA inventory cannot be verified", func() {
+	DescribeTable("removes the compatibility feature when DRA inventory cannot be verified", func(labeled, external, failUpdate bool) {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0"},
-			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
-				Type:   wellknown.NodeConditionSlurmGRESCompatible,
-				Status: corev1.ConditionTrue,
-			}}},
+			Status: corev1.NodeStatus{
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("8Gi"),
+				},
+				Conditions: []corev1.NodeCondition{{
+					Type:   wellknown.NodeConditionSlurmGRESCompatible,
+					Status: corev1.ConditionTrue,
+				}},
+			},
+		}
+		if labeled {
+			node.Labels = map[string]string{wellknown.LabelExternalNode: "true"}
 		}
 		resourceSlice := &resourcev1.ResourceSlice{
 			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-0-gpus"},
@@ -534,16 +544,36 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		kubeClient := fake.NewClientBuilder().WithObjects(node, resourceSlice).Build()
 
 		var updates []api.V0044UpdateNodeMsg
-		updateFn := func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
-			updates = append(updates, req.(api.V0044UpdateNodeMsg))
+		updateFn := func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			update := req.(api.V0044UpdateNodeMsg)
+			updates = append(updates, update)
+			if failUpdate {
+				return errors.New("feature update failed")
+			}
+			slurmNode := obj.(*slurmtypes.V0044Node)
+			if update.Features != nil {
+				slurmNode.Features = update.Features
+			}
+			if update.FeaturesAct != nil {
+				slurmNode.ActiveFeatures = update.FeaturesAct
+			}
 			return nil
 		}
+		state := []api.V0044NodeState{api.V0044NodeStateIDLE}
+		if external {
+			state = append(state, api.V0044NodeStateEXTERNAL)
+		}
+		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name:           ptr.To(node.Name),
+				Cpus:           ptr.To(int32(4)),
+				RealMemory:     ptr.To(int64(8192)),
+				Gres:           ptr.To("gpu:gpu-example:1"),
+				State:          ptr.To(state),
 				Features:       ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
-				Extra:          ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":[]}}`),
+				Extra:          ptr.To(appliedInventory),
 			}}).
 			WithUpdateFn(updateFn).
 			Build()
@@ -551,6 +581,18 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("generation 1 is incomplete: found 1 of 2 ResourceSlices")))
+		if failUpdate {
+			Expect(err).To(MatchError(ContainSubstring("feature update failed")))
+			updatedNode := &corev1.Node{}
+			Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
+			condition := findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(corev1.ConditionUnknown))
+			failUpdate = false
+			updates = nil
+			err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
+			Expect(err).To(MatchError(ContainSubstring("generation 1 is incomplete: found 1 of 2 ResourceSlices")))
+		}
 		Expect(updates).To(HaveLen(2))
 		Expect(updates[0].FeaturesAct).NotTo(BeNil())
 		Expect(*updates[0].FeaturesAct).To(Equal(api.V0044CsvString{"admin-feature"}))
@@ -565,7 +607,37 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		Expect(condition).NotTo(BeNil())
 		Expect(condition.Status).To(Equal(corev1.ConditionUnknown))
 		Expect(condition.Reason).To(Equal(reasonSlurmGRESVerificationError))
-	})
+
+		By("preserving the Slurm node and its last applied inventory")
+		slurmNode := &slurmtypes.V0044Node{}
+		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), slurmNode)).To(Succeed())
+		Expect(*slurmNode.State).To(Equal(state))
+		Expect(*slurmNode.Gres).To(Equal("gpu:gpu-example:1"))
+		Expect(*slurmNode.Extra).To(Equal(appliedInventory))
+		Expect(*slurmNode.Features).To(Equal(api.V0044CsvString{"admin-feature"}))
+		Expect(*slurmNode.ActiveFeatures).To(Equal(api.V0044CsvString{"admin-feature"}))
+
+		By("restoring eligibility after the pool becomes complete")
+		resourceSlice.Spec.Pool.ResourceSliceCount = 1
+		Expect(kubeClient.Update(ctx, resourceSlice)).To(Succeed())
+		Expect(r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})).To(Succeed())
+		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), slurmNode)).To(Succeed())
+		Expect(*slurmNode.Features).To(ConsistOf("admin-feature", wellknown.SlurmFeatureGRESCompatible))
+		Expect(*slurmNode.ActiveFeatures).To(ConsistOf("admin-feature", wellknown.SlurmFeatureGRESCompatible))
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
+		condition = findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
+		if labeled {
+			Expect(condition).To(BeNil())
+		} else {
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(corev1.ConditionTrue))
+		}
+	},
+		Entry("unlabeled hybrid node", false, false, false),
+		Entry("labeled hybrid node", true, false, false),
+		Entry("external node", true, true, false),
+		Entry("external node retries a failed feature update", true, true, true),
+	)
 
 	It("clears the compatibility condition when the node is no longer hybrid", func() {
 		node := &corev1.Node{

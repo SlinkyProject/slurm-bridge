@@ -231,7 +231,10 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 	if hasLabel {
 		nodeInfo, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
-			return err
+			// An existing external or labeled hybrid node must stop advertising
+			// compatibility until its inventory can be verified again.
+			disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
+			return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 		}
 		exists, err := r.slurmControl.NodeExists(ctx, node)
 		if err != nil {
@@ -279,7 +282,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		// Extra inventory that slurm-bridge owns on the existing node.
 		_, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
-			disableErr := r.slurmControl.DisableHybridNodeGRESCompatibility(ctx, node)
+			disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
 			return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 		}
 		if err := r.slurmControl.UpdateHybridNode(ctx, node, draInventory); err != nil {

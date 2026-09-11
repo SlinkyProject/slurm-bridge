@@ -109,8 +109,8 @@ func (r *NodeReconciler) recordIncompatibleSlurmGRESError(ctx context.Context, n
 	// A labeled node that is also slurmd-registered may already carry the
 	// compatibility feature from an earlier, compatible reconcile. Strip it
 	// so Slurm stops placing bridge jobs on the node while it is incompatible.
-	// This is a no-op for external and missing Slurm nodes.
-	disableErr := r.slurmControl.DisableHybridNodeGRESCompatibility(ctx, node)
+	// This is a no-op for missing Slurm nodes.
+	disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
 	return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 }
 
