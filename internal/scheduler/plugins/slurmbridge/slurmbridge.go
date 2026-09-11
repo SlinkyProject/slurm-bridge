@@ -24,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -240,12 +239,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		logger.Info("registered built-in Workload API", "apiVersion", workloadAPI.PodGroupTypeMeta.APIVersion)
 	}
 
-	// The selected compatibility types are JSON wire types and do not implement
-	// Kubernetes protobuf serialization.
-	kubeConfig := rest.CopyConfig(handle.KubeConfig())
-	kubeConfig.ContentType = runtime.ContentTypeJSON
-	kubeConfig.AcceptContentTypes = runtime.ContentTypeJSON
-	kubeClient, err := client.New(kubeConfig, client.Options{Scheme: clientScheme})
+	kubeClient, err := newKubeClient(handle.KubeConfig(), clientScheme)
 	if err != nil {
 		return nil, err
 	}
