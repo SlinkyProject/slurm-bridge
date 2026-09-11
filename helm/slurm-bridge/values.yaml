@@ -26,6 +26,14 @@ scheduler:
     enabled: false
   # -- Enables leader election.
   leaderElect: false
+  # -- Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported
+  # built-in Workload and PodGroup API at startup; disable it for clusters without
+  # those APIs. It is independent of Kubernetes' GenericWorkload feature gate.
+  featureGates:
+    DRAExtendedResource: true
+    DynamicResourceAllocation: true
+    SchedulerPopFromBackoffQ: false
+    SlurmBridgeGenericWorkload: true
   # -- Set the priority class to use.
   # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass
   priorityClassName: ""

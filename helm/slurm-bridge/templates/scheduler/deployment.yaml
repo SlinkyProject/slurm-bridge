@@ -30,7 +30,11 @@ spec:
       containers:
       - args:
         - --config=/etc/kubernetes/scheduler-config.yaml
-        - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false
+        {{- $featureGates := list }}
+        {{- range $name, $enabled := .Values.scheduler.featureGates }}
+        {{- $featureGates = append $featureGates (printf "%s=%t" $name $enabled) }}
+        {{- end }}
+        - --feature-gates={{ join "," $featureGates }}
         {{- with .Values.scheduler.verbosity }}
         - --v={{ . }}
         {{- end }}

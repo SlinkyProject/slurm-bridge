@@ -40,7 +40,7 @@ func missingWorkloadAPI(groupVersion string) error {
 	return apierrors.NewNotFound(schema.GroupResource{Group: workloadAPIGroup, Resource: "groupversions"}, groupVersion)
 }
 
-func TestTryRegisterWorkloadAPI(t *testing.T) {
+func TestRegisterWorkloadAPI(t *testing.T) {
 	beta := workloadAPIGroup + "/" + WorkloadAPIVersionV1Beta1
 	alpha := workloadAPIGroup + "/" + WorkloadAPIVersionV1Alpha2
 	tests := []struct {
@@ -75,6 +75,7 @@ func TestTryRegisterWorkloadAPI(t *testing.T) {
 				alpha: missingWorkloadAPI(alpha),
 			}},
 			wantCalls: []string{beta, alpha},
+			wantErr:   true,
 		},
 		{
 			name: "discovery failure",
@@ -84,14 +85,40 @@ func TestTryRegisterWorkloadAPI(t *testing.T) {
 			wantCalls: []string{beta},
 			wantErr:   true,
 		},
+		{
+			name: "partial beta does not silently downgrade",
+			discovery: &fakeWorkloadAPIDiscovery{resources: map[string]*metav1.APIResourceList{
+				beta:  {GroupVersion: beta, APIResources: []metav1.APIResource{{Name: "podgroups"}}},
+				alpha: workloadResources(alpha),
+			}},
+			wantCalls: []string{beta},
+			wantErr:   true,
+		},
+		{
+			name: "partial alpha",
+			discovery: &fakeWorkloadAPIDiscovery{
+				resources: map[string]*metav1.APIResourceList{
+					alpha: {GroupVersion: alpha, APIResources: []metav1.APIResource{{Name: "workloads"}}},
+				},
+				errors: map[string]error{beta: missingWorkloadAPI(beta)},
+			},
+			wantCalls: []string{beta, alpha},
+			wantErr:   true,
+		},
+		{
+			name:      "empty discovery response",
+			discovery: &fakeWorkloadAPIDiscovery{},
+			wantCalls: []string{beta},
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
-			api, err := TryRegisterWorkloadAPI(tt.discovery, scheme)
+			api, err := RegisterWorkloadAPI(tt.discovery, scheme)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("TryRegisterWorkloadAPI() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("RegisterWorkloadAPI() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !reflect.DeepEqual(tt.discovery.calls, tt.wantCalls) {
 				t.Errorf("discovery calls = %v, want %v", tt.discovery.calls, tt.wantCalls)

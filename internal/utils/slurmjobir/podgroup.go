@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -30,6 +31,15 @@ func podGroupName(pod *corev1.Pod) (string, bool) {
 	}
 	name := *pod.Spec.SchedulingGroup.PodGroupName
 	return name, name != ""
+}
+
+// ValidatePodGroupSupport rejects built-in PodGroup references when the bridge
+// feature is disabled. Legacy scheduler-plugins PodGroups remain supported.
+func ValidatePodGroupSupport(api *WorkloadAPI, pod *corev1.Pod) error {
+	if _, grouped := podGroupName(pod); grouped && api == nil {
+		return fmt.Errorf("pod %s/%s uses spec.schedulingGroup but built-in Workload support is disabled; enable --feature-gates=%s=true on a cluster serving a supported Workload and PodGroup API", pod.Namespace, pod.Name, features.SlurmBridgeGenericWorkload)
+	}
+	return nil
 }
 
 // parsePodGroupSlurmAnnotations merges Slurm annotations from the PodGroup,

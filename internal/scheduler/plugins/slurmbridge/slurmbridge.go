@@ -23,7 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/discovery"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +36,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	nodecontrollerutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -227,16 +227,14 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, err
 	}
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(handle.KubeConfig())
-	if err != nil {
-		return nil, fmt.Errorf("create Kubernetes discovery client: %w", err)
-	}
-	workloadAPI, err := slurmjobir.TryRegisterWorkloadAPI(discoveryClient, clientScheme)
+	workloadAPI, err := newWorkloadAPI(handle.KubeConfig(), clientScheme)
 	if err != nil {
 		return nil, err
 	}
 	if workloadAPI != nil {
 		logger.Info("registered built-in Workload API", "apiVersion", workloadAPI.PodGroupTypeMeta.APIVersion)
+	} else {
+		logger.Info("built-in Workload support disabled", "featureGate", features.SlurmBridgeGenericWorkload)
 	}
 
 	kubeClient, err := newKubeClient(handle.KubeConfig(), clientScheme)
@@ -293,6 +291,10 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 	var err error
+
+	if err := slurmjobir.ValidatePodGroupSupport(sb.workloadAPI, pod); err != nil {
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
 
 	if pod.Spec.ResourceClaims != nil {
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")

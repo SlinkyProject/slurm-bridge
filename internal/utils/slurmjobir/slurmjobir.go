@@ -123,6 +123,9 @@ func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI
 }
 
 func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+	if err := ValidatePodGroupSupport(workloadAPI, pod); err != nil {
+		return nil, err
+	}
 	rootPOM, err := getRootOwnerMetadata(c, ctx, pod)
 	if err != nil {
 		return nil, err
@@ -135,9 +138,6 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 	var pg *PodGroup
 	if pgName, ok := podGroupName(pod); ok {
-		if workloadAPI == nil {
-			return nil, fmt.Errorf("pod %s/%s uses spec.schedulingGroup but the built-in Workload API is not served", pod.Namespace, pod.Name)
-		}
 		pg = &PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
 		if err := t.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
 			return nil, err

@@ -106,7 +106,7 @@ manifests should match snapshot:
           containers:
             - args:
                 - --config=/etc/kubernetes/scheduler-config.yaml
-                - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false
+                - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token
