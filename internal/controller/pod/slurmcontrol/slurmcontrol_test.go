@@ -31,7 +31,7 @@ func (s *staleCacheClient) Get(ctx context.Context, key object.ObjectKey, obj ob
 	options := &client.GetOptions{}
 	options.ApplyOptions(opts)
 	if !options.RefreshCache {
-		return slurmerrors.ErrObjectNotFound
+		return slurmerrors.ErrNotFound
 	}
 	return s.Client.Get(ctx, key, obj, opts...)
 }
