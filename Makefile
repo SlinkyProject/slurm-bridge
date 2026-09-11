@@ -176,6 +176,7 @@ GOTESTSUM_VERSION ?= v1.13.0
 GOVULNCHECK_REPORT ?= govulncheck-vulns.csv
 
 GOLANGCI_LINT_VERSION ?= v2.11.1
+GOLANGCI_LINT_BASE_REV ?= HEAD
 HELM_DOCS_VERSION ?= v1.14.2
 PANDOC_VERSION ?= 3.9
 COSIGN_VERSION ?= v2.4.1
@@ -328,7 +329,7 @@ govulncheck: govulncheck-bin ## Write $(GOVULNCHECK_REPORT); fail if a vulnerabi
 # https://github.com/golangci/golangci-lint/blob/main/.pre-commit-hooks.yaml
 .PHONY: golangci-lint
 golangci-lint: golangci-lint-bin ## Run golangci-lint.
-	$(GOLANGCI_LINT) run --fix
+	$(GOLANGCI_LINT) run --new-from-rev "$(GOLANGCI_LINT_BASE_REV)" --fix
 
 # https://github.com/golangci/golangci-lint/blob/main/.pre-commit-hooks.yaml
 .PHONY: golangci-lint-fmt
