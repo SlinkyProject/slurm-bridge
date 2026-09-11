@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -257,7 +258,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 	}
 	extraChanged := desiredGRES.extra != currentExtra &&
 		(desiredGRES.extra != "" || strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix))
-	gresChanged := desiredGRES.gres != currentGres
+	gresChanged := !gresEqual(desiredGRES.gres, currentGres)
 	if !isExternal {
 		if err := validateHybridNodeGRES(string(key), currentGres, desiredGRES); err != nil {
 			return false, err
@@ -573,6 +574,16 @@ func updateFeatureList(current []string, feature string, present bool) []string 
 		updated = append(updated, feature)
 	}
 	return updated
+}
+
+// gresEqual ignores the order in which Slurm reports GRES entries, while
+// preserving differences in resource names, types, counts and multiplicity.
+func gresEqual(a, b string) bool {
+	aEntries := strings.Split(a, ",")
+	bEntries := strings.Split(b, ",")
+	slices.Sort(aEntries)
+	slices.Sort(bEntries)
+	return slices.Equal(aEntries, bEntries)
 }
 
 // validateHybridNodeGRES checks that every DRA-managed GRES entry is present

@@ -967,6 +967,59 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 	}
 }
 
+func Test_realSlurmControl_NodeNeedsRecreate_ExternalGRES(t *testing.T) {
+	inventory := append([]dra.GRESInventory{{
+		GRES: dra.GRES{Name: "nic", Type: "dranet0"},
+		Devices: []dra.DeviceIdentity{
+			structured.MakeDeviceID("dra.net", "pool-a", "nic-0"),
+		},
+	}}, testExampleDRAInventory()...)
+	extra, err := dra.EncodeAppliedInventory(inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "worker-0"},
+		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("4"),
+			corev1.ResourceMemory: resource.MustParse("8Gi"),
+		}},
+	}
+	for _, tt := range []struct {
+		name  string
+		gres  string
+		extra string
+		want  bool
+	}{
+		{name: "same order", gres: "nic:dranet0:1,gpu:gpu-example:2", extra: extra},
+		{name: "Slurm reorders entries", gres: "gpu:gpu-example:2,nic:dranet0:1", extra: extra},
+		{name: "changed count", gres: "gpu:gpu-example:1,nic:dranet0:1", extra: extra, want: true},
+		{name: "changed type", gres: "gpu:other:2,nic:dranet0:1", extra: extra, want: true},
+		{name: "missing resource", gres: "gpu:gpu-example:2", extra: extra, want: true},
+		{name: "duplicate resource", gres: "gpu:gpu-example:2,nic:dranet0:1,nic:dranet0:1", extra: extra, want: true},
+		{name: "stale applied inventory", gres: "gpu:gpu-example:2,nic:dranet0:1", extra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			slurmClient := fake.NewClientBuilder().WithObjects(&types.V0044Node{V0044Node: api.V0044Node{
+				Name:       ptr.To(node.Name),
+				Cpus:       ptr.To(int32(4)),
+				RealMemory: ptr.To(int64(8192)),
+				State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+				Gres:       ptr.To(tt.gres),
+				Extra:      ptr.To(tt.extra),
+			}}).Build()
+			r := &realSlurmControl{Client: slurmClient}
+			got, err := r.NodeNeedsRecreate(context.Background(), node, nil, inventory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("NodeNeedsRecreate() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_RemoveNode(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
