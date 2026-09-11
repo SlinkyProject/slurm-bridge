@@ -60,6 +60,7 @@ Third-party Dependencies:
 - github.com/klauspost/cpuid/v2 (MIT)
 - github.com/kylelemons/godebug/diff (Apache-2.0)
 - github.com/moby/spdystream (Apache-2.0)
+- github.com/moby/spdystream/spdy (BSD-3-Clause)
 - github.com/moby/term (Apache-2.0)
 - github.com/modern-go/concurrent (Apache-2.0)
 - github.com/modern-go/reflect2 (Apache-2.0)
