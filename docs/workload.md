@@ -352,12 +352,12 @@ for your cluster:
 | 1.36       | `scheduling.k8s.io/v1alpha2`       | [`hack/kind-1.36.yaml`](../hack/kind-1.36.yaml) |
 | 1.37       | `scheduling.k8s.io/v1beta1`        | [`hack/kind.yaml`](../hack/kind.yaml)           |
 
-The bridge's **`SlurmBridgeGenericWorkload`** feature gate is enabled by default.
-At startup, the scheduler requires both Workload and PodGroup resources in a
-supported API version, preferring `v1beta1` when both versions are available.
-Missing APIs, incomplete discovery responses, and discovery errors fail startup
-with an error identifying the required feature. The scheduler does not silently
-disable Workload support.
+The bridge's **`SlurmBridgeGenericWorkload`** feature gate is enabled by
+default. At startup, the scheduler requires both Workload and PodGroup resources
+in a supported API version, preferring `v1beta1` when both versions are
+available. Missing APIs, incomplete discovery responses, and discovery errors
+fail startup with an error identifying the required feature. The scheduler does
+not silently disable Workload support.
 
 This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
 `GenericWorkload` on the cluster components as shown in the Kind configurations;
@@ -365,21 +365,21 @@ This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
 without enabling the embedded scheduler's upstream gang-scheduling path.
 
 Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
-out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm deployments,
-set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The scheduler then
-skips Workload discovery and registration. Pods that reference a built-in
-PodGroup through `spec.schedulingGroup.podGroupName` are rejected with a clear
-scheduling failure before Slurm operations. Ordinary Pods, Jobs, JobSets,
-LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing behavior
-when they do not reference a built-in PodGroup.
+out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm
+deployments, set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The
+scheduler then skips Workload discovery and registration. Pods that reference a
+built-in PodGroup through `spec.schedulingGroup.podGroupName` are rejected with
+a clear scheduling failure before Slurm operations. Ordinary Pods, Jobs,
+JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing
+behavior when they do not reference a built-in PodGroup.
 
 For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
 The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
 profile automatically. Other test versions retain the default requirement.
 
-After slurm-bridge assigns nodes to the gang, it
-sets `PodGroupScheduled=True` on 1.36 or `PodGroupInitiallyScheduled=True` on
-1.37. These conditions record gang admission, independently of Job completion.
+After slurm-bridge assigns nodes to the gang, it sets `PodGroupScheduled=True`
+on 1.36 or `PodGroupInitiallyScheduled=True` on 1.37. These conditions record
+gang admission, independently of Job completion.
 
 A [**Workload**][workload-api] defines **`podGroupTemplates`** (gang or basic
 scheduling). Workload controllers create runtime **`PodGroup`** objects from
