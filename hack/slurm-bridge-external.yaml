@@ -19,7 +19,7 @@ controller:
     GresTypes=gpu,nic
     Nodeset=slurm-bridge Feature=slurm-bridge
     PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
-    SchedulerParameters=bf_interval=5,bf_continue,default_queue_depth=500,bf_max_job_test=1000
+    SchedulerParameters=bf_interval=5,bf_continue,default_queue_depth=2000,bf_max_job_test=1000
   slurmctld:
     resources:
       requests:
