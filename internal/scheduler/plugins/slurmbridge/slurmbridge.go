@@ -142,6 +142,8 @@ func isJobNotPendingError(err error) bool {
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch
 
 // RBAC for Slurm-bridge Workloads
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=compositepodgroups,verbs=get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=compositepodgroups/status,verbs=patch;update
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=workloads,verbs=get
 // +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=get
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get

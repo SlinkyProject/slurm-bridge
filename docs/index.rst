@@ -239,6 +239,7 @@ limitations under the License.
 
     admission.md
     architecture.md
+    composite-development.md
     config.md
     controllers.md
     quickstart.md
