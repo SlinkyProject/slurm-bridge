@@ -71,10 +71,29 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Compatibility
 
-| Software   |                             Minimum Version                              |
-| :--------- | :----------------------------------------------------------------------: |
-| Kubernetes | [v1.35](https://kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release/) |
-| Slurm      | [25.11](https://www.schedmd.com/slurm-version-25-11-0-is-now-available/) |
+Each minor release supports all Kubernetes minor versions that are
+[supported upstream](https://kubernetes.io/releases/) when it is released,
+starting with Kubernetes 1.35. That set is recorded for each minor release.
+Support for newer Kubernetes minors may be backported in a patch release after
+end-to-end validation; these backports are optional.
+
+| Release | Kubernetes 1.35 | Kubernetes 1.36 | Kubernetes 1.37 |
+| :------ | :-------------: | :-------------: | :-------------: |
+| `1.3.X` |        ✓        |        ✓        |        ✓        |
+| `1.2.X` |        ✓        |        ✓        |        —        |
+| `1.1.X` |        ✓        |        ✓        |        —        |
+| `1.0.X` |        ✓        |        ✓        |        —        |
+
+✓ means supported; — means unsupported. `X` denotes the patch version. Use the
+latest patch release in each minor release series. Backported support is marked
+with the first supporting patch version.
+
+| Release |             Minimum Slurm (Data Parser)             |
+| :------ | :-------------------------------------------------: |
+| `1.3.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `1.2.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `1.1.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+| `1.0.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 
 ## Limitations
 
@@ -161,6 +180,8 @@ specific language governing permissions and limitations under the License.
 [slinky]: https://slinky.ai/
 [slinky-docs]: https://slinky.schedmd.com/
 [slurm]: https://slurm.schedmd.com/overview.html
+[slurm-25.11]: https://www.schedmd.com/slurm-version-25-11-0-is-now-available/
+[slurm-data_parser]: https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle
 [slurm-fairshare]: https://slurm.schedmd.com/fair_tree.html
 [slurm-preempt]: https://slurm.schedmd.com/preempt.html
 [slurm-priority]: https://slurm.schedmd.com/priority_multifactor.html
