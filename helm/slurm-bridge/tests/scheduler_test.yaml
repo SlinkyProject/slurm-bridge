@@ -40,6 +40,20 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
+  - it: requires built-in Workload APIs by default without enabling the embedded gang scheduler
+    template: scheduler/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
+  - it: allows an explicit Workload opt-out while preserving other feature gates
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.featureGates.SlurmBridgeGenericWorkload: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=false
   - it: exposes authenticated metrics over HTTPS
     template: scheduler/service.yaml
     asserts:

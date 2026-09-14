@@ -9,7 +9,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,36 +94,14 @@ func testSlurmBridgeJobSetScheduling() types.Feature {
 		Feature()
 }
 
-func testSlurmBridgeJobSetPodGroupScheduling() types.Feature {
+func testSlurmBridgeJobSetPodGroupScheduling(api kubernetesPodGroupAPI) types.Feature {
+	featureName := "JobSet native PodGroup workload (" + string(api) + ")"
 	workloadName := envconf.RandomName("jobset-workload-e2e", 40)
 	jobSetName := envconf.RandomName("jobset-podgroup-e2e", 40)
 	podGroupName := jobSetName + "-workers"
 	var slurmJobIDs []string
-	policy := schedulingv1alpha2.PodGroupSchedulingPolicy{
-		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
-	}
-	workload := &schedulingv1alpha2.Workload{
-		ObjectMeta: metav1.ObjectMeta{Name: workloadName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.WorkloadSpec{
-			ControllerRef: &schedulingv1alpha2.TypedLocalObjectReference{
-				APIGroup: jobsetv1alpha2.GroupVersion.Group, Kind: "JobSet", Name: jobSetName,
-			},
-			PodGroupTemplates: []schedulingv1alpha2.PodGroupTemplate{{
-				Name: "workers", SchedulingPolicy: policy,
-			}},
-		},
-	}
-	podGroup := &schedulingv1alpha2.PodGroup{
-		ObjectMeta: metav1.ObjectMeta{Name: podGroupName, Namespace: slurmBridgeNamespace},
-		Spec: schedulingv1alpha2.PodGroupSpec{
-			PodGroupTemplateRef: &schedulingv1alpha2.PodGroupTemplateReference{
-				Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
-					WorkloadName: workloadName, PodGroupTemplateName: "workers",
-				},
-			},
-			SchedulingPolicy: policy,
-		},
-	}
+	workload := newKubernetesWorkload(api, workloadName, jobsetv1alpha2.GroupVersion.Group, "JobSet", jobSetName)
+	podGroup := newKubernetesPodGroup(api, podGroupName, workloadName)
 	template := slurmTestPodTemplate([]string{"sh", "-c", "sleep 10"})
 	template.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To(podGroupName)}
 	jobSet := &jobsetv1alpha2.JobSet{
@@ -141,9 +118,10 @@ func testSlurmBridgeJobSetPodGroupScheduling() types.Feature {
 		}}},
 	}
 
-	return features.New("JobSet native PodGroup workload").
+	return features.New(featureName).
+		WithLabel("workload-api", string(api)).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			skipKubernetesPodGroupOnUnsupportedVersion(t, config)
+			requireKubernetesPodGroupAPI(t, config, api)
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
@@ -194,7 +172,7 @@ func testSlurmBridgeJobSetPodGroupScheduling() types.Feature {
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			captureReleaseSignalDiagnostics(t, "JobSet native PodGroup workload",
+			captureReleaseSignalDiagnostics(t, featureName,
 				slurmBridgeNamespace, slurmNamespace, slinkyNamespace, "jobset-system")
 			if !e2eCleanupEnabled(t) {
 				return ctx

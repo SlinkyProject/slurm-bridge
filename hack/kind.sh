@@ -20,7 +20,7 @@ KWOK_CHART_VERSION="0.3.0"
 KUBE_PROMETHEUS_STACK_CHART_REPO="https://prometheus-community.github.io/helm-charts"
 KUBE_PROMETHEUS_STACK_CHART_VERSION="88.6.2"
 
-MIN_KIND_VERSION="0.32.0"
+MIN_KIND_VERSION="0.33.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
 
 function tool::version_ge() {
@@ -576,8 +576,16 @@ function slurm::configure_hybrid_dra_inventory() {
 		exit 1
 	fi
 
-	kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
-		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=300s
+	if ! kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+		--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s; then
+		# Slurm startup failures can leave NodeSet reconciliation in backoff.
+		echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+		kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+			"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+			--overwrite
+		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
+			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
+	fi
 
 	for node in $bridge_nodes; do
 		dranet_device="\"/dra/dra.net/$node/$DRANET_INTERFACE_NAME\""

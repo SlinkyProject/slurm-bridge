@@ -17,14 +17,12 @@ import (
 	"github.com/puttsk/hostlist"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +36,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	nodecontrollerutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -82,16 +81,6 @@ func isJobNotPendingError(err error) bool {
 		return strings.Contains(msg, slurmJobNotPending) ||
 			strings.Contains(msg, "eslurm_job_not_pending")
 	}) != nil
-}
-
-func init() {
-	utilruntime.Must(scheme.AddToScheme(scheme.Scheme))
-	utilruntime.Must(sched.AddToScheme(scheme.Scheme))
-	utilruntime.Must(batchv1.AddToScheme(scheme.Scheme))
-	utilruntime.Must(jobset.AddToScheme(scheme.Scheme))
-	utilruntime.Must(lws.AddToScheme(scheme.Scheme))
-	// PodGroup (scheduling.k8s.io/v1alpha2)
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme.Scheme))
 }
 
 // Scheduler Plugin Core RBAC
@@ -144,6 +133,7 @@ type SlurmBridge struct {
 	slurmControl  slurmcontrol.SlurmControlInterface
 	handle        fwk.Handle
 	draRegistry   *dra.Registry
+	workloadAPI   *slurmjobir.WorkloadAPI
 }
 
 var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
@@ -191,6 +181,24 @@ func (sb *SlurmBridge) activatePod(logger klog.Logger, pod *corev1.Pod) {
 	sb.handle.Activate(logger, map[string]*corev1.Pod{string(pod.UID): pod})
 }
 
+func newClientScheme() (*runtime.Scheme, error) {
+	scheme := runtime.NewScheme()
+	for name, addToScheme := range map[string]func(*runtime.Scheme) error{
+		"metadata":          metav1.AddMetaToScheme,
+		"core":              corev1.AddToScheme,
+		"batch":             batchv1.AddToScheme,
+		"resource":          resourcev1.AddToScheme,
+		"scheduler-plugins": sched.AddToScheme,
+		"jobset":            jobset.AddToScheme,
+		"leader-worker-set": lws.AddToScheme,
+	} {
+		if err := addToScheme(scheme); err != nil {
+			return nil, fmt.Errorf("register %s API scheme: %w", name, err)
+		}
+	}
+	return scheme, nil
+}
+
 // New initializes and returns a new Slurmbridge plugin.
 func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin, error) {
 
@@ -214,7 +222,21 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		return nil, fmt.Errorf("configure DRA device profiles: %w", err)
 	}
 
-	client, err := client.New(handle.KubeConfig(), client.Options{})
+	clientScheme, err := newClientScheme()
+	if err != nil {
+		return nil, err
+	}
+	workloadAPI, err := newWorkloadAPI(handle.KubeConfig(), clientScheme)
+	if err != nil {
+		return nil, err
+	}
+	if workloadAPI != nil {
+		logger.Info("registered built-in Workload API", "apiVersion", workloadAPI.PodGroupTypeMeta.APIVersion)
+	} else {
+		logger.Info("built-in Workload support disabled", "featureGate", features.SlurmBridgeGenericWorkload)
+	}
+
+	kubeClient, err := newKubeClient(handle.KubeConfig(), clientScheme)
 	if err != nil {
 		return nil, err
 	}
@@ -230,11 +252,12 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	}
 	sc := slurmcontrol.NewControl(slurmClient, cfg.MCSLabel, cfg.Partition)
 	plugin := &SlurmBridge{
-		Client:        client,
+		Client:        kubeClient,
 		schedulerName: cfg.SchedulerName,
 		slurmControl:  sc,
 		handle:        handle,
 		draRegistry:   draRegistry,
+		workloadAPI:   workloadAPI,
 	}
 	return plugin, nil
 }
@@ -268,6 +291,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	logger := klog.FromContext(ctx)
 	var err error
 
+	if err := slurmjobir.ValidatePodGroupSupport(sb.workloadAPI, pod); err != nil {
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
+
 	if pod.Spec.ResourceClaims != nil {
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
 		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
@@ -283,7 +310,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	}
 
 	// Construct an intermediate representation of the Slurm external job
-	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), ctx, pod)
+	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
@@ -322,7 +349,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	}
 
 	// Perform resource specific PreFilter
-	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), ctx, pod, s.slurmJobIR)
+	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod, s.slurmJobIR)
 	if fs.Code() != fwk.Success {
 		// If the external job is determined to no longer be valid
 		// delete the external job and remove the associated annotations
@@ -665,7 +692,7 @@ func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string
 func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	// Construct an intermediate representation of the Slurm external job
-	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), ctx, pod)
+	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
 	if err != nil {
 		logger.Error(err, "failed to translate to slurmjobir")
 		return err

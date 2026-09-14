@@ -66,6 +66,7 @@ type translator struct {
 	ctx                 context.Context
 	draRegistry         *dra.Registry
 	deviceClassProfiles map[string]dra.DeviceProfile
+	workloadAPI         *WorkloadAPI
 }
 
 func (t *translator) registry() *dra.Registry {
@@ -79,7 +80,7 @@ type workloadTranslator func(*translator, *corev1.Pod, *metav1.PartialObjectMeta
 
 func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) {
 	switch typeMeta {
-	case podgroup_v1alpha2:
+	case podGroupV1Alpha2, podGroupV1Beta1:
 		return (*translator).fromPodGroup, true
 	case jobSet_v1alpha2:
 		return (*translator).fromJobSet, true
@@ -107,11 +108,12 @@ func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
 	return ok
 }
 
-func PreFilter(c client.Client, registry *dra.Registry, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
-	t := translator{Reader: c, ctx: ctx, draRegistry: registry}
-	switch slurmJobIR.RootPOM.TypeMeta {
-	case podgroup_v1alpha2:
+func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
+	if isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
 		return t.PreFilterPodGroup(pod, slurmJobIR)
+	}
+	switch slurmJobIR.RootPOM.TypeMeta {
 	case podgroup_coscheduling_v1alpha1:
 		return t.PreFilterPodGroupCoscheduling(pod, slurmJobIR)
 	case lws_v1:
@@ -121,19 +123,30 @@ func PreFilter(c client.Client, registry *dra.Registry, ctx context.Context, pod
 	}
 }
 
-func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+	if err := ValidatePodGroupSupport(workloadAPI, pod); err != nil {
+		return nil, err
+	}
 	rootPOM, err := getRootOwnerMetadata(c, ctx, pod)
 	if err != nil {
 		return nil, err
 	}
 
-	t := translator{Reader: c, ctx: ctx, draRegistry: registry}
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
 
-	// PodGroup (scheduling.k8s.io/v1alpha2): pods opt in via spec.schedulingGroup.
+	// Only Gang PodGroups replace the normal workload root. Basic PodGroups
+	// still supply annotations, but leave allocation membership to the owner.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
+	var pg *PodGroup
 	if pgName, ok := podGroupName(pod); ok {
-		rootPOM.TypeMeta = podgroup_v1alpha2
-		rootPOM.Name = pgName
+		pg = &PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
+		if err := t.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
+			return nil, err
+		}
+		if pg.Spec.SchedulingPolicy.Gang != nil {
+			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
+			rootPOM.Name = pgName
+		}
 	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
 		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
 		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
@@ -159,7 +172,7 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, ctx context.
 	if err := t.parseDeviceResources(slurmJobIR); err != nil {
 		return nil, err
 	}
-	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM)
+	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM, pg)
 	return slurmJobIR, err
 }
 

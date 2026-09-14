@@ -13,13 +13,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	utilversion "k8s.io/apimachinery/pkg/util/version"
-	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/e2e-framework/klient/wait"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
@@ -39,7 +37,6 @@ const (
 func addReleaseSignalSchemes(scheme *runtime.Scheme) error {
 	adders := []func(*runtime.Scheme) error{
 		resourcev1.AddToScheme,
-		schedulingv1alpha2.AddToScheme,
 		jobsetv1alpha2.AddToScheme,
 		lwsv1.AddToScheme,
 		schedv1alpha1.AddToScheme,
@@ -50,25 +47,6 @@ func addReleaseSignalSchemes(scheme *runtime.Scheme) error {
 		}
 	}
 	return nil
-}
-
-func skipKubernetesPodGroupOnUnsupportedVersion(t *testing.T, config *envconf.Config) {
-	t.Helper()
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config.Client().RESTConfig())
-	if err != nil {
-		t.Fatalf("create Kubernetes discovery client: %v", err)
-	}
-	serverInfo, err := discoveryClient.ServerVersion()
-	if err != nil {
-		t.Fatalf("discover Kubernetes server version: %v", err)
-	}
-	serverVersion, err := utilversion.ParseGeneric(serverInfo.GitVersion)
-	if err != nil {
-		t.Fatalf("parse Kubernetes server version %q: %v", serverInfo.GitVersion, err)
-	}
-	if serverVersion.Major() == 1 && serverVersion.Minor() == 35 {
-		t.Skipf("Kubernetes %s serves the unsupported v1alpha1 PodGroup API", serverVersion)
-	}
 }
 
 func slurmTestResources(cpu, memory string) corev1.ResourceRequirements {
@@ -275,23 +253,19 @@ func assertKubernetesPodGroupScheduled(
 	ctx context.Context,
 	t *testing.T,
 	crClient client.Client,
-	podGroup *schedulingv1alpha2.PodGroup,
+	podGroup *unstructured.Unstructured,
 ) {
 	t.Helper()
 	if err := wait.For(func(ctx context.Context) (bool, error) {
-		observed := &schedulingv1alpha2.PodGroup{}
+		observed := &unstructured.Unstructured{}
+		observed.SetGroupVersionKind(podGroup.GroupVersionKind())
 		if err := crClient.Get(ctx, client.ObjectKeyFromObject(podGroup), observed); err != nil {
 			return false, err
 		}
-		for _, condition := range observed.Status.Conditions {
-			if condition.Type == schedulingv1alpha2.PodGroupScheduled {
-				return condition.Status == metav1.ConditionTrue, nil
-			}
-		}
-		return false, nil
+		return kubernetesPodGroupScheduled(observed)
 	}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(3*time.Second)); err != nil {
 		t.Errorf("PodGroup %s/%s never reported scheduled: %v",
-			podGroup.Namespace, podGroup.Name, err)
+			podGroup.GetNamespace(), podGroup.GetName(), err)
 	}
 }
 

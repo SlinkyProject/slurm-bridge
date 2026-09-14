@@ -8,11 +8,10 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -53,18 +52,18 @@ func Test_podsHaveSlurmNodeAssignments(t *testing.T) {
 func TestMarkPodGroupScheduledSkipsPodRefreshWhenAlreadyScheduled(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Alpha2)
 
 	const (
 		namespace = "slurm-bridge"
 		pgName    = "podgroup"
 	)
-	pg := &schedulingv1alpha2.PodGroup{
+	pg := &slurmjobir.PodGroup{
 		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName},
-		Status: schedulingv1alpha2.PodGroupStatus{
+		Status: slurmjobir.PodGroupStatus{
 			Conditions: []metav1.Condition{{
-				Type:   schedulingv1alpha2.PodGroupScheduled,
+				Type:   workloadAPI.ScheduledCondition,
 				Status: metav1.ConditionTrue,
 			}},
 		},
@@ -74,7 +73,7 @@ func TestMarkPodGroupScheduledSkipsPodRefreshWhenAlreadyScheduled(t *testing.T) 
 	kubeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(pg).
-		WithStatusSubresource(&schedulingv1alpha2.PodGroup{}).
+		WithStatusSubresource(&slurmjobir.PodGroup{}).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				if _, ok := obj.(*corev1.Pod); ok {
@@ -84,7 +83,7 @@ func TestMarkPodGroupScheduledSkipsPodRefreshWhenAlreadyScheduled(t *testing.T) 
 			},
 		}).
 		Build()
-	sb := &SlurmBridge{Client: kubeClient}
+	sb := &SlurmBridge{Client: kubeClient, workloadAPI: workloadAPI}
 	ir := &slurmjobir.SlurmJobIR{
 		RootPOM: metav1.PartialObjectMetadata{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"},
@@ -98,5 +97,137 @@ func TestMarkPodGroupScheduledSkipsPodRefreshWhenAlreadyScheduled(t *testing.T) 
 	sb.markPodGroupScheduled(ctx, ir, "5")
 	if podGets != 0 {
 		t.Fatalf("pod GETs = %d, want 0 for an already scheduled PodGroup", podGets)
+	}
+}
+
+func TestMarkPodGroupScheduledBeta(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Beta1)
+
+	const (
+		namespace = "slurm-bridge"
+		pgName    = "podgroup"
+		jobID     = "5"
+	)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      "pod-a",
+			Labels:    map[string]string{wellknown.LabelExternalJobId: jobID},
+			Annotations: map[string]string{
+				wellknown.AnnotationExternalJobNode: "node-a",
+			},
+		},
+	}
+	pg := &slurmjobir.PodGroup{
+		TypeMeta: workloadAPI.PodGroupTypeMeta,
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      pgName,
+		},
+	}
+	kubeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(pg, pod).
+		WithStatusSubresource(&slurmjobir.PodGroup{}).
+		Build()
+	sb := &SlurmBridge{
+		Client:        kubeClient,
+		schedulerName: "slurm-bridge-scheduler",
+		workloadAPI:   workloadAPI,
+	}
+	ir := &slurmjobir.SlurmJobIR{
+		RootPOM: metav1.PartialObjectMetadata{
+			TypeMeta:   pg.TypeMeta,
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName},
+		},
+		Pods: corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+	}
+
+	sb.markPodGroupScheduled(ctx, ir, jobID)
+
+	updated := &slurmjobir.PodGroup{TypeMeta: pg.TypeMeta}
+	if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(pg), updated); err != nil {
+		t.Fatalf("Get PodGroup: %v", err)
+	}
+	condition := updated.Status.Conditions
+	if len(condition) != 1 || condition[0].Type != "PodGroupInitiallyScheduled" || condition[0].Status != metav1.ConditionTrue {
+		t.Fatalf("PodGroup conditions = %#v, want PodGroupInitiallyScheduled true", condition)
+	}
+}
+
+func TestMarkPodGroupScheduledPreservesConcurrentConditions(t *testing.T) {
+	for _, version := range []string{slurmjobir.WorkloadAPIVersionV1Alpha2, slurmjobir.WorkloadAPIVersionV1Beta1} {
+		t.Run(version, func(t *testing.T) {
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, version)
+			pg := &slurmjobir.PodGroup{
+				TypeMeta:   workloadAPI.PodGroupTypeMeta,
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "podgroup"},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   pg.Namespace,
+					Name:        "pod-a",
+					Labels:      map[string]string{wellknown.LabelExternalJobId: "5"},
+					Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "node-a"},
+				},
+			}
+			concurrentCondition := metav1.Condition{
+				Type:               "DisruptionTarget",
+				Status:             metav1.ConditionTrue,
+				Reason:             "PreemptionByScheduler",
+				Message:            "PodGroup was preempted",
+				LastTransitionTime: metav1.Now(),
+			}
+			kubeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(pg, pod).
+				WithStatusSubresource(pg).
+				WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*corev1.Pod); ok {
+							// Another writer updates the PodGroup after the scheduler's
+							// initial read, while it refreshes the assigned pods.
+							current := &slurmjobir.PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
+							if err := c.Get(ctx, client.ObjectKeyFromObject(pg), current); err != nil {
+								return err
+							}
+							apimeta.SetStatusCondition(&current.Status.Conditions, concurrentCondition)
+							if err := c.Status().Update(ctx, current); err != nil {
+								return err
+							}
+						}
+						return c.Get(ctx, key, obj, opts...)
+					},
+				}).
+				Build()
+			sb := &SlurmBridge{
+				Client:        kubeClient,
+				schedulerName: "slurm-bridge-scheduler",
+				workloadAPI:   workloadAPI,
+			}
+			ir := &slurmjobir.SlurmJobIR{
+				RootPOM: metav1.PartialObjectMetadata{TypeMeta: pg.TypeMeta, ObjectMeta: pg.ObjectMeta},
+				Pods:    corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+			}
+
+			sb.markPodGroupScheduled(ctx, ir, "5")
+
+			updated := &slurmjobir.PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
+			if err := kubeClient.Get(ctx, client.ObjectKeyFromObject(pg), updated); err != nil {
+				t.Fatalf("Get PodGroup: %v", err)
+			}
+			if condition := apimeta.FindStatusCondition(updated.Status.Conditions, workloadAPI.ScheduledCondition); condition == nil || condition.Status != metav1.ConditionTrue {
+				t.Fatalf("scheduled condition = %#v, want true", condition)
+			}
+			if condition := apimeta.FindStatusCondition(updated.Status.Conditions, concurrentCondition.Type); condition == nil || condition.Status != concurrentCondition.Status || condition.Reason != concurrentCondition.Reason || condition.Message != concurrentCondition.Message {
+				t.Fatalf("concurrent condition = %#v, want %#v", condition, concurrentCondition)
+			}
+		})
 	}
 }

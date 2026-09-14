@@ -18,11 +18,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
@@ -62,8 +62,33 @@ type activateRecorder struct {
 	pods map[string]*corev1.Pod
 }
 
+func mustRegisterTestWorkloadAPI(t *testing.T, scheme *runtime.Scheme, version string) *slurmjobir.WorkloadAPI {
+	t.Helper()
+	api, err := slurmjobir.RegisterWorkloadAPIVersion(scheme, version)
+	if err != nil {
+		t.Fatalf("RegisterWorkloadAPIVersion(): %v", err)
+	}
+	return api
+}
+
 func (r *activateRecorder) Activate(_ klog.Logger, pods map[string]*corev1.Pod) {
 	r.pods = pods
+}
+
+func TestNewClientSchemeDefersWorkloadAPIRegistration(t *testing.T) {
+	scheme, err := newClientScheme()
+	if err != nil {
+		t.Fatalf("newClientScheme(): %v", err)
+	}
+	for _, version := range []string{
+		slurmjobir.WorkloadAPIVersionV1Alpha2,
+		slurmjobir.WorkloadAPIVersionV1Beta1,
+	} {
+		gvk := schema.GroupVersion{Group: "scheduling.k8s.io", Version: version}.WithKind("PodGroup")
+		if scheme.Recognizes(gvk) {
+			t.Errorf("new client scheme unexpectedly recognizes %s", gvk)
+		}
+	}
 }
 
 func TestFindMatchingError(t *testing.T) {
@@ -502,8 +527,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(resourcev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Alpha2)
 
 	const (
 		namespace = "slurm-bridge"
@@ -537,13 +563,13 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 			},
 		},
 	}
-	podGroup := &schedulingv1alpha2.PodGroup{
+	podGroup := &slurmjobir.PodGroup{
 		TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: namespace,
 			Name:      pgName,
 		},
-		Spec: schedulingv1alpha2.PodGroupSpec{
+		Spec: slurmjobir.PodGroupSpec{
 			SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
 				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 			},
@@ -559,6 +585,7 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 		Client:       kubeClient,
 		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
 		draRegistry:  dra.DefaultRegistry(),
+		workloadAPI:  workloadAPI,
 	}
 
 	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
@@ -577,8 +604,8 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Alpha2)
 
 	const (
 		namespace = "slurm-bridge"
@@ -615,7 +642,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 			},
 		},
 	}
-	podGroup := &schedulingv1alpha2.PodGroup{
+	podGroup := &slurmjobir.PodGroup{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "scheduling.k8s.io/v1alpha2",
 			Kind:       "PodGroup",
@@ -624,7 +651,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 			Namespace: namespace,
 			Name:      pgName,
 		},
-		Spec: schedulingv1alpha2.PodGroupSpec{
+		Spec: slurmjobir.PodGroupSpec{
 			SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
 				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 			},
@@ -634,7 +661,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 	kubeClient := kubefake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
-		WithStatusSubresource(&schedulingv1alpha2.PodGroup{}).
+		WithStatusSubresource(&slurmjobir.PodGroup{}).
 		Build()
 	slurmControl := func() slurmcontrol.SlurmControlInterface {
 		list := &types.V0044JobInfoList{
@@ -665,6 +692,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		schedulerName: "slurm-bridge-scheduler",
 		slurmControl:  slurmControl,
 		draRegistry:   dra.DefaultRegistry(),
+		workloadAPI:   workloadAPI,
 	}
 
 	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
@@ -675,11 +703,11 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		t.Fatalf("PreFilter() result = %v, want node1", got)
 	}
 
-	updated := &schedulingv1alpha2.PodGroup{}
+	updated := &slurmjobir.PodGroup{TypeMeta: podGroup.TypeMeta}
 	if err := kubeClient.Get(ctx, kubeclient.ObjectKey{Namespace: namespace, Name: pgName}, updated); err != nil {
 		t.Fatalf("Get PodGroup: %v", err)
 	}
-	condition := apimeta.FindStatusCondition(updated.Status.Conditions, schedulingv1alpha2.PodGroupScheduled)
+	condition := apimeta.FindStatusCondition(updated.Status.Conditions, workloadAPI.ScheduledCondition)
 	if condition == nil || condition.Status != metav1.ConditionTrue {
 		t.Fatalf("PodGroupScheduled condition = %#v, want true", condition)
 	}
@@ -1311,7 +1339,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				draRegistry:   dra.DefaultRegistry(),
 			}
 			s := &stateData{}
-			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, sb.draRegistry, tt.args.ctx, tt.args.pod)
+			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, sb.draRegistry, sb.workloadAPI, tt.args.ctx, tt.args.pod)
 			tt.args.state.Write(stateKey, s)
 			got, got1 := sb.PostFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.m)
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {

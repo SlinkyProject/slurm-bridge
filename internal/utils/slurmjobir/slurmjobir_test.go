@@ -174,7 +174,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := TranslateToSlurmJobIR(tt.args.client, dra.DefaultRegistry(), tt.args.ctx, tt.args.pod)
+			got, err := TranslateToSlurmJobIR(tt.args.client, dra.DefaultRegistry(), nil, tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("TranslateToSlurmJobIR() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -239,7 +239,7 @@ func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *tes
 		}).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), nil, context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}
@@ -305,7 +305,7 @@ func TestTranslateToSlurmJobIRPrefersSupportedWorkloadBelowReadableAncestor(t *t
 		WithObjects(deployment, jobSet, job, pod).
 		Build()
 
-	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
+	got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), nil, context.TODO(), pod)
 	if err != nil {
 		t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 	}

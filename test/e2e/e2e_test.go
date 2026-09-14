@@ -31,12 +31,10 @@ func TestScheduling(t *testing.T) {
 		testAdmissionRoutingBoundaries(),
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgeParallelJobScheduling(),
+		testSlurmBridgeSequentialJobScheduling(),
 		testSlurmBridgeJobSetScheduling(),
-		testSlurmBridgeJobSetPodGroupScheduling(),
-		testKubernetesPodGroupScheduling(),
 		testSchedulerPluginsPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),
-		testLeaderWorkerSetPodGroupScheduling(),
 		testSlurmJobRoundTrip(),
 		testKubernetesCancellation(),
 		testSlurmCancellation(),
@@ -44,6 +42,13 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeDRAResourceScheduling(false),
 		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
 		testSlurmBridgeDRANETResourceScheduling(),
+	}
+	for _, api := range []kubernetesPodGroupAPI{podGroupV1Beta1, podGroupV1Alpha2} {
+		testFeatures = append(testFeatures,
+			testKubernetesPodGroupScheduling(api),
+			testSlurmBridgeJobSetPodGroupScheduling(api),
+			testLeaderWorkerSetPodGroupScheduling(api),
+		)
 	}
 	if nodeMode == slurmNodeModeExternal {
 		testFeatures = append(testFeatures, testSlurmBridgeDRAResourceScheduling(true))

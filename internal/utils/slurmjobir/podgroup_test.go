@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,19 +34,28 @@ func podWithSchedulingGroup(ns, name, pgName string) *corev1.Pod {
 	}
 }
 
-func newPodGroup(name, ns string, policy schedulingv1alpha2.PodGroupSchedulingPolicy) *schedulingv1alpha2.PodGroup {
-	return &schedulingv1alpha2.PodGroup{
+func newPodGroup(name, ns string, policy schedulingv1alpha2.PodGroupSchedulingPolicy) *PodGroup {
+	return &PodGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-		Spec: schedulingv1alpha2.PodGroupSpec{
+		Spec: PodGroupSpec{
 			SchedulingPolicy: policy,
 		},
 	}
 }
 
+func mustRegisterWorkloadAPI(t *testing.T, scheme *runtime.Scheme, version string) *WorkloadAPI {
+	t.Helper()
+	api, err := RegisterWorkloadAPIVersion(scheme, version)
+	if err != nil {
+		t.Fatalf("RegisterWorkloadAPIVersion(): %v", err)
+	}
+	return api
+}
+
 func Test_translator_fromPodGroup(t *testing.T) {
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Alpha2)
 
 	type args struct {
 		pod     *corev1.Pod
@@ -71,7 +79,7 @@ func Test_translator_fromPodGroup(t *testing.T) {
 			args: args{
 				pod: podWithSchedulingGroup("default", "p1", "pg1"),
 				rootPOM: &metav1.PartialObjectMetadata{
-					TypeMeta:   podgroup_v1alpha2,
+					TypeMeta:   podGroupV1Alpha2,
 					ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pg1"},
 				},
 			},
@@ -80,7 +88,7 @@ func Test_translator_fromPodGroup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := translator{Reader: tt.client, ctx: context.TODO()}
+			tr := translator{Reader: tt.client, ctx: context.TODO(), workloadAPI: workloadAPI}
 			got, err := tr.fromPodGroup(tt.args.pod, tt.args.rootPOM)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("fromPodGroup() error = %v, wantErr %v", err, tt.wantErr)
@@ -100,8 +108,8 @@ func Test_translator_fromPodGroup(t *testing.T) {
 
 func Test_translator_PreFilterPodGroup(t *testing.T) {
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Alpha2)
 
 	pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
@@ -126,7 +134,7 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 				pod: p1.DeepCopy(),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
-						TypeMeta: podgroup_v1alpha2,
+						TypeMeta: podGroupV1Alpha2,
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: "default",
 							Name:      "pg1",
@@ -144,7 +152,7 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 				pod: p1.DeepCopy(),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
-						TypeMeta: podgroup_v1alpha2,
+						TypeMeta: podGroupV1Alpha2,
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: "default",
 							Name:      "pg1",
@@ -166,7 +174,7 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 				pod: podWithSchedulingGroup("default", "p1", "pg2"),
 				slurmJobIR: &SlurmJobIR{
 					RootPOM: metav1.PartialObjectMetadata{
-						TypeMeta: podgroup_v1alpha2,
+						TypeMeta: podGroupV1Alpha2,
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: "default",
 							Name:      "pg2",
@@ -180,7 +188,7 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tr := translator{Reader: tt.client, ctx: context.TODO()}
+			tr := translator{Reader: tt.client, ctx: context.TODO(), workloadAPI: workloadAPI}
 			got := tr.PreFilterPodGroup(tt.args.pod, tt.args.slurmJobIR)
 			if !got.Equal(tt.want) {
 				t.Errorf("PreFilterPodGroup() = %v, want %v", got, tt.want)
@@ -228,8 +236,8 @@ func podWithJobOwner(pod *corev1.Pod, jobName string) *corev1.Pod {
 
 func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(schedulingv1alpha2.AddToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Alpha2)
 	utilruntime.Must(batchv1.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
 
@@ -254,7 +262,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "jobset is selected instead of intermediate job",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -265,7 +273,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-workload",
 						Namespace: "default",
@@ -312,7 +320,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "workload overrides job and podgroup",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -320,7 +328,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationTimeLimit: "30"},
@@ -339,7 +347,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "job overrides podgroup without workload ref",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -358,7 +366,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "podgroup only when job has no annotations",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -379,7 +387,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "missing workload falls back to job over podgroup",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -399,7 +407,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "non-conflicting annotations from each layer",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -407,7 +415,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationAccount: "wl-account"},
@@ -427,7 +435,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "workload wins on same key as job and podgroup",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -435,7 +443,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationPartition: "wl-partition"},
@@ -453,7 +461,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "workload job-name overrides podgroup object name when they differ",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("training-job-workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -465,7 +473,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					}
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "training-workload", Namespace: "default",
 						Annotations: map[string]string{
@@ -482,7 +490,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		{
 			name: "workload job-name overrides podgroup job-name annotation",
 			objects: []client.Object{
-				func() *schedulingv1alpha2.PodGroup {
+				func() *PodGroup {
 					pg := newPodGroup("training-job-workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
 						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
 					})
@@ -497,7 +505,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					}
 					return pg
 				}(),
-				&schedulingv1alpha2.Workload{
+				&Workload{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "training-workload", Namespace: "default",
 						Annotations: map[string]string{
@@ -522,7 +530,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 
 			pod := tt.objects[len(tt.objects)-2].(*corev1.Pod).DeepCopy()
-			got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), context.TODO(), pod)
+			got, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), workloadAPI, context.TODO(), pod)
 			if err != nil {
 				t.Fatalf("TranslateToSlurmJobIR() error = %v", err)
 			}

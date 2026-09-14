@@ -18,7 +18,7 @@
     - [Scheduler-managed Pod metadata](#scheduler-managed-pod-metadata)
   - [Pod grouping](#pod-grouping)
     - [Other controller owners](#other-controller-owners)
-  - [PodGroup (1.36+)](#podgroup-136)
+  - [Built-in PodGroup](#built-in-podgroup)
   - [JobSets](#jobsets)
   - [PodGroup coscheduling](#podgroup-coscheduling)
   - [LeaderWorkerSet](#leaderworkerset)
@@ -35,12 +35,15 @@ workloads through Kubernetes. Most workloads that can be submitted to
 batch workload primitive.
 
 At this time, `slurm-bridge` has scheduling support for [Jobs],
-[JobSets](#jobsets), [Pods], [PodGroup (1.36+)](#podgroup-136)
-(`scheduling.k8s.io/v1alpha2`), [PodGroup coscheduling](#podgroup-coscheduling)
-(scheduler-plugins), and [LeaderWorkerSets]. If your workload requires or
-benefits from co-scheduled pod launch (e.g. MPI, multi-node), prefer
-[PodGroup (1.36+)](#podgroup-136) on Kubernetes **1.36+** or
-[PodGroup coscheduling](#podgroup-coscheduling) on older clusters.
+[JobSets](#jobsets), [Pods], [built-in PodGroup](#built-in-podgroup)
+(`scheduling.k8s.io/v1alpha2` on Kubernetes **1.36**, or
+`scheduling.k8s.io/v1beta1` on **1.37**),
+[PodGroup coscheduling](#podgroup-coscheduling) (scheduler-plugins), and
+[LeaderWorkerSets]. If your workload requires or benefits from co-scheduled pod
+launch (e.g. MPI, multi-node), prefer [built-in PodGroup](#built-in-podgroup) on
+Kubernetes **1.36 or 1.37** when its API is enabled, or
+[PodGroup coscheduling](#podgroup-coscheduling) when the built-in API is
+unavailable.
 
 ## Using the `slurm-bridge` Scheduler
 
@@ -342,27 +345,65 @@ scheduler cannot read the Deployment, and the Pod is still scheduled. If the
 ReplicaSet itself cannot be retrieved, scheduling fails because no controller in
 the chain was successfully resolved.
 
-## PodGroup (1.36+)
+## Built-in PodGroup
 
-PodGroup is a built-in Kubernetes API introduced in **1.36**. This section
-applies to clusters running **1.36+** with the **`GenericWorkload`** feature
-gate and **`scheduling.k8s.io/v1alpha2`** API enabled (see
-[`hack/kind.yaml`](../hack/kind.yaml) and `make kind-start`). After slurm-bridge
-assigns nodes to the gang, PodGroup `STATUS` becomes **Scheduled**
-(`PodGroupScheduled=True`); it is not tied to Job completion.
+`slurm-bridge` supports built-in Workload and PodGroup APIs on Kubernetes **1.36
+and 1.37**. Enable the **`GenericWorkload`** feature gate and the API version
+for your cluster:
 
-A [**Workload**][workload-api] defines immutable **`podGroupTemplates`** (gang
-or basic scheduling). Workload controllers create runtime **`PodGroup`** objects
-from those templates. Pods opt in with **`spec.schedulingGroup.podGroupName`**
-pointing at their **`PodGroup`**. `slurm-bridge` reads the PodGroup, groups pods
-by scheduling group, and applies the same external-job flow as other
-co-scheduled workload types.
+| Kubernetes | Workload and PodGroup `apiVersion` | Kind configuration                              |
+| ---------- | ---------------------------------- | ----------------------------------------------- |
+| 1.36       | `scheduling.k8s.io/v1alpha2`       | [`hack/kind-1.36.yaml`](../hack/kind-1.36.yaml) |
+| 1.37       | `scheduling.k8s.io/v1beta1`        | [`hack/kind.yaml`](../hack/kind.yaml)           |
 
-Example manifests (see also
-[`hack/examples/workload/`](../hack/examples/workload/)):
+The bridge's **`SlurmBridgeGenericWorkload`** feature gate is enabled by
+default. At startup, the scheduler requires both Workload and PodGroup resources
+in a supported API version, preferring `v1beta1` when both versions are
+available. Missing APIs, incomplete discovery responses, and discovery errors
+fail startup with an error identifying the required feature. The scheduler does
+not silently disable Workload support.
+
+This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
+`GenericWorkload` on the cluster components as shown in the Kind configurations;
+`SlurmBridgeGenericWorkload` controls the bridge's compatibility implementation
+without enabling the embedded scheduler's upstream gang-scheduling path.
+
+Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
+out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm
+deployments, set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The
+scheduler then skips Workload discovery and registration. Pods that reference a
+built-in PodGroup through `spec.schedulingGroup.podGroupName` are rejected with
+a clear scheduling failure before Slurm operations. Ordinary Pods, Jobs,
+JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing
+behavior when they do not reference a built-in PodGroup.
+
+For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
+The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
+profile automatically. Other test versions retain the default requirement.
+
+After slurm-bridge assigns nodes to the gang, it sets `PodGroupScheduled=True`
+on 1.36 or `PodGroupInitiallyScheduled=True` on 1.37. These conditions record
+gang admission, independently of Job completion.
+
+A [**Workload**][workload-api] defines **`podGroupTemplates`** (gang or basic
+scheduling). Workload controllers create runtime **`PodGroup`** objects from
+those templates. Pods opt in with **`spec.schedulingGroup.podGroupName`**
+pointing at their **`PodGroup`**. For a **Gang** policy, `slurm-bridge` groups
+pods by scheduling group and applies the same external-job flow as other
+co-scheduled workload types, including the `minCount` check.
+
+For a **Basic** policy, pods follow their normal owner-based scheduling path.
+Jobs and standalone Pods receive independent Slurm allocations, while
+LeaderWorkerSets retain their existing group scheduling. PodGroup and Workload
+annotations still apply with the precedence described below. This also covers
+the Basic PodGroups that Kubernetes 1.37 creates automatically for ordinary Jobs
+when `WorkloadWithJob` is enabled: completed or failed sibling Pods do not
+increase the allocation requested for the next Job Pod.
+
+Example manifest excerpts for Kubernetes **1.37**:
 
 ```yaml
-apiVersion: scheduling.k8s.io/v1alpha2
+apiVersion: scheduling.k8s.io/v1beta1
 kind: Workload
 metadata:
   name: training-workload
@@ -380,15 +421,14 @@ spec:
         gang:
           minCount: 2
 ---
-apiVersion: scheduling.k8s.io/v1alpha2
+apiVersion: scheduling.k8s.io/v1beta1
 kind: PodGroup
 metadata:
   name: training-job-workers
 spec:
-  podGroupTemplateRef:
-    workload:
-      workloadName: training-workload
-      podGroupTemplateName: workers
+  workloadRef:
+    workloadName: training-workload
+    templateName: workers
   schedulingPolicy:
     gang:
       minCount: 2
@@ -405,14 +445,32 @@ spec:
         podGroupName: training-job-workers
 ```
 
+For Kubernetes **1.36**, set `apiVersion: scheduling.k8s.io/v1alpha2` on both
+the Workload and PodGroup, and replace the PodGroup's `spec.workloadRef` with
+`spec.podGroupTemplateRef`:
+
+```yaml
+spec:
+  podGroupTemplateRef:
+    workload:
+      workloadName: training-workload
+      podGroupTemplateName: workers
+```
+
+Keep `spec.schedulingPolicy` and the Job's
+`spec.template.spec.schedulingGroup.podGroupName` unchanged. The complete
+manifests in [`hack/examples/workload/`](../hack/examples/workload/) use this
+1.36 form.
+
 Ref: [Workload API][workload-api]
 
 To override Slurm submission parameters, add optional
 `slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
 controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
 **Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
-job name defaults to the **PodGroup object name** (not the Workload name) and
-the partition defaults to the scheduler configuration. See
+job name for a Gang policy defaults to the **PodGroup object name** (not the
+Workload name); Basic policies retain the normal workload's naming behavior. The
+partition defaults to the scheduler configuration. See
 [Annotations](#annotations) for the full key list.
 
 If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
@@ -440,11 +498,11 @@ marked as completed.
 
 ## PodGroup coscheduling
 
-This is **not** the same API as [PodGroup (1.36+)](#podgroup-136) above. It uses
-the **scheduler-plugins** CRD `scheduling.x-k8s.io/v1alpha1` and requires
-installing on clusters **before 1.36** (or where the built-in PodGroup API is
-unavailable) the [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree
-CoScheduling controller:
+PodGroup coscheduling uses the **scheduler-plugins** CRD
+`scheduling.x-k8s.io/v1alpha1`. On clusters where the supported
+[built-in PodGroup](#built-in-podgroup) API is unavailable, install the
+[PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
+controller:
 
 ```sh
 helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins scheduler-plugins \
@@ -456,12 +514,12 @@ Pods join the group via the label `scheduling.x-k8s.io/pod-group` (see
 [`hack/examples/podgroup-coscheduling/`](../hack/examples/podgroup-coscheduling/)).
 Gang size is `spec.minMember` on the PodGroup object.
 
-|                 | PodGroup (1.36+)                      | PodGroup coscheduling                 |
-| --------------- | ------------------------------------- | ------------------------------------- |
-| API group       | `scheduling.k8s.io/v1alpha2`          | `scheduling.x-k8s.io/v1alpha1`        |
-| Install         | Feature gate + runtime config         | CRD + helm chart                      |
-| Pod association | `spec.schedulingGroup.podGroupName`   | Label `scheduling.x-k8s.io/pod-group` |
-| Gang field      | `spec.schedulingPolicy.gang.minCount` | `spec.minMember`                      |
+|                 | Built-in PodGroup                                                         | PodGroup coscheduling                 |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------- |
+| API version     | `scheduling.k8s.io/v1alpha2` (1.36) or `scheduling.k8s.io/v1beta1` (1.37) | `scheduling.x-k8s.io/v1alpha1`        |
+| Install         | Feature gate + runtime config                                             | CRD + helm chart                      |
+| Pod association | `spec.schedulingGroup.podGroupName`                                       | Label `scheduling.x-k8s.io/pod-group` |
+| Gang field      | `spec.schedulingPolicy.gang.minCount`                                     | `spec.minMember`                      |
 
 Both paths are supported by `slurm-bridge` independently.
 
