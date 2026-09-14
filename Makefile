@@ -89,10 +89,11 @@ push-charts: build-chart ## Push OCI packages.
 ##@ Deployment
 
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
+SLURM_NODE_MODE ?= external
 
 .PHONY: kind-start
 kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack.
-	./hack/kind.sh --core $(KIND_CLUSTER_NAME)
+	./hack/kind.sh --all --slurm-node-mode="$(SLURM_NODE_MODE)" "$(KIND_CLUSTER_NAME)"
 
 .PHONY: kind-stop
 kind-stop: ## Delete the development Kind cluster.
@@ -121,7 +122,7 @@ demo-stop: ## Delete the demo workloads.
 
 .PHONY: prereqs
 prereqs: ## Install prerequisites into the current Kubernetes context.
-	./hack/kind.sh --existing-cluster --prereqs
+	./hack/kind.sh --existing-cluster --prereqs --slurm-node-mode="$(SLURM_NODE_MODE)"
 
 .PHONY: deploy
 deploy: values-dev ## Build and deploy Slurm Bridge to the current Kubernetes context.
@@ -150,11 +151,15 @@ endif
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
+E2E_ARTIFACTS_DIR ?= $(shell pwd)/e2e-artifacts
+E2E_CLEANUP ?= true
+E2E_RUN ?=
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
 ## Tool Binaries
+GOTESTSUM ?= $(LOCALBIN)/gotestsum-$(GOTESTSUM_VERSION)
 KUBECTL ?= kubectl
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
 ENVTEST ?= $(LOCALBIN)/setup-envtest-$(ENVTEST_VERSION)
@@ -165,6 +170,7 @@ PANDOC ?= $(LOCALBIN)/pandoc-$(PANDOC_VERSION)
 COSIGN ?= $(LOCALBIN)/cosign-$(COSIGN_VERSION)
 
 ## Tool Versions
+GOTESTSUM_VERSION ?= v1.13.0
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
@@ -178,6 +184,11 @@ GOLANGCI_LINT_BASE_REV ?= HEAD
 HELM_DOCS_VERSION ?= v1.14.2
 PANDOC_VERSION ?= 3.9
 COSIGN_VERSION ?= v2.4.1
+
+.PHONY: gotestsum-bin
+gotestsum-bin: $(GOTESTSUM) ## Download gotestsum locally if necessary.
+$(GOTESTSUM): $(LOCALBIN)
+	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VERSION))
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
@@ -417,3 +428,12 @@ test: fmt vet envtest ## Run tests.
 			echo "Total test coverage ($${percentage}%) is less than the coverage threshold ($(CODECOV_PERCENT)%)."; \
 			exit 1; \
 		fi
+
+.PHONY: test-e2e
+test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the current Kubernetes context.
+	mkdir -p "$(E2E_ARTIFACTS_DIR)"
+	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
+		--format testname \
+		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
+		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \
+		-- -count=1 -timeout 30m $(if $(strip $(E2E_RUN)),-run "$(E2E_RUN)",) ./test/e2e

@@ -121,9 +121,13 @@ function sys::check() {
 function kind::start() {
 	sys::check
 	local cluster_name="${1:-"kind"}"
-	local kind_config="${2:-"$SCRIPT_DIR/kind-config.yaml"}"
+	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
 	if ! kind get clusters 2>/dev/null | grep -Fxq "$cluster_name"; then
-		kind create cluster --name "$cluster_name" --config "$kind_config"
+		local create_args=(--name "$cluster_name" --config "$kind_config")
+		if [ -n "${KIND_NODE_IMAGE:-}" ]; then
+			create_args+=(--image "$KIND_NODE_IMAGE")
+		fi
+		kind create cluster "${create_args[@]}"
 	fi
 	kubectl config use-context kind-"$cluster_name"
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
@@ -281,14 +285,38 @@ function slurm-bridge::nodes() {
 		kubectl exec -n slurm pods/slurm-controller-0 -- \
 			scontrol update partitionname="$partition" nodes="$(echo "$bridge_nodes" | paste -sd, -)"
 	else
-		kubectl get pods -n slurm -l nodeset.slinky.slurm.net/name=slurm-worker-slurm-bridge \
-			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}" | while read -r node hostname; do
-			if [[ -n $node && -n $hostname ]]; then
-				kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname"
-			else
-				echo "Skipping node as one or both of 'node'/'hostname' is not set" >&2
+		local replicas
+		replicas=$(kubectl get nodeset slurm-worker-slurm-bridge -n slurm -o jsonpath='{.spec.replicas}')
+		if ! kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
+			-n slurm nodeset/slurm-worker-slurm-bridge --timeout=150s; then
+			# Slurm startup failures can leave NodeSet reconciliation in backoff.
+			echo "[slurm] Hybrid workers are not ready; requesting NodeSet reconciliation and waiting another 150s..."
+			kubectl annotate nodeset/slurm-worker-slurm-bridge -n slurm \
+				"test.slinky.slurm.net/reconcile-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+				--overwrite
+			kubectl wait --for="jsonpath={.status.readyReplicas}=$replicas" \
+				-n slurm nodeset/slurm-worker-slurm-bridge --timeout=150s
+		fi
+		local selector workers mapped=0
+		selector=$(kubectl get nodeset slurm-worker-slurm-bridge -n slurm -o jsonpath='{.status.selector}')
+		if [[ -z $selector ]]; then
+			echo "[slurm] Hybrid NodeSet has no pod selector." >&2
+			return 1
+		fi
+		workers=$(kubectl get pods -n slurm -l "$selector" \
+			-o jsonpath="{range .items[*]}{.spec.nodeName} {.spec.hostname}{'\n'}{end}")
+		while read -r node hostname; do
+			if [[ -z $node || -z $hostname ]]; then
+				echo "[slurm] Hybrid worker is missing its Kubernetes node or Slurm hostname." >&2
+				return 1
 			fi
-		done
+			kubectl label node "$node" slinky.slurm.net/slurm-nodename="$hostname" --overwrite
+			mapped=$((mapped + 1))
+		done <<<"$workers"
+		if ((mapped != replicas)); then
+			echo "[slurm] Mapped $mapped hybrid workers, expected $replicas." >&2
+			return 1
+		fi
 	fi
 }
 
@@ -403,7 +431,43 @@ function slurm-operator::install_from_source() {
 
 function slurm-operator::wait() {
 	kubectl wait --for=condition=Available deployment/slurm-operator-webhook \
-		-n slinky --timeout=120s
+		-n slinky --timeout=120s || return 1
+
+	# Pod readiness can precede Service routing updates. Exercise admission from
+	# the API server without persisting a resource or requiring a running Slurm.
+	echo "[slurm] Waiting for slurm-operator webhook admission..."
+	local deadline=$((SECONDS + 120))
+	local output=""
+	local request_timeout
+	while ((SECONDS < deadline)); do
+		request_timeout=$((deadline - SECONDS))
+		if ((request_timeout <= 0)); then
+			break
+		fi
+		if ((request_timeout > 10)); then
+			request_timeout=10
+		fi
+		if output="$(
+			kubectl create --dry-run=server --namespace=slinky \
+				--request-timeout="${request_timeout}s" -f - 2>&1 <<-EOF
+					apiVersion: slinky.slurm.net/v1beta1
+					kind: RestApi
+					metadata:
+					  generateName: slurm-operator-webhook-check-
+					spec:
+					  controllerRef:
+					    name: slurm-operator-webhook-check
+				EOF
+		)"; then
+			echo "[slurm] Slurm-operator webhook admission is ready."
+			return 0
+		fi
+		sleep 2
+	done
+
+	echo "[slurm] Timed out waiting for slurm-operator webhook admission after 120s." >&2
+	printf '%s\n' "$output" >&2
+	return 1
 }
 
 function slurm::install_from_source() {
@@ -430,11 +494,18 @@ function slurm::configure_for_bridge() {
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
+		# Let the controller reconfigure before creating hybrid workers.
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			--set nodesets.slurm-bridge.enabled=false
+		helm upgrade "$chartName" "$chart" \
+			--namespace slurm --create-namespace \
+			--reuse-values \
+			--wait \
+			--set nodesets.slurm-bridge.enabled=true
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
@@ -448,23 +519,13 @@ function slurm-bridge::secret() {
 }
 
 function dra-example-driver::install() {
-	local cluster_name="${1:-kind}"
-	local version="0.2.0"
-	local dra_path
-	local repo="https://github.com/kubernetes-sigs/dra-example-driver.git"
-	dra_path="$(git::checkout dra-example-driver "$repo" "v${version}")"
-	(
-		cd "$dra_path"
+	local version="0.4.0"
+	local chart="oci://registry.k8s.io/dra-example-driver/charts/dra-example-driver"
+	local values="$SLURM_BRIDGE_TMP/dra-example-driver-values.yaml"
 
-		# Build DRA images and load them into kind cluster.
-		export KIND_CLUSTER_NAME="$cluster_name"
-		./demo/build-driver.sh
-
-		# Install with selectors and tolerations for slurm-bridge.
-		local helm_chart="./deployments/helm/dra-example-driver/"
-		cd $helm_chart
-		cat <<EOF >./values-dev.yaml
+	cat <<EOF >"$values"
 kubeletPlugin:
+  numDevices: 8
   nodeSelector:
     scheduler.slinky.slurm.net/slurm-bridge: "worker"
   tolerations:
@@ -473,10 +534,13 @@ kubeletPlugin:
       value: "slurm-bridge-scheduler"
       effect: "NoExecute"
 EOF
-		helm upgrade -i --create-namespace --namespace dra-example-driver \
-			-f values.yaml -f values-dev.yaml \
-			dra-example-driver .
-	)
+
+	helm upgrade --install dra-example-driver "$chart" \
+		--version "$version" \
+		--namespace dra-example-driver \
+		--create-namespace \
+		--values "$values" \
+		--wait --timeout=120s
 }
 
 function main::help() {
@@ -492,7 +556,8 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 KIND OPTIONS:
-	--config=PATH       Use the specified kind config when creating.
+	--config=PATH       Use the specified kind config when creating (or KIND_CONFIG).
+	                   KIND_NODE_IMAGE optionally selects the Kind node image.
 	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
 	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
 	                    Can also be set with SKAFFOLD_DEFAULT_REPO.
@@ -574,7 +639,7 @@ function main() {
 
 OPT_DEBUG=false
 OPT_RECREATE=false
-OPT_CONFIG="$SCRIPT_DIR/kind-config.yaml"
+OPT_CONFIG="${KIND_CONFIG:-$SCRIPT_DIR/kind.yaml}"
 OPT_DELETE=false
 OPT_EXISTING_CLUSTER=false
 OPT_CORE=false

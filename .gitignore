@@ -137,3 +137,6 @@ values-*.yaml
 *.yaml.debug
 hack/kubectl-kjob
 bake-metadata.json
+
+# End-to-end test reports and cluster diagnostics
+e2e-artifacts/
