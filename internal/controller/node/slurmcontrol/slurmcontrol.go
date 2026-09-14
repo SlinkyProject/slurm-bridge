@@ -75,7 +75,7 @@ func (r *realSlurmControl) NodeExists(ctx context.Context, node *corev1.Node) (b
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -92,7 +92,7 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 	slurmNode := &slurmtypes.V0044Node{}
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -110,7 +110,7 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -127,7 +127,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	opts := &slurmclient.GetOptions{RefreshCache: true}
 	if err := r.Get(ctx, key, slurmNode, opts); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -151,7 +151,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 		Reason: ptr.To(nodeReasonPrefix + " " + reason),
 	}
 	if err := r.Update(ctx, slurmNode, req); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -191,7 +191,7 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -206,7 +206,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -256,7 +256,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		}
 		return r.updateNodeTopology(ctx, node, slurmNode)
 	}
-	if err != nil && !errors.Is(err, slurmerrors.ErrObjectNotFound) {
+	if err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
 		return err
 	}
 
@@ -449,7 +449,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	key := slurmobject.ObjectKey(slurmNodeName)
 	slurmNode := &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -458,7 +458,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	logger.Info("Removing Kubernetes node from Slurm", "node", klog.KObj(node),
 		"slurmNode", slurmNodeName)
 	if err := r.Delete(ctx, slurmNode); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("could not remove node from Slurm: %w", err)
@@ -472,7 +472,7 @@ func (r *realSlurmControl) validatePartitionExists(ctx context.Context, partitio
 	partition := &slurmtypes.V0044PartitionInfo{}
 	key := slurmobject.ObjectKey(partitionName)
 	if err := r.Get(ctx, key, partition); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return fmt.Errorf("partition not found")
 		}
 		return err

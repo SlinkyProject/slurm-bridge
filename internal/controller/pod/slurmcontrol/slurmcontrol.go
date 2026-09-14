@@ -47,7 +47,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 	// "yes, still running"; a forced refresh pays a synchronous batch+poll cost on the
 	// hottest, most frequently repeated path in the controller for no correctness gain.
 	err := r.Get(ctx, jobId, job)
-	if err != nil && !errors.Is(err, slurmerrors.ErrObjectNotFound) {
+	if err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
 		return false, err
 	}
 	if err == nil && job.GetStateAsSet().Has(api.V0044JobInfoJobStateRUNNING) {
@@ -58,7 +58,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 	// recheck live before trusting a cached result that would delete the pod.
 	err = r.Get(ctx, jobId, job, &client.GetOptions{RefreshCache: true})
 	if err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -75,7 +75,7 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -92,7 +92,7 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 		},
 	}
 	if err := r.Delete(ctx, job); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err

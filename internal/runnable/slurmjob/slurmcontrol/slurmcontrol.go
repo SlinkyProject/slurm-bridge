@@ -57,7 +57,7 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -96,7 +96,7 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]k
 	job := &types.V0044JobInfo{}
 	key := client.ObjectKey(fmt.Sprintf("%v", jobId))
 	if err := r.Get(ctx, key, job); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -124,7 +124,7 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 		},
 	}
 	if err := r.Delete(ctx, job); err != nil {
-		if errors.Is(err, slurmerrors.ErrObjectNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
