@@ -128,22 +128,32 @@ func hasWorkloadAPIResources(resources *metav1.APIResourceList) bool {
 // types. Startup calls this once, so the client scheme contains only the API
 // version served by its cluster.
 func RegisterWorkloadAPIVersion(scheme *runtime.Scheme, version string) (*WorkloadAPI, error) {
+	condition, err := ScheduledConditionForVersion(version)
+	if err != nil {
+		return nil, err
+	}
 	groupVersion := schema.GroupVersion{Group: workloadAPIGroup, Version: version}
 	api := &WorkloadAPI{
-		PodGroupTypeMeta: metav1.TypeMeta{APIVersion: groupVersion.String(), Kind: "PodGroup"},
-	}
-	switch version {
-	case WorkloadAPIVersionV1Alpha2:
-		api.ScheduledCondition = schedulingv1alpha2.PodGroupScheduled
-	case WorkloadAPIVersionV1Beta1:
-		api.ScheduledCondition = "PodGroupInitiallyScheduled"
-	default:
-		return nil, fmt.Errorf("unsupported Workload API version %q", version)
+		PodGroupTypeMeta:   metav1.TypeMeta{APIVersion: groupVersion.String(), Kind: "PodGroup"},
+		ScheduledCondition: condition,
 	}
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("PodGroup"), &PodGroup{})
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("Workload"), &Workload{})
 	metav1.AddToGroupVersion(scheme, groupVersion)
 	return api, nil
+}
+
+// ScheduledConditionForVersion returns the PodGroup scheduled condition type
+// for a supported Workload API version.
+func ScheduledConditionForVersion(version string) (string, error) {
+	switch version {
+	case WorkloadAPIVersionV1Alpha2:
+		return schedulingv1alpha2.PodGroupScheduled, nil
+	case WorkloadAPIVersionV1Beta1:
+		return "PodGroupInitiallyScheduled", nil
+	default:
+		return "", fmt.Errorf("unsupported Workload API version %q", version)
+	}
 }
 
 func isBuiltInPodGroup(typeMeta metav1.TypeMeta) bool {

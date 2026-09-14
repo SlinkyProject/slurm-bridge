@@ -139,6 +139,23 @@ func TestKubernetesPodGroupScheduled(t *testing.T) {
 	}
 }
 
+func TestKubernetesPodGroupScheduledUnsupportedVersion(t *testing.T) {
+	t.Parallel()
+	for _, apiVersion := range []string{"", "scheduling.k8s.io/v1alpha1", "scheduling.k8s.io/v1beta2"} {
+		t.Run(apiVersion, func(t *testing.T) {
+			t.Parallel()
+			podGroup := newKubernetesPodGroup(podGroupV1Beta1, "workers", "training")
+			podGroup.SetAPIVersion(apiVersion)
+			podGroup.Object["status"] = map[string]any{"conditions": []any{map[string]any{
+				"type": "PodGroupInitiallyScheduled", "status": "True",
+			}}}
+			if got, err := kubernetesPodGroupScheduled(podGroup); err == nil || got {
+				t.Fatalf("kubernetesPodGroupScheduled() = %v, %v, want false and an error", got, err)
+			}
+		})
+	}
+}
+
 func TestKubernetesPodGroupReferences(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

@@ -6,6 +6,7 @@ package e2e
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,6 +17,8 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
 type kubernetesPodGroupAPI string
@@ -125,9 +128,10 @@ func kubernetesPodGroupScheduled(podGroup *unstructured.Unstructured) (bool, err
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(podGroup.Object, &observed); err != nil {
 		return false, err
 	}
-	conditionType := "PodGroupInitiallyScheduled"
-	if podGroup.GetAPIVersion() == "scheduling.k8s.io/v1alpha2" {
-		conditionType = "PodGroupScheduled"
+	version := strings.TrimPrefix(podGroup.GetAPIVersion(), "scheduling.k8s.io/")
+	conditionType, err := slurmjobir.ScheduledConditionForVersion(version)
+	if err != nil {
+		return false, err
 	}
 	for _, condition := range observed.Status.Conditions {
 		if condition.Type == conditionType {
