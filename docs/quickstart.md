@@ -86,6 +86,7 @@ When running Slurm on baremetal:
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm
+kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
