@@ -214,6 +214,53 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects incomplete per-device pools without published local devices", func(t *testing.T) {
+		for _, tt := range []struct {
+			name    string
+			devices []string
+		}{
+			{name: "remote devices", devices: []string{"gpu-remote"}},
+			{name: "empty slice"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				local := resourceSlice("node-a", "gpu.example.com", "local-pool", "gpu-local")
+				old := resourceSlice("", "gpu.example.com", "shared-pool", "gpu-old")
+				old.Spec.NodeName = nil
+				old.Spec.PerDeviceNodeSelection = ptr.To(true)
+				old.Spec.Devices[0].NodeName = ptr.To("node-a")
+				current := resourceSlice("", "gpu.example.com", "shared-pool", tt.devices...)
+				current.Spec.NodeName = nil
+				current.Spec.PerDeviceNodeSelection = ptr.To(true)
+				current.Spec.Pool.Generation = 2
+				current.Spec.Pool.ResourceSliceCount = 2
+				for i := range current.Spec.Devices {
+					current.Spec.Devices[i].NodeName = ptr.To("node-b")
+				}
+
+				_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{local, old, current})
+				if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
+					t.Fatalf("BuildNodeInventory() error = %v, want incomplete pool error", err)
+				}
+			})
+		}
+	})
+
+	t.Run("ignores a complete per-device pool that belongs to another node", func(t *testing.T) {
+		local := resourceSlice("node-a", "gpu.example.com", "local-pool", "gpu-local")
+		remote := resourceSlice("", "gpu.example.com", "remote-pool", "gpu-remote")
+		remote.Spec.NodeName = nil
+		remote.Spec.PerDeviceNodeSelection = ptr.To(true)
+		remote.Spec.Devices[0].NodeName = ptr.To("node-b")
+
+		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{local, remote})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		if len(got.Profiles) != 1 || len(got.Profiles[0].Devices) != 1 || got.Profiles[0].Devices[0].Device.String() != "gpu-local" {
+			t.Fatalf("BuildNodeInventory() = %#v, want only gpu-local", got)
+		}
+	})
+
 	t.Run("checks pool completeness before filtering by node", func(t *testing.T) {
 		local := resourceSlice("node-a", "gpu.example.com", "shared-pool", "gpu-local")
 		local.Spec.Pool.ResourceSliceCount = 2

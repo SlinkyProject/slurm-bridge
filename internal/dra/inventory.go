@@ -163,10 +163,11 @@ func addResourceSliceToSnapshot(
 }
 
 // completeResourcePoolSnapshots returns the highest-generation snapshot of
-// every pool. An incomplete pool is an error only when one of its published
-// slices is accessible to the node; incomplete pools that belong entirely to
-// other nodes are dropped so that a driver mid-publish on one node does not
-// fail inventory for every node in the cluster.
+// every pool. An incomplete pool is an error when a published slice exposes
+// devices to the node or uses per-device node selection. In the latter case,
+// unpublished slices may contain local devices. Other incomplete pools are
+// dropped so that a driver mid-publish on one node does not fail inventory for
+// every node in the cluster.
 func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
 	poolIDs := make([]resourcePoolID, 0, len(snapshotsByPool))
 	for id := range snapshotsByPool {
@@ -197,10 +198,13 @@ func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resour
 	return snapshots, nil
 }
 
-// poolAccessibleToNode reports whether any published slice in the snapshot
-// exposes devices to the node.
+// poolAccessibleToNode reports whether an incomplete snapshot is potentially
+// relevant to the node.
 func poolAccessibleToNode(node *corev1.Node, snapshot *resourcePoolSnapshot) (bool, error) {
 	for _, resourceSlice := range snapshot.Slices {
+		if ptr.Deref(resourceSlice.Spec.PerDeviceNodeSelection, false) {
+			return true, nil
+		}
 		devices, err := devicesAccessibleToNode(node, resourceSlice)
 		if err != nil {
 			return false, err
