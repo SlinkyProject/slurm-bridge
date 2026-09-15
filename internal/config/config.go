@@ -20,6 +20,13 @@ const (
 	SlurmClientTimeout = 5 * time.Minute
 )
 
+// DefaultClientQPS and DefaultClientBurst match kube-scheduler's own default
+// client, not client-go's much lower bare defaults.
+const (
+	DefaultClientQPS   float32 = 50
+	DefaultClientBurst int     = 100
+)
+
 type Config struct {
 	SchedulerName            string                `json:"schedulerName" yaml:"schedulerName"`
 	SlurmRestApi             string                `json:"slurmRestApi" yaml:"slurmRestApi"`
@@ -28,6 +35,11 @@ type Config struct {
 	MCSLabel                 string                `json:"mcsLabel" yaml:"mcsLabel"`
 	Partition                string                `json:"partition" yaml:"partition"`
 	DeviceProfiles           []DeviceProfileConfig `json:"deviceProfiles" yaml:"deviceProfiles"`
+	// ClientQPS and ClientBurst configure the scheduler plugin's own
+	// Kubernetes client (distinct from kube-scheduler's internal client).
+	// Zero means unset and defaults to DefaultClientQPS/DefaultClientBurst.
+	ClientQPS   float32 `json:"clientQPS,omitempty" yaml:"clientQPS,omitempty"`
+	ClientBurst int     `json:"clientBurst,omitempty" yaml:"clientBurst,omitempty"`
 }
 
 // DeviceProfileConfig is the user-facing YAML representation of a DRA device
@@ -43,6 +55,19 @@ type DeviceProfileConfig struct {
 type DeviceProfileBackendConfig struct {
 	Type     string `json:"type" yaml:"type"`
 	GRESName string `json:"gresName,omitempty" yaml:"gresName,omitempty"`
+}
+
+// EffectiveClientQPSBurst returns the plugin client's configured QPS/Burst,
+// falling back to DefaultClientQPS/DefaultClientBurst where unset.
+func (c *Config) EffectiveClientQPSBurst() (qps float32, burst int) {
+	qps, burst = c.ClientQPS, c.ClientBurst
+	if qps == 0 {
+		qps = DefaultClientQPS
+	}
+	if burst == 0 {
+		burst = DefaultClientBurst
+	}
+	return qps, burst
 }
 
 func (c *Config) ValidateScheduler() error {

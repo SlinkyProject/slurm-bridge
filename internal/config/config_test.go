@@ -82,6 +82,19 @@ func TestUnmarshal(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Test clientQPS and clientBurst",
+			args: args{
+				in: []byte(`clientQPS: 75
+clientBurst: 150
+`),
+			},
+			want: &Config{
+				ClientQPS:   75,
+				ClientBurst: 150,
+			},
+			wantErr: false,
+		},
+		{
 			name: "Test managedNamespaceSelector",
 			args: args{
 				in: []byte(`
@@ -283,6 +296,36 @@ func TestConfig_ValidateScheduler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.config.ValidateScheduler(); (err != nil) != tt.wantErr {
 				t.Errorf("Config.ValidateScheduler() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestConfig_EffectiveClientQPSBurst(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    Config
+		wantQPS   float32
+		wantBurst int
+	}{
+		{
+			name:      "unset falls back to defaults",
+			config:    Config{},
+			wantQPS:   DefaultClientQPS,
+			wantBurst: DefaultClientBurst,
+		},
+		{
+			name:      "configured values are used as-is",
+			config:    Config{ClientQPS: 75, ClientBurst: 150},
+			wantQPS:   75,
+			wantBurst: 150,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qps, burst := tt.config.EffectiveClientQPSBurst()
+			if qps != tt.wantQPS || burst != tt.wantBurst {
+				t.Errorf("EffectiveClientQPSBurst() = (%v, %v), want (%v, %v)", qps, burst, tt.wantQPS, tt.wantBurst)
 			}
 		})
 	}
