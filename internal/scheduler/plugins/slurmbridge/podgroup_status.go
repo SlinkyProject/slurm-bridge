@@ -31,8 +31,8 @@ func podsHaveSlurmNodeAssignments(pods *corev1.PodList, jobID string) bool {
 
 // markPodGroupScheduled sets the served API version's scheduled condition to True.
 // kube-scheduler normally writes this when it admits a gang; slurm-bridge must do the same.
-func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, jobID string) {
-	if slurmJobIR == nil || sb.workloadAPI == nil || slurmJobIR.RootPOM.TypeMeta != sb.workloadAPI.PodGroupTypeMeta || jobID == "" {
+func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, slurmJobComponent *slurmjobir.SlurmJobComponent, jobID string) {
+	if slurmJobIR == nil || slurmJobComponent == nil || sb.workloadAPI == nil || slurmJobIR.RootPOM.TypeMeta != sb.workloadAPI.PodGroupTypeMeta || jobID == "" {
 		return
 	}
 
@@ -52,7 +52,7 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 		logger.V(4).Info("skip PodGroup status update", "err", err)
 		return
 	}
-	if !podsHaveSlurmNodeAssignments(&slurmJobIR.Pods, jobID) {
+	if !podsHaveSlurmNodeAssignments(&slurmJobComponent.Pods, jobID) {
 		return
 	}
 
@@ -74,10 +74,12 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 }
 
 func (sb *SlurmBridge) refreshSlurmJobIRPods(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR) error {
-	for i := range slurmJobIR.Pods.Items {
-		key := client.ObjectKeyFromObject(&slurmJobIR.Pods.Items[i])
-		if err := sb.Get(ctx, key, &slurmJobIR.Pods.Items[i]); err != nil {
-			return err
+	for i := range slurmJobIR.Components {
+		for j := range slurmJobIR.Components[i].Pods.Items {
+			key := client.ObjectKeyFromObject(&slurmJobIR.Components[i].Pods.Items[j])
+			if err := sb.Get(ctx, key, &slurmJobIR.Components[i].Pods.Items[j]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

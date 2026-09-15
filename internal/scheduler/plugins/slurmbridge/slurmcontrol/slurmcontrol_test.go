@@ -30,34 +30,34 @@ import (
 
 func Test_sharedFromExclusiveAnnotation(t *testing.T) {
 	tests := []struct {
-		name       string
-		slurmJobIR *slurmjobir.SlurmJobIR
-		wantShared api.V0044JobDescMsgShared
+		name              string
+		slurmJobComponent *slurmjobir.SlurmJobComponent
+		wantShared        api.V0044JobDescMsgShared
 	}{
 		{
-			name:       "nil slurmJobIR defaults to exclusive",
-			slurmJobIR: nil,
-			wantShared: api.V0044JobDescMsgSharedNone,
+			name:              "nil component defaults to exclusive",
+			slurmJobComponent: nil,
+			wantShared:        api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:       "slurmJobIR with Exclusive nil defaults to exclusive",
-			slurmJobIR: &slurmjobir.SlurmJobIR{},
-			wantShared: api.V0044JobDescMsgSharedNone,
+			name:              "component with Exclusive nil defaults to exclusive",
+			slurmJobComponent: &slurmjobir.SlurmJobComponent{},
+			wantShared:        api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:       "slurmJobIR.Exclusive true",
-			slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(true)}},
-			wantShared: api.V0044JobDescMsgSharedNone,
+			name:              "component Exclusive true",
+			slurmJobComponent: &slurmjobir.SlurmJobComponent{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(true)}},
+			wantShared:        api.V0044JobDescMsgSharedNone,
 		},
 		{
-			name:       "slurmJobIR.Exclusive false uses MCS sharing",
-			slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
-			wantShared: api.V0044JobDescMsgSharedMcs,
+			name:              "component Exclusive false uses MCS sharing",
+			slurmJobComponent: &slurmjobir.SlurmJobComponent{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
+			wantShared:        api.V0044JobDescMsgSharedMcs,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sharedFromExclusiveAnnotation(tt.slurmJobIR)
+			got := sharedFromExclusiveAnnotation(tt.slurmJobComponent)
 			if got == nil || len(*got) != 1 || (*got)[0] != tt.wantShared {
 				t.Errorf("sharedFromExclusiveAnnotation() = %v, want [%v]", got, tt.wantShared)
 			}
@@ -305,6 +305,49 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "Later duplicate job wins",
+			fields: fields{
+				Client: func() client.Client {
+					adminComment := func() *string {
+						pi := externaljobinfo.ExternalJobInfo{
+							Pods: []string{"slurm/pod1"},
+						}
+						return ptr.To(pi.ToString())
+					}
+					items := []slurmtypes.V0044JobInfo{
+						{V0044JobInfo: api.V0044JobInfo{
+							AdminComment: adminComment(),
+							JobId:        ptr.To[int32](1),
+							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+							Nodes:        ptr.To("node1"),
+						}},
+						{V0044JobInfo: api.V0044JobInfo{
+							AdminComment: adminComment(),
+							JobId:        ptr.To[int32](2),
+							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+							Nodes:        ptr.To("node2"),
+						}},
+					}
+					f := interceptor.Funcs{
+						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
+							list.(*slurmtypes.V0044JobInfoList).Items = items
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+			},
+			want: &map[string]ExternalJob{
+				"slurm/pod1": {JobId: 2, Nodes: "node2", Pending: true},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -386,6 +429,19 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			args: args{
 				ctx: context.Background(),
 				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "3"}).Obj(),
+			},
+			want:    &ExternalJob{},
+			wantErr: false,
+		},
+		{
+			name: "Zero job ID not found",
+			fields: fields{
+				Client: fake.NewClientBuilder().
+					Build(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: st.MakePod().Name("foo").Namespace("slurm-bridge").Labels(map[string]string{wellknown.LabelExternalJobId: "0"}).Obj(),
 			},
 			want:    &ExternalJob{},
 			wantErr: false,
@@ -503,6 +559,16 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 }
 
 func Test_realSlurmControl_SubmitJob(t *testing.T) {
+	pod := st.MakePod().Name("foo").Namespace("slurm-bridge").Obj()
+	slurmJobIR := func(jobInfo slurmjobir.SlurmJobIRJobInfo) *slurmjobir.SlurmJobIR {
+		return &slurmjobir.SlurmJobIR{
+			Components: []slurmjobir.SlurmJobComponent{{
+				JobInfo: jobInfo,
+				Pods:    corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+			}},
+		}
+	}
+
 	type fields struct {
 		Client    client.Client
 		mcsLabel  string
@@ -517,7 +583,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 		name    string
 		fields  fields
 		args    args
-		want    int32
+		want    []int32
 		wantErr bool
 	}{
 		{
@@ -536,10 +602,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			},
 			args: args{
 				ctx:        context.Background(),
-				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{},
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{}),
 			},
-			want:    0,
+			want:    []int32{},
 			wantErr: true,
 		},
 		{
@@ -567,10 +633,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			},
 			args: args{
 				ctx:        context.Background(),
-				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: []string{"node2"}}},
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{ExcNodes: []string{"node2"}}),
 			},
-			want:    1,
+			want:    []int32{1},
 			wantErr: false,
 		},
 		{
@@ -587,6 +653,9 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 							if jobSubmit.Job.ExcludedNodes != nil {
 								return fmt.Errorf("expected ExcludedNodes to be nil, got %v", *jobSubmit.Job.ExcludedNodes)
 							}
+							if jobSubmit.Job.TasksPerNode != nil {
+								return fmt.Errorf("expected TasksPerNode to be nil, got %v", *jobSubmit.Job.TasksPerNode)
+							}
 							if (*jobSubmit.Job.Shared)[0] != api.V0044JobDescMsgSharedNone {
 								return fmt.Errorf("expected Shared SharedNone (exclusive), got %v", (*jobSubmit.Job.Shared)[0])
 							}
@@ -600,10 +669,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			},
 			args: args{
 				ctx:        context.Background(),
-				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{},
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{}),
 			},
-			want:    1,
+			want:    []int32{1},
 			wantErr: false,
 		},
 		{
@@ -633,10 +702,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			},
 			args: args{
 				ctx:        context.Background(),
-				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Priority: ptr.To(int32(100))}},
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{Priority: ptr.To(int32(100))}),
 			},
-			want:    1,
+			want:    []int32{1},
 			wantErr: false,
 		},
 		{
@@ -667,10 +736,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			},
 			args: args{
 				ctx:        context.Background(),
-				pod:        st.MakePod().Name("foo").Namespace("slurm-bridge").Obj(),
-				slurmJobIR: &slurmjobir.SlurmJobIR{JobInfo: slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}},
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{Exclusive: ptr.To(false)}),
 			},
-			want:    1,
+			want:    []int32{1},
 			wantErr: false,
 		},
 	}
@@ -685,10 +754,42 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.SubmitSlurmJob() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if got != tt.want {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("realSlurmControl.SubmitSlurmJob() got= %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func Test_realSlurmControl_SubmitJobRejectsMultipleComponents(t *testing.T) {
+	createCalls := 0
+	f := interceptor.Funcs{
+		Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+			createCalls++
+			return nil
+		},
+	}
+	r := &realSlurmControl{
+		Client: fake.NewClientBuilder().
+			WithInterceptorFuncs(f).
+			Build(),
+	}
+	slurmJobIR := &slurmjobir.SlurmJobIR{
+		Components: []slurmjobir.SlurmJobComponent{
+			{Pods: corev1.PodList{Items: []corev1.Pod{*st.MakePod().Name("pod-1").Namespace("slurm-bridge").Obj()}}},
+			{Pods: corev1.PodList{Items: []corev1.Pod{*st.MakePod().Name("pod-2").Namespace("slurm-bridge").Obj()}}},
+		},
+	}
+
+	jobIDs, err := r.SubmitJob(context.Background(), &slurmJobIR.Components[0].Pods.Items[0], slurmJobIR)
+	if err == nil {
+		t.Error("realSlurmControl.SubmitJob() error = nil, want multi-component rejection")
+	}
+	if len(jobIDs) != 0 {
+		t.Errorf("realSlurmControl.SubmitJob() job IDs = %v, want none", jobIDs)
+	}
+	if createCalls != 0 {
+		t.Errorf("realSlurmControl.SubmitJob() Create calls = %d, want 0", createCalls)
 	}
 }
 

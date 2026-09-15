@@ -5,7 +5,8 @@ package slurmcontrol
 
 import (
 	"context"
-	"net/http"
+	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -26,9 +28,76 @@ import (
 )
 
 type ExternalJob struct {
-	JobId   int32
-	Nodes   string
-	Pending bool
+	JobId        int32
+	HetJobId     int32
+	HetJobOffset int32
+	Nodes        string
+	Pending      bool
+}
+
+func externalJobFromJobInfo(job *slurmtypes.V0044JobInfo) (ExternalJob, error) {
+	if job == nil {
+		return ExternalJob{}, errors.New("cannot convert nil Slurm job")
+	}
+
+	extJob := ExternalJob{
+		JobId:   ptr.Deref(job.JobId, 0),
+		Nodes:   ptr.Deref(job.Nodes, ""),
+		Pending: job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
+	}
+
+	return validateExternalJobID(job, extJob)
+}
+
+func validateExternalJobID(job *slurmtypes.V0044JobInfo, extJob ExternalJob) (ExternalJob, error) {
+	if extJob.JobId <= 0 {
+		return ExternalJob{}, errors.New("invalid or unset job ID")
+	}
+
+	if job.HetJobId == nil || !ptr.Deref(job.HetJobId.Set, false) {
+		return extJob, nil
+	}
+	if job.HetJobId.Number == nil {
+		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but its value is missing")
+	}
+	if job.HetJobOffset == nil {
+		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but het job offset is missing")
+	}
+	if !ptr.Deref(job.HetJobOffset.Set, false) {
+		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but het job offset is unset")
+	}
+	if job.HetJobOffset.Number == nil {
+		return ExternalJob{}, errors.New("malformed het-job: het job offset is set but its value is missing")
+	}
+
+	extJob.HetJobId = *job.HetJobId.Number
+	extJob.HetJobOffset = *job.HetJobOffset.Number
+
+	if extJob.HetJobId == 0 {
+		if extJob.HetJobOffset != 0 {
+			return ExternalJob{}, errors.New("invalid het job offset: homogeneous job has non-zero offset")
+		}
+		return extJob, nil
+	}
+	if extJob.HetJobId < 0 {
+		return ExternalJob{}, fmt.Errorf("invalid het job ID %d: value must be positive", extJob.HetJobId)
+	}
+	if extJob.HetJobOffset < 0 {
+		return ExternalJob{}, errors.New("invalid het job offset: value is negative")
+	}
+	if extJob.HetJobId != extJob.JobId && extJob.HetJobOffset == 0 {
+		return ExternalJob{}, errors.New("invalid het job offset: non-leader component has offset zero")
+	}
+
+	return extJob, nil
+}
+
+func isActiveJob(job *slurmtypes.V0044JobInfo) bool {
+	state := job.GetStateAsSet()
+	return state.Len() == 0 || !state.HasAny(
+		api.V0044JobInfoJobStateCANCELLED,
+		api.V0044JobInfoJobStateCOMPLETED,
+	)
 }
 
 type SlurmControlInterface interface {
@@ -37,7 +106,7 @@ type SlurmControlInterface interface {
 	GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
 	GetNodeNames(ctx context.Context, partition *string) ([]string, error)
-	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
+	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 }
 
@@ -66,10 +135,10 @@ type GresLayout struct {
 	Type  string
 }
 
-func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V0044JobDescMsgShared {
+func sharedFromExclusiveAnnotation(slurmJobComponent *slurmjobir.SlurmJobComponent) *[]api.V0044JobDescMsgShared {
 	exclusive := true
-	if slurmJobIR != nil && slurmJobIR.JobInfo.Exclusive != nil {
-		exclusive = *slurmJobIR.JobInfo.Exclusive
+	if slurmJobComponent != nil && slurmJobComponent.JobInfo.Exclusive != nil {
+		exclusive = *slurmJobComponent.JobInfo.Exclusive
 	}
 	if exclusive {
 		return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedNone}
@@ -115,16 +184,19 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 		return nil, err
 	}
 	podToJob := make(map[string]ExternalJob)
-	for _, j := range jobs.Items {
+	for i := range jobs.Items {
+		job := &jobs.Items[i]
 		extInfo := externaljobinfo.ExternalJobInfo{}
-		if err := externaljobinfo.ParseIntoExternalJobInfo(j.AdminComment, &extInfo); err == nil {
-			for _, pod := range extInfo.Pods {
-				podToJob[pod] = ExternalJob{
-					JobId:   *j.JobId,
-					Nodes:   *j.Nodes,
-					Pending: j.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
-				}
-			}
+		if err := externaljobinfo.ParseIntoExternalJobInfo(job.AdminComment, &extInfo); err != nil {
+			continue
+		}
+		extJob, err := externalJobFromJobInfo(job)
+		if err != nil {
+			logger.Error(err, "skipping malformed external job", "jobId", ptr.Deref(job.JobId, 0))
+			continue
+		}
+		for _, pod := range extInfo.Pods {
+			podToJob[pod] = extJob
 		}
 	}
 
@@ -137,139 +209,180 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	jobOut := ExternalJob{}
 
 	job := &slurmtypes.V0044JobInfo{}
-	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
-	if jobId == "" {
+	jobIDLabel := pod.Labels[wellknown.LabelExternalJobId]
+	if jobIDLabel == "" {
 		return &jobOut, nil
 	}
 
-	err := r.Get(ctx, jobId, job)
+	err := r.Get(ctx, object.ObjectKey(jobIDLabel), job)
 	if err != nil {
-		if err.Error() == http.StatusText(http.StatusNotFound) {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return &jobOut, nil
 		}
 		logger.Error(err, "could not get job for pod", "pod", klog.KObj(pod))
 		return nil, err
 	}
 
-	if job.GetStateAsSet().HasAny(api.V0044JobInfoJobStateCANCELLED, api.V0044JobInfoJobStateCOMPLETED) {
+	expectedJobID := slurmjobir.ParseSlurmJobId(jobIDLabel)
+	if ptr.Deref(job.JobId, 0) != expectedJobID {
+		var found bool
+		job, found, err = r.findJobByID(ctx, expectedJobID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return &jobOut, nil
+		}
+	}
+
+	if !isActiveJob(job) {
 		return &jobOut, nil
 	}
 	logger.V(5).Info("found matching job")
-	jobOut.JobId = *job.JobId
-	jobOut.Nodes = *job.Nodes
-	jobOut.Pending = job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING)
+	jobOut, err = externalJobFromJobInfo(job)
+	if err != nil {
+		return nil, err
+	}
+
 	return &jobOut, nil
+}
+
+func (r *realSlurmControl) findJobByID(ctx context.Context, jobID int32) (*slurmtypes.V0044JobInfo, bool, error) {
+	jobs := &slurmtypes.V0044JobInfoList{}
+	if err := r.List(ctx, jobs); err != nil {
+		return nil, false, err
+	}
+	for i := range jobs.Items {
+		if ptr.Deref(jobs.Items[i].JobId, 0) == jobID {
+			return &jobs.Items[i], true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (r *realSlurmControl) ListJobs(ctx context.Context) ([]ExternalJob, error) {
+	logger := klog.FromContext(ctx)
+	jobsOut := []ExternalJob{}
+
+	jobs := &slurmtypes.V0044JobInfoList{}
+
+	err := r.List(ctx, jobs)
+	if err != nil {
+		logger.Error(err, "could not list jobs")
+		return nil, err
+	}
+
+	for i := range jobs.Items {
+		if !isActiveJob(&jobs.Items[i]) {
+			continue
+		}
+		extJob, err := externalJobFromJobInfo(&jobs.Items[i])
+		if err != nil {
+			return nil, err
+		}
+		jobsOut = append(jobsOut, extJob)
+	}
+
+	return jobsOut, nil
 }
 
 // SubmitJob submits an external job to Slurm for a node placement decision. The
 // external job is later used to determine which node to bind a k8s pod to.
-func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error) {
-	return r.submitJob(ctx, pod, slurmJobIR, false)
+func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
+	if err := slurmJobIR.Validate(); err != nil {
+		return []int32{}, err
+	}
+	if slurmJobIR.IsHetJob() {
+		return []int32{}, errors.New("multi-component Slurm jobs are not supported")
+	}
+
+	return r.submitJob(ctx, pod, slurmJobIR)
 }
 
 // UpdateJob updates an external job
 func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error) {
-	return r.submitJob(ctx, pod, slurmJobIR, true)
-}
-
-// submitJob will create or update an external job in Slurm.
-func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR, update bool) (int32, error) {
 	logger := klog.FromContext(ctx)
-	extInfo := externaljobinfo.ExternalJobInfo{}
-	for _, p := range slurmJobIR.Pods.Items {
-		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
+
+	if err := slurmJobIR.Validate(); err != nil {
+		return int32(0), err
 	}
-	job := &slurmtypes.V0044JobInfo{}
-	constraints, err := gresCompatibilityConstraint(slurmJobIR.JobInfo.Constraints)
+
+	componentIndex := slurmJobIR.ComponentOf(pod.Namespace, pod.Name)
+	if componentIndex == -1 {
+		return int32(0), fmt.Errorf("invalid component index %v for pod %v", componentIndex, klog.KObj(pod))
+	}
+	component := slurmJobIR.Components[componentIndex]
+
+	jobIDValue, err := strconv.ParseInt(
+		pod.Labels[wellknown.LabelExternalJobId],
+		10,
+		32,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"unable to parse job ID label %q for pod %v: %w",
+			pod.Labels[wellknown.LabelExternalJobId],
+			klog.KObj(pod),
+			err,
+		)
+	}
+	if jobIDValue <= 0 {
+		return 0, fmt.Errorf("invalid job ID %d for pod %v: cannot perform update", jobIDValue, klog.KObj(pod))
+	}
+	jobID := int32(jobIDValue)
+
+	job := new(slurmtypes.V0044JobInfo)
+	jobDesc, err := r.buildJobDesc(component, true)
 	if err != nil {
 		return 0, err
 	}
-	excludedNodes := append(api.V0044CsvString{}, slurmJobIR.JobInfo.ExcNodes...)
 	jobSubmit := api.V0044JobSubmitReq{
-		Job: &api.V0044JobDescMsg{
-			Account:                 slurmJobIR.JobInfo.Account,
-			AdminComment:            ptr.To(extInfo.ToString()),
-			CpusPerTask:             slurmJobIR.JobInfo.CpuPerTask,
-			Constraints:             constraints,
-			CurrentWorkingDirectory: ptr.To("/tmp"),
-			ExcludedNodes: func() *api.V0044CsvString {
-				if len(excludedNodes) == 0 && !update {
-					return nil
-				}
-				return &excludedNodes
-			}(),
-			Flags: &[]api.V0044JobDescMsgFlags{
-				api.V0044JobDescMsgFlagsEXTERNALJOB,
-			},
-			GroupId:      slurmJobIR.JobInfo.GroupId,
-			Licenses:     slurmJobIR.JobInfo.Licenses,
-			MaximumNodes: slurmJobIR.JobInfo.MaxNodes,
-			McsLabel:     ptr.To(r.mcsLabel),
-			MemoryPerNode: func() *api.V0044Uint64NoValStruct {
-				if slurmJobIR.JobInfo.MemPerNode != nil {
-					return &api.V0044Uint64NoValStruct{
-						Infinite: ptr.To(false),
-						Number:   slurmJobIR.JobInfo.MemPerNode,
-						Set:      ptr.To(true),
-					}
-				} else {
-					return &api.V0044Uint64NoValStruct{Set: ptr.To(false)}
-				}
-			}(),
-			MinimumNodes: slurmJobIR.JobInfo.MinNodes,
-			Name:         slurmJobIR.JobInfo.JobName,
-			Nodes:        ptr.To(strconv.Itoa(len(slurmJobIR.Pods.Items))),
-			Priority: func() *api.V0044Uint32NoValStruct {
-				if slurmJobIR.JobInfo.Priority != nil {
-					return &api.V0044Uint32NoValStruct{
-						Infinite: ptr.To(false),
-						Number:   slurmJobIR.JobInfo.Priority,
-						Set:      ptr.To(true),
-					}
-				} else {
-					return &api.V0044Uint32NoValStruct{Set: ptr.To(false)}
-				}
-			}(),
-			Partition: func() *string {
-				if slurmJobIR.JobInfo.Partition == nil {
-					return &r.partition
-				} else {
-					return slurmJobIR.JobInfo.Partition
-				}
-			}(),
-			Qos:          slurmJobIR.JobInfo.QOS,
-			Reservation:  slurmJobIR.JobInfo.Reservation,
-			Shared:       sharedFromExclusiveAnnotation(slurmJobIR),
-			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
-			TimeLimit: func() *api.V0044Uint32NoValStruct {
-				if slurmJobIR.JobInfo.TimeLimit != nil {
-					return &api.V0044Uint32NoValStruct{
-						Infinite: ptr.To(false),
-						Number:   slurmJobIR.JobInfo.TimeLimit,
-						Set:      ptr.To(true),
-					}
-				} else {
-					return &api.V0044Uint32NoValStruct{Set: ptr.To(false)}
-				}
-			}(),
-			TresPerNode: slurmJobIR.JobInfo.Gres,
-			UserId:      slurmJobIR.JobInfo.UserId,
-			Wckey:       slurmJobIR.JobInfo.Wckey,
-		},
+		Job: ptr.To(jobDesc),
 	}
-	if !update {
-		if err := r.Create(ctx, job, jobSubmit); err != nil {
-			logger.Error(err, "could not create external job", "pod", klog.KObj(pod))
-			return 0, err
+
+	job.JobId = ptr.To(jobID)
+	if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
+		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
+		return 0, err
+	}
+
+	return jobID, nil
+}
+
+// submitJob will create or update an external job in Slurm.
+func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
+	logger := klog.FromContext(ctx)
+	job := new(slurmtypes.V0044JobInfo)
+	var jobSubmit api.V0044JobSubmitReq
+
+	var jobDescList []api.V0044JobDescMsg
+	for _, component := range slurmJobIR.Components {
+		jobDesc, err := r.buildJobDesc(component, false)
+		if err != nil {
+			return []int32{}, err
 		}
+		jobDescList = append(jobDescList, jobDesc)
+	}
+
+	if len(jobDescList) == 1 {
+		jobSubmit = api.V0044JobSubmitReq{Job: ptr.To(jobDescList[0])}
 	} else {
-		job.JobId = ptr.To(slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]))
-		if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
-			logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
-			return 0, err
-		}
+		jobSubmit = api.V0044JobSubmitReq{Jobs: ptr.To(jobDescList)}
 	}
-	return ptr.Deref(job.JobId, 0), nil
+
+	if err := r.Create(ctx, job, jobSubmit); err != nil {
+		logger.Error(err, "could not create external job", "pod", klog.KObj(pod))
+		return []int32{}, err
+	}
+
+	// TODO This will be refactored to get and parse component jobids
+	// instead of inferring them
+	baseJobID := ptr.Deref(job.JobId, 0)
+	jobIDs := make([]int32, len(slurmJobIR.Components))
+	for i := range jobIDs {
+		jobIDs[i] = baseJobID + int32(i)
+	}
+	return jobIDs, nil
 }
 
 func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
@@ -292,6 +405,84 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 		}
 	}
 	return nodeNames, nil
+}
+
+func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
+	extInfo := externaljobinfo.ExternalJobInfo{}
+	for _, p := range jobComponent.Pods.Items {
+		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
+	}
+	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
+	if err != nil {
+		return api.V0044JobDescMsg{}, err
+	}
+	excludedNodes := append(api.V0044CsvString{}, jobComponent.JobInfo.ExcNodes...)
+
+	jobDesc := api.V0044JobDescMsg{
+		Account:                 jobComponent.JobInfo.Account,
+		AdminComment:            ptr.To(extInfo.ToString()),
+		CpusPerTask:             jobComponent.JobInfo.CpuPerTask,
+		Constraints:             constraints,
+		CurrentWorkingDirectory: ptr.To("/tmp"),
+		Flags: &[]api.V0044JobDescMsgFlags{
+			api.V0044JobDescMsgFlagsEXTERNALJOB,
+		},
+		GroupId:       jobComponent.JobInfo.GroupId,
+		Licenses:      jobComponent.JobInfo.Licenses,
+		MaximumNodes:  jobComponent.JobInfo.MaxNodes,
+		McsLabel:      ptr.To(r.mcsLabel),
+		MemoryPerNode: &api.V0044Uint64NoValStruct{Set: ptr.To(false)},
+		MinimumNodes:  jobComponent.JobInfo.MinNodes,
+		Name:          jobComponent.JobInfo.JobName,
+		Nodes:         ptr.To(strconv.Itoa(len(jobComponent.Pods.Items))),
+		Priority:      &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
+		Qos:           jobComponent.JobInfo.QOS,
+		Reservation:   jobComponent.JobInfo.Reservation,
+		Shared:        sharedFromExclusiveAnnotation(&jobComponent),
+		TasksPerNode:  jobComponent.JobInfo.TasksPerNode,
+		TimeLimit:     &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
+		TresPerNode:   jobComponent.JobInfo.Gres,
+		UserId:        jobComponent.JobInfo.UserId,
+		Wckey:         jobComponent.JobInfo.Wckey,
+	}
+
+	if len(excludedNodes) == 0 && !update {
+		jobDesc.ExcludedNodes = nil
+	} else {
+		jobDesc.ExcludedNodes = &excludedNodes
+	}
+
+	if jobComponent.JobInfo.MemPerNode != nil {
+		jobDesc.MemoryPerNode = &api.V0044Uint64NoValStruct{
+			Infinite: ptr.To(false),
+			Number:   jobComponent.JobInfo.MemPerNode,
+			Set:      ptr.To(true),
+		}
+	}
+
+	if jobComponent.JobInfo.Priority != nil {
+		jobDesc.Priority = &api.V0044Uint32NoValStruct{
+			Infinite: ptr.To(false),
+			Number:   jobComponent.JobInfo.Priority,
+			Set:      ptr.To(true),
+		}
+	}
+
+	if jobComponent.JobInfo.Partition == nil {
+		jobDesc.Partition = &r.partition
+	} else {
+		jobDesc.Partition = jobComponent.JobInfo.Partition
+	}
+
+	if jobComponent.JobInfo.TimeLimit != nil {
+		jobDesc.TimeLimit = &api.V0044Uint32NoValStruct{
+			Infinite: ptr.To(false),
+			Number:   jobComponent.JobInfo.TimeLimit,
+			Set:      ptr.To(true),
+		}
+	}
+
+	return jobDesc, nil
 }
 
 // GetResources will return the resources used by a node for a given JobId
