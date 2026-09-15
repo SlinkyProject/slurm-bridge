@@ -1529,3 +1529,58 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestPatchPodExtendedResourceClaimStatusWithoutReadback(t *testing.T) {
+	patchErr := errors.New("status patch failed")
+	for _, wantErr := range []error{nil, patchErr} {
+		name := "success"
+		if wantErr != nil {
+			name = "patch failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", Namespace: "default", UID: "pod-uid"}}
+			original := pod.DeepCopy()
+			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Name: "claim"}}
+			mappings := []corev1.ContainerExtendedResourceRequest{{
+				ContainerName: "app", RequestName: "gpu", ResourceName: "deviceclass.resource.kubernetes.io/gpu.example.com",
+			}}
+			base := fake.NewClientBuilder().WithObjects(pod.DeepCopy()).WithStatusSubresource(&corev1.Pod{}).Build()
+			patches, gets := 0, 0
+			kc := interceptor.NewClient(base, interceptor.Funcs{
+				Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+					gets++
+					return errors.New("readback unavailable")
+				},
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					patches++
+					if wantErr != nil {
+						return wantErr
+					}
+					return c.SubResource(subResource).Patch(ctx, obj, patch, opts...)
+				},
+			})
+			sb := &SlurmBridge{Client: kc}
+			if err := sb.patchPodExtendedResourceClaimStatus(ctx, pod, claim, mappings); !errors.Is(err, wantErr) {
+				t.Fatalf("patch status error = %v, want %v", err, wantErr)
+			}
+			if patches != 1 || gets != 0 {
+				t.Errorf("API calls: %d status patches, %d reads; want 1 patch, 0 reads", patches, gets)
+			}
+			if !apiequality.Semantic.DeepEqual(pod, original) {
+				t.Fatal("status patch mutated the framework pod")
+			}
+			stored := &corev1.Pod{}
+			if err := base.Get(ctx, client.ObjectKeyFromObject(pod), stored); err != nil {
+				t.Fatal(err)
+			}
+			var wantStatus *corev1.PodExtendedResourceClaimStatus
+			if wantErr == nil {
+				wantStatus = &corev1.PodExtendedResourceClaimStatus{ResourceClaimName: claim.Name, RequestMappings: mappings}
+			}
+			if !apiequality.Semantic.DeepEqual(stored.Status.ExtendedResourceClaimStatus, wantStatus) {
+				t.Fatalf("stored claim status = %#v, want %#v", stored.Status.ExtendedResourceClaimStatus, wantStatus)
+			}
+		})
+	}
+}

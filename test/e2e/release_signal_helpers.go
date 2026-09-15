@@ -25,6 +25,7 @@ import (
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	schedv1alpha1 "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -214,6 +215,13 @@ func assertBridgePod(t *testing.T, ctx context.Context, crClient client.Client, 
 	if pod.Spec.SchedulerName != slurmBridgeScheduler {
 		t.Errorf("pod %s/%s scheduler is %q, want %q",
 			pod.Namespace, pod.Name, pod.Spec.SchedulerName, slurmBridgeScheduler)
+	}
+	wantToleration := *utils.NewTolerationNodeBridged(slurmBridgeScheduler)
+	if !slices.ContainsFunc(pod.Spec.Tolerations, func(toleration corev1.Toleration) bool {
+		return toleration.MatchToleration(&wantToleration)
+	}) {
+		t.Errorf("pod %s/%s tolerations are %v, want the admission controller to have added %v",
+			pod.Namespace, pod.Name, pod.Spec.Tolerations, wantToleration)
 	}
 	node := &corev1.Node{}
 	if err := crClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {

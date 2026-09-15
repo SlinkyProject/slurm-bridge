@@ -26,6 +26,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -526,6 +527,79 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			}
 			if tt.args.pod.Spec.NodeName != tt.wantNodeName {
 				t.Errorf("PodAdmission.Default() nodeName = %q, want %q", tt.args.pod.Spec.NodeName, tt.wantNodeName)
+			}
+		})
+	}
+}
+
+// TestPodAdmission_DefaultTolerations asserts admission is what puts the
+// bridged-node toleration on pods this scheduler will place. The scheduler
+// cannot add it later because the pods it is handed are owned by its informer
+// cache.
+func TestPodAdmission_DefaultTolerations(t *testing.T) {
+	bridged := *utils.NewTolerationNodeBridged(SchedulerName)
+	otherToleration := corev1.Toleration{
+		Key:      "example.com/other",
+		Operator: corev1.TolerationOpExists,
+	}
+
+	podIn := func(ns, schedulerName string, tolerations ...corev1.Toleration) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: ns},
+			Spec: corev1.PodSpec{
+				SchedulerName: schedulerName,
+				Tolerations:   tolerations,
+			},
+		}
+	}
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want []corev1.Toleration
+	}{
+		{
+			name: "managed namespace gets the toleration",
+			pod:  podIn(namespace, corev1.DefaultSchedulerName),
+			want: []corev1.Toleration{bridged},
+		},
+		{
+			name: "pod selecting the scheduler outside a managed namespace gets the toleration",
+			pod:  podIn("other", SchedulerName),
+			want: []corev1.Toleration{bridged},
+		},
+		{
+			name: "existing tolerations are preserved",
+			pod:  podIn(namespace, corev1.DefaultSchedulerName, otherToleration),
+			want: []corev1.Toleration{otherToleration, bridged},
+		},
+		{
+			name: "the toleration is not duplicated",
+			pod:  podIn(namespace, corev1.DefaultSchedulerName, bridged),
+			want: []corev1.Toleration{bridged},
+		},
+		{
+			name: "pod left to another scheduler is untouched",
+			pod:  podIn(namespace, "other-scheduler"),
+			want: nil,
+		},
+		{
+			name: "pod outside a managed namespace is untouched",
+			pod:  podIn("other", corev1.DefaultSchedulerName),
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PodAdmission{
+				ManagedNamespaces: []string{namespace},
+				SchedulerName:     SchedulerName,
+			}
+			if err := r.Default(context.TODO(), tt.pod); err != nil {
+				t.Fatalf("PodAdmission.Default() error = %v", err)
+			}
+			if !reflect.DeepEqual(tt.pod.Spec.Tolerations, tt.want) {
+				t.Errorf("PodAdmission.Default() tolerations = %v, want %v", tt.pod.Spec.Tolerations, tt.want)
 			}
 		})
 	}
