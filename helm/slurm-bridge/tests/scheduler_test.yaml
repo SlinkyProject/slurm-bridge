@@ -5,6 +5,7 @@ suite: test scheduler
 templates:
   - scheduler/deployment.yaml
   - scheduler/configmap.yaml
+  - scheduler/poddisruptionbudget.yaml
   - scheduler/rbac.yaml
   - scheduler/service.yaml
   - scheduler/serviceaccount.yaml
@@ -114,6 +115,85 @@ tests:
       - equal:
           path: metadata.name
           value: slurm-bridge-scheduler
+  - it: pdb is not rendered for a single replica, which would block node drains
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 1
+        pdb:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: pdb defaults to minAvailable when maxUnavailable is unset
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 2
+        pdb:
+          enabled: true
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - notExists:
+          path: spec.maxUnavailable
+  - it: pdb maxUnavailable takes precedence over minAvailable
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 2
+        pdb:
+          enabled: true
+          maxUnavailable: 1
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - notExists:
+          path: spec.minAvailable
+  - it: pdb accepts a quoted percentage for maxUnavailable
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 2
+        pdb:
+          enabled: true
+          maxUnavailable: 50%
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 50%
+      - notExists:
+          path: spec.minAvailable
+  - it: pdb honors an explicit maxUnavailable of zero
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 2
+        pdb:
+          enabled: true
+          maxUnavailable: 0
+    asserts:
+      - equal:
+          path: spec.maxUnavailable
+          value: 0
+      - notExists:
+          path: spec.minAvailable
+  - it: pdb falls back to minAvailable 1 when both bounds are null
+    template: scheduler/poddisruptionbudget.yaml
+    set:
+      scheduler:
+        replicaCount: 2
+        pdb:
+          enabled: true
+          minAvailable: null
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 1
+      - notExists:
+          path: spec.maxUnavailable
   - it: mounts the rotating Slurm JWT secret
     template: scheduler/deployment.yaml
     asserts:

@@ -22,8 +22,13 @@ scheduler:
   replicaCount: 1
   # -- PodDisruptionBudget for the scheduler deployment
   pdb:
-    # -- Enable PodDisruptionBudget
+    # -- Enable PodDisruptionBudget. Only rendered when `replicaCount` is
+    # greater than 1, since a PDB over a single replica blocks node drains.
     enabled: false
+    # -- Minimum pods that must remain available after eviction (int or quoted percent).
+    minAvailable: 1
+    # -- Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`.
+    maxUnavailable:
   # -- Enables leader election.
   leaderElect: false
   # -- Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported

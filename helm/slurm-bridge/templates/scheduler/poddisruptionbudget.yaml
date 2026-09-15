@@ -3,15 +3,21 @@ SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
-{{- if and .Values.scheduler.pdb .Values.scheduler.pdb.enabled  }}
+{{- if and .Values.scheduler.pdb .Values.scheduler.pdb.enabled (gt (int .Values.scheduler.replicaCount) 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "slurm-bridge.name" . }}-scheduler
   namespace: {{ include "slurm-bridge.namespace" . }}
 spec:
-  maxUnavailable: 0
+  {{- if ne .Values.scheduler.pdb.maxUnavailable nil }}
+  maxUnavailable: {{ .Values.scheduler.pdb.maxUnavailable }}
+  {{- else if ne .Values.scheduler.pdb.minAvailable nil }}
+  minAvailable: {{ .Values.scheduler.pdb.minAvailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
   selector:
     matchLabels:
       {{- include "slurm-bridge.scheduler.selectorLabels" . | nindent 6 }}
-{{- end }}{{- /* if .Values.scheduler.pdb && .Values.scheduler.pdb.enabled */}}
+{{- end }}{{- /* if .Values.scheduler.pdb && .Values.scheduler.pdb.enabled && replicaCount > 1 */}}
