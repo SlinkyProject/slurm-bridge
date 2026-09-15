@@ -22,7 +22,7 @@ so that the kubelet can run them.
 The scheduler controller in `slurm-bridge` is responsible for [scheduling]
 eligible pods onto nodes that are managed by `slurm-bridge`. In doing so, the
 `slurm-bridge` scheduler interacts with the Slurm REST API in order to acquire
-allocations for its' workloads. In `slurm-bridge`, `slurmctld` serves as the
+allocations for its workloads. In `slurm-bridge`, `slurmctld` serves as the
 source of truth for scheduling decisions.
 
 ## Design
