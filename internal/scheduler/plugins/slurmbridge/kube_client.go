@@ -115,6 +115,13 @@ func (c *podGroupJSONClient) coschedulingInvalidate(obj client.Object) {
 	}
 }
 
+func (c *podGroupJSONClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*slurmjobir.PodGroupList); ok {
+		return c.jsonClient.List(ctx, list, opts...)
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
 func (c *podGroupJSONClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
 	return c.clientFor(obj).Create(ctx, obj, opts...)
 }

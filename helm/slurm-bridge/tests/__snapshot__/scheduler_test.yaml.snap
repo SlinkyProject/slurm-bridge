@@ -324,6 +324,12 @@ manifests should match snapshot:
           - scheduling.k8s.io
         resources:
           - podgroups
+        verbs:
+          - get
+          - list
+      - apiGroups:
+          - scheduling.k8s.io
+        resources:
           - workloads
         verbs:
           - get

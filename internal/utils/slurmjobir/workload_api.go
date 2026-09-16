@@ -45,6 +45,12 @@ type PodGroup struct {
 	Status            PodGroupStatus `json:"status,omitempty"`
 }
 
+type PodGroupList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []PodGroup `json:"items"`
+}
+
 type PodGroupSpec struct {
 	PodGroupTemplateRef *PodGroupTemplateReference                 `json:"podGroupTemplateRef,omitempty"`
 	WorkloadRef         *WorkloadReference                         `json:"workloadRef,omitempty"`
@@ -103,6 +109,29 @@ func (in *PodGroup) DeepCopyObject() runtime.Object {
 	return in.DeepCopy()
 }
 
+func (in *PodGroupList) DeepCopy() *PodGroupList {
+	if in == nil {
+		return nil
+	}
+
+	out := new(PodGroupList)
+	*out = *in
+	in.DeepCopyInto(&out.ListMeta)
+
+	if in.Items != nil {
+		out.Items = make([]PodGroup, len(in.Items))
+		for i := range in.Items {
+			out.Items[i] = *in.Items[i].DeepCopy()
+		}
+	}
+
+	return out
+}
+
+func (in *PodGroupList) DeepCopyObject() runtime.Object {
+	return in.DeepCopy()
+}
+
 // RegisterWorkloadAPI discovers and registers one built-in Workload API
 // version. The beta version is preferred when both are advertised.
 // A complete, supported Workload and PodGroup API is required.
@@ -155,6 +184,7 @@ func RegisterWorkloadAPIVersion(scheme *runtime.Scheme, version string) (*Worklo
 		ScheduledCondition: condition,
 	}
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("PodGroup"), &PodGroup{})
+	scheme.AddKnownTypeWithName(groupVersion.WithKind("PodGroupList"), &PodGroupList{})
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("Workload"), &Workload{})
 	metav1.AddToGroupVersion(scheme, groupVersion)
 	return api, nil
