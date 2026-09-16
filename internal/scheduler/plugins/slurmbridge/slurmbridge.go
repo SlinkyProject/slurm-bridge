@@ -466,27 +466,59 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Success)
 	}
 
-	// Create the Slurm external job based on the nodes that have
-	// not been filtered out by Filter plugins. Because the SlurmBridge
-	// Filter plugin runs last, and will fail if the node annotation does
-	// not match, a failure from SlurmBridge means none of the other
-	// Filter plugins rejected the node and it can be fed into Slurm
-	// as a node to schedule with.
+	// populate the pod's SlurmJobComponent with eligible Slurm node names based
+	// on nodes that have passed Filter plugins
+	if status := sb.populateComponentWithFeasibleNodes(ctx, s, pod, m); status != nil {
+		return nil, status
+	}
+
+	// If no external job exists, we should create one
+	if externalJob.JobId == 0 {
+		if status := sb.submitExternalJob(ctx, s, pod); status != nil {
+			return nil, status
+		}
+	}
+
+	logger.V(4).Info("external job exists")
+
+	// As the external job is not yet running, update the job
+	// to include any changes from slurmJobIR.
+	if externalJob.Nodes == "" {
+		if status := sb.updateExternalJob(ctx, s, pod, externalJob); status != nil {
+			return nil, status
+		}
+	}
+
+	// If we get here, that means the job started running after PreFilter occurred.
+	// Return a success so the pod will get another PreFilter attempt.
+	sb.activatePod(logger, pod)
+	return nil, fwk.NewStatus(fwk.Success, "")
+}
+
+// populateComponentWithFeasibleNodes returns a sorted slice of eligible Slurm node names
+// based on nodes that have not been filtered out by Filter plugins.
+// Because the SlurmBridge Filter plugin runs last, and will fail if the
+// node annotation does not match, a failure from SlurmBridge means none
+// of the other Filter plugins rejected the node and it can be fed into
+// Slurm as a node to schedule with.
+func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s *stateData, pod *corev1.Pod, m fwk.NodeToStatusReader) *fwk.Status {
+	logger := klog.FromContext(ctx)
+
 	feasibleNodes, err := m.NodesForStatusCode(sb.handle.SnapshotSharedLister().NodeInfos(), fwk.Unschedulable)
 	if err != nil {
 		logger.Error(err, "error getting nodes that SlurmBridge can use")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
+		return fwk.NewStatus(fwk.Error, err.Error())
 	}
 
 	component, status := s.componentForPod(pod)
 	if status != nil {
-		return nil, status
+		return status
 	}
 
 	slurmNodeNames, err := sb.slurmControl.GetNodeNames(ctx, component.JobInfo.Partition)
 	if err != nil {
 		logger.Error(err, "error getting Slurm nodes")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
+		return fwk.NewStatus(fwk.Error, err.Error())
 	}
 	slurmNodes := set.New(slurmNodeNames...)
 	feasibleSlurmNodes := set.New[string]()
@@ -506,112 +538,110 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 
 	// If this situation occurs, the best we can do is trigger another
 	// scheduling cycle.
-	if feasibleSlurmNodes.Len() < len(component.Pods.Items) {
-		return nil, fwk.NewStatus(fwk.Success)
+	if len(feasibleSlurmNodes) < len(component.Pods.Items) {
+		return fwk.NewStatus(fwk.Success)
 	}
+
 	component.JobInfo.ExcNodes = slurmNodes.Difference(feasibleSlurmNodes).UnsortedList()
 	slices.Sort(component.JobInfo.ExcNodes)
 
-	// If no external job exists, we should create one with the list
-	// of nodes that passed Filter plugins.
-	if externalJob.JobId == 0 {
-		jobIDs, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
-		if err != nil {
-			invalidConfigErr := findMatchingError(err, func(err error) bool {
-				return strings.EqualFold(err.Error(), ErrorNodeConfigInvalid.Error())
-			})
-			if invalidConfigErr != nil {
-				logger.Error(err, "invalid node configuration for external job")
-				return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, invalidConfigErr.Error())
-			}
-			logger.Error(err, "error submitting Slurm job")
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		logger.V(5).Info("submitted external job to slurm", "pod", klog.KObj(pod))
+	return nil
+}
 
-		if len(jobIDs) != len(s.slurmJobIR.Components) {
-			return nil, fwk.NewStatus(fwk.Error, fmt.Sprintf("Not enough jobs to start workload: %v/%v", len(jobIDs), len(s.slurmJobIR.Components)))
-		}
+func (sb *SlurmBridge) submitExternalJob(ctx context.Context, s *stateData, pod *corev1.Pod) *fwk.Status {
+	logger := klog.FromContext(ctx)
 
-		baseJobID := int32(0)
-		if s.slurmJobIR.IsHetJob() {
-			baseJobID = jobIDs[0]
+	jobIDs, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
+	if err != nil {
+		invalidConfigErr := findMatchingError(err, func(err error) bool {
+			return strings.EqualFold(err.Error(), ErrorNodeConfigInvalid.Error())
+		})
+		if invalidConfigErr != nil {
+			logger.Error(err, "invalid node configuration for external job")
+			return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, invalidConfigErr.Error())
 		}
-		for i := range s.slurmJobIR.Components {
-			err = sb.labelPodsWithJobId(ctx, jobIDs[i], baseJobID, s.slurmJobIR.Components[i])
-			if err != nil {
-				return nil, fwk.NewStatus(fwk.Error, err.Error())
-			}
-		}
-		sb.activatePod(logger, pod)
-		return nil, fwk.NewStatus(fwk.Success)
+		logger.Error(err, "error submitting Slurm job")
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	logger.V(5).Info("submitted external job to slurm", "pod", klog.KObj(pod))
+
+	if len(jobIDs) != len(s.slurmJobIR.Components) {
+		return fwk.NewStatus(fwk.Error, fmt.Sprintf("Not enough jobs to start workload: %v/%v", len(jobIDs), len(s.slurmJobIR.Components)))
 	}
 
-	logger.V(4).Info("external job exists")
-	if externalJob.Nodes == "" {
-		logger.V(4).Info("external job exists but no nodes have been allocated")
-		if !externalJob.Pending {
-			logger.V(4).Info("external job is no longer pending; waiting for allocated nodes")
-			sb.activatePod(logger, pod)
-			return nil, fwk.NewStatus(fwk.Success)
-		}
-		// As the external job is not yet running, update to the job
-		// to include any changes from slurmJobIR.
-		jobID, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
-		if err != nil {
-			if isJobNotPendingError(err) {
-				logger.V(4).Info("external job started before update completed")
-				externalJob, err := sb.slurmControl.GetJob(ctx, pod)
-				if err != nil {
-					logger.Error(err, "error checking for Slurm job after update race")
-					return nil, fwk.NewStatus(fwk.Error, err.Error())
-				}
-				if externalJob.JobId != 0 && externalJob.Nodes != "" {
-					slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
-					kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
-					if err != nil {
-						return nil, fwk.NewStatus(fwk.Error, err.Error())
-					}
-
-					component, status := s.componentForPod(pod)
-					if status != nil {
-						return nil, status
-					}
-
-					err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &component.Pods)
-					if err != nil {
-						return nil, fwk.NewStatus(fwk.Error, err.Error())
-					}
-					sb.activatePod(logger, pod)
-					return nil, fwk.NewStatus(fwk.Success)
-				}
-				logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm but no nodes were allocated")
-				sb.activatePod(logger, pod)
-				return nil, fwk.NewStatus(fwk.Success)
-			}
-			logger.Error(err, "error updating Slurm job")
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		// Update the pods with the jobId label in case there
-		// are new pods included in slurmJobIR after the update.
-		component, status := s.componentForPod(pod)
-		if status != nil {
-			return nil, status
-		}
-
-		err = sb.labelPodsWithJobId(ctx, jobID, externalJob.HetJobId, *component)
-		if err != nil {
-			logger.Error(err, "error labeling pods after update")
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
-		}
-		sb.activatePod(logger, pod)
-		return nil, fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error())
+	baseJobID := int32(0)
+	if s.slurmJobIR.IsHetJob() {
+		baseJobID = jobIDs[0]
 	}
-
-	// If we get here, that means the job started running after PreFilter occurred.
-	// Return a success so the pod will get another PreFilter attempt.
+	for i := range s.slurmJobIR.Components {
+		err = sb.labelPodsWithJobId(ctx, jobIDs[i], baseJobID, s.slurmJobIR.Components[i])
+		if err != nil {
+			return fwk.NewStatus(fwk.Error, err.Error())
+		}
+	}
 	sb.activatePod(logger, pod)
-	return nil, fwk.NewStatus(fwk.Success, "")
+	return fwk.NewStatus(fwk.Success)
+}
+
+func (sb *SlurmBridge) updateExternalJob(ctx context.Context, s *stateData, pod *corev1.Pod, externalJob *slurmcontrol.ExternalJob) *fwk.Status {
+	logger := klog.FromContext(ctx)
+	logger.V(4).Info("external job exists but no nodes have been allocated")
+	if !externalJob.Pending {
+		logger.V(4).Info("external job is no longer pending; waiting for allocated nodes")
+		sb.activatePod(logger, pod)
+		return fwk.NewStatus(fwk.Success)
+	}
+	// As the external job is not yet running, update to the job
+	// to include any changes from slurmJobIR.
+	jobID, err := sb.slurmControl.UpdateJob(ctx, pod, s.slurmJobIR)
+	if err != nil {
+		if isJobNotPendingError(err) {
+			logger.V(4).Info("external job started before update completed")
+			externalJob, err := sb.slurmControl.GetJob(ctx, pod)
+			if err != nil {
+				logger.Error(err, "error checking for Slurm job after update race")
+				return fwk.NewStatus(fwk.Error, err.Error())
+			}
+			if externalJob.JobId != 0 && externalJob.Nodes != "" {
+				slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
+				kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
+				if err != nil {
+					return fwk.NewStatus(fwk.Error, err.Error())
+				}
+
+				component, status := s.componentForPod(pod)
+				if status != nil {
+					return status
+				}
+
+				err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &component.Pods)
+				if err != nil {
+					return fwk.NewStatus(fwk.Error, err.Error())
+				}
+				sb.activatePod(logger, pod)
+				return fwk.NewStatus(fwk.Success)
+			}
+			logger.Error(ErrorJobNotPendingNoNodes, "external job update raced with Slurm but no nodes were allocated")
+			sb.activatePod(logger, pod)
+			return fwk.NewStatus(fwk.Success)
+		}
+		logger.Error(err, "error updating Slurm job")
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	// Update the pods with the jobId label in case there
+	// are new pods included in slurmJobIR after the update.
+	component, status := s.componentForPod(pod)
+	if status != nil {
+		return status
+	}
+
+	err = sb.labelPodsWithJobId(ctx, jobID, externalJob.HetJobId, *component)
+	if err != nil {
+		logger.Error(err, "error labeling pods after update")
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	sb.activatePod(logger, pod)
+	return fwk.NewStatus(fwk.Success, ErrorNoNodesAssigned.Error())
 }
 
 // PreBindPreFlight will check if any GRES was requested for the external job
