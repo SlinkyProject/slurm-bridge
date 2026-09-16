@@ -382,7 +382,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 					"index": {IntValue: ptr.To[int64](0)},
 				},
 			},
-			wantProfile: "gpu-example",
+			wantProfile: "gpu.example.com",
 		},
 		{
 			name:   "NVIDIA GPU",
@@ -393,7 +393,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 					"type": {StringValue: ptr.To("gpu")},
 				},
 			},
-			wantProfile: "gpu-nvidia",
+			wantProfile: "gpu.nvidia.com",
 		},
 	}
 

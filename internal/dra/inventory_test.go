@@ -57,7 +57,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := registry.LookupByName("gpu-example")
+		profile, _ := registry.LookupByName("gpu.example.com")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -88,7 +88,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := registry.LookupByName("gpu-nvidia")
+		profile, _ := registry.LookupByName("gpu.nvidia.com")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -176,7 +176,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := registry.LookupByName("gpu-example")
+		profile, _ := registry.LookupByName("gpu.example.com")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{

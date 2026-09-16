@@ -10,12 +10,12 @@ import "github.com/SlinkyProject/slurm-bridge/internal/dra"
 func DRARegistryWithExampleGPU() *dra.Registry {
 	defaults := dra.DefaultRegistry()
 	profiles := []dra.DeviceProfile{{
-		Name:     "gpu-example",
+		Name:     "gpu.example.com",
 		Driver:   "gpu.example.com",
 		Selector: `device.driver == 'gpu.example.com'`,
 		Backend:  dra.IndexedGRESBackend{GRESName: "gpu"},
 	}}
-	for _, name := range []string{"cpu", "gpu-nvidia", "dranet-rdma"} {
+	for _, name := range []string{"cpu", "gpu.nvidia.com", "dranet-rdma"} {
 		profile, ok := defaults.LookupByName(name)
 		if !ok {
 			panic("missing built-in device profile: " + name)

@@ -207,7 +207,7 @@ sharedConfig:
   #     selector: device.driver == "dra.cpu"
   #     backend:
   #       type: core-bitmap
-  #   - name: gpu-nvidia
+  #   - name: gpu.nvidia.com
   #     driver: gpu.nvidia.com
   #     selector: >-
   #       device.driver == 'gpu.nvidia.com' &&

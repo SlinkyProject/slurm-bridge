@@ -454,7 +454,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name: ptr.To(node.Name),
-				Gres: ptr.To("gpu:gpu-example:1,nic:infiniband:1"),
+				Gres: ptr.To("gpu:gpu.example.com:1,nic:infiniband:1"),
 			}}).
 			WithUpdateFn(updateFn).
 			Build()
@@ -463,7 +463,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(gotExtra).To(Equal(
-			`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu-example":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`,
+			`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`,
 		))
 		updatedNode := &corev1.Node{}
 		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
@@ -493,7 +493,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name: ptr.To(node.Name),
-				Gres: ptr.To("gpu:gpu-example:2"),
+				Gres: ptr.To("gpu:gpu.example.com:2"),
 			}}).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
@@ -506,7 +506,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		Expect(condition).NotTo(BeNil())
 		Expect(condition.Status).To(Equal(corev1.ConditionFalse))
 		Expect(condition.Reason).To(Equal(reasonIncompatibleSlurmGRES))
-		Expect(condition.Message).To(ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu-example Count=1"))
+		Expect(condition.Message).To(ContainSubstring("NodeName=hybrid-0 Name=gpu Type=gpu.example.com Count=1"))
 
 		err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
@@ -564,13 +564,13 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		if external {
 			state = append(state, api.V0044NodeStateEXTERNAL)
 		}
-		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`
+		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name:           ptr.To(node.Name),
 				Cpus:           ptr.To(int32(4)),
 				RealMemory:     ptr.To(int64(8192)),
-				Gres:           ptr.To("gpu:gpu-example:1"),
+				Gres:           ptr.To("gpu:gpu.example.com:1"),
 				State:          ptr.To(state),
 				Features:       ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
@@ -613,7 +613,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		slurmNode := &slurmtypes.V0044Node{}
 		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), slurmNode)).To(Succeed())
 		Expect(*slurmNode.State).To(Equal(state))
-		Expect(*slurmNode.Gres).To(Equal("gpu:gpu-example:1"))
+		Expect(*slurmNode.Gres).To(Equal("gpu:gpu.example.com:1"))
 		Expect(*slurmNode.Extra).To(Equal(appliedInventory))
 		Expect(*slurmNode.Features).To(Equal(api.V0044CsvString{"admin-feature"}))
 		Expect(*slurmNode.ActiveFeatures).To(Equal(api.V0044CsvString{"admin-feature"}))
@@ -704,7 +704,7 @@ var _ = Describe("syncNodeRegistration() labeled hybrid nodes", func() {
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name:           ptr.To(node.Name),
-				Gres:           ptr.To("gpu:gpu-example:2"),
+				Gres:           ptr.To("gpu:gpu.example.com:2"),
 				Features:       ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 			}}).

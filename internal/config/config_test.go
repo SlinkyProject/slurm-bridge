@@ -217,7 +217,7 @@ func TestConfigDRARegistryUsesDefaultsWhenProfilesAreNil(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Config.DRARegistry() error = %v", err)
 		}
-		for _, profileName := range []string{"cpu", "gpu-nvidia", "dranet-rdma"} {
+		for _, profileName := range []string{"cpu", "gpu.nvidia.com", "dranet-rdma"} {
 			if _, ok := registry.LookupByName(profileName); !ok {
 				t.Errorf("Config.DRARegistry() omitted default profile %q for input %q", profileName, input)
 			}
@@ -244,14 +244,14 @@ func TestConfigDRARegistryE2EProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defaults := dra.DefaultRegistry()
-	for _, name := range []string{"cpu", "gpu-nvidia", "dranet-rdma"} {
+	for _, name := range []string{"cpu", "gpu.nvidia.com", "dranet-rdma"} {
 		want, _ := defaults.LookupByName(name)
 		if got, ok := registry.LookupByName(name); !ok || !reflect.DeepEqual(got, want) {
 			t.Errorf("e2e profile %q = (%#v, %t), want built-in profile %#v", name, got, ok, want)
 		}
 	}
 	want := dra.DeviceProfile{
-		Name:     "gpu-example",
+		Name:     "gpu.example.com",
 		Driver:   "gpu.example.com",
 		Selector: `device.driver == 'gpu.example.com'`,
 		Backend:  dra.IndexedGRESBackend{GRESName: "gpu"},
@@ -277,7 +277,7 @@ func TestConfigDRARegistryHonoursExplicitEmptyProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Config.DRARegistry() error = %v", err)
 	}
-	for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+	for _, profileName := range []string{"cpu", "gpu.example.com", "gpu.nvidia.com", "dranet-rdma"} {
 		if _, ok := registry.LookupByName(profileName); ok {
 			t.Errorf("Config.DRARegistry() unexpectedly included profile %q", profileName)
 		}

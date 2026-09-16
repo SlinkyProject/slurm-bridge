@@ -1161,7 +1161,7 @@ func testHybridGRESCompatibilityCondition() types.Feature {
 					}
 
 					expectedGRESConf := fmt.Sprintf(
-						"NodeName=%s Name=gpu Type=gpu-example Count=%d",
+						"NodeName=%s Name=gpu Type=gpu.example.com Count=%d",
 						node.Name,
 						syntheticGPUCount,
 					)

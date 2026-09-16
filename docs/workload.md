@@ -116,6 +116,13 @@ same driver must be mutually exclusive. If a device matches more than one
 profile, the node controller leaves its Slurm GRES inventory unchanged and emits
 an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
+The built-in NVIDIA profile uses `gpu.nvidia.com` as its name and maps to
+`gpu:gpu.nvidia.com` in Slurm. The explicitly configured example GPU profile
+uses `gpu.example.com` and maps to `gpu:gpu.example.com`. These preserve the
+driver-named GRES types used before DeviceProfiles. Registered profiles require
+the applied device-index mapping in the Slurm node's `Extra` field before
+allocations can bind.
+
 ResourceSlices must explicitly name a single node with a nonempty
 `spec.nodeName`. `spec.nodeSelector`, `spec.allNodes`, and
 `spec.perDeviceNodeSelection` are unsupported. All slices in the latest

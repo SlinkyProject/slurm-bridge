@@ -123,8 +123,9 @@ func DefaultRegistry() *Registry {
 	}
 	// Upstream DeviceClass:
 	// https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.0/deployments/helm/dra-driver-nvidia-gpu/templates/deviceclass-gpu.yaml
+	// Preserve the driver-named GRES type used before DeviceProfiles.
 	nvidiaGPU := DeviceProfile{
-		Name:     "gpu-nvidia",
+		Name:     "gpu.nvidia.com",
 		Driver:   "gpu.nvidia.com",
 		Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
 		Backend: IndexedGRESBackend{
