@@ -1,0 +1,35 @@
+---
+configFiles:
+  topology.yaml: |
+    ---
+    - topology: topo-switch
+      cluster_default: true
+      tree:
+        switches:
+          - switch: sw_root
+            children: s[1-2]
+          - switch: s1
+          - switch: s2
+nodesets:
+  slinky:
+    enabled: false
+controller:
+  # Clear the legacy scalar so extraConfMap is used with --reuse-values.
+  extraConf: ''
+  extraConfMap:
+    SchedulerParameters:
+      - bf_interval=5
+      - bf_continue
+      - default_queue_depth=2000
+      - bf_max_job_test=1000
+  slurmctld:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+restapi:
+  slurmrestd:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
