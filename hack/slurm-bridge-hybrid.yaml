@@ -20,6 +20,18 @@ controller:
     GresTypes=gpu,nic
     MCSPlugin=mcs/label
     MCSParameters=ondemand,ondemandselect
+    SchedulerParameters=bf_interval=5,bf_continue,default_queue_depth=2000,bf_max_job_test=1000
+  slurmctld:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+restapi:
+  slurmrestd:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
 nodesets:
   slinky:
     enabled: false
