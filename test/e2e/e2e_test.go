@@ -57,4 +57,8 @@ func TestScheduling(t *testing.T) {
 	}
 
 	_ = testEnv.TestInParallel(t, testFeatures...)
+	if nodeMode == slurmNodeModeHybrid {
+		// Changing GRES compatibility would disrupt the scheduling features above.
+		_ = testEnv.Test(t, testHybridGRESCompatibilityCondition())
+	}
 }

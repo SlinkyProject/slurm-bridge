@@ -1409,8 +1409,12 @@ func TestSlurmBridge_PreFilterExtensions(t *testing.T) {
 
 func TestSlurmBridge_Filter(t *testing.T) {
 	ctx := context.Background()
-	nodeInfo := framework.NewNodeInfo()
-	nodeInfo.SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
+	nodeInfoFor := func(node *corev1.Node) *framework.NodeInfo {
+		nodeInfo := framework.NewNodeInfo()
+		nodeInfo.SetNode(node)
+		return nodeInfo
+	}
+	nodeInfo := nodeInfoFor(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
 	podWithAnnotation := st.MakePod().Name("foo").Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
 	podWithoutAnnotation := st.MakePod().Name("foo").Obj()
 	type fields struct {
@@ -1458,6 +1462,28 @@ func TestSlurmBridge_Filter(t *testing.T) {
 				nodeInfo: nodeInfo,
 			},
 			want: fwk.NewStatus(fwk.Unschedulable, "node does not match annotation"),
+		},
+		{
+			name: "GRES compatibility condition is informational",
+			fields: fields{
+				slurmControl: slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+			},
+			args: args{
+				ctx:   ctx,
+				state: nil,
+				pod:   podWithAnnotation.DeepCopy(),
+				nodeInfo: nodeInfoFor(&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+					Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+						Type:    wellknown.NodeConditionSlurmGRESCompatible,
+						Status:  corev1.ConditionFalse,
+						Reason:  "IncompatibleSlurmGRES",
+						Message: "Slurm GRES does not match DRA inventory",
+					}},
+					},
+				}),
+			},
+			want: fwk.NewStatus(fwk.Success, ""),
 		},
 	}
 	for _, tt := range tests {

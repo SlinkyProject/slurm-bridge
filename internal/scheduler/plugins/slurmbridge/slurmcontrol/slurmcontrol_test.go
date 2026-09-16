@@ -65,6 +65,57 @@ func Test_sharedFromExclusiveAnnotation(t *testing.T) {
 	}
 }
 
+func Test_gresCompatibilityConstraint(t *testing.T) {
+	tests := []struct {
+		name        string
+		constraints *string
+		want        string
+		wantErr     bool
+	}{
+		{
+			name: "adds required feature without user constraints",
+			want: wellknown.SlurmFeatureGRESCompatible,
+		},
+		{
+			name:        "combines required feature with user constraints",
+			constraints: ptr.To("gpu&(rack-a|rack-b)"),
+			want:        wellknown.SlurmFeatureGRESCompatible + "&gpu&(rack-a|rack-b)",
+		},
+		{
+			name:        "groups a top-level OR",
+			constraints: ptr.To("rack-a|rack-b"),
+			want:        wellknown.SlurmFeatureGRESCompatible + "&(rack-a|rack-b)",
+		},
+		{
+			name:        "keeps matching-OR brackets",
+			constraints: ptr.To("[rack-a|rack-b]"),
+			want:        wellknown.SlurmFeatureGRESCompatible + "&[rack-a|rack-b]",
+		},
+		{
+			name:        "rejects an expression that cannot be composed",
+			constraints: ptr.To("(a&b)|(c&d)"),
+			wantErr:     true,
+		},
+		{
+			name:        "does not duplicate the required feature",
+			constraints: ptr.To(wellknown.SlurmFeatureGRESCompatible),
+			want:        wellknown.SlurmFeatureGRESCompatible,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := gresCompatibilityConstraint(tt.constraints)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("gresCompatibilityConstraint() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && ptr.Deref(got, "") != tt.want {
+				t.Errorf("gresCompatibilityConstraint() = %q, want %q", ptr.Deref(got, ""), tt.want)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_DeleteJob(t *testing.T) {
 	type fields struct {
 		Client    client.Client

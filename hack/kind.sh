@@ -549,7 +549,7 @@ function slurm::configure_for_bridge() {
 			--reuse-values \
 			--wait \
 			--set nodesets.slurm-bridge.enabled=true
-		slurm::configure_hybrid_dra_inventory
+		slurm::wait_hybrid_nodes_ready
 		;;
 	*)
 		echo "[slurm] Unsupported slurm node mode: $OPT_SLURM_NODE_MODE" >&2
@@ -558,15 +558,9 @@ function slurm::configure_for_bridge() {
 	esac
 }
 
-function slurm::configure_hybrid_dra_inventory() {
+function slurm::wait_hybrid_nodes_ready() {
 	local bridge_nodes
-	local dranet_device
 	local desired_nodes
-	local example_devices
-	local index
-	local nvidia_devices
-	local node
-	local extra
 
 	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
 		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
@@ -586,24 +580,6 @@ function slurm::configure_hybrid_dra_inventory() {
 		kubectl wait nodeset/slurm-worker-slurm-bridge -n slurm \
 			--for=jsonpath='{.status.readyReplicas}'="$desired_nodes" --timeout=150s
 	fi
-
-	for node in $bridge_nodes; do
-		dranet_device="\"/dra/dra.net/$node/$DRANET_INTERFACE_NAME\""
-		example_devices=""
-		for index in 0 1 2 3; do
-			example_devices="${example_devices}${example_devices:+,}\"/dra/gpu.example.com/$node/gpu-$index\""
-		done
-		nvidia_devices=""
-		for index in 0 1 2 3 4 5 6 7; do
-			nvidia_devices="${nvidia_devices}${nvidia_devices:+,}\"/dra/gpu.nvidia.com/$node/gpu-$index\""
-		done
-		extra='slurm-bridge.dra-gres-map={"v":1,"profiles":{'
-		extra="${extra}\"dranet0\":[$dranet_device],"
-		extra="${extra}\"gpu-example\":[$example_devices],"
-		extra="${extra}\"gpu-nvidia\":[$nvidia_devices]}}"
-		kubectl exec -n slurm slurm-controller-0 -- \
-			scontrol update NodeName="$node" "Extra=$extra"
-	done
 }
 
 function slurm-bridge::secret() {

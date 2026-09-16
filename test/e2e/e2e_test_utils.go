@@ -16,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,6 +59,9 @@ const (
 	slurmWorkerScalingModeLabel = "nodeset.slinky.slurm.net/scaling-mode"
 	slurmWorkerDaemonSetMode    = "DaemonSet"
 	slurmJobStateCancelled      = "CANCELLED" //nolint:misspell // Slurm API spelling.
+	draExampleDriverNamespace   = "dra-example-driver"
+	draExampleDriverDaemonSet   = "dra-example-driver-kubeletplugin"
+	draExampleGPUDriver         = "gpu.example.com"
 	draCPUResource              = "deviceclass.resource.kubernetes.io/dra.cpu"
 	draExampleGPUResource       = "deviceclass.resource.kubernetes.io/gpu.example.com"
 	draNvidiaGPUResource        = "deviceclass.resource.kubernetes.io/gpu.nvidia.com"
@@ -64,6 +69,7 @@ const (
 	slurmBridgeReadinessTimeout = 3 * time.Minute
 	slurmWorkloadTimeout        = 10 * time.Minute
 	slurmCleanupTimeout         = 3 * time.Minute
+	hybridGRESConditionTimeout  = 8 * time.Minute
 )
 
 var (
@@ -131,6 +137,9 @@ func e2eCleanupEnabled(t *testing.T) bool {
 
 func getControllerRuntimeClient(config *envconf.Config) (client.Client, error) {
 	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
@@ -181,23 +190,40 @@ func execInPod(ctx context.Context, config *envconf.Config, pod *corev1.Pod, com
 }
 
 func slurmNodeStates(output string) map[string]string {
+	return slurmNodeFieldValues(output, "State")
+}
+
+func slurmNodeAvailableFeatures(output string) map[string]string {
+	return slurmNodeFieldValues(output, "AvailableFeatures")
+}
+
+func slurmNodeFieldValues(output, fieldName string) map[string]string {
 	nodes := make(map[string]string)
 	for line := range strings.Lines(output) {
 		var name string
-		var state string
+		var value string
 		for field := range strings.FieldsSeq(line) {
 			if value, found := strings.CutPrefix(field, "NodeName="); found {
 				name = value
 			}
-			if value, found := strings.CutPrefix(field, "State="); found {
-				state = value
+			if fieldValue, found := strings.CutPrefix(field, fieldName+"="); found {
+				value = fieldValue
 			}
 		}
 		if name != "" {
-			nodes[name] = state
+			nodes[name] = value
 		}
 	}
 	return nodes
+}
+
+func csvContains(value, item string) bool {
+	for entry := range strings.SplitSeq(value, ",") {
+		if strings.TrimSpace(entry) == item {
+			return true
+		}
+	}
+	return false
 }
 
 func slurmJobNodeList(output string) (string, error) {
@@ -234,6 +260,7 @@ func bridgeNodesReadyForMode(
 	mode slurmNodeMode,
 	bridgeNodes []corev1.Node,
 	slurmStates map[string]string,
+	slurmFeatures map[string]string,
 	readyHybridNodes map[string]struct{},
 ) (bool, string) {
 	for i := range bridgeNodes {
@@ -241,6 +268,13 @@ func bridgeNodesReadyForMode(
 		state, registered := slurmStates[node.Name]
 		if !registered {
 			return false, fmt.Sprintf("Kubernetes bridge worker %s is not registered in Slurm", node.Name)
+		}
+		if !csvContains(slurmFeatures[node.Name], wellknown.SlurmFeatureGRESCompatible) {
+			return false, fmt.Sprintf(
+				"Kubernetes bridge worker %s does not have Slurm feature %s",
+				node.Name,
+				wellknown.SlurmFeatureGRESCompatible,
+			)
 		}
 
 		_, hasExternalLabel := node.Labels[wellknown.LabelExternalNode]
@@ -330,6 +364,7 @@ func testSlurmBridgeReadiness(nodeMode slurmNodeMode) types.Feature {
 					nodeMode,
 					bridgeNodes.Items,
 					slurmNodeStates(output),
+					slurmNodeAvailableFeatures(output),
 					readyHybridNodes,
 				)
 				lastObservation = observation
@@ -605,6 +640,13 @@ func testSlurmBridgePodScheduling() types.Feature {
 			}
 			if slurmNode != pod.Spec.NodeName {
 				t.Fatalf("Slurm allocated node %s, but Kubernetes bound the pod to %s", slurmNode, pod.Spec.NodeName)
+			}
+			constraints, err := slurmJobField(output, "Features")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !csvContains(constraints, wellknown.SlurmFeatureGRESCompatible) {
+				t.Fatalf("Slurm job Features=%q does not include %s", constraints, wellknown.SlurmFeatureGRESCompatible)
 			}
 			return ctx
 		}).
@@ -904,7 +946,7 @@ func testHybridSlurmBatchScheduling() types.Feature {
 
 			output, err := execInPod(ctx, config, controllerPod,
 				"sbatch", "--parsable", "--partition="+slurmBridgePartition,
-				"--chdir=/tmp", "--output=/dev/null", "--wrap=/bin/true")
+				"--mem=100M", "--chdir=/tmp", "--output=/dev/null", "--wrap=/bin/true")
 			if err != nil {
 				t.Fatalf("failed to submit native Slurm job: %v", err)
 			}
@@ -980,6 +1022,238 @@ func testHybridSlurmBatchScheduling() types.Feature {
 			}
 			if _, err := execInPod(ctx, config, controllerPod, "scancel", jobID); err != nil {
 				t.Logf("failed to cancel native Slurm job %s: %v", jobID, err)
+			}
+			return ctx
+		}).
+		Feature()
+}
+
+func testHybridGRESCompatibilityCondition() types.Feature {
+	const (
+		disableDriverLabel = "e2e.slinky.slurm.net/disable-dra-example-driver"
+		syntheticGPUCount  = 5
+	)
+
+	var (
+		driverDisabled       bool
+		originalNodeSelector map[string]string
+		syntheticSlice       *resourcev1.ResourceSlice
+		targetNodeName       string
+	)
+	return features.New("Hybrid GRES compatibility condition").
+		WithLabel(slurmNodeModeLabel, string(slurmNodeModeHybrid)).
+		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			bridgeNodes := &corev1.NodeList{}
+			if err := crClient.List(ctx, bridgeNodes,
+				client.MatchingLabels{slurmBridgeWorkerLabel: "worker"},
+			); err != nil {
+				t.Fatalf("failed to list Kubernetes bridge workers: %v", err)
+			}
+			if len(bridgeNodes.Items) == 0 {
+				t.Fatal("no Kubernetes bridge workers found")
+			}
+			for i := range bridgeNodes.Items {
+				for _, condition := range bridgeNodes.Items[i].Status.Conditions {
+					if condition.Type == wellknown.NodeConditionSlurmGRESCompatible &&
+						condition.Status == corev1.ConditionTrue {
+						targetNodeName = bridgeNodes.Items[i].Name
+						break
+					}
+				}
+				if targetNodeName != "" {
+					break
+				}
+			}
+			if targetNodeName == "" {
+				t.Fatal("no Kubernetes bridge worker has compatible Slurm GRES")
+			}
+
+			driver := &appsv1.DaemonSet{}
+			driverKey := client.ObjectKey{
+				Namespace: draExampleDriverNamespace,
+				Name:      draExampleDriverDaemonSet,
+			}
+			if err := crClient.Get(ctx, driverKey, driver); err != nil {
+				t.Fatalf("failed to get DRA example driver DaemonSet: %v", err)
+			}
+			originalNodeSelector = make(map[string]string, len(driver.Spec.Template.Spec.NodeSelector))
+			for key, value := range driver.Spec.Template.Spec.NodeSelector {
+				originalNodeSelector[key] = value
+			}
+			base := driver.DeepCopy()
+			driver.Spec.Template.Spec.NodeSelector = map[string]string{disableDriverLabel: "true"}
+			if err := crClient.Patch(ctx, driver, client.MergeFrom(base)); err != nil {
+				t.Fatalf("failed to pause the DRA example driver: %v", err)
+			}
+			driverDisabled = true
+
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				resourceSlices := &resourcev1.ResourceSliceList{}
+				if err := crClient.List(ctx, resourceSlices); err != nil {
+					return false, err
+				}
+				for i := range resourceSlices.Items {
+					if resourceSlices.Items[i].Spec.Driver == draExampleGPUDriver {
+						return false, nil
+					}
+				}
+				return true, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(2*time.Minute), wait.WithInterval(time.Second)); err != nil {
+				t.Fatalf("DRA example driver ResourceSlices were not removed: %v", err)
+			}
+
+			syntheticSlice = &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: envconf.RandomName("hybrid-gres-incompatible-e2e", 63),
+				},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver:   draExampleGPUDriver,
+					NodeName: &targetNodeName,
+					Pool: resourcev1.ResourcePool{
+						Name:               targetNodeName + "-e2e",
+						Generation:         1,
+						ResourceSliceCount: 1,
+					},
+				},
+			}
+			for i := range syntheticGPUCount {
+				syntheticSlice.Spec.Devices = append(
+					syntheticSlice.Spec.Devices,
+					resourcev1.Device{Name: fmt.Sprintf("gpu-%d", i)},
+				)
+			}
+			if err := crClient.Create(ctx, syntheticSlice); err != nil {
+				t.Fatalf("failed to create incompatible DRA inventory: %v", err)
+			}
+			return ctx
+		}).
+		Assess("condition includes gres.conf inventory and Slurm feature is removed", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatalf("failed to get client: %v", err)
+			}
+
+			controllerPod := &corev1.Pod{}
+			if err := crClient.Get(ctx, client.ObjectKey{
+				Namespace: slurmNamespace,
+				Name:      slurmControllerPodName,
+			}, controllerPod); err != nil {
+				t.Fatalf("failed to get Slurm controller pod: %v", err)
+			}
+
+			lastObservation := "no bridge worker condition observed"
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				node := &corev1.Node{}
+				if err := crClient.Get(ctx, client.ObjectKey{Name: targetNodeName}, node); err != nil {
+					lastObservation = fmt.Sprintf("get Kubernetes bridge worker %s: %v", targetNodeName, err)
+					return false, nil
+				}
+
+				for _, condition := range node.Status.Conditions {
+					if condition.Type != wellknown.NodeConditionSlurmGRESCompatible ||
+						condition.Status != corev1.ConditionFalse {
+						continue
+					}
+
+					expectedGRESConf := fmt.Sprintf(
+						"NodeName=%s Name=gpu Type=gpu-example Count=%d",
+						node.Name,
+						syntheticGPUCount,
+					)
+					if condition.Reason != "IncompatibleSlurmGRES" {
+						return false, fmt.Errorf(
+							"node %s condition reason = %q, want IncompatibleSlurmGRES",
+							node.Name,
+							condition.Reason,
+						)
+					}
+					if !strings.Contains(condition.Message, expectedGRESConf) {
+						return false, fmt.Errorf(
+							"node %s condition message does not contain %q: %s",
+							node.Name,
+							expectedGRESConf,
+							condition.Message,
+						)
+					}
+					output, err := execInPod(
+						ctx,
+						config,
+						controllerPod,
+						"scontrol",
+						"show",
+						"node",
+						targetNodeName,
+						"--oneliner",
+					)
+					if err != nil {
+						lastObservation = fmt.Sprintf("query Slurm node %s: %v", targetNodeName, err)
+						return false, nil
+					}
+					features := slurmNodeAvailableFeatures(output)[targetNodeName]
+					if csvContains(features, wellknown.SlurmFeatureGRESCompatible) {
+						lastObservation = fmt.Sprintf(
+							"Slurm node %s still has feature %s",
+							targetNodeName,
+							wellknown.SlurmFeatureGRESCompatible,
+						)
+						return false, nil
+					}
+					return true, nil
+				}
+				lastObservation = fmt.Sprintf(
+					"bridge worker %s does not have a False %s condition",
+					node.Name,
+					wellknown.NodeConditionSlurmGRESCompatible,
+				)
+				return false, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(hybridGRESConditionTimeout), wait.WithInterval(5*time.Second)); err != nil {
+				t.Fatalf(
+					"hybrid GRES incompatibility was not reported: %v; last observation: %s",
+					err,
+					lastObservation,
+				)
+			}
+			return ctx
+		}).
+		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				captureFailureDiagnostics(
+					t,
+					"hybrid GRES compatibility condition",
+					slurmNamespace,
+					slinkyNamespace,
+				)
+			}
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Errorf("failed to get client while restoring the DRA example driver: %v", err)
+				return ctx
+			}
+			if syntheticSlice != nil {
+				if err := crClient.Delete(ctx, syntheticSlice); err != nil && !apierrors.IsNotFound(err) {
+					t.Errorf("failed to delete incompatible DRA inventory: %v", err)
+				}
+			}
+			if driverDisabled {
+				driver := &appsv1.DaemonSet{}
+				driverKey := client.ObjectKey{
+					Namespace: draExampleDriverNamespace,
+					Name:      draExampleDriverDaemonSet,
+				}
+				if err := crClient.Get(ctx, driverKey, driver); err != nil {
+					t.Errorf("failed to get DRA example driver DaemonSet while restoring it: %v", err)
+					return ctx
+				}
+				base := driver.DeepCopy()
+				driver.Spec.Template.Spec.NodeSelector = originalNodeSelector
+				if err := crClient.Patch(ctx, driver, client.MergeFrom(base)); err != nil {
+					t.Errorf("failed to restore DRA example driver DaemonSet: %v", err)
+				}
 			}
 			return ctx
 		}).

@@ -263,13 +263,13 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			}},
 		},
 		{
-			name: "all external nodes",
+			name: "all matching nodes",
 			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
 				Driver:   "gpu.example.com",
 				AllNodes: ptr.To(true),
 				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
 			}},
-			want: []string{"node-a", "node-b"},
+			want: []string{"node-a", "node-b", "node-c"},
 		},
 		{
 			name: "per-device selection",
@@ -281,7 +281,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 					{Name: "gpu-c", NodeName: ptr.To("node-c")},
 				},
 			}},
-			want: []string{"node-a"},
+			want: []string{"node-a", "node-c"},
 		},
 	}
 

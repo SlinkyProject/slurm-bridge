@@ -99,6 +99,22 @@ nodesets:
         scheduler.slinky.slurm.net/slurm-bridge: worker
 ```
 
+For DRA-backed devices, the bridge node controller records the stable device
+inventory in the Slurm node's `Extra` field. The hybrid node's `gres.conf` must
+provide matching `Name`, `Type`, and `Count` values. Other GRES entries are
+allowed and remain available to native Slurm workloads. If the DRA-managed
+entries do not match, the controller sets the Kubernetes node's
+`SlinkySlurmGRESCompatible` condition to `False` with the required `gres.conf`
+inventory. This condition reports compatibility to administrators; Slurm node
+features control bridge-job placement.
+
+The controller adds the `slurm_bridge_gres_compatible` Slurm feature to every
+external node and to hybrid nodes whose GRES configuration has been verified.
+Every Slurm job submitted by the bridge requires this feature. An incompatible
+hybrid node therefore remains available to native Slurm jobs while bridge jobs
+cannot be allocated to it. Other hybrid-node features and native job constraints
+are unaffected.
+
 ### Topology
 
 Slurm supports dynamic node topology with `topology.yaml`. The topology file
