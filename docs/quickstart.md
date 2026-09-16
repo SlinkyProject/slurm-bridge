@@ -11,8 +11,8 @@
   - [Installation](#installation)
     - [1. Install the required helm charts](#1-install-the-required-helm-charts)
     - [2. Create a secret for `slurm-bridge`](#2-create-a-secret-for-slurm-bridge)
-    - [2. Download and configure `values.yaml` for the `slurm-bridge` helm chart](#2-download-and-configure-valuesyaml-for-the-slurm-bridge-helm-chart)
-    - [3. Install the `slurm-bridge` Helm Chart](#3-install-the-slurm-bridge-helm-chart)
+    - [3. Download and configure `values.yaml` for the `slurm-bridge` helm chart](#3-download-and-configure-valuesyaml-for-the-slurm-bridge-helm-chart)
+    - [4. Install the `slurm-bridge` Helm Chart](#4-install-the-slurm-bridge-helm-chart)
   - [Running Your First Job](#running-your-first-job)
 
 <!-- mdformat-toc end -->
@@ -51,8 +51,7 @@ started.
 ### 1. Install the required helm charts
 
 ```bash
-helm repo update
-helm install cert-manager jetstack/cert-manager \
+helm install cert-manager --repo https://charts.jetstack.io cert-manager \
   --namespace cert-manager --create-namespace --set crds.enabled=true
 ```
 
@@ -86,11 +85,12 @@ When running Slurm on baremetal:
 
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
+kubectl create namespace slurm
 kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 ```
 
-### 2. Download and configure `values.yaml` for the `slurm-bridge` helm chart
+### 3. Download and configure `values.yaml` for the `slurm-bridge` helm chart
 
 The helm chart used by `slurm-bridge` has a number of parameters in
 [values.yaml](https://github.com/SlinkyProject/slurm-bridge/blob/main/helm/slurm-bridge/values.yaml)
@@ -113,7 +113,7 @@ variables:
   API on a different URL or port. The default value of this variable is
   `http://slurm-restapi.slurm:6820`
 
-### 3. Install the `slurm-bridge` Helm Chart
+### 4. Install the `slurm-bridge` Helm Chart
 
 ```bash
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
@@ -149,10 +149,10 @@ workload as a [JobSet] or [PodGroup].
 
 Now that `slurm-bridge` is configured, we can write a workload. `slurm-bridge`
 schedules Kubernetes workloads using the Slurm scheduler by translating a
-Kubernetes workload in the form of a [Jobs][job], [JobSets][jobset],
-[Pods][pod], and [PodGroups][podgroup] into a representative Slurm job, which is
-used for scheduling purposes. Once a workload is allocated resources, the
-Kubelet binds the Kubernetes workload to the allocated resources and executes
+Kubernetes workload in the form of [Jobs][job], [JobSets][jobset], [Pods][pod],
+and [PodGroups][podgroup] into a representative Slurm job, which is used for
+scheduling purposes. Once a workload is allocated resources, `slurm-bridge`
+binds the Kubernetes workload to the allocated nodes and the Kubelet executes
 it. There are
 [example workload](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples)
 definitions in the `slurm-bridge` repo.
@@ -323,7 +323,7 @@ JobId=1 JobName=job-sleep-single
 Note that the `Command` field is equal to `(null)`, and that the `JobState`
 field is equal to `CANCELLED`. This is because this Slurm job is only an
 external job - no work is actually done by the external job. Instead, the job is
-cancelled upon allocation so that the Kubelet can bind the workload to the
+cancelled upon allocation so that `slurm-bridge` can bind the workload to the
 selected node(s) for the duration of the job.
 
 We can also look at this job using `kubectl`:
@@ -388,6 +388,6 @@ running jobs. Recommended next steps involve reviewing our documentation on
 [jobset]: https://jobset.sigs.k8s.io/
 [kubelet]: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet
 [pod]: https://kubernetes.io/docs/concepts/workloads/pods/
-[podgroup]: https://scheduler-plugins.sigs.k8s.io/docs/kep/42-podgroup-coscheduling
+[podgroup]: https://github.com/kubernetes-sigs/scheduler-plugins/tree/master/kep/42-podgroup-coscheduling
 [slurmd]: https://slurm.schedmd.com/slurmd.html
 [workloads]: workload.md

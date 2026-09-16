@@ -95,19 +95,19 @@ sequenceDiagram
 
     alt Node is managed
       SWC->>KAPI: Taint Node
-      KAPI-->>SWC: Taint Node
+      KAPI-->>SWC: Return Status
     else
       SWC->>KAPI: Untaint Node
-      KAPI-->>SWC: Untaint Node
+      KAPI-->>SWC: Return Status
     end %% alt Node is managed
 
-    alt Node is schedulable
+    alt Node is unschedulable
       SWC->>SAPI: Drain Node
-      SAPI-->>SWC: Taint Node
+      SAPI-->>SWC: Return Status
     else
       SWC->>SAPI: Undrain Node
-      SAPI-->>SWC: Undrain Node
-    end %% alt Node is schedulable
+      SAPI-->>SWC: Return Status
+    end %% alt Node is unschedulable
 
   end %% loop Reconcile Loop
 ```

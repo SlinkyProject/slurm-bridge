@@ -31,7 +31,7 @@
   allocations.
 - Limit DRA claims and allocations to the GRES requested by each pod.
 - Fixed repeated termination of jobs.
-- The node controller will watch resourcesliecs for changes to external nodes in
+- The node controller will watch resourceslices for changes to external nodes in
   order to update them.
 - Replace /readyz probe with StartedChecker instead of a ping.
 - Correct the readinessProbe to use /readyz.

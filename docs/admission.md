@@ -35,9 +35,9 @@ and rejects unsupported scheduling and resource configurations.
 ## Design
 
 Any pods created in the specified namespaces will have their
-`.spec. schedulerName` changed to the slurm-bridge [scheduler].
+`.spec.schedulerName` changed to the slurm-bridge [scheduler].
 
-Managed namespaces are defined as a list of namespace as configured in the
+Managed namespaces are defined as a list of namespaces as configured in the
 admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
 `managedNamespaceSelector` can be used to select namespaces based on labels. If
 `managedNamespaceSelector` is set, `managedNamespaces` will be ignored.

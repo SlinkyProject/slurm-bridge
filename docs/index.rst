@@ -61,12 +61,12 @@ Kubernetes context as a ``Pod``, ``PodGroup``, ``Job``, ``JobSet``, or
 ``sbatch``. Workloads submitted via Slurm will execute as they would in
 a Slurm-only environment, using ``slurmd``. Workloads submitted from
 Kubernetes will have their resource requirements translated into a
-representative Slurm job by ``slurm-bridge``. That job will serve as a
+representative Slurm job by ``slurm-bridge``. That job will serve as an
 external job and will be scheduled by the Slurm controller. Upon
 resource allocation to a K8s workload by the Slurm controller,
 ``slurm-bridge`` will bind the workload’s pod(s) to the allocated
 node(s). At that point, the kubelet will launch and run the pod the same
-as it would within a standard Kubernetes instance
+as it would within a standard Kubernetes instance.
 
 .. figure:: _static/images/slurm-bridge_big-picture.svg
    :alt: “Slurm Bridge Architecture”
@@ -149,8 +149,11 @@ Limitations
   Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__ and
   `NVIDIA DRA
   Driver <https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu>`__
-  GPUs by default, and retains its specialized `NVIDIA DRA
-  Driver <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__ path.
+  GPUs plus RDMA-capable
+  `DRANET <https://github.com/kubernetes-sigs/dranet>`__ devices by
+  default, and retains its specialized `NVIDIA
+  k8s-dra-driver-gpu <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__
+  path.
 - NVIDIA GPU backend selection is resource-name based:
   ``deviceclass.resource.kubernetes.io/gpu.nvidia.com`` selects the
   NVIDIA DRA DeviceClass, while ``nvidia.com/gpu`` selects the NVIDIA
@@ -173,9 +176,10 @@ Create a secret for slurm-bridge to communicate with Slurm.
 
 .. code:: sh
 
-   export SLURM_JWT=$(scontrol token username=slurm lifespan=infinite)
+   export $(scontrol token username=slurm lifespan=infinite)
+   kubectl create namespace slurm
    kubectl create namespace slurm-bridge
-   kubectl create secret generic slurm-bridge-jwt-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+   kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
 
 Install the slurm-bridge scheduler:
 
@@ -190,8 +194,9 @@ For additional instructions, see the
 Documentation
 -------------
 
-Project documentation is located in the `docs <./docs/>`__ directory of
-this repository.
+Project documentation is located in the
+`docs <https://github.com/SlinkyProject/slurm-bridge/tree/main/docs>`__
+directory of this repository.
 
 `Slinky documentation <https://slinky.schedmd.com/>`__ is hosted on the
 web.
