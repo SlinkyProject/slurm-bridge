@@ -533,6 +533,7 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
+			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
 			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
@@ -542,6 +543,7 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
+			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
 			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
 			--set nodesets.slurm-bridge.enabled=false
 		helm upgrade "$chartName" "$chart" \
