@@ -6,6 +6,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -80,29 +80,41 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 		return nil
 	}
 
-	// This should be the most common case - a ResourceSlice has NodeName set.
-	if resourceSlice.Spec.NodeName != nil && !ptr.Deref(resourceSlice.Spec.PerDeviceNodeSelection, false) {
-		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: *resourceSlice.Spec.NodeName}}}
-	}
-
-	// This handles cases where a ResourceSlice doesn't correspond to exactly one node.
-	nodes := &corev1.NodeList{}
-	if err := r.List(ctx, nodes); err != nil {
-		logger.Error(err, "failed to list nodes for ResourceSlice", "resourceSlice", client.ObjectKeyFromObject(resourceSlice))
+	poolSlices, err := nodeutils.GetResourceSlicesForPool(ctx, r.Client, resourceSlice.Spec.Driver, resourceSlice.Spec.Pool.Name)
+	if err != nil {
+		logger.Error(err, "failed to list ResourceSlices for pool", "resourceSlice", client.ObjectKeyFromObject(resourceSlice))
 		return nil
 	}
-
-	requests := make([]reconcile.Request, 0)
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
-		matches, err := dra.ResourceSliceMatchesNode(node, resourceSlice)
-		if err != nil {
-			logger.Error(err, "failed to match ResourceSlice to node", "resourceSlice", client.ObjectKeyFromObject(resourceSlice), "node", client.ObjectKeyFromObject(node))
+	// Include the event object: an old or deleted slice may no longer be cached.
+	poolSlices = append(poolSlices, *resourceSlice)
+	nodeNames := make(map[string]struct{})
+	for i := range poolSlices {
+		poolSlice := &poolSlices[i]
+		if dra.ValidateResourceSliceNode(poolSlice) == nil {
+			nodeNames[*poolSlice.Spec.NodeName] = struct{}{}
 			continue
 		}
-		if matches {
-			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
+		// Unsupported selection has no single node owner. Reconcile all nodes
+		// so their inventory validation reports the unsupported pool.
+		nodes := &corev1.NodeList{}
+		if err := r.List(ctx, nodes); err != nil {
+			logger.Error(err, "failed to list nodes for ResourceSlice", "resourceSlice", client.ObjectKeyFromObject(poolSlice))
+			return nil
 		}
+		for _, node := range nodes.Items {
+			nodeNames[node.Name] = struct{}{}
+		}
+		break
+	}
+
+	names := make([]string, 0, len(nodeNames))
+	for name := range nodeNames {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	requests := make([]reconcile.Request, 0, len(names))
+	for _, name := range names {
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
 	}
 	return requests
 }

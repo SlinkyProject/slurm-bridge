@@ -87,11 +87,8 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 	seen := make(map[DeviceIdentity]struct{})
 	for _, poolSnapshot := range poolSnapshots {
 		for _, resourceSlice := range poolSnapshot.Slices {
-			devices, err := devicesAccessibleToNode(node, resourceSlice)
-			if err != nil {
-				return NodeInventory{}, err
-			}
-			for _, device := range devices {
+			for i := range resourceSlice.Spec.Devices {
+				device := &resourceSlice.Spec.Devices[i]
 				identity := structured.MakeDeviceID(resourceSlice.Spec.Driver, resourceSlice.Spec.Pool.Name, device.Name)
 				profile, matched, err := matchDeviceProfile(ctx, deviceProfileCELCache, poolSnapshot.Profiles, identity, device)
 				if err != nil {
@@ -129,9 +126,7 @@ func selectResourcePoolSnapshots(registry *Registry, node *corev1.Node, resource
 		if len(profiles) == 0 {
 			continue
 		}
-		if err := addResourceSliceToSnapshot(snapshotsByPool, profiles, resourceSlice); err != nil {
-			return nil, err
-		}
+		addResourceSliceToSnapshot(snapshotsByPool, profiles, resourceSlice)
 	}
 	return completeResourcePoolSnapshots(node, snapshotsByPool)
 }
@@ -140,7 +135,7 @@ func addResourceSliceToSnapshot(
 	snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot,
 	profiles []DeviceProfile,
 	resourceSlice *resourcev1.ResourceSlice,
-) error {
+) {
 	id := resourcePoolID{Driver: resourceSlice.Spec.Driver, Pool: resourceSlice.Spec.Pool.Name}
 	snapshot, ok := snapshotsByPool[id]
 	if !ok || resourceSlice.Spec.Pool.Generation > snapshot.Generation {
@@ -151,24 +146,18 @@ func addResourceSliceToSnapshot(
 			Profiles:           profiles,
 			Slices:             []*resourcev1.ResourceSlice{resourceSlice},
 		}
-		return nil
+		return
 	}
 	if resourceSlice.Spec.Pool.Generation < snapshot.Generation {
-		return nil
-	}
-	if resourceSlice.Spec.Pool.ResourceSliceCount != snapshot.ResourceSliceCount {
-		return fmt.Errorf("DRA resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", id.Driver+"/"+id.Pool, snapshot.Generation, snapshot.ResourceSliceCount, resourceSlice.Spec.Pool.ResourceSliceCount)
+		return
 	}
 	snapshot.Slices = append(snapshot.Slices, resourceSlice)
-	return nil
 }
 
-// completeResourcePoolSnapshots returns the highest-generation snapshot of
-// every pool. An incomplete pool is an error when a published slice exposes
-// devices to the node or uses per-device node selection. In the latter case,
-// unpublished slices may contain local devices. Other incomplete pools are
-// dropped so that a driver mid-publish on one node does not fail inventory for
-// every node in the cluster.
+// completeResourcePoolSnapshots validates the highest generation of each pool
+// and returns complete snapshots assigned to node. Every slice in a generation
+// must name the same single node. Incomplete pools assigned to other nodes are
+// ignored so a driver mid-publish does not block inventory across the cluster.
 func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
 	poolIDs := make([]resourcePoolID, 0, len(snapshotsByPool))
 	for id := range snapshotsByPool {
@@ -184,14 +173,22 @@ func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resour
 	snapshots := make([]resourcePoolSnapshot, 0, len(poolIDs))
 	for _, id := range poolIDs {
 		snapshot := snapshotsByPool[id]
-		if int64(len(snapshot.Slices)) != snapshot.ResourceSliceCount {
-			relevant, err := poolAccessibleToNode(node, snapshot)
-			if err != nil {
+		nodeName := ptr.Deref(snapshot.Slices[0].Spec.NodeName, "")
+		for _, resourceSlice := range snapshot.Slices {
+			if err := ValidateResourceSliceNode(resourceSlice); err != nil {
 				return nil, err
 			}
-			if !relevant {
-				continue
+			if *resourceSlice.Spec.NodeName != nodeName {
+				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent nodeName values %q and %q", id.Driver+"/"+id.Pool, snapshot.Generation, nodeName, *resourceSlice.Spec.NodeName)
 			}
+			if resourceSlice.Spec.Pool.ResourceSliceCount != snapshot.ResourceSliceCount {
+				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", id.Driver+"/"+id.Pool, snapshot.Generation, snapshot.ResourceSliceCount, resourceSlice.Spec.Pool.ResourceSliceCount)
+			}
+		}
+		if nodeName != node.Name {
+			continue
+		}
+		if int64(len(snapshot.Slices)) != snapshot.ResourceSliceCount {
 			return nil, fmt.Errorf("DRA resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", id.Driver+"/"+id.Pool, snapshot.Generation, len(snapshot.Slices), snapshot.ResourceSliceCount)
 		}
 		snapshots = append(snapshots, *snapshot)
@@ -199,71 +196,22 @@ func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resour
 	return snapshots, nil
 }
 
-// poolAccessibleToNode reports whether an incomplete snapshot is potentially
-// relevant to the node.
-func poolAccessibleToNode(node *corev1.Node, snapshot *resourcePoolSnapshot) (bool, error) {
-	for _, resourceSlice := range snapshot.Slices {
-		if ptr.Deref(resourceSlice.Spec.PerDeviceNodeSelection, false) {
-			return true, nil
-		}
-		devices, err := devicesAccessibleToNode(node, resourceSlice)
-		if err != nil {
-			return false, err
-		}
-		if len(devices) > 0 {
-			return true, nil
-		}
+// ValidateResourceSliceNode requires every device in the slice to belong to
+// the single node explicitly named by spec.nodeName.
+func ValidateResourceSliceNode(resourceSlice *resourcev1.ResourceSlice) error {
+	if resourceSlice.Spec.NodeSelector != nil {
+		return fmt.Errorf("ResourceSlice %q uses unsupported spec.nodeSelector", resourceSlice.Name)
 	}
-	return false, nil
-}
-
-func devicesAccessibleToNode(node *corev1.Node, resourceSlice *resourcev1.ResourceSlice) ([]*resourcev1.Device, error) {
+	if ptr.Deref(resourceSlice.Spec.AllNodes, false) {
+		return fmt.Errorf("ResourceSlice %q uses unsupported spec.allNodes", resourceSlice.Name)
+	}
 	if ptr.Deref(resourceSlice.Spec.PerDeviceNodeSelection, false) {
-		devices := make([]*resourcev1.Device, 0, len(resourceSlice.Spec.Devices))
-		for i := range resourceSlice.Spec.Devices {
-			device := &resourceSlice.Spec.Devices[i]
-			matches, err := structured.NodeMatches(
-				structured.Features{PartitionableDevices: true},
-				node,
-				ptr.Deref(device.NodeName, ""),
-				ptr.Deref(device.AllNodes, false),
-				device.NodeSelector,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("match device %q from ResourceSlice %q to node %q: %w", device.Name, resourceSlice.Name, node.Name, err)
-			}
-			if matches {
-				devices = append(devices, device)
-			}
-		}
-		return devices, nil
+		return fmt.Errorf("ResourceSlice %q uses unsupported spec.perDeviceNodeSelection", resourceSlice.Name)
 	}
-
-	matches, err := structured.NodeMatches(
-		structured.Features{},
-		node,
-		ptr.Deref(resourceSlice.Spec.NodeName, ""),
-		ptr.Deref(resourceSlice.Spec.AllNodes, false),
-		resourceSlice.Spec.NodeSelector,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("match ResourceSlice %q to node %q: %w", resourceSlice.Name, node.Name, err)
+	if ptr.Deref(resourceSlice.Spec.NodeName, "") == "" {
+		return fmt.Errorf("ResourceSlice %q must have a nonempty spec.nodeName", resourceSlice.Name)
 	}
-	if !matches {
-		return nil, nil
-	}
-	devices := make([]*resourcev1.Device, len(resourceSlice.Spec.Devices))
-	for i := range resourceSlice.Spec.Devices {
-		devices[i] = &resourceSlice.Spec.Devices[i]
-	}
-	return devices, nil
-}
-
-// ResourceSliceMatchesNode reports whether a ResourceSlice contains at least
-// one device accessible to node.
-func ResourceSliceMatchesNode(node *corev1.Node, resourceSlice *resourcev1.ResourceSlice) (bool, error) {
-	devices, err := devicesAccessibleToNode(node, resourceSlice)
-	return len(devices) > 0, err
+	return nil
 }
 
 func matchDeviceProfile(

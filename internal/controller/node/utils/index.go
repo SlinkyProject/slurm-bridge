@@ -8,9 +8,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 )
 
 // IndexFieldSlurmNodeName is the field index name under which Nodes are indexed by their
@@ -28,10 +29,8 @@ func IndexNodeBySlurmName(obj client.Object) []string {
 }
 
 // IndexFieldResourceSliceNode is the field index name under which ResourceSlices are
-// indexed by the node they apply to: the exact node name for the common per-node case
-// (Spec.NodeName set), or IndexValueResourceSliceGlobal for slices that can apply to more
-// than one node (NodeSelector, AllNodes, or PerDeviceNodeSelection), so a node's relevant
-// ResourceSlices can be resolved without listing every ResourceSlice in the cluster.
+// indexed by their single node name. Unsupported node selection is indexed under
+// IndexValueResourceSliceGlobal so inventory validation can reject it.
 const IndexFieldResourceSliceNode = "slurmBridge.resourceSliceNode"
 
 // IndexValueResourceSliceGlobal is the index value used for ResourceSlices that are not
@@ -44,10 +43,23 @@ func IndexResourceSliceByNode(obj client.Object) []string {
 	if !ok {
 		return nil
 	}
-	if nodeName := ptr.Deref(resourceSlice.Spec.NodeName, ""); nodeName != "" && !ptr.Deref(resourceSlice.Spec.PerDeviceNodeSelection, false) {
-		return []string{nodeName}
+	if dra.ValidateResourceSliceNode(resourceSlice) == nil {
+		return []string{*resourceSlice.Spec.NodeName}
 	}
 	return []string{IndexValueResourceSliceGlobal}
+}
+
+// IndexFieldResourceSlicePool indexes ResourceSlices by driver and pool, across
+// all nodes and generations, so node filtering cannot hide inconsistent pools.
+const IndexFieldResourceSlicePool = "slurmBridge.resourceSlicePool"
+
+// IndexResourceSliceByPool is the IndexerFunc for IndexFieldResourceSlicePool.
+func IndexResourceSliceByPool(obj client.Object) []string {
+	resourceSlice, ok := obj.(*resourcev1.ResourceSlice)
+	if !ok {
+		return nil
+	}
+	return []string{resourceSlice.Spec.Driver + "/" + resourceSlice.Spec.Pool.Name}
 }
 
 // SetupFieldIndexers registers the field indexes used by the node controller and the
@@ -57,14 +69,15 @@ func SetupFieldIndexers(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Node{}, IndexFieldSlurmNodeName, IndexNodeBySlurmName); err != nil {
 		return err
 	}
-	return mgr.GetFieldIndexer().IndexField(context.Background(), &resourcev1.ResourceSlice{}, IndexFieldResourceSliceNode, IndexResourceSliceByNode)
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &resourcev1.ResourceSlice{}, IndexFieldResourceSliceNode, IndexResourceSliceByNode); err != nil {
+		return err
+	}
+	return mgr.GetFieldIndexer().IndexField(context.Background(), &resourcev1.ResourceSlice{}, IndexFieldResourceSlicePool, IndexResourceSliceByPool)
 }
 
-// GetResourceSlicesForNode returns the ResourceSlices relevant to nodeName: those scoped
-// to it by name, plus any that can apply to more than one node (NodeSelector, AllNodes, or
-// PerDeviceNodeSelection), using IndexFieldResourceSliceNode instead of listing every
-// ResourceSlice in the cluster. Callers must still evaluate node-selector matching
-// themselves for the latter group.
+// GetResourceSlicesForNode returns every slice in pools with a slice assigned to
+// nodeName, plus pools using unsupported node selection. Include all generations
+// and nodes so callers can validate the latest generation before filtering by node.
 //
 // If reader doesn't support the index, this falls back to listing every ResourceSlice, so
 // callers stay correct regardless of which client they were constructed with.
@@ -82,7 +95,40 @@ func GetResourceSlicesForNode(ctx context.Context, reader client.Reader, nodeNam
 	if err := reader.List(ctx, global, client.MatchingFields{IndexFieldResourceSliceNode: IndexValueResourceSliceGlobal}); err != nil {
 		return nil, err
 	}
-	return append(perNode.Items, global.Items...), nil
+	seenPools := make(map[string]struct{})
+	var resourceSlices []resourcev1.ResourceSlice
+	for _, resourceSlice := range append(perNode.Items, global.Items...) {
+		key := resourceSlice.Spec.Driver + "/" + resourceSlice.Spec.Pool.Name
+		if _, seen := seenPools[key]; seen {
+			continue
+		}
+		seenPools[key] = struct{}{}
+		poolSlices, err := GetResourceSlicesForPool(ctx, reader, resourceSlice.Spec.Driver, resourceSlice.Spec.Pool.Name)
+		if err != nil {
+			return nil, err
+		}
+		resourceSlices = append(resourceSlices, poolSlices...)
+	}
+	return resourceSlices, nil
+}
+
+// GetResourceSlicesForPool returns all generations and node assignments for one
+// driver/pool. Readers without the pool index fall back to a full list scan.
+func GetResourceSlicesForPool(ctx context.Context, reader client.Reader, driver, pool string) ([]resourcev1.ResourceSlice, error) {
+	resourceSlices := &resourcev1.ResourceSliceList{}
+	if err := reader.List(ctx, resourceSlices, client.MatchingFields{IndexFieldResourceSlicePool: driver + "/" + pool}); err == nil {
+		return resourceSlices.Items, nil
+	}
+	if err := reader.List(ctx, resourceSlices); err != nil {
+		return nil, err
+	}
+	var poolSlices []resourcev1.ResourceSlice
+	for _, resourceSlice := range resourceSlices.Items {
+		if resourceSlice.Spec.Driver == driver && resourceSlice.Spec.Pool.Name == pool {
+			poolSlices = append(poolSlices, resourceSlice)
+		}
+	}
+	return poolSlices, nil
 }
 
 // GetNodeNameForSlurmName resolves the Kubernetes node name for a given Slurm node name,

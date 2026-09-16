@@ -116,6 +116,14 @@ same driver must be mutually exclusive. If a device matches more than one
 profile, the node controller leaves its Slurm GRES inventory unchanged and emits
 an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
+ResourceSlices must explicitly name a single node with a nonempty
+`spec.nodeName`. `spec.nodeSelector`, `spec.allNodes`, and
+`spec.perDeviceNodeSelection` are unsupported. All slices in the latest
+generation of a driver/pool must name the same node and agree on
+`resourceSliceCount`. That generation must be complete before the bridge uses
+its devices. Multiple slices per pool are supported, including CPU driver pools;
+an incomplete new generation does not fall back to an older generation.
+
 The default `dranet-rdma` profile maps PCI-backed devices with DRANET's `rdma`
 attribute set to the Slurm `nic` GRES. It includes InfiniBand, RoCE, and iWARP
 devices; it does not imply an InfiniBand link layer.
