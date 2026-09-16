@@ -503,7 +503,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/net
 - Name: golang.org/x/net
-- Version: v0.57.0
+- Version: v0.58.0
 - License: BSD-3-Clause
 
 ### golang.org/x/oauth2
@@ -553,7 +553,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### google.golang.org/grpc
 - Name: google.golang.org/grpc
-- Version: v1.82.1
+- Version: v1.83.2
 - License: Apache-2.0
 
 ### google.golang.org/protobuf
