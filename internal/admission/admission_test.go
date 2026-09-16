@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -1059,6 +1060,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			objects = append(objects, class)
 		}
 		return &PodAdmission{
+			DRARegistry:       testutils.DRARegistryWithExampleGPU(),
 			Client:            fake.NewClientBuilder().WithScheme(scheme.Scheme).WithRuntimeObjects(objects...).Build(),
 			SchedulerName:     SchedulerName,
 			ManagedNamespaces: []string{namespace},
@@ -1072,6 +1074,19 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			},
 		}
 	}
+
+	t.Run("example GPU requires configuration", func(t *testing.T) {
+		pod := newPod()
+		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			deviceResource: resource.MustParse("1"),
+		}
+		admission := newAdmission(validClass())
+		admission.DRARegistry = nil
+		_, err := admission.ValidateCreate(context.Background(), pod)
+		if err == nil || !strings.Contains(err.Error(), "selector does not match a supported device profile") {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want unsupported profile error", err)
+		}
+	})
 
 	t.Run("request in app container", func(t *testing.T) {
 		pod := newPod()

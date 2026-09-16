@@ -26,6 +26,7 @@ func deviceIDForTest(driver, pool, device string) DeviceIdentity {
 }
 
 func TestBuildNodeInventory(t *testing.T) {
+	registry := registryWithExampleGPU()
 	resourceSlice := func(nodeName, driver, pool string, devices ...string) resourcev1.ResourceSlice {
 		slice := resourcev1.ResourceSlice{
 			Spec: resourcev1.ResourceSliceSpec{
@@ -52,11 +53,11 @@ func TestBuildNodeInventory(t *testing.T) {
 			resourceSlice("node-a", "unsupported.example.com", "pool-a", "unsupported-device"),
 		}
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), slices)
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), slices)
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu-example")
+		profile, _ := registry.LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -83,11 +84,11 @@ func TestBuildNodeInventory(t *testing.T) {
 			}
 		}
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu-nvidia")
+		profile, _ := registry.LookupByName("gpu-nvidia")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -109,11 +110,11 @@ func TestBuildNodeInventory(t *testing.T) {
 		second := resourceSlice("node-a", "dra.cpu", "node-a", "cpudev000")
 		second.Spec.Pool.ResourceSliceCount = 2
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{first, second})
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{first, second})
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("cpu")
+		profile, _ := registry.LookupByName("cpu")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -137,7 +138,7 @@ func TestBuildNodeInventory(t *testing.T) {
 	})
 
 	t.Run("returns an empty inventory without matching devices", func(t *testing.T) {
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-b", "gpu.example.com", "pool-a", "gpu-0"),
 		})
 		if err != nil {
@@ -150,7 +151,7 @@ func TestBuildNodeInventory(t *testing.T) {
 	})
 
 	t.Run("rejects duplicate identities", func(t *testing.T) {
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{
+		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0", "gpu-0"),
 		})
 		if err == nil || !strings.Contains(err.Error(), "gpu.example.com/pool-a/gpu-0") {
@@ -167,7 +168,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		currentB.Spec.Pool.Generation = 2
 		currentB.Spec.Pool.ResourceSliceCount = 2
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{
 			currentA,
 			old,
 			currentB,
@@ -175,7 +176,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		profile, _ := DefaultRegistry().LookupByName("gpu-example")
+		profile, _ := registry.LookupByName("gpu-example")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -197,7 +198,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		current.Spec.Pool.Generation = 2
 		current.Spec.Pool.ResourceSliceCount = 2
 
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{old, current})
+		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{old, current})
 		if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
 			t.Fatalf("BuildNodeInventory() error = %v, want incomplete pool error", err)
 		}
@@ -208,7 +209,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		remote := resourceSlice("node-b", "gpu.example.com", "pool-b", "gpu-remote")
 		remote.Spec.Pool.ResourceSliceCount = 2
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{local, remote})
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{local, remote})
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
@@ -240,7 +241,7 @@ func TestBuildNodeInventory(t *testing.T) {
 					current.Spec.Devices[i].NodeName = ptr.To("node-b")
 				}
 
-				_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{local, old, current})
+				_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{local, old, current})
 				if err == nil || !strings.Contains(err.Error(), "unsupported spec.perDeviceNodeSelection") {
 					t.Fatalf("BuildNodeInventory() error = %v, want unsupported node selection error", err)
 				}
@@ -255,7 +256,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		remote.Spec.PerDeviceNodeSelection = ptr.To(true)
 		remote.Spec.Devices[0].NodeName = ptr.To("node-b")
 
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{local, remote})
+		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{local, remote})
 		if err == nil || !strings.Contains(err.Error(), "unsupported spec.perDeviceNodeSelection") {
 			t.Fatalf("BuildNodeInventory() error = %v, want unsupported node selection error", err)
 		}
@@ -269,7 +270,7 @@ func TestBuildNodeInventory(t *testing.T) {
 
 		for _, nodeName := range []string{"node-a", "node-b"} {
 			for _, slices := range [][]resourcev1.ResourceSlice{{local, remote}, {remote, local}} {
-				_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest(nodeName), slices)
+				_, err := BuildNodeInventory(context.Background(), registry, nodeForTest(nodeName), slices)
 				if err == nil || !strings.Contains(err.Error(), `pool "gpu.example.com/shared-pool" generation 1 has inconsistent nodeName`) {
 					t.Fatalf("BuildNodeInventory() error = %v, want inconsistent nodeName error", err)
 				}
@@ -282,7 +283,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		current := resourceSlice("node-a", "gpu.example.com", "pool-a")
 		current.Spec.Pool.Generation = 2
 		current.Spec.Pool.ResourceSliceCount = 2
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{old, current})
+		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{old, current})
 		if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
 			t.Fatalf("BuildNodeInventory() error = %v, want incomplete pool error", err)
 		}
@@ -292,7 +293,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		first := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-0")
 		second := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-1")
 		second.Spec.Pool.ResourceSliceCount = 2
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{first, second})
+		_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{first, second})
 		if err == nil || !strings.Contains(err.Error(), "inconsistent resourceSliceCount") {
 			t.Fatalf("BuildNodeInventory() error = %v, want inconsistent slice count error", err)
 		}
@@ -306,7 +307,7 @@ func TestBuildNodeInventory(t *testing.T) {
 		current := resourceSlice("node-a", "gpu.example.com", "pool-a", "gpu-current")
 		current.Spec.Pool.Generation = 2
 		for _, slices := range [][]resourcev1.ResourceSlice{{oldA, oldB, current}, {current, oldB, oldA}, {oldB, current, oldA}} {
-			got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), slices)
+			got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), slices)
 			if err != nil {
 				t.Fatalf("BuildNodeInventory() error = %v", err)
 			}
@@ -324,7 +325,7 @@ func TestBuildNodeInventory(t *testing.T) {
 	})
 
 	t.Run("rejects a nil node", func(t *testing.T) {
-		_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nil, nil)
+		_, err := BuildNodeInventory(context.Background(), registry, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "node must not be nil") {
 			t.Fatalf("BuildNodeInventory() error = %v, want nil node error", err)
 		}
@@ -397,11 +398,11 @@ func TestBuildNodeInventory(t *testing.T) {
 			"dra.net/rdma": boolAttribute(false),
 		}
 
-		got, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		got, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
 		if err != nil {
 			t.Fatalf("BuildNodeInventory() error = %v", err)
 		}
-		rdmaProfile, _ := DefaultRegistry().LookupByName("dranet-rdma")
+		rdmaProfile, _ := registry.LookupByName("dranet-rdma")
 		want := NodeInventory{
 			NodeName: "node-a",
 			Profiles: []ProfileInventory{{
@@ -487,7 +488,7 @@ func TestBuildNodeInventory(t *testing.T) {
 						slice.Spec.NodeName = nil
 					}
 					tt.mutate(&slice)
-					_, err := BuildNodeInventory(context.Background(), DefaultRegistry(), nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+					_, err := BuildNodeInventory(context.Background(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
 					if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !strings.Contains(err.Error(), "invalid-slice") {
 						t.Fatalf("BuildNodeInventory() error = %v, want ResourceSlice name and %q", err, tt.wantErr)
 					}

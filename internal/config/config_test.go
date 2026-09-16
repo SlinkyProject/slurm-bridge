@@ -4,11 +4,16 @@
 package config
 
 import (
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 )
 
 func TestUnmarshal(t *testing.T) {
@@ -212,11 +217,50 @@ func TestConfigDRARegistryUsesDefaultsWhenProfilesAreNil(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Config.DRARegistry() error = %v", err)
 		}
-		for _, profileName := range []string{"cpu", "gpu-example", "gpu-nvidia", "dranet-rdma"} {
+		for _, profileName := range []string{"cpu", "gpu-nvidia", "dranet-rdma"} {
 			if _, ok := registry.LookupByName(profileName); !ok {
 				t.Errorf("Config.DRARegistry() omitted default profile %q for input %q", profileName, input)
 			}
 		}
+		if registry.SupportsDriver("gpu.example.com") {
+			t.Errorf("Config.DRARegistry() enabled the example GPU driver for input %q", input)
+		}
+	}
+}
+
+func TestConfigDRARegistryE2EProfiles(t *testing.T) {
+	data, err := os.ReadFile("../../hack/e2e-device-profiles.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		SharedConfig Config `json:"sharedConfig"`
+	}
+	if err := yaml.UnmarshalStrict(data, &values); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := values.SharedConfig.DRARegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := dra.DefaultRegistry()
+	for _, name := range []string{"cpu", "gpu-nvidia", "dranet-rdma"} {
+		want, _ := defaults.LookupByName(name)
+		if got, ok := registry.LookupByName(name); !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("e2e profile %q = (%#v, %t), want built-in profile %#v", name, got, ok, want)
+		}
+	}
+	want := dra.DeviceProfile{
+		Name:     "gpu-example",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  dra.IndexedGRESBackend{GRESName: "gpu"},
+	}
+	if got, ok := registry.LookupBySelector(want.Selector); !ok || !reflect.DeepEqual(got, want) {
+		t.Errorf("e2e example GPU profile = (%#v, %t), want %#v", got, ok, want)
+	}
+	if _, ok := registry.LookupByName("dranet0"); !ok {
+		t.Error("e2e configuration omitted the dummy network interface profile")
 	}
 }
 

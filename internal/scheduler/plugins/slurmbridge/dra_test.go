@@ -34,6 +34,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 )
 
 func init() {
@@ -365,7 +366,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
-				draRegistry:   dra.DefaultRegistry(),
+				draRegistry:   testutils.DRARegistryWithExampleGPU(),
 			}
 			gotClaim, gotMappings, gotResources, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
@@ -475,7 +476,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 		},
 		exampleGPUDeviceClass(legacyDRAExampleDriver),
 	).Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, resources.Node, resources)
 	if err != nil {
@@ -567,7 +568,7 @@ func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(
 			if tt.class != nil {
 				builder = builder.WithObjects(tt.class)
 			}
-			sb := &SlurmBridge{Client: builder.Build(), draRegistry: dra.DefaultRegistry()}
+			sb := &SlurmBridge{Client: builder.Build(), draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 			_, _, _, err := sb.createRequestsAndMappings(context.Background(), pod, resources.Node, resources)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -705,7 +706,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 			kclient := newClient(pod, tt.funcs)
 			sb := &SlurmBridge{
 				Client:      kclient,
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 
 			gotErr := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
@@ -772,7 +773,7 @@ func TestValidateDeviceClassRequestsForPodsRejectsCoreBitmapMultipleContainers(t
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
 			}}},
 		}).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	err := sb.validateDeviceClassRequestsForPods(context.Background(), []corev1.Pod{pod})
@@ -828,7 +829,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -912,7 +913,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		WithObjects(pod, deviceClass).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -1293,7 +1294,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sb := &SlurmBridge{
 				Client:      tt.kclient,
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{
 				NodeResources:        tt.resources,

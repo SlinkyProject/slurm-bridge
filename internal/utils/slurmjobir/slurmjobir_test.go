@@ -29,6 +29,7 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -760,7 +761,7 @@ func TestTranslatorParseDeviceResourcesCombinesProfileAliases(t *testing.T) {
 	translator := translator{
 		Reader:      fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
 		ctx:         context.Background(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	if err := translator.parseDeviceResources(component); err != nil {

@@ -72,11 +72,10 @@ more.
 `slurm-bridge` supports the following DRA DeviceClass extended resources out of
 the box:
 
-| DeviceClass       | Extended resource                                    | Device type |
-| ----------------- | ---------------------------------------------------- | ----------- |
-| `dra.cpu`         | `deviceclass.resource.kubernetes.io/dra.cpu`         | CPU         |
-| `gpu.nvidia.com`  | `deviceclass.resource.kubernetes.io/gpu.nvidia.com`  | NVIDIA GPU  |
-| `gpu.example.com` | `deviceclass.resource.kubernetes.io/gpu.example.com` | Example GPU |
+| DeviceClass      | Extended resource                                   | Device type |
+| ---------------- | --------------------------------------------------- | ----------- |
+| `dra.cpu`        | `deviceclass.resource.kubernetes.io/dra.cpu`        | CPU         |
+| `gpu.nvidia.com` | `deviceclass.resource.kubernetes.io/gpu.nvidia.com` | NVIDIA GPU  |
 
 For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
 ResourceClaim and records the allocated devices for the Pod. Additional indexed
@@ -85,9 +84,10 @@ Other DeviceClass extended resources are unsupported. Validation covers requests
 and limits in both init containers and regular containers.
 
 Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
-shared Slurm Bridge configuration. The Helm chart supplies the example GPU,
-NVIDIA GPU, and PCI-backed DRANET profiles by default; operators can replace or
-extend the list through `sharedConfig.deviceProfiles`:
+shared Slurm Bridge configuration. The built-in profiles cover CPU, NVIDIA GPU,
+and PCI-backed DRANET devices. The example GPU driver requires explicit
+configuration. Operators can replace or extend the list through
+`sharedConfig.deviceProfiles`:
 
 ```yaml
 sharedConfig:
@@ -128,9 +128,10 @@ The default `dranet-rdma` profile maps PCI-backed devices with DRANET's `rdma`
 attribute set to the Slurm `nic` GRES. It includes InfiniBand, RoCE, and iWARP
 devices; it does not imply an InfiniBand link layer.
 
-The Kind DRANET e2e values extend those defaults with a fixture-only `dranet0`
-profile. It selects the dummy network interface created by
-`hack/kind.sh --dranet` by driver and interface name:
+The [Kind e2e device profiles](../hack/e2e-device-profiles.yaml) explicitly add
+the example GPU driver and a fixture-only `dranet0` profile alongside the
+built-in profiles. The `dranet0` profile selects the dummy network interface
+created by `hack/kind.sh --dranet` by driver and interface name:
 
 ```yaml
 sharedConfig:

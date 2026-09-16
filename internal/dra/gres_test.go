@@ -14,7 +14,7 @@ type unsupportedBackend struct{}
 func (unsupportedBackend) String() string { return "unsupported" }
 
 func TestNodeInventoryGRES(t *testing.T) {
-	profile, _ := DefaultRegistry().LookupByName("gpu-example")
+	profile, _ := registryWithExampleGPU().LookupByName("gpu-example")
 	cpuProfile, _ := DefaultRegistry().LookupByName("cpu")
 	devices := []DeviceIdentity{
 		deviceIDForTest("gpu.example.com", "pool-a", "gpu-0"),

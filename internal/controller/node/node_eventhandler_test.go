@@ -23,6 +23,7 @@ import (
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -225,7 +226,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			externalNode("node-b"),
 			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-c"}},
 		).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	tests := []struct {
@@ -319,7 +320,7 @@ func TestResourceSliceToNodesReconcilesWholePool(t *testing.T) {
 		if indexed {
 			builder.WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSlicePool, nodeutils.IndexResourceSliceByPool)
 		}
-		r := &NodeReconciler{Client: builder.Build(), draRegistry: dra.DefaultRegistry()}
+		r := &NodeReconciler{Client: builder.Build(), draRegistry: testutils.DRARegistryWithExampleGPU()}
 		// A changed or deleted slice may not be in the cache. Its node and the
 		// nodes of every other generation in the pool still need reconciliation.
 		changed := local.DeepCopy()
@@ -355,7 +356,7 @@ func TestNodeRegistrationInventoriesRejectsConflictingPoolNodes(t *testing.T) {
 			WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSliceNode, nodeutils.IndexResourceSliceByNode).
 			WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSlicePool, nodeutils.IndexResourceSliceByPool).
 			WithObjects(local, remote).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 	for _, name := range []string{"node-a", "node-b"} {
 		_, _, err := r.nodeRegistrationInventories(context.Background(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
@@ -414,7 +415,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 			}
 			r := &NodeReconciler{
 				Client:      fake.NewClientBuilder().WithObjects(node, resourceSlice).Build(),
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 
 			_, inventory, err := r.nodeRegistrationInventories(context.Background(), node)

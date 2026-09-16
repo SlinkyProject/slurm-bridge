@@ -17,6 +17,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 )
 
 func TestAllocateCoreBitmapProfileUsesDeviceClassAlias(t *testing.T) {
@@ -82,9 +83,9 @@ func TestAppendIndexedGRESRequestsKeepsCollisionSuffixWithinDNSLabelLimit(t *tes
 }
 
 func TestAllocateIndexedGRESProfilesPartitionsAliases(t *testing.T) {
-	profile, ok := dra.DefaultRegistry().LookupByName("gpu-example")
+	profile, ok := testutils.DRARegistryWithExampleGPU().LookupByName("gpu-example")
 	if !ok {
-		t.Fatal("default registry does not contain gpu-example")
+		t.Fatal("configured registry does not contain gpu-example")
 	}
 	requests := []deviceProfileRequest{
 		{DeviceClassName: "class-a", Profile: profile, Count: 1},
@@ -102,9 +103,9 @@ func TestAllocateIndexedGRESProfilesPartitionsAliases(t *testing.T) {
 }
 
 func TestVerifyIndexedGRESDeviceProfileRequestRejectsChangedCount(t *testing.T) {
-	profile, ok := dra.DefaultRegistry().LookupByName("gpu-example")
+	profile, ok := testutils.DRARegistryWithExampleGPU().LookupByName("gpu-example")
 	if !ok {
-		t.Fatal("default registry does not contain gpu-example")
+		t.Fatal("configured registry does not contain gpu-example")
 	}
 	sb := &SlurmBridge{
 		Client: fake.NewClientBuilder().WithObjects(&resourcev1.DeviceClass{
@@ -113,7 +114,7 @@ func TestVerifyIndexedGRESDeviceProfileRequestRejectsChangedCount(t *testing.T) 
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "gpu.example.com"`},
 			}}},
 		}).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
 		Requests: []resourcev1.DeviceRequest{{
@@ -146,7 +147,7 @@ func TestVerifyCoreBitmapRequestUsesAllocatedThreadCount(t *testing.T) {
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
 			}}},
 		}).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
 		Requests: []resourcev1.DeviceRequest{{
@@ -199,9 +200,9 @@ func TestValidateDeviceProfileAllocationCounts(t *testing.T) {
 }
 
 func TestAllocateIndexedGRESProfilesRejectsMissingAllocation(t *testing.T) {
-	profile, ok := dra.DefaultRegistry().LookupByName("gpu-example")
+	profile, ok := testutils.DRARegistryWithExampleGPU().LookupByName("gpu-example")
 	if !ok {
-		t.Fatal("default registry does not contain gpu-example")
+		t.Fatal("configured registry does not contain gpu-example")
 	}
 
 	_, err := allocateIndexedGRESProfiles([]deviceProfileRequest{{
@@ -266,7 +267,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 		},
 	}
 
-	indexedGRESResources, remainingResources, err := splitGRESResources(dra.DefaultRegistry(), resources)
+	indexedGRESResources, remainingResources, err := splitGRESResources(testutils.DRARegistryWithExampleGPU(), resources)
 	if err != nil {
 		t.Fatalf("splitGRESResources() error = %v", err)
 	}
@@ -295,7 +296,7 @@ func TestSplitGRESResourcesUsesAllocatedRepresentation(t *testing.T) {
 }
 
 func TestSplitGRESResourcesRejectsWrongProfileGRESName(t *testing.T) {
-	_, _, err := splitGRESResources(dra.DefaultRegistry(), slurmcontrol.NodeResources{
+	_, _, err := splitGRESResources(testutils.DRARegistryWithExampleGPU(), slurmcontrol.NodeResources{
 		Gres: []slurmcontrol.GresLayout{{Name: "accelerator", Type: "gpu-example", Count: 1, Index: "0"}},
 	})
 	if err == nil {

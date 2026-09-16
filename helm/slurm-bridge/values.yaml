@@ -207,12 +207,6 @@ sharedConfig:
   #     selector: device.driver == "dra.cpu"
   #     backend:
   #       type: core-bitmap
-  #   - name: gpu-example
-  #     driver: gpu.example.com
-  #     selector: device.driver == 'gpu.example.com'
-  #     backend:
-  #       type: indexed-gres
-  #       gresName: gpu
   #   - name: gpu-nvidia
   #     driver: gpu.nvidia.com
   #     selector: >-

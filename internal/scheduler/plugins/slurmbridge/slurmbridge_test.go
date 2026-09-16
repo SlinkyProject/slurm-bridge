@@ -50,6 +50,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -747,7 +748,7 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	sb := &SlurmBridge{
 		Client:       kubeClient,
 		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
-		draRegistry:  dra.DefaultRegistry(),
+		draRegistry:  testutils.DRARegistryWithExampleGPU(),
 		workloadAPI:  workloadAPI,
 	}
 

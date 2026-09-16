@@ -31,6 +31,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -457,7 +458,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			}}).
 			WithUpdateFn(updateFn).
 			Build()
-		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).NotTo(HaveOccurred())
@@ -495,7 +496,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 				Gres: ptr.To("gpu:gpu-example:2"),
 			}}).
 			Build()
-		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
@@ -577,7 +578,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			}}).
 			WithUpdateFn(updateFn).
 			Build()
-		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("generation 1 is incomplete: found 1 of 2 ResourceSlices")))
@@ -709,7 +710,7 @@ var _ = Describe("syncNodeRegistration() labeled hybrid nodes", func() {
 			}}).
 			WithUpdateFn(updateFn).
 			Build()
-		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
 
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).To(MatchError(ContainSubstring("incompatible with required DRA GRES")))
