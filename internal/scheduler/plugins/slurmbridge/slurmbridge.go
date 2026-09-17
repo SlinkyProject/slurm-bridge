@@ -40,7 +40,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
-	"github.com/puttsk/hostlist"
+	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 )
 
 var (
