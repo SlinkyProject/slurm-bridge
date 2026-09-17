@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func newLWS(name string, size int32) *lwsv1.LeaderWorkerSet {

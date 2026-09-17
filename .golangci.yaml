@@ -10,13 +10,12 @@ linters:
     - gocritic
     - gosec
     - ineffassign
+    - misspell
     - nilnil
     - nilerr
     - unused
     - wastedassign
   exclusions:
-    mispell:
-      locale: US
     generated: lax
     presets:
       - comments
@@ -27,10 +26,25 @@ linters:
       - third_party$
       - builtin$
       - examples$
+  settings:
+    misspell:
+      locale: US
 formatters:
+  enable:
+    - gci
   exclusions:
     generated: lax
     paths:
       - third_party$
       - builtin$
       - examples$
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/SlinkyProject)
+        - localmodule
+      no-inline-comments: true
+      no-prefix-comments: true
+      custom-order: true
