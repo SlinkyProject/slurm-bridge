@@ -117,21 +117,25 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 						ResourceVersion: "999",
 					},
 				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{*podWithAnnotation.DeepCopy()},
-				},
-				JobInfo: SlurmJobIRJobInfo{
-					Account: ptr.To("test1"),
-					GroupId: ptr.To("1000"),
-					MaxNodes: func() *int32 {
-						maxNodes := int32(1)
-						return &maxNodes
-					}(),
-					TasksPerNode: func() *int32 {
-						tasksPerNode := int32(1)
-						return &tasksPerNode
-					}(),
-					UserId: ptr.To("1000"),
+				Components: []SlurmJobComponent{
+					{
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{*podWithAnnotation.DeepCopy()},
+						},
+						JobInfo: SlurmJobIRJobInfo{
+							Account: ptr.To("test1"),
+							GroupId: ptr.To("1000"),
+							MaxNodes: func() *int32 {
+								maxNodes := int32(1)
+								return &maxNodes
+							}(),
+							TasksPerNode: func() *int32 {
+								tasksPerNode := int32(1)
+								return &tasksPerNode
+							}(),
+							UserId: ptr.To("1000"),
+						},
+					},
 				},
 			},
 			wantErr: false,
@@ -155,18 +159,22 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 						ResourceVersion: "999",
 					},
 				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{*podWithBadAnnotation.DeepCopy()},
-				},
-				JobInfo: SlurmJobIRJobInfo{
-					MaxNodes: func() *int32 {
-						maxNodes := int32(1)
-						return &maxNodes
-					}(),
-					TasksPerNode: func() *int32 {
-						tasksPerNode := int32(1)
-						return &tasksPerNode
-					}(),
+				Components: []SlurmJobComponent{
+					{
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{*podWithBadAnnotation.DeepCopy()},
+						},
+						JobInfo: SlurmJobIRJobInfo{
+							MaxNodes: func() *int32 {
+								maxNodes := int32(1)
+								return &maxNodes
+							}(),
+							TasksPerNode: func() *int32 {
+								tasksPerNode := int32(1)
+								return &tasksPerNode
+							}(),
+						},
+					},
 				},
 			},
 			wantErr: true,
@@ -246,11 +254,16 @@ func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *tes
 	if got.RootPOM.TypeMeta != job_v1 || got.RootPOM.Name != job.Name {
 		t.Errorf("RootPOM = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, job_v1, job.Name)
 	}
-	if got.JobInfo.MinNodes == nil || *got.JobInfo.MinNodes != 1 {
-		t.Errorf("MinNodes = %v, want 1 from the Job controller", got.JobInfo.MinNodes)
+	componentIndex := got.ComponentOf(pod.Namespace, pod.Name)
+	if componentIndex < 0 {
+		t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
 	}
-	if got.JobInfo.Account == nil || *got.JobInfo.Account != "job-account" {
-		t.Errorf("Account = %v, want Job controller annotation", got.JobInfo.Account)
+	jobInfo := got.Components[componentIndex].JobInfo
+	if jobInfo.MinNodes == nil || *jobInfo.MinNodes != 1 {
+		t.Errorf("MinNodes = %v, want 1 from the Job controller", jobInfo.MinNodes)
+	}
+	if jobInfo.Account == nil || *jobInfo.Account != "job-account" {
+		t.Errorf("Account = %v, want Job controller annotation", jobInfo.Account)
 	}
 }
 
@@ -312,14 +325,18 @@ func TestTranslateToSlurmJobIRPrefersSupportedWorkloadBelowReadableAncestor(t *t
 	if got.RootPOM.TypeMeta != jobSet_v1alpha2 || got.RootPOM.Name != jobSet.Name {
 		t.Errorf("RootPOM = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, jobSet_v1alpha2, jobSet.Name)
 	}
-	if got.JobInfo.Account == nil || *got.JobInfo.Account != "jobset-account" {
-		t.Errorf("Account = %v, want JobSet controller annotation", got.JobInfo.Account)
+	componentIndex := got.ComponentOf(pod.Namespace, pod.Name)
+	if componentIndex < 0 {
+		t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
+	}
+	if account := got.Components[componentIndex].JobInfo.Account; account == nil || *account != "jobset-account" {
+		t.Errorf("Account = %v, want JobSet controller annotation", account)
 	}
 }
 
 func Test_parsePodsCpuAndMemory(t *testing.T) {
 	type args struct {
-		slurmJobIR *SlurmJobIR
+		slurmJobComponent *SlurmJobComponent
 	}
 	tests := []struct {
 		name       string
@@ -330,7 +347,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 		{
 			name: "No requests or limits set",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{{}},
 					},
@@ -342,7 +359,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 		{
 			name: "requests set",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithResources("1", "100Mi", "2", "200Mi"),
@@ -357,7 +374,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 		{
 			name: "requests set on multiple pods",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithResources("1", "100Mi", "2", "400Mi"),
@@ -374,11 +391,11 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parsePodsCpuAndMemory(tt.args.slurmJobIR)
-			if !apiequality.Semantic.DeepEqual(tt.cpuPerTask, tt.args.slurmJobIR.JobInfo.CpuPerTask) {
+			parsePodsCpuAndMemory(tt.args.slurmJobComponent)
+			if !apiequality.Semantic.DeepEqual(tt.cpuPerTask, tt.args.slurmJobComponent.JobInfo.CpuPerTask) {
 				var gotCpu, wantCpu interface{}
-				if tt.args.slurmJobIR.JobInfo.CpuPerTask != nil {
-					gotCpu = *tt.args.slurmJobIR.JobInfo.CpuPerTask
+				if tt.args.slurmJobComponent.JobInfo.CpuPerTask != nil {
+					gotCpu = *tt.args.slurmJobComponent.JobInfo.CpuPerTask
 				} else {
 					gotCpu = nil
 				}
@@ -389,10 +406,10 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 				}
 				t.Errorf("parsePodsCpuAndMemory() CPU = %v, want %v", gotCpu, wantCpu)
 			}
-			if !apiequality.Semantic.DeepEqual(tt.memPerNode, tt.args.slurmJobIR.JobInfo.MemPerNode) {
+			if !apiequality.Semantic.DeepEqual(tt.memPerNode, tt.args.slurmJobComponent.JobInfo.MemPerNode) {
 				var gotMem, wantMem interface{}
-				if tt.args.slurmJobIR.JobInfo.MemPerNode != nil {
-					gotMem = *tt.args.slurmJobIR.JobInfo.MemPerNode
+				if tt.args.slurmJobComponent.JobInfo.MemPerNode != nil {
+					gotMem = *tt.args.slurmJobComponent.JobInfo.MemPerNode
 				} else {
 					gotMem = nil
 				}
@@ -409,7 +426,7 @@ func Test_parsePodsCpuAndMemory(t *testing.T) {
 
 func TestTranslatorParseDeviceResources(t *testing.T) {
 	type args struct {
-		slurmJobIR *SlurmJobIR
+		slurmJobComponent *SlurmJobComponent
 	}
 	tests := []struct {
 		name string
@@ -419,7 +436,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "No GPU requested",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{},
 					},
@@ -430,7 +447,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "Zero GPUs requested",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU("nvidia.com/gpu", "0"),
@@ -443,7 +460,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "Single GPUs requested",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU("nvidia.com/gpu", "1"),
@@ -456,7 +473,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "Multiple GPUs requested",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU("nvidia.com/gpu", "2"),
@@ -469,7 +486,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "Multiple pods, multiple GPUs requested",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU("amd.com/gpu", "2"),
@@ -483,7 +500,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "GPU requested via DRA Extended Resource Claim",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"gpu.nvidia.com", "1"),
@@ -496,7 +513,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "CPU DRA Extended Resource Claim is ignored for GRES",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"dra.cpu", "1"),
@@ -509,7 +526,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 		{
 			name: "Multiple GPU DRA Extended Resource Claims",
 			args: args{
-				slurmJobIR: &SlurmJobIR{
+				slurmJobComponent: &SlurmJobComponent{
 					Pods: corev1.PodList{
 						Items: []corev1.Pod{
 							podWithGPU(resourcev1.ResourceDeviceClassPrefix+"gpu.nvidia.com", "1"),
@@ -540,13 +557,13 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := translator.parseDeviceResources(tt.args.slurmJobIR); err != nil {
+			if err := translator.parseDeviceResources(tt.args.slurmJobComponent); err != nil {
 				t.Fatalf("translator.parseDeviceResources() error = %v", err)
 			}
-			if !apiequality.Semantic.DeepEqual(tt.want, tt.args.slurmJobIR.JobInfo.Gres) {
+			if !apiequality.Semantic.DeepEqual(tt.want, tt.args.slurmJobComponent.JobInfo.Gres) {
 				var gotGres, wantGres interface{}
-				if tt.args.slurmJobIR.JobInfo.Gres != nil {
-					gotGres = *tt.args.slurmJobIR.JobInfo.Gres
+				if tt.args.slurmJobComponent.JobInfo.Gres != nil {
+					gotGres = *tt.args.slurmJobComponent.JobInfo.Gres
 				} else {
 					gotGres = nil
 				}
@@ -580,7 +597,7 @@ func TestTranslatorParseDeviceResourcesUsesConfiguredDeviceProfile(t *testing.T)
 	if err != nil {
 		t.Fatalf("dra.NewRegistry() error = %v", err)
 	}
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
@@ -589,11 +606,11 @@ func TestTranslatorParseDeviceResourcesUsesConfiguredDeviceProfile(t *testing.T)
 		draRegistry: registry,
 	}
 
-	if err = translator.parseDeviceResources(ir); err != nil {
+	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/accelerator:custom-accelerator=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/accelerator:custom-accelerator=2")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/accelerator:custom-accelerator=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/accelerator:custom-accelerator=2")
 	}
 }
 
@@ -605,7 +622,7 @@ func TestTranslatorParseDeviceResourcesUsesCoreBitmapAlias(t *testing.T) {
 			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
 		}}},
 	}
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
@@ -614,20 +631,20 @@ func TestTranslatorParseDeviceResourcesUsesCoreBitmapAlias(t *testing.T) {
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseDeviceResources(ir); err != nil {
+	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.CpuPerTask == nil || *ir.JobInfo.CpuPerTask != 2 {
-		t.Fatalf("translator.parseDeviceResources() CpuPerTask = %v, want 2", ir.JobInfo.CpuPerTask)
+	if component.JobInfo.CpuPerTask == nil || *component.JobInfo.CpuPerTask != 2 {
+		t.Fatalf("translator.parseDeviceResources() CpuPerTask = %v, want 2", component.JobInfo.CpuPerTask)
 	}
-	if ir.JobInfo.Gres != nil {
-		t.Fatalf("translator.parseDeviceResources() Gres = %q, want nil", *ir.JobInfo.Gres)
+	if component.JobInfo.Gres != nil {
+		t.Fatalf("translator.parseDeviceResources() Gres = %q, want nil", *component.JobInfo.Gres)
 	}
 }
 
 func TestTranslatorParseDeviceResourcesFailsClosedForUnresolvedDeviceClass(t *testing.T) {
 	const className = "my-cpus"
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
@@ -636,7 +653,7 @@ func TestTranslatorParseDeviceResourcesFailsClosedForUnresolvedDeviceClass(t *te
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	err := translator.parseDeviceResources(ir)
+	err := translator.parseDeviceResources(component)
 	if err == nil || !strings.Contains(err.Error(), `DeviceClass "my-cpus" was not found`) {
 		t.Fatalf("translator.parseDeviceResources() error = %v, want missing DeviceClass error", err)
 	}
@@ -645,7 +662,7 @@ func TestTranslatorParseDeviceResourcesFailsClosedForUnresolvedDeviceClass(t *te
 func TestTranslatorParseDeviceResourcesFailsClosedForNonMatchingDeviceClass(t *testing.T) {
 	const className = "my-cpus"
 	deviceClass := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: className}}
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "1"),
 	}}}
 	translator := translator{
@@ -654,7 +671,7 @@ func TestTranslatorParseDeviceResourcesFailsClosedForNonMatchingDeviceClass(t *t
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	err := translator.parseDeviceResources(ir)
+	err := translator.parseDeviceResources(component)
 	if err == nil || !strings.Contains(err.Error(), `device class "my-cpus" must have exactly one selector`) {
 		t.Fatalf("translator.parseDeviceResources() error = %v, want profile mismatch error", err)
 	}
@@ -671,7 +688,7 @@ func TestTranslatorParseDeviceResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 			}},
 		},
 	}
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(resourcev1.ResourceDeviceClassPrefix+className, "2"),
 	}}}
 	translator := translator{
@@ -680,11 +697,11 @@ func TestTranslatorParseDeviceResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseDeviceResources(ir); err != nil {
+	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
 	}
 }
 
@@ -698,7 +715,7 @@ func TestTranslatorParseDeviceResourcesKeepsNVIDIADevicePluginSeparateFromDRAAli
 			}},
 		},
 	}
-	ir := &SlurmJobIR{Pods: corev1.PodList{Items: []corev1.Pod{
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{
 		podWithGPU(nvidiaDevicePlugin, "2"),
 	}}}
 	translator := translator{
@@ -707,11 +724,11 @@ func TestTranslatorParseDeviceResourcesKeepsNVIDIADevicePluginSeparateFromDRAAli
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseDeviceResources(ir); err != nil {
+	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu=2")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu=2")
 	}
 }
 
@@ -726,7 +743,7 @@ func TestTranslatorParseDeviceResourcesCombinesProfileAliases(t *testing.T) {
 			},
 		}
 	}
-	ir := &SlurmJobIR{
+	component := &SlurmJobComponent{
 		Pods: corev1.PodList{
 			Items: []corev1.Pod{{
 				Spec: corev1.PodSpec{
@@ -746,236 +763,185 @@ func TestTranslatorParseDeviceResourcesCombinesProfileAliases(t *testing.T) {
 		draRegistry: dra.DefaultRegistry(),
 	}
 
-	if err := translator.parseDeviceResources(ir); err != nil {
+	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if ir.JobInfo.Gres == nil || *ir.JobInfo.Gres != "gres/gpu:gpu-example=3" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", ir.JobInfo.Gres, "gres/gpu:gpu-example=3")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu-example=3" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu-example=3")
 	}
 }
 
-func Test_parseAnnotations(t *testing.T) {
-
-	type args struct {
-		slurmJobIR *SlurmJobIR
-		anno       map[string]string
-	}
+func TestSlurmJobIR_ComponentOf(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		wantRes SlurmJobIR
+		name      string
+		ir        SlurmJobIR
+		namespace string
+		podName   string
+		want      int
 	}{
 		{
-			name: "Empty",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno:       nil,
-			},
-			wantErr: false,
+			name: "pod belongs to component",
+			ir: SlurmJobIR{Components: []SlurmJobComponent{
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "cpu-pod"}}}}},
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "gpu-pod"}}}}},
+			}},
+			podName: "gpu-pod",
+			want:    1,
 		},
 		{
-			name: "GoodAnnotations",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationAccount:     "slurm",
-					wellknown.AnnotationConstraints: "foo",
-					wellknown.AnnotationCpuPerTask:  "200m",
-					wellknown.AnnotationGres:        "gres/gpu=2",
-					wellknown.AnnotationGroupId:     "1000",
-					wellknown.AnnotationJobName:     "jobname",
-					wellknown.AnnotationLicenses:    "mathlib",
-					wellknown.AnnotationMaxNodes:    "4",
-					wellknown.AnnotationMemPerNode:  "1Gi",
-					wellknown.AnnotationMinNodes:    "2",
-					wellknown.AnnotationPartition:   "slurm-bridge",
-					wellknown.AnnotationPriority:    "100",
-					wellknown.AnnotationQOS:         "high",
-					wellknown.AnnotationReservation: "training",
-					wellknown.AnnotationTimeLimit:   "30",
-					wellknown.AnnotationUserId:      "1000",
-					wellknown.AnnotationWckey:       "key",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					Account:     ptr.To("slurm"),
-					Constraints: ptr.To("foo"),
-					CpuPerTask:  ptr.To(int32(1)),
-					Gres:        ptr.To("gres/gpu=2"),
-					GroupId:     ptr.To("1000"),
-					JobName:     ptr.To("jobname"),
-					Licenses:    ptr.To("mathlib"),
-					MemPerNode:  ptr.To(int64(1024)),
-					MinNodes:    ptr.To(int32(2)),
-					MaxNodes:    ptr.To(int32(4)),
-					Partition:   ptr.To("slurm-bridge"),
-					Priority:    ptr.To(int32(100)),
-					QOS:         ptr.To("high"),
-					Reservation: ptr.To("training"),
-					TimeLimit:   ptr.To(int32(30)),
-					UserId:      ptr.To("1000"),
-					Wckey:       ptr.To("key"),
-				},
-			},
+			name:    "zero components",
+			ir:      SlurmJobIR{},
+			podName: "missing-pod",
+			want:    -1,
 		},
 		{
-			name: "TimeLimitDurationAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationTimeLimit: "2h",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					TimeLimit: ptr.To(int32(120)),
-				},
-			},
+			name: "absent pod",
+			ir: SlurmJobIR{Components: []SlurmJobComponent{
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "cpu-pod"}}}}},
+			}},
+			podName: "missing-pod",
+			want:    -1,
 		},
 		{
-			name: "TimeLimitSlurmTimeAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationTimeLimit: "1-00:30:00",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					TimeLimit: ptr.To(int32(1470)),
-				},
-			},
+			name: "same pod name in different namespaces",
+			ir: SlurmJobIR{Components: []SlurmJobComponent{
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "worker"}}}}},
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "team-b", Name: "worker"}}}}},
+			}},
+			namespace: "team-b",
+			podName:   "worker",
+			want:      1,
 		},
 		{
-			name: "TimeLimitSubMinuteAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationTimeLimit: "30s",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					TimeLimit: ptr.To(int32(1)),
-				},
-			},
-		},
-		{
-			name: "BadCpuPerTaskAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationCpuPerTask: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadMaxNodesAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationMaxNodes: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadMemPerNodeAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationMemPerNode: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadTimeLimitAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationTimeLimit: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadTimeLimitDurationAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationTimeLimit: "1.5h",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadPriorityAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationPriority: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "BadNTasksAnnotation",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationMinNodes: "foo",
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Exclusive annotation false",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationExclusive: "false",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					Exclusive: ptr.To(false),
-				},
-			},
-		},
-		{
-			name: "Exclusive annotation true",
-			args: args{
-				slurmJobIR: &SlurmJobIR{},
-				anno: map[string]string{
-					wellknown.AnnotationExclusive: "true",
-				},
-			},
-			wantErr: false,
-			wantRes: SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					Exclusive: ptr.To(true),
-				},
-			},
+			name: "duplicate membership is ambiguous",
+			ir: SlurmJobIR{Components: []SlurmJobComponent{
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "duplicate-pod"}}}}},
+				{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "duplicate-pod"}}}}},
+			}},
+			podName: "duplicate-pod",
+			want:    -1,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := parseAnnotations(tt.args.slurmJobIR, tt.args.anno)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseAnnotations() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			if got := tt.ir.ComponentOf(tt.namespace, tt.podName); got != tt.want {
+				t.Errorf("ComponentOf(%q, %q) = %d, want %d", tt.namespace, tt.podName, got, tt.want)
 			}
-			if !apiequality.Semantic.DeepEqual(&tt.wantRes, (tt.args.slurmJobIR)) {
-				t.Errorf("parseAnnotations() error = %v, want %v", tt.wantRes, *(tt.args.slurmJobIR))
+		})
+	}
+}
+
+func TestSlurmJobIR_ValidateRejectsEmptyComponents(t *testing.T) {
+	ir := &SlurmJobIR{Components: []SlurmJobComponent{
+		{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "pod-a"}}}}},
+		{},
+	}}
+
+	if err := ir.Validate(); err == nil {
+		t.Error("Validate() error = nil, want empty component error")
+	}
+}
+
+func TestSlurmJobIR_ValidateRejectsDuplicatePodMembership(t *testing.T) {
+	ir := &SlurmJobIR{Components: []SlurmJobComponent{
+		{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "duplicate-pod"}}}}},
+		{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: "duplicate-pod"}}}}},
+	}}
+
+	if err := ir.Validate(); err == nil {
+		t.Error("Validate() error = nil, want duplicate pod membership error")
+	}
+}
+
+func TestSlurmJobIR_ValidatePreservesNodeCountOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		min  *int32
+		max  *int32
+	}{
+		{name: "exact count", min: ptr.To(int32(2)), max: ptr.To(int32(2))},
+		{name: "range contains count", min: ptr.To(int32(1)), max: ptr.To(int32(3))},
+		{name: "zero minimum", min: ptr.To(int32(0)), max: ptr.To(int32(2))},
+		{name: "minimum exceeds count", min: ptr.To(int32(3)), max: ptr.To(int32(3))},
+		{name: "maximum below count", min: ptr.To(int32(1)), max: ptr.To(int32(1))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ir := &SlurmJobIR{Components: []SlurmJobComponent{{
+				JobInfo: SlurmJobIRJobInfo{
+					MinNodes: tt.min,
+					MaxNodes: tt.max,
+				},
+				Pods: corev1.PodList{Items: []corev1.Pod{
+					{ObjectMeta: metav1.ObjectMeta{Name: "pod-a"}},
+					{ObjectMeta: metav1.ObjectMeta{Name: "pod-b"}},
+				}},
+			}}}
+
+			if err := ir.Validate(); err != nil {
+				t.Errorf("Validate() error = %v, want nil for Slurm node options", err)
+			}
+		})
+	}
+}
+
+func TestSlurmJobIR_ValidateAllowsSamePodNameInDifferentNamespaces(t *testing.T) {
+	ir := &SlurmJobIR{Components: []SlurmJobComponent{
+		{Pods: corev1.PodList{Items: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "worker"},
+		}}}},
+		{Pods: corev1.PodList{Items: []corev1.Pod{{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "team-b", Name: "worker"},
+		}}}},
+	}}
+
+	if err := ir.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil for distinct namespaced pods", err)
+	}
+}
+
+func TestSlurmJobIR_ValidatePreservesTasksPerNode(t *testing.T) {
+	tests := []struct {
+		name         string
+		tasksPerNode *int32
+	}{
+		{
+			name: "nil",
+		},
+		{
+			name:         "one",
+			tasksPerNode: ptr.To(int32(1)),
+		},
+		{
+			name:         "zero",
+			tasksPerNode: ptr.To(int32(0)),
+		},
+		{
+			name:         "negative",
+			tasksPerNode: ptr.To(int32(-1)),
+		},
+		{
+			name:         "greater than one",
+			tasksPerNode: ptr.To(int32(2)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ir := &SlurmJobIR{Components: []SlurmJobComponent{{
+				JobInfo: SlurmJobIRJobInfo{TasksPerNode: tt.tasksPerNode},
+				Pods: corev1.PodList{Items: []corev1.Pod{{
+					ObjectMeta: metav1.ObjectMeta{Name: "pod-a"},
+				}}},
+			}}}
+
+			if err := ir.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v, want nil for TasksPerNode %v", err, tt.tasksPerNode)
+			}
+			if got := ir.Components[0].JobInfo.TasksPerNode; !apiequality.Semantic.DeepEqual(got, tt.tasksPerNode) {
+				t.Errorf("Validate() TasksPerNode = %v, want unchanged %v", got, tt.tasksPerNode)
 			}
 		})
 	}

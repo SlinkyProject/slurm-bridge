@@ -51,6 +51,12 @@ func newLWSPod(name, groupHash string) *corev1.Pod {
 	}
 }
 
+func newLWSRolePod(name, groupHash, workerIndex string) *corev1.Pod {
+	pod := newLWSPod(name, groupHash)
+	pod.Labels[lwsv1.WorkerIndexLabelKey] = workerIndex
+	return pod
+}
+
 func Test_translator_PreFilterLWS(t *testing.T) {
 	type fields struct {
 		Reader client.Reader
@@ -98,7 +104,11 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 							Namespace: corev1.NamespaceDefault,
 						},
 					},
-					Pods: corev1.PodList{},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{},
+						},
+					},
 				},
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -130,7 +140,11 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 							Namespace: corev1.NamespaceDefault,
 						},
 					},
-					Pods: corev1.PodList{},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{},
+						},
+					},
 				},
 				pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
@@ -163,10 +177,14 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 							Namespace: corev1.NamespaceDefault,
 						},
 					},
-					Pods: corev1.PodList{
-						Items: []corev1.Pod{
-							*newLWSPod("pod1", "lws"),
-							*newLWSPod("pod2", "lws"),
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{
+								Items: []corev1.Pod{
+									*newLWSPod("pod1", "lws"),
+									*newLWSPod("pod2", "lws"),
+								},
+							},
 						},
 					},
 				},
@@ -295,7 +313,7 @@ func Test_translator_fromLws(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "LWS to SlurmJobIR",
+			name: "LWS to flat SlurmJobIR without opt-in",
 			fields: fields{
 				Reader: func() client.Client {
 					scheme := runtime.NewScheme()
@@ -303,8 +321,8 @@ func Test_translator_fromLws(t *testing.T) {
 					utilruntime.Must(lwsv1.AddToScheme(scheme))
 					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 						newLWS("lws", 2),
-						newLWSPod("pod1", "lws"),
-						newLWSPod("pod2", "lws"),
+						newLWSRolePod("pod1", "lws", "0"),
+						newLWSRolePod("pod2", "lws", "1"),
 					).Build()
 				}(),
 				ctx: context.Background(),
@@ -316,6 +334,7 @@ func Test_translator_fromLws(t *testing.T) {
 							lwsv1.GroupUniqueHashLabelKey: "lws",
 							lwsv1.SetNameLabelKey:         "foo",
 							lwsv1.GroupIndexLabelKey:      "1",
+							lwsv1.WorkerIndexLabelKey:     "0",
 						},
 					},
 				},
@@ -327,16 +346,20 @@ func Test_translator_fromLws(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					JobName:      ptr.To("foo-1"),
-					MaxNodes:     ptr.To(int32(2)),
-					MinNodes:     ptr.To(int32(2)),
-					TasksPerNode: ptr.To(int32(1)),
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{
-						*newLWSPod("pod1", "lws"),
-						*newLWSPod("pod2", "lws"),
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							JobName:      ptr.To("foo-1"),
+							MaxNodes:     ptr.To(int32(2)),
+							MinNodes:     ptr.To(int32(2)),
+							TasksPerNode: ptr.To(int32(1)),
+						},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{
+								*newLWSRolePod("pod1", "lws", "0"),
+								*newLWSRolePod("pod2", "lws", "1"),
+							},
+						},
 					},
 				},
 			},

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,7 @@ import (
 	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	kubeinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -138,6 +140,74 @@ func TestFindMatchingError(t *testing.T) {
 		})
 	}
 }
+
+type postFilterSlurmControl struct {
+	deleteCalls          int
+	deletedPod           *corev1.Pod
+	getJobCalls          int
+	getJobs              []*slurmcontrol.ExternalJob
+	nodeNamesByPartition map[string][]string
+	podToJobs            map[string]slurmcontrol.ExternalJob
+	submitCalls          int
+	submitIDs            []int32
+	submittedIR          *slurmjobir.SlurmJobIR
+	updateJob            func(*slurmjobir.SlurmJobIR) (int32, error)
+}
+
+func (c *postFilterSlurmControl) GetResources(context.Context, *corev1.Pod, string) (*slurmcontrol.NodeResources, error) {
+	return &slurmcontrol.NodeResources{}, nil
+}
+
+func (c *postFilterSlurmControl) DeleteJob(_ context.Context, pod *corev1.Pod) error {
+	c.deleteCalls++
+	c.deletedPod = pod
+	return nil
+}
+
+func (c *postFilterSlurmControl) GetJobsForPods(context.Context) (*map[string]slurmcontrol.ExternalJob, error) {
+	if c.podToJobs != nil {
+		return &c.podToJobs, nil
+	}
+	return &map[string]slurmcontrol.ExternalJob{}, nil
+}
+
+func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
+	if c.getJobCalls < len(c.getJobs) {
+		job := c.getJobs[c.getJobCalls]
+		c.getJobCalls++
+		return job, nil
+	}
+	return &slurmcontrol.ExternalJob{}, nil
+}
+
+func (c *postFilterSlurmControl) SubmitJob(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]int32, error) {
+	c.submitCalls++
+	c.submittedIR = ir
+	if c.submitIDs != nil {
+		return c.submitIDs, nil
+	}
+	return []int32{101, 102}, nil
+}
+
+func (c *postFilterSlurmControl) UpdateJob(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (int32, error) {
+	if c.updateJob != nil {
+		return c.updateJob(ir)
+	}
+	return 0, nil
+}
+
+func (c *postFilterSlurmControl) GetNodeNames(_ context.Context, partition *string) ([]string, error) {
+	if c.nodeNamesByPartition != nil {
+		partitionName := ""
+		if partition != nil {
+			partitionName = *partition
+		}
+		return c.nodeNamesByPartition[partitionName], nil
+	}
+	return []string{"node-a", "cpu-node", "gpu-node"}, nil
+}
+
+var _ slurmcontrol.SlurmControlInterface = (*postFilterSlurmControl)(nil)
 
 func TestSlurmbridge_Name(t *testing.T) {
 	tests := []struct {
@@ -753,7 +823,13 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 
 	kubeClient := kubefake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
+		WithObjects(
+			podA.DeepCopy(),
+			podB.DeepCopy(),
+			podGroup.DeepCopy(),
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+		).
 		WithStatusSubresource(&slurmjobir.PodGroup{}).
 		Build()
 	slurmControl := func() slurmcontrol.SlurmControlInterface {
@@ -1200,6 +1276,48 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			wantActivate: true,
 		},
 		{
+			name: "Creating an external job succeeds",
+			fields: fields{
+				Client: kubefake.NewFakeClient(
+					pod.DeepCopy(),
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+				),
+				slurmControl: func() slurmcontrol.SlurmControlInterface {
+					f := interceptor.Funcs{
+						Create: func(_ context.Context, obj object.Object, _ any, _ ...slurmclient.CreateOption) error {
+							obj.(*types.V0044JobInfo).JobId = ptr.To(int32(1))
+							return nil
+						},
+					}
+					nodes := &types.V0044NodeList{
+						Items: []types.V0044Node{
+							slurmNode("node1", "slurm-bridge"),
+							slurmNode("node2", "slurm-bridge"),
+						},
+					}
+					c := fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						WithLists(nodes).
+						Build()
+					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+				}(),
+				handle: f,
+			},
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod:   pod.DeepCopy(),
+				m: framework.NewNodeToStatus(map[string]*fwk.Status{
+					"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
+			},
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
+		},
+		{
 			name: "Updating an external job succeeds",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
@@ -1213,7 +1331,10 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							jobUpdate := req.(api.V0044JobDescMsg)
 							want := ptr.To(api.V0044CsvString{})
 							if !reflect.DeepEqual(jobUpdate.ExcludedNodes, want) {
-								return fmt.Errorf("ExcludedNodes = %v, want an explicit empty list", jobUpdate.ExcludedNodes)
+								return fmt.Errorf("ExcludedNodes = %v, want empty list", jobUpdate.ExcludedNodes)
+							}
+							if jobUpdate.RequiredNodes != nil {
+								return fmt.Errorf("RequiredNodes = %v, want nil", jobUpdate.RequiredNodes)
 							}
 							return nil
 						},
@@ -1730,7 +1851,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 		{
 			name: "Matching slurm job exists",
 			fields: fields{
-				Client: kubefake.NewFakeClient(),
+				Client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
@@ -1757,7 +1878,11 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				ctx: context.TODO(),
 				pod: pod.DeepCopy(),
 			},
-			want:    pod.DeepCopy(),
+			want: func() *corev1.Pod {
+				want := pod.DeepCopy()
+				want.Finalizers = append(want.Finalizers, wellknown.FinalizerScheduler)
+				return want
+			}(),
 			wantErr: false,
 		},
 		{
@@ -1835,6 +1960,9 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				pod.Labels = map[string]string{
 					wellknown.LabelExternalJobId: "2",
 				}
+				pod.Finalizers = []string{
+					wellknown.FinalizerScheduler,
+				}
 				return pod.DeepCopy()
 			}(),
 			wantErr: false,
@@ -1852,6 +1980,295 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(tt.args.pod, tt.want) {
 				t.Errorf("SlurmBridge.validatePodToJob() pod = %v, want %v", tt.args.pod, tt.want)
+			}
+		})
+	}
+}
+
+func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		labels        map[string]string
+		finalizers    []string
+		job           slurmcontrol.ExternalJob
+		wantLabels    map[string]string
+		wantFinalizer bool
+		wantPatches   int
+	}{
+		{
+			name: "does not adopt unlabeled pod",
+			job: slurmcontrol.ExternalJob{
+				JobId:    102,
+				HetJobId: 100,
+			},
+		},
+		{
+			name: "corrects zero component label",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId: "0",
+			},
+			job: slurmcontrol.ExternalJob{
+				JobId: 102,
+			},
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId: "102",
+			},
+			wantFinalizer: true,
+			wantPatches:   1,
+		},
+		{
+			name: "corrects zero component label with het jobid",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId: "0",
+			},
+			job: slurmcontrol.ExternalJob{
+				JobId:    102,
+				HetJobId: 100,
+			},
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantFinalizer: true,
+			wantPatches:   1,
+		},
+		{
+			name: "corrects stale component and base labels",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "999",
+				wellknown.LabelExternalHetJobId: "998",
+			},
+			job: slurmcontrol.ExternalJob{
+				JobId:    102,
+				HetJobId: 100,
+			},
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantFinalizer: true,
+			wantPatches:   1,
+		},
+		{
+			name: "removes stale base label from homogeneous job",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "101",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			finalizers: []string{wellknown.FinalizerScheduler},
+			job: slurmcontrol.ExternalJob{
+				JobId: 101,
+			},
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId: "101",
+			},
+			wantFinalizer: true,
+			wantPatches:   1,
+		},
+		{
+			name: "matching identity is a no-op",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			finalizers: []string{wellknown.FinalizerScheduler},
+			job: slurmcontrol.ExternalJob{
+				JobId:    102,
+				HetJobId: 100,
+			},
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantFinalizer: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Namespace:  "workload",
+				Name:       "pod-a",
+				Labels:     tt.labels,
+				Finalizers: tt.finalizers,
+			}}
+			patches := 0
+			kubeClient := kubefake.NewClientBuilder().
+				WithObjects(pod.DeepCopy()).
+				WithInterceptorFuncs(kubeinterceptor.Funcs{
+					Patch: func(
+						ctx context.Context,
+						c kubeclient.WithWatch,
+						obj kubeclient.Object,
+						patch kubeclient.Patch,
+						opts ...kubeclient.PatchOption,
+					) error {
+						patches++
+						return c.Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
+			key := kubeclient.ObjectKeyFromObject(pod).String()
+			control := &postFilterSlurmControl{
+				podToJobs: map[string]slurmcontrol.ExternalJob{key: tt.job},
+			}
+			sb := &SlurmBridge{Client: kubeClient, slurmControl: control}
+
+			if err := sb.validatePodToJob(ctx, pod); err != nil {
+				t.Fatalf("validatePodToJob() error = %v, want nil", err)
+			}
+			got := &corev1.Pod{}
+			if err := kubeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+				t.Fatalf("Get(%s) error = %v, want nil", pod.Name, err)
+			}
+			if !apiequality.Semantic.DeepEqual(got.Labels, tt.wantLabels) {
+				t.Errorf("validatePodToJob() labels = %v, want %v", got.Labels, tt.wantLabels)
+			}
+			if gotFinalizer := slices.Contains(got.Finalizers, wellknown.FinalizerScheduler); gotFinalizer != tt.wantFinalizer {
+				t.Errorf("validatePodToJob() finalizer present = %t, want %t", gotFinalizer, tt.wantFinalizer)
+			}
+			if patches != tt.wantPatches {
+				t.Errorf("validatePodToJob() Patch calls = %d, want %d", patches, tt.wantPatches)
+			}
+			if !apiequality.Semantic.DeepEqual(pod.Labels, tt.wantLabels) {
+				t.Errorf("validatePodToJob() in-memory labels = %v, want %v", pod.Labels, tt.wantLabels)
+			}
+		})
+	}
+}
+
+func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
+	tests := []struct {
+		name        string
+		labels      map[string]string
+		finalizers  []string
+		jobID       int32
+		hetJobID    int32
+		wantLabels  map[string]string
+		wantPatches int
+	}{
+		{
+			name:     "persists base identity before component discovery",
+			hetJobID: 100,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantPatches: 1,
+		},
+		{
+			name:     "labels heterogeneous pod",
+			jobID:    102,
+			hetJobID: 100,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantPatches: 1,
+		},
+		{
+			name: "corrects stale base label",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "999",
+			},
+			finalizers: []string{wellknown.FinalizerScheduler},
+			jobID:      102,
+			hetJobID:   100,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantPatches: 1,
+		},
+		{
+			name: "removes stale base label from homogeneous pod",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "101",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			finalizers: []string{wellknown.FinalizerScheduler},
+			jobID:      101,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId: "101",
+			},
+			wantPatches: 1,
+		},
+		{
+			name: "restores missing finalizer",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			jobID:    102,
+			hetJobID: 100,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			wantPatches: 1,
+		},
+		{
+			name: "matching state is a no-op",
+			labels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+			finalizers: []string{wellknown.FinalizerScheduler},
+			jobID:      102,
+			hetJobID:   100,
+			wantLabels: map[string]string{
+				wellknown.LabelExternalJobId:    "102",
+				wellknown.LabelExternalHetJobId: "100",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Namespace:  "workload",
+				Name:       "pod-a",
+				Labels:     tt.labels,
+				Finalizers: tt.finalizers,
+			}}
+			patches := 0
+			kubeClient := kubefake.NewClientBuilder().
+				WithObjects(pod.DeepCopy()).
+				WithInterceptorFuncs(kubeinterceptor.Funcs{
+					Patch: func(
+						ctx context.Context,
+						c kubeclient.WithWatch,
+						obj kubeclient.Object,
+						patch kubeclient.Patch,
+						opts ...kubeclient.PatchOption,
+					) error {
+						patches++
+						return c.Patch(ctx, obj, patch, opts...)
+					},
+				}).
+				Build()
+			sb := &SlurmBridge{Client: kubeClient}
+			component := slurmjobir.SlurmJobComponent{
+				Pods: corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+			}
+
+			if err := sb.labelPodsWithJobId(ctx, tt.jobID, tt.hetJobID, component); err != nil {
+				t.Fatalf("labelPodsWithJobId() error = %v, want nil", err)
+			}
+			got := &corev1.Pod{}
+			if err := kubeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+				t.Fatalf("Get(%s) error = %v, want nil", pod.Name, err)
+			}
+			if !apiequality.Semantic.DeepEqual(got.Labels, tt.wantLabels) {
+				t.Errorf("labelPodsWithJobId() labels = %v, want %v", got.Labels, tt.wantLabels)
+			}
+			if !apiequality.Semantic.DeepEqual(got.Finalizers, []string{wellknown.FinalizerScheduler}) {
+				t.Errorf("labelPodsWithJobId() finalizers = %v, want scheduler finalizer", got.Finalizers)
+			}
+			if patches != tt.wantPatches {
+				t.Errorf("labelPodsWithJobId() Patch calls = %d, want %d", patches, tt.wantPatches)
 			}
 		})
 	}

@@ -46,11 +46,11 @@ func ValidatePodGroupSupport(api *WorkloadAPI, pod *corev1.Pod) error {
 // selected controller, and Workload. Only one controller source is applied.
 // Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 func (t *translator) parsePodGroupSlurmAnnotations(
-	slurmJobIR *SlurmJobIR,
+	slurmJobComponent *SlurmJobComponent,
 	pg *PodGroup,
 	controllerPOM *metav1.PartialObjectMetadata,
 ) error {
-	if err := parseAnnotations(slurmJobIR, pg.GetAnnotations()); err != nil {
+	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
 		return err
 	}
 	if controllerPOM != nil {
@@ -66,7 +66,7 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 				ann = jobSet.GetAnnotations()
 			}
 		}
-		if err := parseAnnotations(slurmJobIR, ann); err != nil {
+		if err := parseUserAnnotations(slurmJobComponent, ann); err != nil {
 			return err
 		}
 	}
@@ -82,32 +82,7 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 		}
 		return err
 	}
-	return parseAnnotations(slurmJobIR, wl.GetAnnotations())
-}
-
-// applySlurmAnnotations merges Slurm job annotations for the scheduling root object.
-func (t *translator) applySlurmAnnotations(
-	slurmJobIR *SlurmJobIR,
-	pod *corev1.Pod,
-	rootPOM *metav1.PartialObjectMetadata,
-	pg *PodGroup,
-) error {
-	if pg == nil {
-		return parseAnnotations(slurmJobIR, rootPOM.Annotations)
-	}
-	if !isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
-		// Basic scheduling retains the original root and its annotations.
-		return t.parsePodGroupSlurmAnnotations(slurmJobIR, pg, rootPOM)
-	}
-	c, ok := t.Reader.(client.Client)
-	if !ok {
-		return fmt.Errorf("client does not support owner metadata lookup")
-	}
-	controllerPOM, err := getRootOwnerMetadata(c, t.ctx, pod)
-	if err != nil {
-		return err
-	}
-	return t.parsePodGroupSlurmAnnotations(slurmJobIR, pg, controllerPOM)
+	return parseUserAnnotations(slurmJobComponent, wl.GetAnnotations())
 }
 
 func schedulingGroupsMatch(a, b *corev1.PodSchedulingGroup) bool {
@@ -133,7 +108,7 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 		return fwk.NewStatus(fwk.Success)
 	}
 	var numPodsWaiting int32
-	for _, p := range slurmJobIR.Pods.Items {
+	for _, p := range slurmJobIR.AllPods() {
 		if p.Labels[wellknown.LabelExternalJobId] == pod.Labels[wellknown.LabelExternalJobId] {
 			numPodsWaiting++
 		}
@@ -153,7 +128,9 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 	if err := t.List(t.ctx, &allPods, client.InNamespace(pod.Namespace)); err != nil {
 		return nil, err
 	}
-	slurmJobIR := &SlurmJobIR{}
+	slurmJobIR := new(SlurmJobIR)
+	slurmJobComponent := new(SlurmJobComponent)
+
 	ref := pod.Spec.SchedulingGroup
 	for i := range allPods.Items {
 		p := &allPods.Items[i]
@@ -161,18 +138,22 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 			continue
 		}
 		if schedulingGroupsMatch(p.Spec.SchedulingGroup, ref) {
-			slurmJobIR.Pods.Items = append(slurmJobIR.Pods.Items, *p)
+			slurmJobComponent.Pods.Items = append(slurmJobComponent.Pods.Items, *p)
 		}
 	}
-	if len(slurmJobIR.Pods.Items) == 0 {
+	if len(slurmJobComponent.Pods.Items) == 0 {
 		return nil, ErrorPodGroupNoPods
 	}
 
-	slurmJobIR.JobInfo.JobName = ptr.To(rootPOM.Name)
-	n := int32(len(slurmJobIR.Pods.Items)) //nolint:gosec // count bounded by cluster
-	slurmJobIR.JobInfo.MinNodes = ptr.To(n)
-	slurmJobIR.JobInfo.MaxNodes = ptr.To(n)
-	slurmJobIR.JobInfo.TasksPerNode = ptr.To(int32(1))
+	slurmJobComponent.JobInfo.JobName = ptr.To(rootPOM.Name)
+	n := int32(len(slurmJobComponent.Pods.Items)) //nolint:gosec // count bounded by cluster
+	slurmJobComponent.JobInfo.MinNodes = ptr.To(n)
+	slurmJobComponent.JobInfo.MaxNodes = ptr.To(n)
+	slurmJobComponent.JobInfo.TasksPerNode = ptr.To(int32(1))
+
+	slurmJobIR.Components = []SlurmJobComponent{
+		*slurmJobComponent,
+	}
 
 	return slurmJobIR, nil
 }

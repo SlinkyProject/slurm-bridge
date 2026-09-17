@@ -4,45 +4,32 @@
 package slurmjobir
 
 import (
-	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func Test_translator_fromPod(t *testing.T) {
-	type fields struct {
-		Reader client.Reader
-		ctx    context.Context
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "workload",
+		Name:      "pod-a",
+	}}
+	want := &SlurmJobIR{Components: []SlurmJobComponent{{
+		JobInfo: SlurmJobIRJobInfo{
+			MaxNodes:     ptr.To(int32(1)),
+			TasksPerNode: ptr.To(int32(1)),
+		},
+		Pods: corev1.PodList{Items: []corev1.Pod{*pod}},
+	}}}
+
+	got, err := (&translator{}).fromPod(pod)
+	if err != nil {
+		t.Fatalf("translator.fromPod() error = %v, want nil", err)
 	}
-	type args struct {
-		pod *corev1.Pod
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    *SlurmJobIR
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tr := &translator{
-				Reader: tt.fields.Reader,
-				ctx:    tt.fields.ctx,
-			}
-			got, err := tr.fromPod(tt.args.pod)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("translator.fromPod() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("translator.fromPod() = %v, want %v", got, tt.want)
-			}
-		})
+	if !apiequality.Semantic.DeepEqual(got, want) {
+		t.Errorf("translator.fromPod() = %v, want %v", got, want)
 	}
 }

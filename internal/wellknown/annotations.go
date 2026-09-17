@@ -40,6 +40,8 @@ const (
 	// AnnotationGroupId overrides the default groupid
 	// for the Slurm external job.
 	AnnotationGroupId = SlurmJobPrefix + "group-id"
+	// AnnotationHetJob opts a job into heterogeneous job processing.
+	AnnotationHetJob = SlurmJobPrefix + "het-job"
 	// AnnotationJobName sets the job name for
 	// the slurm job
 	AnnotationJobName = SlurmJobPrefix + "job-name"

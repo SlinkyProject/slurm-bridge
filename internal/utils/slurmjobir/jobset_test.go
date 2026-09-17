@@ -126,14 +126,18 @@ func Test_translator_fromJobSet(t *testing.T) {
 				},
 			},
 			want: &SlurmJobIR{
-				JobInfo: SlurmJobIRJobInfo{
-					MinNodes:   ptr.To(int32(1)),
-					CpuPerTask: ptr.To(int32(22)),
-					MemPerNode: ptr.To(int64(1)),
-				},
-				Pods: corev1.PodList{
-					Items: []corev1.Pod{
-						*newJobPod("foo", "foo"),
+				Components: []SlurmJobComponent{
+					{
+						JobInfo: SlurmJobIRJobInfo{
+							MinNodes:   ptr.To(int32(1)),
+							CpuPerTask: ptr.To(int32(22)),
+							MemPerNode: ptr.To(int64(1)),
+						},
+						Pods: corev1.PodList{
+							Items: []corev1.Pod{
+								*newJobPod("foo", "foo"),
+							},
+						},
 					},
 				},
 			},
