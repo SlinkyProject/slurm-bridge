@@ -1464,6 +1464,98 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 	}
 }
 
+func Test_nodeInternalIP(t *testing.T) {
+	tests := []struct {
+		name string
+		node *corev1.Node
+		want string
+	}{
+		{
+			name: "has an InternalIP",
+			node: &corev1.Node{Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "203.0.113.1"},
+				{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+			}}},
+			want: "10.0.0.1",
+		},
+		{
+			name: "no InternalIP",
+			node: &corev1.Node{Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeExternalIP, Address: "203.0.113.1"},
+			}}},
+			want: "",
+		},
+		{
+			name: "no addresses",
+			node: &corev1.Node{},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nodeInternalIP(tt.node); got != tt.want {
+				t.Errorf("nodeInternalIP() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_AddNode_setsNodeAddr(t *testing.T) {
+	tests := []struct {
+		name           string
+		addresses      []corev1.NodeAddress
+		wantInNodeConf string
+		wantAbsent     bool
+	}{
+		{
+			name:           "InternalIP set",
+			addresses:      []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.1"}},
+			wantInNodeConf: "NodeAddr=10.0.0.1",
+		},
+		{
+			name:       "no InternalIP",
+			addresses:  nil,
+			wantAbsent: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var nodeConf string
+			f := interceptor.Funcs{
+				Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
+					if r, ok := req.(api.V0044OpenapiCreateNodeReq); ok {
+						nodeConf = r.NodeConf
+					}
+					return nil
+				},
+			}
+			r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build()}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("8Gi"),
+					},
+					Addresses: tt.addresses,
+				},
+			}
+			if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+				t.Fatalf("AddNode: %v", err)
+			}
+			if tt.wantAbsent {
+				if strings.Contains(nodeConf, "NodeAddr=") {
+					t.Errorf("NodeConf = %q, want no NodeAddr", nodeConf)
+				}
+				return
+			}
+			if !strings.Contains(nodeConf, tt.wantInNodeConf) {
+				t.Errorf("NodeConf missing %q: %q", tt.wantInNodeConf, nodeConf)
+			}
+		})
+	}
+}
+
 func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 	var nodeConf string
 	var extra string
