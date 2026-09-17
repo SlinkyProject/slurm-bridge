@@ -317,6 +317,99 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		want1  *fwk.Status
 	}{
 		{
+			name: "pod with required node affinity is rejected",
+			fields: fields{
+				client: kubefake.NewFakeClient(pod.DeepCopy()),
+				handle: f,
+			},
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod: st.MakePod().Name("pod1").NodeAffinity(&corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"rack-a"}},
+								},
+							},
+						},
+					},
+				}).Obj(),
+			},
+			want:  nil,
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
+		},
+		{
+			name: "pod with required pod anti-affinity is rejected",
+			fields: fields{
+				client: kubefake.NewFakeClient(pod.DeepCopy()),
+				handle: f,
+			},
+			args: args{
+				ctx:   context.Background(),
+				state: framework.NewCycleState(),
+				pod: st.MakePod().Name("pod1").
+					PodAntiAffinity("kubernetes.io/hostname", &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "example"},
+					}, st.PodAntiAffinityWithRequiredReq).
+					Obj(),
+			},
+			want:  nil,
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
+		},
+		{
+			name: "pod with preferred node affinity is allowed, Slurm just won't honor the preference",
+			fields: fields{
+				client: kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: func() slurmcontrol.SlurmControlInterface {
+					list := &types.V0044JobInfoList{
+						Items: []types.V0044JobInfo{
+							{V0044JobInfo: api.V0044JobInfo{
+								AdminComment: func() *string {
+									pi := externaljobinfo.ExternalJobInfo{
+										Pods: []string{"slurm/pod1"},
+									}
+									return ptr.To(pi.ToString())
+								}(),
+								JobId:    ptr.To[int32](1),
+								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+								Nodes:    ptr.To("node1"),
+							}},
+						},
+					}
+					c := fake.NewClientBuilder().
+						WithLists(list).
+						Build()
+					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+				}(),
+				handle: f,
+			},
+			args: args{
+				ctx:   context.Background(),
+				state: framework.NewCycleState(),
+				pod: st.MakePod().Name("pod1").Annotations(map[string]string{
+					wellknown.AnnotationExternalJobNode: "node1",
+				}).Labels(map[string]string{
+					wellknown.LabelExternalJobId: "1"}).
+					NodeAffinity(&corev1.NodeAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+							{
+								Weight: 1,
+								Preference: corev1.NodeSelectorTerm{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"rack-a"}},
+									},
+								},
+							},
+						},
+					}).
+					Obj(),
+			},
+			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
+			want1: fwk.NewStatus(fwk.Success),
+		},
+		{
 			name: "JobId and Node assignment exist in annotations",
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy()),

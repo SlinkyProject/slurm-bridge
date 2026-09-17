@@ -81,6 +81,27 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 	return nil
 }
 
+// hasRequiredAffinity reports whether pod has a required (as opposed to
+// preferred) node or pod (anti-)affinity term.
+func hasRequiredAffinity(pod *corev1.Pod) bool {
+	affinity := pod.Spec.Affinity
+	if affinity == nil {
+		return false
+	}
+	if na := affinity.NodeAffinity; na != nil {
+		if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
+			return true
+		}
+	}
+	if pa := affinity.PodAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+		return true
+	}
+	if pa := affinity.PodAntiAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
+		return true
+	}
+	return false
+}
+
 // +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods;pods/resize,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
 var _ admission.Validator[*corev1.Pod] = &PodAdmission{}
@@ -106,6 +127,9 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	}
 	if len(pod.Spec.TopologySpreadConstraints) > 0 {
 		return nil, fmt.Errorf("spec.topologySpreadConstraints is not supported by the slurm-bridge scheduler")
+	}
+	if hasRequiredAffinity(pod) {
+		return nil, fmt.Errorf("spec.affinity's required fields are not supported by the slurm-bridge scheduler, use a Slurm partition or constraint instead")
 	}
 	if err := validatePositiveResourceQuantities(pod); err != nil {
 		return nil, err
