@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/puttsk/hostlist"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -32,6 +31,7 @@ import (
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
+	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	nodecontrollerutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
