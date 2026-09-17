@@ -6,7 +6,6 @@ package slurmjobir
 import (
 	"errors"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -14,6 +13,8 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var (

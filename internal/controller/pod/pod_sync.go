@@ -7,9 +7,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,6 +17,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func (r *PodReconciler) Sync(ctx context.Context, req reconcile.Request) error {
