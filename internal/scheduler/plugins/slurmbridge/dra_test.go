@@ -9,8 +9,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -24,6 +22,8 @@ import (
 	fwkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	tf "k8s.io/kubernetes/pkg/scheduler/testing/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
 func Test_expandDevices(t *testing.T) {

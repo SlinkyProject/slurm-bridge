@@ -8,17 +8,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
-	api "github.com/SlinkyProject/slurm-client/api/v0044"
-	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
-	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
-	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
-
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +28,18 @@ import (
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
+
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
+	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
+	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
+	"github.com/SlinkyProject/slurm-client/pkg/object"
+	"github.com/SlinkyProject/slurm-client/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/placeholderinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func TestSlurmbridge_Name(t *testing.T) {

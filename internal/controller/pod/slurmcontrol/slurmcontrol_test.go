@@ -13,11 +13,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func Test_realSlurmControl_GetJob(t *testing.T) {
