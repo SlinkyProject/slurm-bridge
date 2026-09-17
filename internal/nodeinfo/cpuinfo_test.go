@@ -7,11 +7,12 @@ package nodeinfo_test
 import (
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 )
 
 func TestNewCPUInfos(t *testing.T) {
