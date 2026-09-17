@@ -3,11 +3,10 @@ module github.com/SlinkyProject/slurm-bridge
 go 1.26.6
 
 require (
-	github.com/SlinkyProject/slurm-client v1.1.3
+	github.com/SlinkyProject/slurm-client v1.1.4-0.20260917143214-489581811e63
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/puttsk/hostlist v0.1.0
 	k8s.io/api v0.35.2
 	k8s.io/apimachinery v0.35.2
 	k8s.io/client-go v0.35.2

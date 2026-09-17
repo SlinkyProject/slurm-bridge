@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/puttsk/hostlist"
+	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
