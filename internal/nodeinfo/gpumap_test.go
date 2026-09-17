@@ -6,8 +6,9 @@ package nodeinfo_test
 import (
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"k8s.io/apimachinery/pkg/api/equality"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 )
 
 func TestNewGPUMap(t *testing.T) {

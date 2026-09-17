@@ -7,7 +7,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
@@ -20,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func podWithSchedulingGroup(ns, name, pgName string) *corev1.Pod {
