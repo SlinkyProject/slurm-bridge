@@ -6,13 +6,13 @@ package node
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -87,11 +87,11 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 	}
 	// Include the event object: an old or deleted slice may no longer be cached.
 	poolSlices = append(poolSlices, *resourceSlice)
-	nodeNames := make(map[string]struct{})
+	nodeNames := sets.New[string]()
 	for i := range poolSlices {
 		poolSlice := &poolSlices[i]
 		if dra.ValidateResourceSliceNode(poolSlice) == nil {
-			nodeNames[*poolSlice.Spec.NodeName] = struct{}{}
+			nodeNames.Insert(*poolSlice.Spec.NodeName)
 			continue
 		}
 		// Unsupported selection has no single node owner. Reconcile all nodes
@@ -102,18 +102,13 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 			return nil
 		}
 		for _, node := range nodes.Items {
-			nodeNames[node.Name] = struct{}{}
+			nodeNames.Insert(node.Name)
 		}
 		break
 	}
 
-	names := make([]string, 0, len(nodeNames))
-	for name := range nodeNames {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	requests := make([]reconcile.Request, 0, len(names))
-	for _, name := range names {
+	requests := make([]reconcile.Request, 0, nodeNames.Len())
+	for _, name := range sets.List(nodeNames) {
 		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: name}})
 	}
 	return requests
