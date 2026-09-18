@@ -11,7 +11,8 @@ import (
 )
 
 // validateDeviceProfileSelector catches explicit contradictions between the
-// structural driver prefilter and direct device.driver equality expressions.
+// structural driver prefilter and required device.driver equality or singleton
+// membership constraints. Only direct constraints and conjunctions are checked.
 // It deliberately does not try to prove what an arbitrary CEL expression
 // implies about the driver.
 func validateDeviceProfileSelector(profile DeviceProfile) error {
@@ -25,38 +26,53 @@ func validateDeviceProfileSelector(profile DeviceProfile) error {
 		return fmt.Errorf("parse selector for device profile %q: %s", profile.Name, issues.String())
 	}
 
-	var validationErr error
-	celast.PreOrderVisit(parsed.NativeRep().Expr(), celast.NewExprVisitor(func(expr celast.Expr) {
-		if validationErr != nil {
-			return
-		}
-		driver, ok := deviceDriverEquality(expr)
-		if ok && driver != profile.Driver {
-			validationErr = fmt.Errorf(
-				"device profile %q selector constrains device.driver to %q, but configured driver is %q",
-				profile.Name,
-				driver,
-				profile.Driver,
-			)
-		}
-	}))
-	return validationErr
+	return validateDeviceProfileDriverConstraint(profile, parsed.NativeRep().Expr())
 }
 
-func deviceDriverEquality(expr celast.Expr) (string, bool) {
+func validateDeviceProfileDriverConstraint(profile DeviceProfile, expr celast.Expr) error {
+	if expr.Kind() == celast.CallKind && expr.AsCall().FunctionName() == operators.LogicalAnd {
+		for _, arg := range expr.AsCall().Args() {
+			if err := validateDeviceProfileDriverConstraint(profile, arg); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if driver, ok := deviceDriverConstraint(expr); ok && driver != profile.Driver {
+		return fmt.Errorf(
+			"device profile %q selector constrains device.driver to %q, but configured driver is %q",
+			profile.Name,
+			driver,
+			profile.Driver,
+		)
+	}
+	return nil
+}
+
+func deviceDriverConstraint(expr celast.Expr) (string, bool) {
 	if expr.Kind() != celast.CallKind {
 		return "", false
 	}
 	call := expr.AsCall()
 	args := call.Args()
-	if call.FunctionName() != operators.Equals || len(args) != 2 {
+	if len(args) != 2 {
 		return "", false
 	}
-	if isDeviceDriverReference(args[0]) {
-		return stringLiteral(args[1])
-	}
-	if isDeviceDriverReference(args[1]) {
-		return stringLiteral(args[0])
+	switch call.FunctionName() {
+	case operators.Equals:
+		if isDeviceDriverReference(args[0]) {
+			return stringLiteral(args[1])
+		}
+		if isDeviceDriverReference(args[1]) {
+			return stringLiteral(args[0])
+		}
+	case operators.In:
+		if isDeviceDriverReference(args[0]) && args[1].Kind() == celast.ListKind {
+			elements := args[1].AsList().Elements()
+			if len(elements) == 1 {
+				return stringLiteral(elements[0])
+			}
+		}
 	}
 	return "", false
 }

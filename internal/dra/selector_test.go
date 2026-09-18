@@ -41,6 +41,52 @@ func TestNewRegistryValidatesSelectorDriver(t *testing.T) {
 			selector: `device.attributes['driver-a.example.com'].model == 'a'`,
 		},
 		{
+			name:     "matching singleton driver membership",
+			selector: `device.driver in ['driver-a.example.com']`,
+		},
+		{
+			name:     "different singleton driver membership",
+			selector: `device.driver in ['driver-b.example.com']`,
+			wantErr:  `constrains device.driver to "driver-b.example.com", but configured driver is "driver-a.example.com"`,
+		},
+		{
+			name:     "different singleton driver membership with attributes",
+			selector: `device.attributes['driver-a.example.com'].model == 'a' && device.driver in ["driver-b.example.com"]`,
+			wantErr:  `constrains device.driver to "driver-b.example.com", but configured driver is "driver-a.example.com"`,
+		},
+		{
+			name:     "multiple driver membership",
+			selector: `device.driver in ['driver-b.example.com', 'driver-a.example.com']`,
+		},
+		{
+			name:     "empty driver membership",
+			selector: `device.driver in []`,
+		},
+		{
+			name:     "computed singleton driver membership",
+			selector: `device.driver in [device.attributes['driver-a.example.com'].model]`,
+		},
+		{
+			name:     "non-driver singleton membership",
+			selector: `device.attributes['driver-a.example.com'].model in ['driver-b.example.com']`,
+		},
+		{
+			name:     "negated singleton driver membership",
+			selector: `!(device.driver in ['driver-b.example.com'])`,
+		},
+		{
+			name:     "alternative singleton driver memberships",
+			selector: `device.driver in ['driver-a.example.com'] || device.driver in ['driver-b.example.com']`,
+		},
+		{
+			name:     "negated driver equality",
+			selector: `!(device.driver == 'driver-b.example.com')`,
+		},
+		{
+			name:     "alternative driver equalities",
+			selector: `device.driver == 'driver-a.example.com' || device.driver == 'driver-b.example.com'`,
+		},
+		{
 			name:     "matching driver equality under disjunction",
 			selector: `device.driver == 'driver-a.example.com' || device.attributes['driver-a.example.com'].model == 'a'`,
 		},
