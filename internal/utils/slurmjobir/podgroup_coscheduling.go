@@ -49,26 +49,24 @@ func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupCoschedulingFinished.Error())
 	}
 
-	// Ensure there are enough pods to satisfy MinMembers. Don't count pods
-	// that may already have an external job annotation.
+	// Group membership, not label-propagation progress: siblings are still
+	// being labeled async, so counting only already-labeled ones races that.
+	if pod.Labels[wellknown.LabelExternalJobId] != "" {
+		if len(slurmJobIR.AllPods()) < int(podGroup.Spec.MinMember) {
+			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
+		}
+		return fwk.NewStatus(fwk.Success)
+	}
+
+	// No job yet: ensure enough unclaimed pods exist to create one.
 	numPodsWaiting := 0
 	for _, p := range slurmJobIR.AllPods() {
-		if p.Labels[wellknown.LabelExternalJobId] ==
-			pod.Labels[wellknown.LabelExternalJobId] {
+		if p.Labels[wellknown.LabelExternalJobId] == "" {
 			numPodsWaiting++
 		}
 	}
-
-	// If the pod has no external job return an error to wait for more to be created.
-	// If the pod had an external job and now MinMember can no longer be satisfied because
-	// one or more pods were deleted after submitting the external job, return an error
-	// to indicate external job cleanup must occur.
 	if numPodsWaiting < int(podGroup.Spec.MinMember) {
-		if pod.Labels[wellknown.LabelExternalJobId] == "" {
-			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
-		} else {
-			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
-		}
+		return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
 	}
 	return fwk.NewStatus(fwk.Success)
 }

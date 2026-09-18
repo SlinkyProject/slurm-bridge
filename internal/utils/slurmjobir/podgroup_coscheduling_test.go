@@ -552,6 +552,46 @@ func Test_translator_PreFilterPodGroupCoscheduling(t *testing.T) {
 			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
 		},
 		{
+			// Regression: siblings mid-labeling shouldn't look like insufficient quorum.
+			name: "Enough pods for minmembers but siblings not yet labeled",
+			fields: fields{
+				Reader: func() client.Client {
+					scheme := runtime.NewScheme()
+					utilruntime.Must(sched.AddToScheme(scheme))
+					return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+						newPodGroupCoscheduling("pg", 2, sched.PodGroupStatus{}),
+					).Build()
+				}(),
+				ctx: context.Background(),
+			},
+			args: args{
+				slurmJobIR: &SlurmJobIR{
+					RootPOM: metav1.PartialObjectMetadata{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "pg",
+							Namespace: "default",
+						},
+					},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{
+								Items: []corev1.Pod{
+									*newPodGroupCoschedulingPod("pod-a", "pg"),
+									*newPodGroupCoschedulingPod("pod-b", "pg"),
+								},
+							},
+						},
+					},
+				},
+				pod: func() *corev1.Pod {
+					p := newPodGroupCoschedulingPod("pod-a", "pg")
+					p.Labels[wellknown.LabelExternalJobId] = "123"
+					return p
+				}(),
+			},
+			want: fwk.NewStatus(fwk.Success),
+		},
+		{
 			name: "Enough pods for minmembers",
 			fields: fields{
 				Reader: func() client.Client {
