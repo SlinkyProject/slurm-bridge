@@ -21,7 +21,7 @@ const (
 	AppliedInventoryExtraPrefix = "slurm-bridge.dra-gres-map="
 	// appliedInventoryVersion records the version of the format used for storing DRA device identities in Slurm
 	// node Extra fields. This version is required if the format changes in future.
-	appliedInventoryVersion = 2
+	appliedInventoryVersion = 1
 	devicePathPrefix        = "/dra/"
 )
 
@@ -176,16 +176,11 @@ type appliedProfileInventoryWire struct {
 	Devices    []string `json:"devices"`
 }
 
-type appliedInventoryWireV2 struct {
+type appliedInventoryWire struct {
 	Version int `json:"v"`
 	// The profile name is also the Slurm GRES type. The GRES name is omitted
 	// because the DeviceProfile registry supplies it.
 	Profiles map[string]appliedProfileInventoryWire `json:"profiles"`
-}
-
-type appliedInventoryWireV1 struct {
-	Version  int                 `json:"v"`
-	Profiles map[string][]string `json:"profiles"`
 }
 
 // EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node Extra
@@ -210,7 +205,7 @@ func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 		nextIndexes[gres.GRES.Name] = firstIndex + len(devices)
 	}
 
-	data, err := json.Marshal(appliedInventoryWireV2{
+	data, err := json.Marshal(appliedInventoryWire{
 		Version:  appliedInventoryVersion,
 		Profiles: profiles,
 	})
@@ -228,41 +223,19 @@ func DecodeAppliedInventory(extra string) (AppliedInventory, error) {
 		return nil, fmt.Errorf("slurm node Extra does not contain a DRA GRES map")
 	}
 
-	var header struct {
-		Version int `json:"v"`
-	}
-	if err := json.Unmarshal([]byte(data), &header); err != nil {
+	var wire appliedInventoryWire
+	if err := json.Unmarshal([]byte(data), &wire); err != nil {
 		return nil, fmt.Errorf("decode applied inventory: %w", err)
 	}
-
-	var profiles map[string]appliedProfileInventoryWire
-	switch header.Version {
-	case 1:
-		var wire appliedInventoryWireV1
-		if err := json.Unmarshal([]byte(data), &wire); err != nil {
-			return nil, fmt.Errorf("decode applied inventory: %w", err)
-		}
-		if wire.Profiles != nil {
-			profiles = make(map[string]appliedProfileInventoryWire, len(wire.Profiles))
-			for profileName, devices := range wire.Profiles {
-				profiles[profileName] = appliedProfileInventoryWire{Devices: devices}
-			}
-		}
-	case appliedInventoryVersion:
-		var wire appliedInventoryWireV2
-		if err := json.Unmarshal([]byte(data), &wire); err != nil {
-			return nil, fmt.Errorf("decode applied inventory: %w", err)
-		}
-		profiles = wire.Profiles
-	default:
-		return nil, fmt.Errorf("unsupported applied inventory version %d", header.Version)
+	if wire.Version != appliedInventoryVersion {
+		return nil, fmt.Errorf("unsupported applied inventory version %d", wire.Version)
 	}
-	if profiles == nil {
+	if wire.Profiles == nil {
 		return nil, fmt.Errorf("applied inventory has no profiles map")
 	}
 
-	inventory := make(AppliedInventory, len(profiles))
-	for profileName, profile := range profiles {
+	inventory := make(AppliedInventory, len(wire.Profiles))
+	for profileName, profile := range wire.Profiles {
 		if profileName == "" {
 			return nil, fmt.Errorf("applied inventory contains an empty device profile name")
 		}

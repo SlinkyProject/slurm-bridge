@@ -463,7 +463,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(gotExtra).To(Equal(
-			`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`,
+			`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`,
 		))
 		updatedNode := &corev1.Node{}
 		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
@@ -564,7 +564,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		if external {
 			state = append(state, api.V0044NodeStateEXTERNAL)
 		}
-		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}`
+		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`
 		slurmClient := slurmclientfake.NewClientBuilder().
 			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
 				Name:           ptr.To(node.Name),

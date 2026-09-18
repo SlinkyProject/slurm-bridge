@@ -793,7 +793,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:gpu.example.com:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
 					},
 				},
 			).Build(),
@@ -810,7 +810,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
 						Gres:       ptr.To("gpu:gpu.example.com:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":["/dra/gpu.example.com/pool-a/gpu-0"]}}`),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0"]}}}`),
 					},
 				},
 			).Build(),
@@ -1505,7 +1505,7 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
 		}
 	}
-	wantExtra := `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`
+	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`
 	if extra != wantExtra {
 		t.Errorf("AddNode() extra = %q, want %q", extra, wantExtra)
 	}
@@ -1569,12 +1569,12 @@ func Test_realSlurmControl_AddNode_updatesExistingHybridNodeInventory(t *testing
 		},
 		{
 			name:         "replaces stale owned inventory",
-			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":[]}}`,
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":[]}}}`,
 			wantExtra:    wantExtra,
 		},
 		{
 			name:         "clears removed owned inventory",
-			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":[]}}`,
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":[]}}}`,
 			wantExtra:    "",
 		},
 	}

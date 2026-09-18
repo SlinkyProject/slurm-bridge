@@ -609,7 +609,7 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 
 	resources := &slurmcontrol.NodeResources{
 		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/node1/gpu-0"]}}}`,
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/node1/gpu-0"]}}}`,
 		Gres: []slurmcontrol.GresLayout{
 			{
 				Name:  "gpu",
@@ -805,7 +805,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 	}
 	resources := &slurmcontrol.NodeResources{
 		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.nvidia.com":{"firstIndex":0,"devices":["/dra/gpu.nvidia.com/node1/gpu-0"]}}}`,
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.nvidia.com":{"firstIndex":0,"devices":["/dra/gpu.nvidia.com/node1/gpu-0"]}}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  legacyDRANVIDIADriver,
@@ -903,7 +903,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 	}
 	resources := &slurmcontrol.NodeResources{
 		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":2,"profiles":{"gpu.example.com":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  "gpu.example.com",
