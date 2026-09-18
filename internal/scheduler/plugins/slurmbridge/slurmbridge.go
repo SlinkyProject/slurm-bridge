@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/set"
@@ -259,7 +260,11 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, err
 	}
-	workloadAPI, err := newWorkloadAPI(handle.KubeConfig(), clientScheme)
+	// handle.KubeConfig() is the plain input config, not QPS/Burst-tuned, so
+	// this plugin's own client needs its own (user-configurable) tuning.
+	restConfig := rest.CopyConfig(handle.KubeConfig())
+	restConfig.QPS, restConfig.Burst = cfg.EffectiveClientQPSBurst()
+	workloadAPI, err := newWorkloadAPI(restConfig, clientScheme)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +274,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		logger.Info("built-in Workload support disabled", "featureGate", features.SlurmBridgeGenericWorkload)
 	}
 
-	kubeClient, err := newKubeClient(handle.KubeConfig(), clientScheme)
+	// sb.Client needs the same QPS/Burst tuning as workloadAPI's -- it's
+	// what PreEnqueue and PostFilter's async dispatch actually patch pods
+	// through.
+	kubeClient, err := newKubeClient(restConfig, clientScheme)
 	if err != nil {
 		return nil, err
 	}
