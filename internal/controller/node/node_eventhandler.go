@@ -80,7 +80,7 @@ func (r *NodeReconciler) resourceSliceToNodes(ctx context.Context, obj client.Ob
 		return nil
 	}
 
-	poolSlices, err := nodeutils.GetResourceSlicesForPool(ctx, r.Client, resourceSlice.Spec.Driver, resourceSlice.Spec.Pool.Name)
+	poolSlices, err := nodeutils.GetResourceSlicesForPool(ctx, r.Client, dra.ResourcePoolIDFromSlice(resourceSlice))
 	if err != nil {
 		logger.Error(err, "failed to list ResourceSlices for pool", "resourceSlice", client.ObjectKeyFromObject(resourceSlice))
 		return nil

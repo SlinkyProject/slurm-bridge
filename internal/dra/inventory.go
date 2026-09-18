@@ -54,13 +54,24 @@ type NodeInventory struct {
 	Profiles []ProfileInventory
 }
 
-type resourcePoolID struct {
+// ResourcePoolID identifies a DRA resource pool within its driver.
+type ResourcePoolID struct {
 	Driver string
 	Pool   string
 }
 
+// ResourcePoolIDFromSlice returns the driver and pool identified by a ResourceSlice.
+func ResourcePoolIDFromSlice(resourceSlice *resourcev1.ResourceSlice) ResourcePoolID {
+	return ResourcePoolID{Driver: resourceSlice.Spec.Driver, Pool: resourceSlice.Spec.Pool.Name}
+}
+
+// String returns the driver/pool key used in cache indexes and diagnostics.
+func (id ResourcePoolID) String() string {
+	return id.Driver + "/" + id.Pool
+}
+
 type resourcePoolSnapshot struct {
-	ID                 resourcePoolID
+	ID                 ResourcePoolID
 	Generation         int64
 	ResourceSliceCount int64
 	Profiles           []DeviceProfile
@@ -114,7 +125,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 }
 
 func selectResourcePoolSnapshots(registry *Registry, node *corev1.Node, resourceSlices []resourcev1.ResourceSlice) ([]resourcePoolSnapshot, error) {
-	snapshotsByPool := make(map[resourcePoolID]*resourcePoolSnapshot)
+	snapshotsByPool := make(map[ResourcePoolID]*resourcePoolSnapshot)
 	profilesByDriver := make(map[string][]DeviceProfile)
 	for i := range resourceSlices {
 		resourceSlice := &resourceSlices[i]
@@ -132,11 +143,11 @@ func selectResourcePoolSnapshots(registry *Registry, node *corev1.Node, resource
 }
 
 func addResourceSliceToSnapshot(
-	snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot,
+	snapshotsByPool map[ResourcePoolID]*resourcePoolSnapshot,
 	profiles []DeviceProfile,
 	resourceSlice *resourcev1.ResourceSlice,
 ) {
-	id := resourcePoolID{Driver: resourceSlice.Spec.Driver, Pool: resourceSlice.Spec.Pool.Name}
+	id := ResourcePoolIDFromSlice(resourceSlice)
 	snapshot, ok := snapshotsByPool[id]
 	if !ok || resourceSlice.Spec.Pool.Generation > snapshot.Generation {
 		snapshotsByPool[id] = &resourcePoolSnapshot{
@@ -158,12 +169,12 @@ func addResourceSliceToSnapshot(
 // and returns complete snapshots assigned to node. Every slice in a generation
 // must name the same single node. Incomplete pools assigned to other nodes are
 // ignored so a driver mid-publish does not block inventory across the cluster.
-func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
-	poolIDs := make([]resourcePoolID, 0, len(snapshotsByPool))
+func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[ResourcePoolID]*resourcePoolSnapshot) ([]resourcePoolSnapshot, error) {
+	poolIDs := make([]ResourcePoolID, 0, len(snapshotsByPool))
 	for id := range snapshotsByPool {
 		poolIDs = append(poolIDs, id)
 	}
-	slices.SortFunc(poolIDs, func(a, b resourcePoolID) int {
+	slices.SortFunc(poolIDs, func(a, b ResourcePoolID) int {
 		if n := cmp.Compare(a.Driver, b.Driver); n != 0 {
 			return n
 		}
@@ -179,17 +190,17 @@ func completeResourcePoolSnapshots(node *corev1.Node, snapshotsByPool map[resour
 				return nil, err
 			}
 			if *resourceSlice.Spec.NodeName != nodeName {
-				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent nodeName values %q and %q", id.Driver+"/"+id.Pool, snapshot.Generation, nodeName, *resourceSlice.Spec.NodeName)
+				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent nodeName values %q and %q", id.String(), snapshot.Generation, nodeName, *resourceSlice.Spec.NodeName)
 			}
 			if resourceSlice.Spec.Pool.ResourceSliceCount != snapshot.ResourceSliceCount {
-				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", id.Driver+"/"+id.Pool, snapshot.Generation, snapshot.ResourceSliceCount, resourceSlice.Spec.Pool.ResourceSliceCount)
+				return nil, fmt.Errorf("DRA resource pool %q generation %d has inconsistent resourceSliceCount values %d and %d", id.String(), snapshot.Generation, snapshot.ResourceSliceCount, resourceSlice.Spec.Pool.ResourceSliceCount)
 			}
 		}
 		if nodeName != node.Name {
 			continue
 		}
 		if int64(len(snapshot.Slices)) != snapshot.ResourceSliceCount {
-			return nil, fmt.Errorf("DRA resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", id.Driver+"/"+id.Pool, snapshot.Generation, len(snapshot.Slices), snapshot.ResourceSliceCount)
+			return nil, fmt.Errorf("DRA resource pool %q generation %d is incomplete: found %d of %d ResourceSlices", id.String(), snapshot.Generation, len(snapshot.Slices), snapshot.ResourceSliceCount)
 		}
 		snapshots = append(snapshots, *snapshot)
 	}

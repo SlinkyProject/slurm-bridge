@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -59,7 +60,7 @@ func IndexResourceSliceByPool(obj client.Object) []string {
 	if !ok {
 		return nil
 	}
-	return []string{resourceSlice.Spec.Driver + "/" + resourceSlice.Spec.Pool.Name}
+	return []string{dra.ResourcePoolIDFromSlice(resourceSlice).String()}
 }
 
 // SetupFieldIndexers registers the field indexes used by the node controller and the
@@ -95,15 +96,15 @@ func GetResourceSlicesForNode(ctx context.Context, reader client.Reader, nodeNam
 	if err := reader.List(ctx, global, client.MatchingFields{IndexFieldResourceSliceNode: IndexValueResourceSliceGlobal}); err != nil {
 		return nil, err
 	}
-	seenPools := make(map[string]struct{})
+	seenPools := sets.New[dra.ResourcePoolID]()
 	var resourceSlices []resourcev1.ResourceSlice
 	for _, resourceSlice := range append(perNode.Items, global.Items...) {
-		key := resourceSlice.Spec.Driver + "/" + resourceSlice.Spec.Pool.Name
-		if _, seen := seenPools[key]; seen {
+		poolID := dra.ResourcePoolIDFromSlice(&resourceSlice)
+		if seenPools.Has(poolID) {
 			continue
 		}
-		seenPools[key] = struct{}{}
-		poolSlices, err := GetResourceSlicesForPool(ctx, reader, resourceSlice.Spec.Driver, resourceSlice.Spec.Pool.Name)
+		seenPools.Insert(poolID)
+		poolSlices, err := GetResourceSlicesForPool(ctx, reader, poolID)
 		if err != nil {
 			return nil, err
 		}
@@ -114,9 +115,9 @@ func GetResourceSlicesForNode(ctx context.Context, reader client.Reader, nodeNam
 
 // GetResourceSlicesForPool returns all generations and node assignments for one
 // driver/pool. Readers without the pool index fall back to a full list scan.
-func GetResourceSlicesForPool(ctx context.Context, reader client.Reader, driver, pool string) ([]resourcev1.ResourceSlice, error) {
+func GetResourceSlicesForPool(ctx context.Context, reader client.Reader, poolID dra.ResourcePoolID) ([]resourcev1.ResourceSlice, error) {
 	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := reader.List(ctx, resourceSlices, client.MatchingFields{IndexFieldResourceSlicePool: driver + "/" + pool}); err == nil {
+	if err := reader.List(ctx, resourceSlices, client.MatchingFields{IndexFieldResourceSlicePool: poolID.String()}); err == nil {
 		return resourceSlices.Items, nil
 	}
 	if err := reader.List(ctx, resourceSlices); err != nil {
@@ -124,7 +125,7 @@ func GetResourceSlicesForPool(ctx context.Context, reader client.Reader, driver,
 	}
 	var poolSlices []resourcev1.ResourceSlice
 	for _, resourceSlice := range resourceSlices.Items {
-		if resourceSlice.Spec.Driver == driver && resourceSlice.Spec.Pool.Name == pool {
+		if dra.ResourcePoolIDFromSlice(&resourceSlice) == poolID {
 			poolSlices = append(poolSlices, resourceSlice)
 		}
 	}
