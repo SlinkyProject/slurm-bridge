@@ -43,6 +43,34 @@ Allow the release namespace to be overridden
 {{- end }}
 
 {{/*
+Define the Slurm JWT secret ref name
+*/}}
+{{- define "slurm-bridge.slurmJwtSecret.name" -}}
+{{- $secret := .Values.sharedConfig.slurmJwtSecret | default dict -}}
+{{- if kindIs "string" $secret }}
+{{- $secret }}
+{{- else if $secret.name }}
+{{- $secret.name }}
+{{- else }}
+{{- printf "slurm-bridge-token" -}}
+{{- end }}
+{{- end }}
+
+{{/*
+Define the Slurm JWT secret ref key
+*/}}
+{{- define "slurm-bridge.slurmJwtSecret.key" -}}
+{{- $secret := .Values.sharedConfig.slurmJwtSecret | default dict -}}
+{{- if kindIs "string" $secret }}
+{{- printf "SLURM_JWT" -}}
+{{- else if $secret.key }}
+{{- $secret.key }}
+{{- else }}
+{{- printf "SLURM_JWT" -}}
+{{- end }}
+{{- end }}
+
+{{/*
 Common labels
 */}}
 {{- define "slurm-bridge.labels" -}}

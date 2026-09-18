@@ -225,6 +225,8 @@ sharedConfig:
   #     backend:
   #       type: indexed-gres
   #       gresName: nic
-  # -- The Secret containing the Slurm JWT in the `auth-token` key. The token is
-  # mounted and read before each Slurm REST API request to support rotation.
-  slurmJwtSecret: slurm-bridge-token
+  # -- (corev1.SecretKeySelector) The Secret and key containing the Slurm JWT. The token is mounted and read
+  # before each Slurm REST API request to support rotation.
+  slurmJwtSecret:
+    name: slurm-bridge-token
+    key: SLURM_JWT

@@ -10,7 +10,7 @@ spec:
     key: jwt.key
   secretRef:
     name: slurm-bridge-token
-    key: auth-token
+    key: SLURM_JWT
   username: slurm
   refresh: true
   lifetime: 8760h

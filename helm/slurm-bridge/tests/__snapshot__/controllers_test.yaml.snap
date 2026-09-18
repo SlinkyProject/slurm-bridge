@@ -85,7 +85,7 @@ manifests should match snapshot:
             - name: slurm-jwt
               secret:
                 items:
-                  - key: auth-token
+                  - key: SLURM_JWT
                     path: auth-token
                 secretName: slurm-bridge-token
   3: |

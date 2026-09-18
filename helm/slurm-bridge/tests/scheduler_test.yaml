@@ -205,3 +205,32 @@ tests:
       - equal:
           path: spec.template.spec.volumes[2].secret.secretName
           value: slurm-bridge-token
+      - equal:
+          path: spec.template.spec.volumes[2].secret.items[0].key
+          value: SLURM_JWT
+  - it: mounts a custom Slurm JWT secret key
+    template: scheduler/deployment.yaml
+    set:
+      sharedConfig:
+        slurmJwtSecret:
+          name: custom-token
+          key: custom-key
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[2].secret.secretName
+          value: custom-token
+      - equal:
+          path: spec.template.spec.volumes[2].secret.items[0].key
+          value: custom-key
+  - it: accepts the legacy Slurm JWT secret name
+    template: scheduler/deployment.yaml
+    set:
+      sharedConfig:
+        slurmJwtSecret: legacy-token
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[2].secret.secretName
+          value: legacy-token
+      - equal:
+          path: spec.template.spec.volumes[2].secret.items[0].key
+          value: SLURM_JWT
