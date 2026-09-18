@@ -324,6 +324,11 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
 	nodeConf := fmt.Sprintf("NodeName=%s Sockets=1 CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
 		slurmNodeName, cpuConfig.coresPerSocket, cpuConfig.threadsPerCore, cpuConfig.cpus, memoryMB)
+	// Avoids NodeAddr defaulting to NodeName, which slurmctld would then
+	// try (and fail) to resolve via DNS on every access.
+	if addr := nodeInternalIP(node); addr != "" {
+		nodeConf += fmt.Sprintf(" NodeAddr=%s", addr)
+	}
 	nodeConf += fmt.Sprintf(" Feature=%s", strings.Join(features, ","))
 	if topologySpec, ok := annotations[wellknown.AnnotationNodeTopologySpec]; ok && topologySpec != "" {
 		nodeConf += fmt.Sprintf(" Topology=%s", topologySpec)
@@ -416,6 +421,16 @@ type nodeCPUConfig struct {
 	threadsPerCore int
 	cpus           int
 	fromDRA        bool
+}
+
+// nodeInternalIP returns node's Kubernetes InternalIP, or "" if it has none.
+func nodeInternalIP(node *corev1.Node) string {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == corev1.NodeInternalIP {
+			return addr.Address
+		}
+	}
+	return ""
 }
 
 func desiredNodeCPUConfig(node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) nodeCPUConfig {
