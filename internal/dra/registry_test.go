@@ -22,13 +22,7 @@ func TestDefaultRegistry(t *testing.T) {
 			Backend:  CoreBitmapBackend{},
 		},
 		{
-			Name:     "gpu-example",
-			Driver:   "gpu.example.com",
-			Selector: `device.driver == 'gpu.example.com'`,
-			Backend:  IndexedGRESBackend{GRESName: "gpu"},
-		},
-		{
-			Name:     "gpu-nvidia",
+			Name:     "gpu.nvidia.com",
 			Driver:   "gpu.nvidia.com",
 			Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
 			Backend:  IndexedGRESBackend{GRESName: "gpu"},
@@ -44,6 +38,15 @@ func TestDefaultRegistry(t *testing.T) {
 		},
 	}
 	registry := DefaultRegistry()
+	if registry.SupportsDriver("gpu.example.com") {
+		t.Error("DefaultRegistry() unexpectedly enabled the example GPU driver")
+	}
+	if _, ok := registry.LookupByName("gpu.example.com"); ok {
+		t.Error("DefaultRegistry() unexpectedly included the example GPU profile")
+	}
+	if _, ok := registry.LookupBySelector(`device.driver == 'gpu.example.com'`); ok {
+		t.Error("DefaultRegistry() unexpectedly included the example GPU selector")
+	}
 
 	for _, want := range wants {
 		if got, ok := registry.LookupByName(want.Name); !ok || !reflect.DeepEqual(got, want) {
@@ -57,7 +60,7 @@ func TestDefaultRegistry(t *testing.T) {
 
 func TestNewRegistryRejectsDuplicates(t *testing.T) {
 	profile := DeviceProfile{
-		Name:     "gpu-example",
+		Name:     "gpu.example.com",
 		Driver:   "gpu.example.com",
 		Selector: `device.driver == 'gpu.example.com'`,
 		Backend:  IndexedGRESBackend{GRESName: "gpu"},
@@ -69,7 +72,7 @@ func TestNewRegistryRejectsDuplicates(t *testing.T) {
 	}{
 		{name: "duplicate name", profiles: []DeviceProfile{profile, profile}, wantErr: "duplicate device profile name"},
 		{name: "duplicate selector", profiles: []DeviceProfile{profile, {
-			Name: "other", Driver: "other.example.com", Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
+			Name: "other", Driver: profile.Driver, Selector: profile.Selector, Backend: IndexedGRESBackend{GRESName: "gpu"},
 		}}, wantErr: "same selector"},
 		{name: "invalid selector", profiles: []DeviceProfile{{
 			Name: "broken", Driver: "gpu.example.com", Selector: `device.`, Backend: IndexedGRESBackend{GRESName: "gpu"},
@@ -105,7 +108,7 @@ func TestNewRegistryRejectsDuplicates(t *testing.T) {
 
 func TestNewRegistryRejectsInvalidConfiguredProfiles(t *testing.T) {
 	valid := DeviceProfile{
-		Name:     "gpu-example",
+		Name:     "gpu.example.com",
 		Driver:   "gpu.example.com",
 		Selector: `device.driver == 'gpu.example.com'`,
 		Backend:  IndexedGRESBackend{GRESName: "gpu"},
@@ -201,10 +204,10 @@ func TestNewRegistryRejectsInvalidConfiguredProfiles(t *testing.T) {
 }
 
 func TestRegistryLookupsAreExact(t *testing.T) {
-	registry := DefaultRegistry()
+	registry := registryWithExampleGPU()
 	selector := `device.driver == 'gpu.example.com'`
 
-	if _, ok := registry.LookupByName("GPU-example"); ok {
+	if _, ok := registry.LookupByName("GPU.example.com"); ok {
 		t.Fatal("Registry.LookupByName() accepted a non-canonical name")
 	}
 	if _, ok := registry.LookupBySelector(" " + selector); ok {
@@ -213,7 +216,7 @@ func TestRegistryLookupsAreExact(t *testing.T) {
 }
 
 func TestRegistryMatchIndexedGRES(t *testing.T) {
-	registry := DefaultRegistry()
+	registry := registryWithExampleGPU()
 	tests := []struct {
 		name      string
 		gres      GRES
@@ -223,8 +226,8 @@ func TestRegistryMatchIndexedGRES(t *testing.T) {
 	}{
 		{
 			name:      "indexed GRES",
-			gres:      GRES{Name: "gpu", Type: "gpu-example"},
-			wantName:  "gpu-example",
+			gres:      GRES{Name: "gpu", Type: "gpu.example.com"},
+			wantName:  "gpu.example.com",
 			wantOwned: true,
 		},
 		{
@@ -237,9 +240,9 @@ func TestRegistryMatchIndexedGRES(t *testing.T) {
 		},
 		{
 			name:      "wrong GRES name",
-			gres:      GRES{Name: "accelerator", Type: "gpu-example"},
+			gres:      GRES{Name: "accelerator", Type: "gpu.example.com"},
 			wantOwned: true,
-			wantErr:   `expected "gpu" for DeviceProfile "gpu-example"`,
+			wantErr:   `expected "gpu" for DeviceProfile "gpu.example.com"`,
 		},
 	}
 
@@ -287,8 +290,8 @@ func TestNewRegistryProfileLimit(t *testing.T) {
 }
 
 func TestRegistryProfilesForDriver(t *testing.T) {
-	registry := DefaultRegistry()
-	gpuProfile, _ := registry.LookupByName("gpu-example")
+	registry := registryWithExampleGPU()
+	gpuProfile, _ := registry.LookupByName("gpu.example.com")
 	dranetProfile, _ := registry.LookupByName("dranet-rdma")
 
 	if got := registry.profilesForDriver("gpu.example.com"); !reflect.DeepEqual(got, []DeviceProfile{gpuProfile}) {
@@ -303,7 +306,7 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 	if !registry.SupportsDriver("gpu.example.com") {
 		t.Fatal("Registry.SupportsDriver() = false for the example driver")
 	}
-	nvidia, _ := registry.LookupByName("gpu-nvidia")
+	nvidia, _ := registry.LookupByName("gpu.nvidia.com")
 	if got := registry.profilesForDriver("gpu.nvidia.com"); !reflect.DeepEqual(got, []DeviceProfile{nvidia}) {
 		t.Fatalf("Registry.profilesForDriver() = %#v, want %#v", got, []DeviceProfile{nvidia})
 	}
@@ -342,7 +345,7 @@ func TestRegistryProfilesForDriver(t *testing.T) {
 }
 
 func TestRegistryMatchDeviceClass(t *testing.T) {
-	registry := DefaultRegistry()
+	registry := registryWithExampleGPU()
 	valid := func() *resourcev1.DeviceClass {
 		return &resourcev1.DeviceClass{
 			ObjectMeta: metav1.ObjectMeta{
@@ -363,7 +366,7 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
 		}
-		want, _ := registry.LookupByName("gpu-example")
+		want, _ := registry.LookupByName("gpu.example.com")
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
 		}
@@ -378,7 +381,7 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Registry.MatchDeviceClass() error = %v", err)
 		}
-		want, _ := registry.LookupByName("gpu-nvidia")
+		want, _ := registry.LookupByName("gpu.nvidia.com")
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("Registry.MatchDeviceClass() = %#v, want %#v", got, want)
 		}
@@ -464,4 +467,28 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			}
 		})
 	}
+}
+
+// registryWithExampleGPU explicitly enables the example GPU fixture alongside
+// the built-in profiles.
+func registryWithExampleGPU() *Registry {
+	defaults := DefaultRegistry()
+	profiles := []DeviceProfile{{
+		Name:     "gpu.example.com",
+		Driver:   "gpu.example.com",
+		Selector: `device.driver == 'gpu.example.com'`,
+		Backend:  IndexedGRESBackend{GRESName: "gpu"},
+	}}
+	for _, name := range []string{"cpu", "gpu.nvidia.com", "dranet-rdma"} {
+		profile, ok := defaults.LookupByName(name)
+		if !ok {
+			panic("missing built-in device profile: " + name)
+		}
+		profiles = append(profiles, profile)
+	}
+	registry, err := NewRegistry(profiles)
+	if err != nil {
+		panic(err)
+	}
+	return registry
 }

@@ -82,7 +82,7 @@ func testNodeInfoFromResourceSlices(t *testing.T, nodeName string, resourceSlice
 
 func testExampleDRAInventory() []dra.GRESInventory {
 	return []dra.GRESInventory{{
-		GRES: dra.GRES{Name: "gpu", Type: "gpu-example"},
+		GRES: dra.GRES{Name: "gpu", Type: "gpu.example.com"},
 		Devices: []dra.DeviceIdentity{
 			structured.MakeDeviceID("gpu.example.com", "pool-a", "gpu-0"),
 			structured.MakeDeviceID("gpu.example.com", "pool-a", "gpu-1"),
@@ -792,8 +792,8 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`),
+						Gres:       ptr.To("gpu:gpu.example.com:2"),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
 					},
 				},
 			).Build(),
@@ -809,8 +809,8 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0"]}}`),
+						Gres:       ptr.To("gpu:gpu.example.com:2"),
+						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0"]}}}`),
 					},
 				},
 			).Build(),
@@ -841,7 +841,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:2,nic:infiniband:1"),
+						Gres:       ptr.To("gpu:gpu.example.com:2,nic:infiniband:1"),
 					},
 				},
 			).Build(),
@@ -857,7 +857,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:2(S:0-1)"),
+						Gres:       ptr.To("gpu:gpu.example.com:2(S:0-1)"),
 					},
 				},
 			).Build(),
@@ -873,14 +873,14 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:1,nic:infiniband:1"),
+						Gres:       ptr.To("gpu:gpu.example.com:1,nic:infiniband:1"),
 					},
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
 			draInventory: testExampleDRAInventory(),
 			wantErr:      true,
-			wantErrText:  "NodeName=worker-0 Name=gpu Type=gpu-example Count=2",
+			wantErrText:  "NodeName=worker-0 Name=gpu Type=gpu.example.com Count=2",
 		},
 		{
 			name: "node exists with unrelated extra and no profile inventory",
@@ -905,7 +905,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 						Name:       ptr.To("worker-0"),
 						Cpus:       ptr.To(int32(4)),
 						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu-example:2"),
+						Gres:       ptr.To("gpu:gpu.example.com:2"),
 						Extra:      ptr.To("owned by an administrator"),
 					},
 				},
@@ -991,13 +991,13 @@ func Test_realSlurmControl_NodeNeedsRecreate_ExternalGRES(t *testing.T) {
 		extra string
 		want  bool
 	}{
-		{name: "same order", gres: "nic:dranet0:1,gpu:gpu-example:2", extra: extra},
-		{name: "Slurm reorders entries", gres: "gpu:gpu-example:2,nic:dranet0:1", extra: extra},
-		{name: "changed count", gres: "gpu:gpu-example:1,nic:dranet0:1", extra: extra, want: true},
+		{name: "same order", gres: "nic:dranet0:1,gpu:gpu.example.com:2", extra: extra},
+		{name: "Slurm reorders entries", gres: "gpu:gpu.example.com:2,nic:dranet0:1", extra: extra},
+		{name: "changed count", gres: "gpu:gpu.example.com:1,nic:dranet0:1", extra: extra, want: true},
 		{name: "changed type", gres: "gpu:other:2,nic:dranet0:1", extra: extra, want: true},
-		{name: "missing resource", gres: "gpu:gpu-example:2", extra: extra, want: true},
-		{name: "duplicate resource", gres: "gpu:gpu-example:2,nic:dranet0:1,nic:dranet0:1", extra: extra, want: true},
-		{name: "stale applied inventory", gres: "gpu:gpu-example:2,nic:dranet0:1", extra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`, want: true},
+		{name: "missing resource", gres: "gpu:gpu.example.com:2", extra: extra, want: true},
+		{name: "duplicate resource", gres: "gpu:gpu.example.com:2,nic:dranet0:1,nic:dranet0:1", extra: extra, want: true},
+		{name: "stale applied inventory", gres: "gpu:gpu.example.com:2,nic:dranet0:1", extra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`, want: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			slurmClient := fake.NewClientBuilder().WithObjects(&types.V0044Node{V0044Node: api.V0044Node{
@@ -1589,15 +1589,15 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 
 	wants := []string{
 		`Feature=slurm_bridge_gres_compatible`,
-		`Gres="gpu:gpu-example:2"`,
-		`GresConf="count=1,name=gpu,type=gpu-example,file=/dra/gpu.example.com/pool-a/gpu-0+count=1,name=gpu,type=gpu-example,file=/dra/gpu.example.com/pool-a/gpu-1"`,
+		`Gres="gpu:gpu.example.com:2"`,
+		`GresConf="count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-0+count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-1"`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(nodeConf, want) {
 			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
 		}
 	}
-	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}`
+	wantExtra := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`
 	if extra != wantExtra {
 		t.Errorf("AddNode() extra = %q, want %q", extra, wantExtra)
 	}
@@ -1661,12 +1661,12 @@ func Test_realSlurmControl_AddNode_updatesExistingHybridNodeInventory(t *testing
 		},
 		{
 			name:         "replaces stale owned inventory",
-			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":[]}}`,
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":[]}}}`,
 			wantExtra:    wantExtra,
 		},
 		{
 			name:         "clears removed owned inventory",
-			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":[]}}`,
+			currentExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":[]}}}`,
 			wantExtra:    "",
 		},
 	}
@@ -1691,7 +1691,7 @@ func Test_realSlurmControl_AddNode_updatesExistingHybridNodeInventory(t *testing
 			}}
 			var inventory []dra.GRESInventory
 			if tt.wantExtra != "" {
-				slurmNode.Gres = ptr.To("gpu:gpu-example:2,nic:infiniband:1")
+				slurmNode.Gres = ptr.To("gpu:gpu.example.com:2,nic:infiniband:1")
 				inventory = testExampleDRAInventory()
 			}
 			if tt.currentExtra != "" {
@@ -1736,7 +1736,7 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 		},
 		{
 			name:      "removes feature from incompatible node",
-			gres:      "gpu:gpu-example:1",
+			gres:      "gpu:gpu.example.com:1",
 			features:  api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible},
 			active:    api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible},
 			inventory: testExampleDRAInventory(),
@@ -1797,7 +1797,7 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
 	slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
 		Name: ptr.To("test-node"),
-		Gres: ptr.To("gpu:gpu-example:1"),
+		Gres: ptr.To("gpu:gpu.example.com:1"),
 	}}
 	r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(slurmNode).Build()}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
@@ -1810,7 +1810,7 @@ func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
 	if !errors.As(err, &incompatible) {
 		t.Fatalf("AddNode() error = %T, want *IncompatibleGRESConfigurationError", err)
 	}
-	if want := "NodeName=test-node Name=gpu Type=gpu-example Count=2"; !strings.Contains(err.Error(), want) {
+	if want := "NodeName=test-node Name=gpu Type=gpu.example.com Count=2"; !strings.Contains(err.Error(), want) {
 		t.Errorf("AddNode() error = %q, want containing %q", err, want)
 	}
 }
@@ -1862,6 +1862,35 @@ func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t
 				t.Fatal("UpdateHybridNode() mutated a node outside hybrid scope")
 			}
 		})
+	}
+}
+
+func TestBuildNodeGRESConfigOffsetsProfilesSharingGRESName(t *testing.T) {
+	inventory := []dra.GRESInventory{
+		{
+			GRES:    dra.GRES{Name: "nic", Type: "dranet0"},
+			Devices: []dra.DeviceIdentity{structured.MakeDeviceID("dra.net", "node-a", "dranet0")},
+		},
+		{
+			GRES:    dra.GRES{Name: "nic", Type: "sriov-vf"},
+			Devices: []dra.DeviceIdentity{structured.MakeDeviceID("sriov.example.com", "node-a", "vf-0")},
+		},
+	}
+
+	config, err := buildNodeGRESConfig(inventory)
+	if err != nil {
+		t.Fatalf("buildNodeGRESConfig() error = %v", err)
+	}
+	applied, err := dra.DecodeAppliedInventory(config.extra)
+	if err != nil {
+		t.Fatalf("DecodeAppliedInventory() error = %v", err)
+	}
+	devices, err := applied.Devices("sriov-vf", []int{1})
+	if err != nil {
+		t.Fatalf("AppliedInventory.Devices() error = %v", err)
+	}
+	if len(devices) != 1 || devices[0] != inventory[1].Devices[0] {
+		t.Fatalf("AppliedInventory.Devices() = %#v, want sriov-vf device at global nic index 1", devices)
 	}
 }
 

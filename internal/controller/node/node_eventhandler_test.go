@@ -7,6 +7,7 @@ import (
 	"context"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -223,7 +226,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			externalNode("node-b"),
 			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-c"}},
 		).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	tests := []struct {
@@ -263,7 +266,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			}},
 		},
 		{
-			name: "all matching nodes",
+			name: "all nodes reconcile unsupported allNodes selection",
 			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
 				Driver:   "gpu.example.com",
 				AllNodes: ptr.To(true),
@@ -272,7 +275,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 			want: []string{"node-a", "node-b", "node-c"},
 		},
 		{
-			name: "per-device selection",
+			name: "all nodes reconcile unsupported per-device selection",
 			slice: &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{
 				Driver:                 "gpu.example.com",
 				PerDeviceNodeSelection: ptr.To(true),
@@ -281,7 +284,7 @@ func Test_resourceSliceToNodes(t *testing.T) {
 					{Name: "gpu-c", NodeName: ptr.To("node-c")},
 				},
 			}},
-			want: []string{"node-a", "node-c"},
+			want: []string{"node-a", "node-b", "node-c"},
 		},
 	}
 
@@ -297,6 +300,69 @@ func Test_resourceSliceToNodes(t *testing.T) {
 				t.Fatalf("resourceSliceToNodes() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResourceSliceToNodesReconcilesWholePool(t *testing.T) {
+	local := &resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "local"},
+		Spec: resourcev1.ResourceSliceSpec{
+			Driver: "gpu.example.com", NodeName: ptr.To("node-a"),
+			Pool: resourcev1.ResourcePool{Name: "shared-pool", Generation: 1, ResourceSliceCount: 1},
+		},
+	}
+	otherDriver := local.DeepCopy()
+	otherDriver.Name = "other-driver"
+	otherDriver.Spec.Driver = "dra.cpu"
+	otherDriver.Spec.NodeName = ptr.To("node-c")
+	for _, indexed := range []bool{true, false} {
+		builder := fake.NewClientBuilder().WithObjects(local, otherDriver)
+		if indexed {
+			builder.WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSlicePool, nodeutils.IndexResourceSliceByPool)
+		}
+		r := &NodeReconciler{Client: builder.Build(), draRegistry: testutils.DRARegistryWithExampleGPU()}
+		// A changed or deleted slice may not be in the cache. Its node and the
+		// nodes of every other generation in the pool still need reconciliation.
+		changed := local.DeepCopy()
+		changed.Name = "changed"
+		changed.Spec.NodeName = ptr.To("node-b")
+		changed.Spec.Pool.Generation = 2
+		requests := r.resourceSliceToNodes(context.Background(), changed)
+		var got []string
+		for _, request := range requests {
+			got = append(got, request.Name)
+		}
+		if want := []string{"node-a", "node-b"}; !slices.Equal(got, want) {
+			t.Fatalf("resourceSliceToNodes() = %v, want %v (indexed=%t)", got, want, indexed)
+		}
+	}
+}
+
+func TestNodeRegistrationInventoriesRejectsConflictingPoolNodes(t *testing.T) {
+	local := &resourcev1.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: "local"},
+		Spec: resourcev1.ResourceSliceSpec{
+			Driver: "gpu.example.com", NodeName: ptr.To("node-a"),
+			Pool:    resourcev1.ResourcePool{Name: "shared-pool", Generation: 1, ResourceSliceCount: 1},
+			Devices: []resourcev1.Device{{Name: "gpu-a"}},
+		},
+	}
+	remote := local.DeepCopy()
+	remote.Name = "remote"
+	remote.Spec.NodeName = ptr.To("node-b")
+	remote.Spec.Devices[0].Name = "gpu-b"
+	r := &NodeReconciler{
+		Client: fake.NewClientBuilder().
+			WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSliceNode, nodeutils.IndexResourceSliceByNode).
+			WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSlicePool, nodeutils.IndexResourceSliceByPool).
+			WithObjects(local, remote).Build(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
+	}
+	for _, name := range []string{"node-a", "node-b"} {
+		_, _, err := r.nodeRegistrationInventories(context.Background(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
+		if err == nil || !strings.Contains(err.Error(), "inconsistent nodeName") {
+			t.Fatalf("nodeRegistrationInventories(%q) error = %v, want inconsistent nodeName", name, err)
+		}
 	}
 }
 
@@ -316,7 +382,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 					"index": {IntValue: ptr.To[int64](0)},
 				},
 			},
-			wantProfile: "gpu-example",
+			wantProfile: "gpu.example.com",
 		},
 		{
 			name:   "NVIDIA GPU",
@@ -327,7 +393,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 					"type": {StringValue: ptr.To("gpu")},
 				},
 			},
-			wantProfile: "gpu-nvidia",
+			wantProfile: "gpu.nvidia.com",
 		},
 	}
 
@@ -349,7 +415,7 @@ func TestNodeRegistrationInventoriesPrefersDeviceProfiles(t *testing.T) {
 			}
 			r := &NodeReconciler{
 				Client:      fake.NewClientBuilder().WithObjects(node, resourceSlice).Build(),
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 
 			_, inventory, err := r.nodeRegistrationInventories(context.Background(), node)

@@ -75,12 +75,17 @@ func TestGetNodeNameForSlurmName_FallsBackWithoutIndex(t *testing.T) {
 }
 
 func resourceSlicesForIndexTest() []resourcev1.ResourceSlice {
-	return []resourcev1.ResourceSlice{
+	slices := []resourcev1.ResourceSlice{
 		{ObjectMeta: metav1.ObjectMeta{Name: "slice-node0"}, Spec: resourcev1.ResourceSliceSpec{NodeName: ptr.To("kube-0")}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "slice-node1"}, Spec: resourcev1.ResourceSliceSpec{NodeName: ptr.To("kube-1")}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "slice-allnodes"}, Spec: resourcev1.ResourceSliceSpec{AllNodes: ptr.To(true)}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "slice-perdevice"}, Spec: resourcev1.ResourceSliceSpec{NodeName: ptr.To("kube-0"), PerDeviceNodeSelection: ptr.To(true)}},
 	}
+	for i := range slices {
+		slices[i].Spec.Driver = "gpu.example.com"
+		slices[i].Spec.Pool = resourcev1.ResourcePool{Name: slices[i].Name, Generation: 1, ResourceSliceCount: 1}
+	}
+	return slices
 }
 
 func sliceNames(slices []resourcev1.ResourceSlice) []string {
@@ -96,6 +101,7 @@ func TestGetResourceSlicesForNode_Indexed(t *testing.T) {
 	slices := resourceSlicesForIndexTest()
 	c := fake.NewClientBuilder().
 		WithIndex(&resourcev1.ResourceSlice{}, IndexFieldResourceSliceNode, IndexResourceSliceByNode).
+		WithIndex(&resourcev1.ResourceSlice{}, IndexFieldResourceSlicePool, IndexResourceSliceByPool).
 		WithObjects(&slices[0], &slices[1], &slices[2], &slices[3]).
 		Build()
 
@@ -109,6 +115,42 @@ func TestGetResourceSlicesForNode_Indexed(t *testing.T) {
 	want := []string{"slice-allnodes", "slice-node0", "slice-perdevice"}
 	if got := sliceNames(got); !equalStrings(got, want) {
 		t.Errorf("GetResourceSlicesForNode() = %v, want %v", got, want)
+	}
+}
+
+func TestGetResourceSlicesForNodeIncludesWholePools(t *testing.T) {
+	for _, poolIndex := range []bool{true, false} {
+		name := "indexed"
+		if !poolIndex {
+			name = "fallback without pool index"
+		}
+		t.Run(name, func(t *testing.T) {
+			local := resourceSlicesForIndexTest()[0]
+			peer := *local.DeepCopy()
+			peer.Name = "peer"
+			peer.Spec.NodeName = ptr.To("kube-1")
+			newer := *peer.DeepCopy()
+			newer.Name = "newer"
+			newer.Spec.Pool.Generation = 2
+			otherDriver := *peer.DeepCopy()
+			otherDriver.Name = "other-driver"
+			otherDriver.Spec.Driver = "dra.cpu"
+			otherPool := resourceSlicesForIndexTest()[1]
+			builder := fake.NewClientBuilder().
+				WithIndex(&resourcev1.ResourceSlice{}, IndexFieldResourceSliceNode, IndexResourceSliceByNode).
+				WithObjects(&local, &peer, &newer, &otherDriver, &otherPool)
+			if poolIndex {
+				builder.WithIndex(&resourcev1.ResourceSlice{}, IndexFieldResourceSlicePool, IndexResourceSliceByPool)
+			}
+			got, err := GetResourceSlicesForNode(context.Background(), builder.Build(), "kube-0")
+			if err != nil {
+				t.Fatalf("GetResourceSlicesForNode() error = %v", err)
+			}
+			want := []string{"newer", "peer", "slice-node0"}
+			if got := sliceNames(got); !equalStrings(got, want) {
+				t.Fatalf("GetResourceSlicesForNode() = %v, want %v", got, want)
+			}
+		})
 	}
 }
 

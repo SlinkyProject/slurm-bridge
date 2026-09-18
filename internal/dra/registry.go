@@ -75,6 +75,9 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 		if compiled.MaxCost > resourcev1.CELSelectorExpressionMaxCost {
 			return nil, fmt.Errorf("selector for device profile %q is too complex: estimated cost %d exceeds limit %d", profile.Name, compiled.MaxCost, resourcev1.CELSelectorExpressionMaxCost)
 		}
+		if err := validateDeviceProfileSelector(profile); err != nil {
+			return nil, err
+		}
 		if existing, exists := registry.bySelector[profile.Selector]; exists {
 			return nil, fmt.Errorf("device profiles %q and %q have the same selector", existing.Name, profile.Name)
 		}
@@ -108,8 +111,7 @@ func NewRegistry(profiles []DeviceProfile) (*Registry, error) {
 	return registry, nil
 }
 
-// DefaultRegistry returns a registry containing the profiles currently
-// supported by slurm-bridge.
+// DefaultRegistry returns a registry containing the profiles enabled by default.
 func DefaultRegistry() *Registry {
 	// Upstream DeviceClass:
 	// https://github.com/kubernetes-sigs/dra-driver-cpu/blob/main/deployment/helm/dra-driver-cpu/templates/deviceclass.yaml
@@ -120,19 +122,10 @@ func DefaultRegistry() *Registry {
 		Backend:  CoreBitmapBackend{},
 	}
 	// Upstream DeviceClass:
-	// https://github.com/kubernetes-sigs/dra-example-driver/blob/v0.4.0/deployments/helm/dra-example-driver/templates/deviceclass.yaml
-	exampleGPU := DeviceProfile{
-		Name:     "gpu-example",
-		Driver:   "gpu.example.com",
-		Selector: `device.driver == 'gpu.example.com'`,
-		Backend: IndexedGRESBackend{
-			GRESName: "gpu",
-		},
-	}
-	// Upstream DeviceClass:
 	// https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.0/deployments/helm/dra-driver-nvidia-gpu/templates/deviceclass-gpu.yaml
+	// Preserve the driver-named GRES type used before DeviceProfiles.
 	nvidiaGPU := DeviceProfile{
-		Name:     "gpu-nvidia",
+		Name:     "gpu.nvidia.com",
 		Driver:   "gpu.nvidia.com",
 		Selector: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`,
 		Backend: IndexedGRESBackend{
@@ -152,7 +145,7 @@ func DefaultRegistry() *Registry {
 			GRESName: "nic",
 		},
 	}
-	registry, err := NewRegistry([]DeviceProfile{cpu, exampleGPU, nvidiaGPU, dranetRDMA})
+	registry, err := NewRegistry([]DeviceProfile{cpu, nvidiaGPU, dranetRDMA})
 	if err != nil {
 		panic(err)
 	}

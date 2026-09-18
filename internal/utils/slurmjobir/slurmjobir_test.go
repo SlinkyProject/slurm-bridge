@@ -29,6 +29,7 @@ import (
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -508,7 +509,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 					},
 				},
 			},
-			want: ptr.To("gres/gpu:gpu-nvidia=1"),
+			want: ptr.To("gres/gpu:gpu.nvidia.com=1"),
 		},
 		{
 			name: "CPU DRA Extended Resource Claim is ignored for GRES",
@@ -535,7 +536,7 @@ func TestTranslatorParseDeviceResources(t *testing.T) {
 					},
 				},
 			},
-			want: ptr.To("gres/gpu:gpu-nvidia=2"),
+			want: ptr.To("gres/gpu:gpu.nvidia.com=2"),
 		},
 	}
 	cpuClass := &resourcev1.DeviceClass{
@@ -700,8 +701,8 @@ func TestTranslatorParseDeviceResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu-nvidia=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu-nvidia=2")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu.nvidia.com=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu.nvidia.com=2")
 	}
 }
 
@@ -760,14 +761,14 @@ func TestTranslatorParseDeviceResourcesCombinesProfileAliases(t *testing.T) {
 	translator := translator{
 		Reader:      fake.NewClientBuilder().WithObjects(newClass("class-a"), newClass("class-b")).Build(),
 		ctx:         context.Background(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu-example=3" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu-example=3")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu.example.com=3" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu.example.com=3")
 	}
 }
 

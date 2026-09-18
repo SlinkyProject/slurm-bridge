@@ -680,16 +680,16 @@ function dranet::install() {
 	kubectl -n kube-system rollout status daemonset/dranet --timeout=120s
 }
 
-function dranet::configure_slurm_bridge() {
+function slurm-bridge::configure_e2e_device_profiles() {
 	if ! helm::find slurm-bridge; then
-		echo "[dranet] Slurm Bridge is not installed; skipping device profile configuration."
+		echo "[slurm-bridge] Slurm Bridge is not installed; skipping e2e device profile configuration."
 		return 0
 	fi
 
 	helm upgrade slurm-bridge "$ROOT_DIR/helm/slurm-bridge" \
 		--namespace slurm \
 		--reuse-values \
-		--values "$SCRIPT_DIR/dranet/e2e-values.yaml" \
+		--values "$SCRIPT_DIR/e2e-device-profiles.yaml" \
 		--wait \
 		--timeout 120s
 }
@@ -800,8 +800,8 @@ function main() {
 	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
-	if $OPT_DRANET; then
-		dranet::configure_slurm_bridge
+	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET; then
+		slurm-bridge::configure_e2e_device_profiles
 	fi
 	if $OPT_METRICS; then
 		metrics::install

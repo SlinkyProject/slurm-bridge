@@ -68,7 +68,8 @@ func (p DeviceProfile) GRES() (GRES, error) {
 }
 
 // GRESInventory describes one indexed Slurm GRES and its stable DRA device
-// mapping. Devices[i] is the DRA device represented by Slurm index i.
+// mapping. Devices are ordered within the GRES type; Slurm assigns absolute
+// indexes across all types which share the same GRES name.
 type GRESInventory struct {
 	GRES    GRES
 	Devices []DeviceIdentity
@@ -135,14 +136,21 @@ func (g GRESInventory) SlurmConfig() (string, string, error) {
 	return fmt.Sprintf("%s:%d", g.GRES.String(), len(devices)), strings.Join(gresConf, "+"), nil
 }
 
-// AppliedInventory records the DRA device represented by each Slurm index,
+// AppliedProfileInventory records the DRA devices represented by a contiguous
+// range of Slurm GRES indexes for one DeviceProfile.
+type AppliedProfileInventory struct {
+	FirstIndex int
+	Devices    []DeviceIdentity
+}
+
+// AppliedInventory records the DRA devices represented by Slurm GRES indexes,
 // keyed by stable DeviceProfile name.
-type AppliedInventory map[string][]DeviceIdentity
+type AppliedInventory map[string]AppliedProfileInventory
 
 // Devices returns the devices represented by indexes for a DeviceProfile.
 // The order of the returned devices matches the order of indexes.
 func (a AppliedInventory) Devices(profileName string, indexes []int) ([]DeviceIdentity, error) {
-	devices, ok := a[profileName]
+	profile, ok := a[profileName]
 	if !ok {
 		return nil, fmt.Errorf("applied inventory does not contain device profile %q", profileName)
 	}
@@ -150,29 +158,37 @@ func (a AppliedInventory) Devices(profileName string, indexes []int) ([]DeviceId
 	selected := make([]DeviceIdentity, len(indexes))
 	seen := make(map[int]struct{}, len(indexes))
 	for i, index := range indexes {
-		if index < 0 || index >= len(devices) {
-			return nil, fmt.Errorf("slurm GRES index %d is outside device profile %q inventory of %d devices", index, profileName, len(devices))
+		localIndex := index - profile.FirstIndex
+		if localIndex < 0 || localIndex >= len(profile.Devices) {
+			return nil, fmt.Errorf("slurm GRES index %d is outside device profile %q inventory range %d-%d", index, profileName, profile.FirstIndex, profile.FirstIndex+len(profile.Devices)-1)
 		}
 		if _, ok := seen[index]; ok {
 			return nil, fmt.Errorf("slurm GRES index %d is repeated for device profile %q", index, profileName)
 		}
 		seen[index] = struct{}{}
-		selected[i] = devices[index]
+		selected[i] = profile.Devices[localIndex]
 	}
 	return selected, nil
+}
+
+type appliedProfileInventoryWire struct {
+	FirstIndex int      `json:"firstIndex"`
+	Devices    []string `json:"devices"`
 }
 
 type appliedInventoryWire struct {
 	Version int `json:"v"`
 	// The profile name is also the Slurm GRES type. The GRES name is omitted
 	// because the DeviceProfile registry supplies it.
-	Profiles map[string][]string `json:"profiles"`
+	Profiles map[string]appliedProfileInventoryWire `json:"profiles"`
 }
 
 // EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node Extra
-// field. Device array position is the Slurm GRES index.
+// field. Slurm starts each GRES name at index zero and assigns indexes across
+// all types which share that name.
 func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
-	profiles := make(map[string][]string, len(inventory))
+	profiles := make(map[string]appliedProfileInventoryWire, len(inventory))
+	nextIndexes := make(map[string]int)
 	for _, gres := range inventory {
 		profileName, devices, err := gres.appliedInventoryEntry()
 		if err != nil {
@@ -181,7 +197,12 @@ func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 		if _, ok := profiles[profileName]; ok {
 			return "", fmt.Errorf("cannot encode duplicate device profile %q", profileName)
 		}
-		profiles[profileName] = devices
+		firstIndex := nextIndexes[gres.GRES.Name]
+		profiles[profileName] = appliedProfileInventoryWire{
+			FirstIndex: firstIndex,
+			Devices:    devices,
+		}
+		nextIndexes[gres.GRES.Name] = firstIndex + len(devices)
 	}
 
 	data, err := json.Marshal(appliedInventoryWire{
@@ -214,19 +235,25 @@ func DecodeAppliedInventory(extra string) (AppliedInventory, error) {
 	}
 
 	inventory := make(AppliedInventory, len(wire.Profiles))
-	for profileName, paths := range wire.Profiles {
+	for profileName, profile := range wire.Profiles {
 		if profileName == "" {
 			return nil, fmt.Errorf("applied inventory contains an empty device profile name")
 		}
-		devices := make([]DeviceIdentity, len(paths))
-		for i, path := range paths {
+		if profile.FirstIndex < 0 {
+			return nil, fmt.Errorf("applied inventory device profile %q has negative first Slurm GRES index %d", profileName, profile.FirstIndex)
+		}
+		devices := make([]DeviceIdentity, len(profile.Devices))
+		for i, path := range profile.Devices {
 			device, err := decodeDevicePath(path)
 			if err != nil {
 				return nil, fmt.Errorf("decode device profile %q index %d: %w", profileName, i, err)
 			}
 			devices[i] = device
 		}
-		inventory[profileName] = devices
+		inventory[profileName] = AppliedProfileInventory{
+			FirstIndex: profile.FirstIndex,
+			Devices:    devices,
+		}
 	}
 	return inventory, nil
 }

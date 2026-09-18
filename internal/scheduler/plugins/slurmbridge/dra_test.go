@@ -34,6 +34,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 )
 
 func init() {
@@ -365,7 +366,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
-				draRegistry:   dra.DefaultRegistry(),
+				draRegistry:   testutils.DRARegistryWithExampleGPU(),
 			}
 			gotClaim, gotMappings, gotResources, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
@@ -462,7 +463,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 	resources := &slurmcontrol.NodeResources{
 		Node: "node1",
 		Gres: []slurmcontrol.GresLayout{
-			{Name: "gpu", Type: "gpu-example", Count: 1, Index: "0"},
+			{Name: "gpu", Type: "example", Count: 1, Index: "0"},
 			{Name: "gpu", Type: legacyDRAExampleDriver, Count: 1, Index: "1"},
 		},
 	}
@@ -475,7 +476,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 		},
 		exampleGPUDeviceClass(legacyDRAExampleDriver),
 	).Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: customGPURegistryForTest(t)}
 
 	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, resources.Node, resources)
 	if err != nil {
@@ -514,7 +515,7 @@ func TestSlurmBridge_createRequestsAndMappingsSplitsProfileAndLegacyGRES(t *test
 			t.Errorf("mappings = %#v, want %#v", mappings, want)
 		}
 	}
-	if len(resources.Gres) != 2 || resources.Gres[0].Type != "gpu-example" || resources.Gres[1].Type != legacyDRAExampleDriver {
+	if len(resources.Gres) != 2 || resources.Gres[0].Type != "example" || resources.Gres[1].Type != legacyDRAExampleDriver {
 		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres)
 	}
 }
@@ -533,7 +534,7 @@ func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(
 	}
 	resources := &slurmcontrol.NodeResources{
 		Node: "node1",
-		Gres: []slurmcontrol.GresLayout{{Name: "gpu", Type: "gpu-example", Count: 1, Index: "0"}},
+		Gres: []slurmcontrol.GresLayout{{Name: "gpu", Type: "gpu.example.com", Count: 1, Index: "0"}},
 	}
 	tests := []struct {
 		name       string
@@ -557,7 +558,7 @@ func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(
 					CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'`},
 				}}},
 			},
-			wantErrSub: `resolves to DeviceProfile "gpu-nvidia" but the Slurm allocation has no matching indexed GRES`,
+			wantErrSub: `resolves to DeviceProfile "gpu.nvidia.com" but the Slurm allocation has no matching indexed GRES`,
 		},
 	}
 
@@ -567,7 +568,7 @@ func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(
 			if tt.class != nil {
 				builder = builder.WithObjects(tt.class)
 			}
-			sb := &SlurmBridge{Client: builder.Build(), draRegistry: dra.DefaultRegistry()}
+			sb := &SlurmBridge{Client: builder.Build(), draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 			_, _, _, err := sb.createRequestsAndMappings(context.Background(), pod, resources.Node, resources)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
@@ -607,7 +608,8 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 	}
 
 	resources := &slurmcontrol.NodeResources{
-		Node: "node1",
+		Node:      "node1",
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/node1/gpu-0"]}}}`,
 		Gres: []slurmcontrol.GresLayout{
 			{
 				Name:  "gpu",
@@ -705,12 +707,12 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 			kclient := newClient(pod, tt.funcs)
 			sb := &SlurmBridge{
 				Client:      kclient,
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 
 			gotErr := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
-			if gotErr == nil {
-				t.Fatal("SlurmBridge.manageResourceClaim() error = nil, want error")
+			if !errors.Is(gotErr, injectedErr) {
+				t.Fatalf("SlurmBridge.manageResourceClaim() error = %v, want injected error", gotErr)
 			}
 
 			claimList := &resourcev1.ResourceClaimList{}
@@ -772,7 +774,7 @@ func TestValidateDeviceClassRequestsForPodsRejectsCoreBitmapMultipleContainers(t
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
 			}}},
 		}).Build(),
-		draRegistry: dra.DefaultRegistry(),
+		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
 	err := sb.validateDeviceClassRequestsForPods(context.Background(), []corev1.Pod{pod})
@@ -802,7 +804,8 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		},
 	}
 	resources := &slurmcontrol.NodeResources{
-		Node: "node1",
+		Node:      "node1",
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.nvidia.com":{"firstIndex":0,"devices":["/dra/gpu.nvidia.com/node1/gpu-0"]}}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
 			Type:  legacyDRANVIDIADriver,
@@ -828,7 +831,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -900,19 +903,19 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 	}
 	resources := &slurmcontrol.NodeResources{
 		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu-example":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}`,
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
 		Gres: []slurmcontrol.GresLayout{{
 			Name:  "gpu",
-			Type:  "gpu-example",
+			Type:  "gpu.example.com",
 			Count: 2,
-			Index: "2,0",
+			Index: "6,4",
 		}},
 	}
 	kclient := fake.NewClientBuilder().
 		WithObjects(pod, deviceClass).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: dra.DefaultRegistry()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -955,8 +958,69 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		!hasContainerExtendedResourceRequest(updatedPod.Status.ExtendedResourceClaimStatus.RequestMappings, wantMapping) {
 		t.Fatalf("pod request mappings = %#v, want %#v", updatedPod.Status.ExtendedResourceClaimStatus, wantMapping)
 	}
-	if resources.Gres[0].Index != "2,0" || resources.Gres[0].Type != "gpu-example" {
+	if resources.Gres[0].Index != "6,4" || resources.Gres[0].Type != "gpu.example.com" {
 		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres[0])
+	}
+}
+
+func TestSlurmBridge_manageResourceClaimRequiresAppliedGPUInventory(t *testing.T) {
+	for _, deviceClass := range []*resourcev1.DeviceClass{
+		exampleGPUDeviceClass("gpu.example.com"),
+		nvidiaGPUDeviceClass("gpu.nvidia.com"),
+	} {
+		for _, tt := range []struct {
+			name, extra, wantErr string
+		}{
+			{name: "missing", wantErr: "Extra does not contain a DRA GRES map"},
+			{name: "unrelated", extra: "administrator metadata", wantErr: "Extra does not contain a DRA GRES map"},
+			{name: "malformed", extra: dra.AppliedInventoryExtraPrefix + "invalid", wantErr: "decode applied inventory"},
+		} {
+			t.Run(deviceClass.Name+"/"+tt.name, func(t *testing.T) {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "gpu-test", Namespace: metav1.NamespaceDefault, UID: "123"},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Name: "work",
+						Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + deviceClass.Name): resource.MustParse("1"),
+						}},
+					}}},
+				}
+				// This device could satisfy the old index mapping. The registered
+				// profile must still refuse to bind without its applied inventory.
+				slice := &resourcev1.ResourceSlice{
+					ObjectMeta: metav1.ObjectMeta{Name: "gpu-slice"},
+					Spec: resourcev1.ResourceSliceSpec{
+						NodeName: ptr.To("node1"), Driver: deviceClass.Name,
+						Pool: resourcev1.ResourcePool{Name: "node1", Generation: 1, ResourceSliceCount: 1},
+						Devices: []resourcev1.Device{{
+							Name: "gpu-0",
+							Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+								"index": {IntValue: ptr.To[int64](0)},
+								"type":  {StringValue: ptr.To("gpu")},
+							},
+						}},
+					},
+				}
+				kclient := fake.NewClientBuilder().WithObjects(pod, deviceClass, slice).
+					WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).Build()
+				sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
+				resources := &slurmcontrol.NodeResources{
+					Node: "node1", NodeExtra: tt.extra,
+					Gres: []slurmcontrol.GresLayout{{Name: "gpu", Type: deviceClass.Name, Count: 1, Index: "0"}},
+				}
+				err := sb.manageResourceClaim(context.Background(), pod, resources.Node, resources)
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("manageResourceClaim() error = %v, want %q", err, tt.wantErr)
+				}
+				claims := &resourcev1.ResourceClaimList{}
+				if err := kclient.List(context.Background(), claims); err != nil {
+					t.Fatal(err)
+				}
+				if len(claims.Items) != 0 {
+					t.Fatalf("found %d claims after failed binding, want none", len(claims.Items))
+				}
+			})
+		}
 	}
 }
 
@@ -1293,7 +1357,7 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sb := &SlurmBridge{
 				Client:      tt.kclient,
-				draRegistry: dra.DefaultRegistry(),
+				draRegistry: testutils.DRARegistryWithExampleGPU(),
 			}
 			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{
 				NodeResources:        tt.resources,

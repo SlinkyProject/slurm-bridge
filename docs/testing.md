@@ -97,6 +97,11 @@ driver can still be installed individually with `--dra-driver-cpu`,
 fixture creates a `dranet0` dummy interface on each managed Kind worker before
 installing the driver.
 
+The `--dra-example-driver` and `--dranet` flags also configure Slurm Bridge with
+the [e2e device profiles](../hack/e2e-device-profiles.yaml). This explicitly
+enables the example GPU and dummy network interface profiles alongside the
+built-in profiles. The example GPU profile is disabled by default.
+
 NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
 installed on the host. For local testing without GPUs, set `MOCK_NVML=true` to
 install

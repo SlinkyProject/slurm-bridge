@@ -4,6 +4,7 @@ go 1.26.6
 
 require (
 	github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260917142417-b9ce680ca667
+	github.com/google/cel-go v0.30.0
 	github.com/kelindar/bitmap v1.5.4
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
@@ -78,7 +79,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/cel-go v0.30.0 // indirect
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20260202012954-cb029daf43ef // indirect
