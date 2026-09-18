@@ -609,6 +609,66 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "Submission returned no job ID",
+			fields: fields{
+				Client: fake.NewClientBuilder().Build(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{}),
+			},
+			wantErr: true,
+		},
+		{
+			name: "Submission returned heterogeneous job IDs",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							job := obj.(*slurmtypes.V0044JobInfo)
+							job.JobId = ptr.To(int32(1))
+							job.HetJobIdSet = ptr.To("1,3-4")
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{}),
+			},
+			want: []int32{1, 3, 4},
+		},
+		{
+			name: "Submission returned invalid heterogeneous job IDs",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							job := obj.(*slurmtypes.V0044JobInfo)
+							job.JobId = ptr.To(int32(1))
+							job.HetJobIdSet = ptr.To("invalid")
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx:        context.Background(),
+				pod:        pod.DeepCopy(),
+				slurmJobIR: slurmJobIR(slurmjobir.SlurmJobIRJobInfo{}),
+			},
+			wantErr: true,
+		},
+		{
 			name: "Submit external job",
 			fields: fields{
 				Client: func() client.Client {
