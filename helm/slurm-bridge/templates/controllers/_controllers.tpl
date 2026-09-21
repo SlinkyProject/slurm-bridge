@@ -11,6 +11,14 @@ Determine bridge controllers name
 {{- end }}
 
 {{/*
+Determine bridge controllers name for cluster-scoped objects, which two
+releases of the chart would otherwise collide on.
+*/}}
+{{- define "slurm-bridge.controllers.fullname" -}}
+{{ printf "%s-controllers" (include "slurm-bridge.fullname" .) }}
+{{- end }}
+
+{{/*
 Determine bridge controllers image repository
 */}}
 {{- define "slurm-bridge.controllers.image.repository" -}}

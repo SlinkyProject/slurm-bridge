@@ -6,17 +6,21 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "slurm-bridge.scheduler.name" . }}
+  name: {{ include "slurm-bridge.scheduler.fullname" . }}
+  labels:
+    {{- include "slurm-bridge.scheduler.labels" . | nindent 4 }}
 {{- .Files.Get "files/scheduler_rbac_rules.yaml" | nindent 0 }}
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: {{ include "slurm-bridge.scheduler.name" . }}
+  name: {{ include "slurm-bridge.scheduler.fullname" . }}
+  labels:
+    {{- include "slurm-bridge.scheduler.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "slurm-bridge.scheduler.name" . }}
+  name: {{ include "slurm-bridge.scheduler.fullname" . }}
 subjects:
 - kind: ServiceAccount
   name: {{ include "slurm-bridge.scheduler.name" . }}
@@ -26,6 +30,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: {{ include "slurm-bridge.fullname" . }}-metrics-reader
+  labels:
+    {{- include "slurm-bridge.scheduler.labels" . | nindent 4 }}
 rules:
 - nonResourceURLs:
   - /metrics
@@ -35,7 +41,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "slurm-bridge.scheduler.name" . }}::extension-apiserver-authentication-reader
+  name: {{ include "slurm-bridge.scheduler.fullname" . }}::extension-apiserver-authentication-reader
   namespace: kube-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io

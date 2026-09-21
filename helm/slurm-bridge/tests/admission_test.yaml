@@ -328,6 +328,39 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: admission.tls requires admission.certManager.enabled=false
+  - it: the admission ClusterRole is release-scoped and carries no namespace
+    template: admission/rbac.yaml
+    set:
+      admission.enabled: true
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-admission
+      - notExists:
+          path: metadata.namespace
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: admission
+  - it: the admission ClusterRoleBinding binds the release-scoped ClusterRole to the admission account
+    template: admission/rbac.yaml
+    set:
+      admission.enabled: true
+    documentSelector:
+      path: kind
+      value: ClusterRoleBinding
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-admission
+      - equal:
+          path: roleRef.name
+          value: test-release-slurm-bridge-admission
+      - equal:
+          path: subjects[0].name
+          value: slurm-bridge-admission
   - it: does not expose the Slurm JWT to admission
     template: admission/deployment.yaml
     set:

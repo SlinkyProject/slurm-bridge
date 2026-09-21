@@ -156,7 +156,14 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
-      name: slurm-bridge-scheduler
+      labels:
+        app.kubernetes.io/component: scheduler
+        app.kubernetes.io/instance: test-release
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: slurm-bridge-scheduler
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
+      name: test-release-slurm-bridge-scheduler
     rules:
       - apiGroups:
           - ""
@@ -326,11 +333,18 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRoleBinding
     metadata:
-      name: slurm-bridge-scheduler
+      labels:
+        app.kubernetes.io/component: scheduler
+        app.kubernetes.io/instance: test-release
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: slurm-bridge-scheduler
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
+      name: test-release-slurm-bridge-scheduler
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
-      name: slurm-bridge-scheduler
+      name: test-release-slurm-bridge-scheduler
     subjects:
       - kind: ServiceAccount
         name: slurm-bridge-scheduler
@@ -339,6 +353,13 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
+      labels:
+        app.kubernetes.io/component: scheduler
+        app.kubernetes.io/instance: test-release
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: slurm-bridge-scheduler
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
       name: test-release-slurm-bridge-metrics-reader
     rules:
       - nonResourceURLs:
@@ -349,7 +370,7 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: RoleBinding
     metadata:
-      name: slurm-bridge-scheduler::extension-apiserver-authentication-reader
+      name: test-release-slurm-bridge-scheduler::extension-apiserver-authentication-reader
       namespace: kube-system
     roleRef:
       apiGroup: rbac.authorization.k8s.io

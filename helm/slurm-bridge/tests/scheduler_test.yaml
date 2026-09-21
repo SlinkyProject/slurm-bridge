@@ -81,6 +81,52 @@ tests:
               - /metrics
             verbs:
               - get
+  - it: the scheduler ClusterRole is named after the release, not after the scheduler
+    template: scheduler/rbac.yaml
+    documentIndex: 0
+    set:
+      schedulerConfig:
+        schedulerName: my-scheduler
+    asserts:
+      - equal:
+          path: kind
+          value: ClusterRole
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-scheduler
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: scheduler
+  - it: the scheduler ClusterRoleBinding binds the release-scoped ClusterRole to the scheduler account
+    template: scheduler/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRoleBinding
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-scheduler
+      - equal:
+          path: roleRef.name
+          value: test-release-slurm-bridge-scheduler
+      - equal:
+          path: subjects[0].name
+          value: slurm-bridge-scheduler
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: scheduler
+  - it: the kube-system authentication reader binding is release-scoped
+    template: scheduler/rbac.yaml
+    documentSelector:
+      path: kind
+      value: RoleBinding
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-scheduler::extension-apiserver-authentication-reader
+      - equal:
+          path: metadata.namespace
+          value: kube-system
   - it: scheduler can update its leader election lease
     template: scheduler/rbac.yaml
     documentIndex: 0

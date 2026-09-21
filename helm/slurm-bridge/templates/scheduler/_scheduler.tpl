@@ -11,6 +11,15 @@ Scheduler name
 {{- end }}
 
 {{/*
+Scheduler name for cluster-scoped objects, which two releases of the chart
+would otherwise collide on. Deliberately independent of the scheduler name
+above, which names a scheduler rather than a release.
+*/}}
+{{- define "slurm-bridge.scheduler.fullname" -}}
+{{ printf "%s-scheduler" (include "slurm-bridge.fullname" .) }}
+{{- end }}
+
+{{/*
 Scheduler Labels
 */}}
 {{- define "slurm-bridge.scheduler.labels" -}}

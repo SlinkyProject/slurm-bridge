@@ -76,8 +76,14 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
-      name: slurm-bridge-admission
-      namespace: test-namespace
+      labels:
+        app.kubernetes.io/component: admission
+        app.kubernetes.io/instance: test-release
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: slurm-bridge-admission
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
+      name: test-release-slurm-bridge-admission
     rules:
       - apiGroups:
           - ""
@@ -106,11 +112,11 @@ manifests should match snapshot:
         app.kubernetes.io/name: slurm-bridge-admission
         app.kubernetes.io/version: 1.2.3
         helm.sh/chart: slurm-bridge-1.2.3
-      name: slurm-bridge-admission
+      name: test-release-slurm-bridge-admission
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
-      name: slurm-bridge-admission
+      name: test-release-slurm-bridge-admission
     subjects:
       - kind: ServiceAccount
         name: slurm-bridge-admission

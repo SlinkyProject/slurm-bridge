@@ -105,8 +105,14 @@ manifests should match snapshot:
     apiVersion: rbac.authorization.k8s.io/v1
     kind: ClusterRole
     metadata:
-      name: slurm-bridge-controllers
-      namespace: test-namespace
+      labels:
+        app.kubernetes.io/component: controllers
+        app.kubernetes.io/instance: test-release
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: slurm-bridge-controllers
+        app.kubernetes.io/version: 1.2.3
+        helm.sh/chart: slurm-bridge-1.2.3
+      name: test-release-slurm-bridge-controllers
     rules:
       - apiGroups:
           - ""
@@ -184,11 +190,11 @@ manifests should match snapshot:
         app.kubernetes.io/name: slurm-bridge-controllers
         app.kubernetes.io/version: 1.2.3
         helm.sh/chart: slurm-bridge-1.2.3
-      name: slurm-bridge-controllers
+      name: test-release-slurm-bridge-controllers
     roleRef:
       apiGroup: rbac.authorization.k8s.io
       kind: ClusterRole
-      name: slurm-bridge-controllers
+      name: test-release-slurm-bridge-controllers
     subjects:
       - kind: ServiceAccount
         name: slurm-bridge-controllers
