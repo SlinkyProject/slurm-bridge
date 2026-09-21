@@ -5,26 +5,45 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.admission.enabled }}
 {{- $certNamespacedName := printf "%s/%s" (include "slurm-bridge.namespace" .) (include "slurm-bridge.admission.name" .) -}}
+{{- if and .Values.admission.certManager.enabled (or .Values.admission.tls.existingSecret .Values.admission.tls.caBundle) -}}
+{{- fail "admission.tls requires admission.certManager.enabled=false, because cert-manager issues the serving certificate and injects its own CA" -}}
+{{- end }}
+{{- $caBundle := .Values.admission.tls.caBundle -}}
+{{- if and (not .Values.admission.certManager.enabled) (not .Values.admission.tls.existingSecret) }}
+{{- $name := include "slurm-bridge.admission.name" . -}}
+{{- $namespace := include "slurm-bridge.namespace" . -}}
+{{- /* Reuse the certificate already in the cluster, so that repeated renders
+       neither rotate the webhook trust nor drift against the live Secret.
+       `lookup` yields nothing without a cluster connection (`helm template`),
+       in which case a fresh certificate is issued. */}}
+{{- $existing := (lookup "v1" "Secret" $namespace $name).data | default dict -}}
+{{- $tlsCrt := index $existing "tls.crt" | default "" -}}
+{{- $tlsKey := index $existing "tls.key" | default "" -}}
+{{- $caCrt := index $existing "ca.crt" | default "" -}}
+{{- if not (and $tlsCrt $tlsKey $caCrt) -}}
 {{- $durationDays := int 3650 -}}
-{{- $ca := genCA (include "slurm-bridge.admission.name" .) $durationDays -}}
-{{- if not .Values.admission.certManager.enabled }}
-{{- $cn := (include "slurm-bridge.admission.name" .) -}}
-{{- $dnsList := list (printf "%s.%s" (include "slurm-bridge.admission.name" .) (include "slurm-bridge.namespace" .)) (printf "%s.%s.svc" (include "slurm-bridge.admission.name" .) (include "slurm-bridge.namespace" .)) -}}
-{{- $cert := genSignedCert $cn nil $dnsList $durationDays $ca -}}
+{{- $dnsList := list (printf "%s.%s" $name $namespace) (printf "%s.%s.svc" $name $namespace) -}}
+{{- $ca := genCA $name $durationDays -}}
+{{- $cert := genSignedCert $name nil $dnsList $durationDays $ca -}}
+{{- $tlsCrt = $cert.Cert | b64enc -}}
+{{- $tlsKey = $cert.Key | b64enc -}}
+{{- $caCrt = $ca.Cert | b64enc -}}
+{{- end }}
+{{- $caBundle = $caCrt -}}
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ include "slurm-bridge.admission.name" . }}
-  namespace: {{ include "slurm-bridge.namespace" . }}
+  name: {{ $name }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "slurm-bridge.admission.labels" . | nindent 4 }}
 type: kubernetes.io/tls
 data:
-  tls.crt: {{ $cert.Cert | b64enc | quote }}
-  tls.key: {{ $cert.Key | b64enc | quote }}
-  ca.crt: {{ $ca.Cert | b64enc | quote }}
-{{- end }}{{- /* if not .Values.admission.certManager.enabled */}}
+  tls.crt: {{ $tlsCrt | quote }}
+  tls.key: {{ $tlsKey | quote }}
+  ca.crt: {{ $caCrt | quote }}
+{{- end }}{{- /* if self-signed certificate */}}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -53,9 +72,9 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         scope: Namespaced
     clientConfig:
-      {{- if not .Values.admission.certManager.enabled }}
-      caBundle: {{ $ca.Cert | b64enc | quote }}
-      {{- end }}{{- /* if not .Values.admission.certManager.enabled */}}
+      {{- with $caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}{{- /* with $caBundle */}}
       service:
         namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}
@@ -90,9 +109,9 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         scope: Namespaced
     clientConfig:
-      {{- if not .Values.admission.certManager.enabled }}
-      caBundle: {{ $ca.Cert | b64enc | quote }}
-      {{- end }}{{- /* if not .Values.admission.certManager.enabled */}}
+      {{- with $caBundle }}
+      caBundle: {{ . | quote }}
+      {{- end }}{{- /* with $caBundle */}}
       service:
         namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}

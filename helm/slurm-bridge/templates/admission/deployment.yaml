@@ -63,7 +63,7 @@ spec:
         - name: certificates
           secret:
             defaultMode: 420
-            secretName: {{ include "slurm-bridge.admission.name" . }}
+            secretName: {{ include "slurm-bridge.admission.certSecretName" . }}
         - name: slurm-bridge-config
           configMap:
             name: slurm-bridge-config

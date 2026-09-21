@@ -99,6 +99,16 @@ admission:
     duration: 43800h0m0s # 5 year
     # -- Certificate renewal time. Should be before the expiration.
     renewBefore: 8760h0m0s # 1 year
+  # Externally managed serving certificate for the webhook. Use this when the
+  # certificate is issued outside of the chart, for example under GitOps, where
+  # the chart's self-signed certificate is regenerated on every render.
+  tls:
+    # -- Name of an existing `kubernetes.io/tls` Secret holding the webhook
+    # serving certificate. Requires `certManager.enabled` to be false.
+    existingSecret: ""
+    # -- Base64 encoded PEM CA bundle that validates the serving certificate,
+    # written into both webhook configurations.
+    caBundle: ""
   # -- Set the number of replicas to deploy.
   replicas: 1
   # -- PodDisruptionBudget for the admission deployment
