@@ -731,12 +731,19 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 // annotatePodsWithNodes will annotate a jobid to pods and add a finalizer to
 // ensure there is an opportunity to cleanly reconcile state between k8s and Slurm
 func (sb *SlurmBridge) labelPodsWithJobId(ctx context.Context, jobid int32, hetjobid int32, slurmJobComponent slurmjobir.SlurmJobComponent) error {
+	logger := klog.FromContext(ctx)
 	for _, p := range slurmJobComponent.Pods.Items {
 		if p.Labels == nil {
 			p.Labels = make(map[string]string)
 		}
 
 		if err := sb.syncPodMeta(ctx, &p, jobid, hetjobid, "", true); err != nil {
+			// A sibling can vanish between the snapshot and this patch;
+			// don't fail the whole gang for it.
+			if apierrors.IsNotFound(err) {
+				logger.V(4).Info("pod no longer exists, skipping label", "pod", klog.KObj(&p))
+				continue
+			}
 			return err
 		}
 	}
@@ -791,6 +798,14 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		toUpdate := p.DeepCopy()
 		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = node
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
+			// A sibling can vanish (e.g. recreated elsewhere) between the
+			// snapshot and this patch; don't fail the whole gang for it.
+			if apierrors.IsNotFound(err) {
+				logger.V(4).Info("pod no longer exists, skipping node assignment",
+					"pod", klog.KObj(&p))
+				kubeNodes.Insert(node)
+				continue
+			}
 			logger.Error(err, "failed to update pod with slurm job id")
 			return ErrorPodUpdateFailed
 		}
@@ -935,7 +950,9 @@ func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid i
 	if !reflect.DeepEqual(pod, toUpdate) {
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")
-			return ErrorPodUpdateFailed
+			// Wrap, don't replace: callers need to tell NotFound apart
+			// from a real failure to skip just a stale sibling.
+			return fmt.Errorf("%w: %w", ErrorPodUpdateFailed, err)
 		}
 		// Update pod to reflect patch
 		pod.Labels = toUpdate.Labels
