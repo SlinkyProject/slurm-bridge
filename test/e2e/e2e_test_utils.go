@@ -26,10 +26,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/cpuset"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/e2e-framework/klient"
 	"sigs.k8s.io/e2e-framework/klient/wait"
+	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
@@ -41,6 +44,7 @@ const (
 	slurmNodeModeEnvironment    = "SLURM_NODE_MODE"
 	mockNVMLEnvironment         = "MOCK_NVML"
 	e2eCleanupEnvironment       = "E2E_CLEANUP"
+	e2eKubeContextEnvironment   = "E2E_KUBE_CONTEXT"
 	slurmNodeModeExternal       = slurmNodeMode("external")
 	slurmNodeModeHybrid         = slurmNodeMode("hybrid")
 	slurmNamespace              = "slurm"
@@ -88,6 +92,29 @@ func parseSlurmNodeMode(value string) (slurmNodeMode, error) {
 		return "", fmt.Errorf("%s must be one of %q or %q, got %q",
 			slurmNodeModeEnvironment, slurmNodeModeExternal, slurmNodeModeHybrid, value)
 	}
+}
+
+// newTestEnvironment requires an explicit context so the suite never runs
+// against whatever kubeconfig context happens to be current.
+func newTestEnvironment() (types.Environment, error) {
+	kubeContext := os.Getenv(e2eKubeContextEnvironment)
+	if kubeContext == "" {
+		return nil, fmt.Errorf("%s must name the kubeconfig context of the e2e cluster", e2eKubeContextEnvironment)
+	}
+	restConfig, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{CurrentContext: kubeContext},
+	).ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("load kubeconfig context %q: %w", kubeContext, err)
+	}
+	// envconf.Config.Client ignores WithKubeContext, so supply the client directly.
+	kubeClient, err := klient.New(restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("create client for kubeconfig context %q: %w", kubeContext, err)
+	}
+	cfg := envconf.New().WithParallelTestEnabled().WithKubeContext(kubeContext).WithClient(kubeClient)
+	return env.NewWithConfig(cfg), nil
 }
 
 func parseSlurmNodeModeFromEnvironment() (slurmNodeMode, error) {

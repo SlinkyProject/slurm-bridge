@@ -6,13 +6,14 @@ package e2e
 import (
 	"testing"
 
-	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 )
 
-var testEnv = env.NewParallel()
-
 func TestScheduling(t *testing.T) {
+	testEnv, err := newTestEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
 	nodeMode, err := parseSlurmNodeModeFromEnvironment()
 	if err != nil {
 		t.Fatal(err)
