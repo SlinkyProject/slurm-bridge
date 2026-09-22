@@ -35,10 +35,11 @@ func (t *translator) PreFilterLWS(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.
 
 	// Determine if there are enough LWS pods for the group
 	if int32(len(slurmJobIR.AllPods())) < *lws.Spec.LeaderWorkerTemplate.Size { //nolint:gosec
+		// Siblings are still being created; park until an event instead of retrying blindly.
 		if pod.Labels[wellknown.LabelExternalJobId] == "" {
-			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
+			return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
 		} else {
-			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
+			return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
 		}
 	}
 	return fwk.NewStatus(fwk.Success)

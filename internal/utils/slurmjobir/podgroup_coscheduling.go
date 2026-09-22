@@ -59,7 +59,8 @@ func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *
 	// being labeled async, so counting only already-labeled ones races that.
 	if pod.Labels[wellknown.LabelExternalJobId] != "" {
 		if len(slurmJobIR.AllPods()) < int(podGroup.Spec.MinMember) {
-			return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
+			// Siblings are still being created; park until an event instead of retrying blindly.
+			return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
 		}
 		return fwk.NewStatus(fwk.Success)
 	}
@@ -72,7 +73,8 @@ func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *
 		}
 	}
 	if numPodsWaiting < int(podGroup.Spec.MinMember) {
-		return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
+		// Siblings are still being created; park until an event instead of retrying blindly.
+		return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
 	}
 	return fwk.NewStatus(fwk.Success)
 }

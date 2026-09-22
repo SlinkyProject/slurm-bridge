@@ -118,7 +118,7 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 					},
 				},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error()),
 		},
 		{
 			name: "Invalid state with external job and insufficient pods",
@@ -155,7 +155,7 @@ func Test_translator_PreFilterLWS(t *testing.T) {
 					},
 				},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error()),
 		},
 		{
 			name: "group has enough pods",

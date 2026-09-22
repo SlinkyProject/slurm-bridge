@@ -767,6 +767,51 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	}
 }
 
+func TestSlurmBridge_PostFilterSkipsGangShortOfQuorum(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Alpha2)
+
+	const (
+		namespace = "slurm-bridge"
+		pgName    = "podgroup"
+	)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName + "-a"},
+		Spec: corev1.PodSpec{
+			SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(pgName)},
+			Containers:      []corev1.Container{{Name: "c"}},
+		},
+	}
+	podGroup := &slurmjobir.PodGroup{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: pgName},
+		Spec: slurmjobir.PodGroupSpec{
+			SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
+			},
+		},
+	}
+	kubeClient := kubefake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(pod.DeepCopy(), podGroup.DeepCopy()).
+		Build()
+	sb := &SlurmBridge{
+		Client:       kubeClient,
+		slurmControl: slurmcontrol.NewControl(fake.NewClientBuilder().Build(), "kubernetes", "slurm-bridge"),
+		workloadAPI:  workloadAPI,
+	}
+
+	state := framework.NewCycleState()
+	if _, status := sb.PreFilter(ctx, state, pod.DeepCopy(), nil); status.Code() != fwk.Unschedulable {
+		t.Fatalf("PreFilter() status = %v, want Unschedulable", status)
+	}
+	if _, status := sb.PostFilter(ctx, state, pod.DeepCopy(), nil); status.Code() != fwk.Unschedulable {
+		t.Fatalf("PostFilter() status = %v, want Unschedulable without submitting", status)
+	}
+}
+
 func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
