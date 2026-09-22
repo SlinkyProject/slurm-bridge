@@ -2274,3 +2274,38 @@ func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
 		})
 	}
 }
+
+func TestSlurmBridge_annotatePodsWithNodes_doesNotReshuffleAlreadyAssignedPod(t *testing.T) {
+	ctx := context.Background()
+	pod1 := st.MakePod().Name("pod1").UID("uid1").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).
+		Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
+	pod2 := st.MakePod().Name("pod2").UID("uid2").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
+
+	fakeClient := kubefake.NewFakeClient(pod1.DeepCopy(), pod2.DeepCopy())
+	sb := &SlurmBridge{Client: fakeClient}
+
+	// Only node2 is left in the pool -- if pod1 (already on node1) got
+	// reshuffled instead of skipped, this call would either hand node1 or
+	// node2 to pod2 nondeterministically and potentially collide with pod1.
+	kubeNodes := sets.New("node1", "node2")
+	podList := &corev1.PodList{Items: []corev1.Pod{*pod1, *pod2}}
+	if err := sb.annotatePodsWithNodes(ctx, 1, kubeNodes, podList); err != nil {
+		t.Fatalf("annotatePodsWithNodes() error = %v, want nil", err)
+	}
+
+	var got1, got2 corev1.Pod
+	if err := fakeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod1), &got1); err != nil {
+		t.Fatal(err)
+	}
+	if err := fakeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod2), &got2); err != nil {
+		t.Fatal(err)
+	}
+	if got1.Annotations[wellknown.AnnotationExternalJobNode] != "node1" {
+		t.Errorf("pod1 node annotation = %q, want unchanged %q", got1.Annotations[wellknown.AnnotationExternalJobNode], "node1")
+	}
+	if got2.Annotations[wellknown.AnnotationExternalJobNode] != "node2" {
+		t.Errorf("pod2 node annotation = %q, want %q", got2.Annotations[wellknown.AnnotationExternalJobNode], "node2")
+	}
+}

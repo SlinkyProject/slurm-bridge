@@ -738,6 +738,24 @@ func (sb *SlurmBridge) labelPodsWithJobId(ctx context.Context, jobid int32, hetj
 // annotatePodsWithNodes will annotate a node assignment to pods
 func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, kubeNodes sets.Set[string], pods *corev1.PodList) error {
 	logger := klog.FromContext(ctx)
+	// Successive PreFilter cycles for siblings in the same gang may reach this
+	// function. Scheduling cycles are serialized, but a sibling may have been
+	// queued before it observed node assignments written by an earlier cycle,
+	// while that earlier pod's binding is still in progress.
+	//
+	// Each call starts with the full Slurm allocation. Preserve assignments already
+	// recorded on pods and remove their nodes from the available set; rebuilding
+	// every assignment could otherwise reshuffle the gang and select a node already
+	// chosen by an earlier scheduling cycle.
+	for _, p := range pods.Items {
+		podJobID := slurmjobir.ParseSlurmJobId(p.Labels[wellknown.LabelExternalJobId])
+		if jobid != podJobID {
+			continue
+		}
+		if existing := p.Annotations[wellknown.AnnotationExternalJobNode]; existing != "" && kubeNodes.Has(existing) {
+			kubeNodes.Delete(existing)
+		}
+	}
 	for _, p := range pods.Items {
 		// Return if there are no nodes left
 		if kubeNodes.Len() == 0 {
@@ -749,6 +767,9 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		podJobID := slurmjobir.ParseSlurmJobId(p.Labels[wellknown.LabelExternalJobId])
 		if jobid != podJobID {
 			logger.V(5).Info("pod JobID does not match external JobID")
+			continue
+		}
+		if p.Annotations[wellknown.AnnotationExternalJobNode] != "" {
 			continue
 		}
 		if p.Annotations == nil {
