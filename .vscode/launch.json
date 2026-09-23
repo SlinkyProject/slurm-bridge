@@ -12,7 +12,10 @@
         "--config", "/tmp/config.yaml.debug"
       ],
       "preLaunchTask": "Setup Controllers",
-      "envFile": "/tmp/slurm-bridge.env"
+      "envFile": "/tmp/slurm-bridge.env",
+      "env": {
+        "SLURM_JWT_FILE": "/tmp/slurm-bridge.env"
+      }
     },
     {
       "name": "Launch Admission",
@@ -40,7 +43,10 @@
         "--slurm-bridge-config", "/tmp/config.yaml.debug"
       ],
       "preLaunchTask": "Setup Scheduler",
-      "envFile": "/tmp/slurm-bridge.env"
+      "envFile": "/tmp/slurm-bridge.env",
+      "env": {
+        "SLURM_JWT_FILE": "/tmp/slurm-bridge.env"
+      }
     },
     {
       "name": "Debug Scheduler",
