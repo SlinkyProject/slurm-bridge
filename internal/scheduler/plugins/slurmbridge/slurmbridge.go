@@ -952,10 +952,10 @@ func validateIDLabel(ctx context.Context, id int32, label string, pod *corev1.Po
 				"slurm job id", id)
 			newPod.Labels[label] = strconv.Itoa(int(id))
 		}
-	} else {
+	} else if currentLabel != "" {
 		logger.V(3).Info("Deleting invalid label from pod",
 			"label", label,
-			"label contents", pod.Labels[label],
+			"label contents", currentLabel,
 		)
 		delete(newPod.Labels, label)
 	}
