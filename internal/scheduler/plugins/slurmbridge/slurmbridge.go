@@ -368,6 +368,9 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 
 	// Construct an intermediate representation of the Slurm external job
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
+	if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
@@ -494,6 +497,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	s, err := getStateData(state)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	// PreFilter rejected the pod before building its job, so there is nothing to submit.
+	if s.slurmJobIR == nil {
+		return nil, fwk.NewStatus(fwk.Unschedulable)
 	}
 
 	// Determine if an external job for the pod exists in Slurm
