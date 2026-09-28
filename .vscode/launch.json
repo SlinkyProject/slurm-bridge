@@ -12,7 +12,10 @@
         "--config", "/tmp/config.yaml.debug"
       ],
       "preLaunchTask": "Setup Controllers",
-      "envFile": "/tmp/slurm-bridge.env"
+      "envFile": "/tmp/slurm-bridge.env",
+      "env": {
+        "SLURM_JWT_FILE": "/tmp/slurm-bridge.env"
+      }
     },
     {
       "name": "Launch Admission",
@@ -36,10 +39,14 @@
       "args": [
         "--v=5",
         "--feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false",
-        "--config", "/tmp/scheduler-config.yaml.debug"
+        "--config", "/tmp/scheduler-config.yaml.debug",
+        "--slurm-bridge-config", "/tmp/config.yaml.debug"
       ],
       "preLaunchTask": "Setup Scheduler",
-      "envFile": "/tmp/slurm-bridge.env"
+      "envFile": "/tmp/slurm-bridge.env",
+      "env": {
+        "SLURM_JWT_FILE": "/tmp/slurm-bridge.env"
+      }
     },
     {
       "name": "Debug Scheduler",
