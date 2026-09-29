@@ -21,6 +21,7 @@
   - [Built-in PodGroup](#built-in-podgroup)
   - [JobSets](#jobsets)
   - [PodGroup coscheduling](#podgroup-coscheduling)
+    - [Migrating from v1alpha1 PodGroups](#migrating-from-v1alpha1-podgroups)
   - [LeaderWorkerSet](#leaderworkerset)
 
 <!-- mdformat-toc end -->
@@ -38,12 +39,12 @@ At this time, `slurm-bridge` has scheduling support for [Jobs],
 [JobSets](#jobsets), [Pods], [built-in PodGroup](#built-in-podgroup)
 (`scheduling.k8s.io/v1alpha2` on Kubernetes **1.36**, or
 `scheduling.k8s.io/v1beta1` on **1.37**),
-[PodGroup coscheduling](#podgroup-coscheduling) (scheduler-plugins), and
-[LeaderWorkerSets]. If your workload requires or benefits from co-scheduled pod
-launch (e.g. MPI, multi-node), prefer [built-in PodGroup](#built-in-podgroup) on
-Kubernetes **1.36 or 1.37** when its API is enabled, or
-[PodGroup coscheduling](#podgroup-coscheduling) when the built-in API is
-unavailable.
+[PodGroup coscheduling](#podgroup-coscheduling) (scheduler-plugins, deprecated),
+and [LeaderWorkerSets]. If your workload requires or benefits from co-scheduled
+pod launch (e.g. MPI, multi-node), use [built-in PodGroup](#built-in-podgroup)
+on Kubernetes **1.36 or 1.37** when its API is enabled. The deprecated
+[PodGroup coscheduling](#podgroup-coscheduling) integration remains available
+for compatibility when the built-in API is unavailable.
 
 ## Using the `slurm-bridge` Scheduler
 
@@ -525,9 +526,17 @@ marked as completed.
 
 ## PodGroup coscheduling
 
-PodGroup coscheduling uses the **scheduler-plugins** CRD
-`scheduling.x-k8s.io/v1alpha1`. On clusters where the supported
-[built-in PodGroup](#built-in-podgroup) API is unavailable, install the
+> [!WARNING]
+> Support for the **scheduler-plugins** PodGroup API
+> `scheduling.x-k8s.io/v1alpha1` is deprecated in `slurm-bridge` and will be
+> removed in an upcoming release. Use the
+> [built-in PodGroup](#built-in-podgroup) API for new workloads. Existing legacy
+> workloads remain supported, but the [admission webhook](admission.md) warns on
+> Pod creation and update when the `scheduling.x-k8s.io/pod-group` label is
+> non-empty. This deprecation does not remove scheduling support.
+
+For compatibility on clusters where the supported built-in PodGroup API is
+unavailable, legacy workloads still require the
 [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
 controller:
 
@@ -548,7 +557,21 @@ Gang size is `spec.minMember` on the PodGroup object.
 | Pod association | `spec.schedulingGroup.podGroupName`                                       | Label `scheduling.x-k8s.io/pod-group` |
 | Gang field      | `spec.schedulingPolicy.gang.minCount`                                     | `spec.minMember`                      |
 
-Both paths are supported by `slurm-bridge` independently.
+### Migrating from v1alpha1 PodGroups
+
+The built-in and scheduler-plugins PodGroups are separate APIs with different
+schemas. Changing only `apiVersion` is not sufficient.
+
+1. Enable the built-in Workload and PodGroup APIs for your cluster as described
+   in [Built-in PodGroup](#built-in-podgroup): `scheduling.k8s.io/v1alpha2` on
+   Kubernetes **1.36** or `scheduling.k8s.io/v1beta1` on **1.37**.
+1. Update new Pod manifests or workload Pod templates to reference the built-in
+   PodGroup through `spec.schedulingGroup.podGroupName`. Remove the
+   `scheduling.x-k8s.io/pod-group` label; leaving it set continues to trigger
+   the deprecation warning.
+1. Let existing legacy workloads finish before removing their PodGroups. Keep
+   the scheduler-plugins CRD and CoScheduling controller installed while any
+   workloads still depend on them.
 
 ## LeaderWorkerSet
 
