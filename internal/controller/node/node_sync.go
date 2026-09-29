@@ -28,7 +28,8 @@ import (
 func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error {
 	var errs []error
 
-	if err := r.syncNodeRegistration(ctx, req); err != nil {
+	registrationOwnsDrain, err := r.syncNodeRegistration(ctx, req)
+	if err != nil {
 		errs = append(errs, err)
 	}
 
@@ -36,8 +37,10 @@ func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error 
 		errs = append(errs, err)
 	}
 
-	if err := r.syncState(ctx, req); err != nil {
-		errs = append(errs, err)
+	if !registrationOwnsDrain {
+		if err := r.syncState(ctx, req); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	return utilerrors.NewAggregate(errs)
@@ -197,14 +200,16 @@ func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request) e
 //   - If the k8s node has the LabelExternalNode label, register it in Slurm.
 //   - If the k8s node does not have the label (or it was removed): drain the node in Slurm
 //     first; only after the Slurm node has finished draining do we remove it from Slurm.
-func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile.Request) error {
+//
+// The returned bool reports whether node registration currently owns the Slurm drain.
+func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile.Request) (bool, error) {
 
 	node := &corev1.Node{}
 	if err := r.Get(ctx, req.NamespacedName, node); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 
 	labels := node.GetLabels()
@@ -214,44 +219,48 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 	_, hasLabel := labels[wellknown.LabelExternalNode]
 
 	if hasLabel {
+		registrationOwnsDrain := false
 		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, r.Client, node.Name)
 		if err != nil {
-			return err
+			return false, err
 		}
 		exists, err := r.slurmControl.NodeExists(ctx, node)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if exists {
 			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if needsRecreate {
+				registrationOwnsDrain = true
 				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
-					return err
+					return registrationOwnsDrain, err
 				}
 			}
 		}
 		if err := r.slurmControl.AddNode(ctx, node, nodeInfo); err != nil {
-			return err
+			return registrationOwnsDrain, err
 		}
+		return registrationOwnsDrain, nil
 	} else {
 		isExternal, err := r.slurmControl.IsNodeExternal(ctx, node)
 		if apierrors.IsNotFound(err) {
-			return nil
+			return false, nil
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 		if isExternal {
 			if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
-				return err
+				return true, err
 			}
+			return true, nil
 		}
 	}
 
-	return nil
+	return false, nil
 }
 
 func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) error {
