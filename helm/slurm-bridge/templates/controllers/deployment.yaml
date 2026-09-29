@@ -71,7 +71,7 @@ spec:
             name: slurm-bridge-config
         - name: slurm-jwt
           secret:
-            secretName: {{ .Values.sharedConfig.slurmJwtSecret }}
+            secretName: {{ include "slurm-bridge.slurmJwtSecret.name" . | quote }}
             items:
-              - key: auth-token
+              - key: {{ include "slurm-bridge.slurmJwtSecret.key" . | quote }}
                 path: auth-token

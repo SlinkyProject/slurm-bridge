@@ -74,7 +74,7 @@ spec:
     key: jwt.key
   secretRef:
     name: slurm-bridge-token
-    key: auth-token
+    key: SLURM_JWT
   username: slurm
   refresh: true
   lifetime: 8760h
@@ -87,7 +87,7 @@ When running Slurm on baremetal:
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm
 kubectl create namespace slurm-bridge
-kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="auth-token=$SLURM_JWT" --type=Opaque
+kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="SLURM_JWT=$SLURM_JWT" --type=Opaque
 ```
 
 ### 3. Download and configure `values.yaml` for the `slurm-bridge` helm chart
