@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
@@ -146,7 +147,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateConstraintsAnnotation(pod); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return podGroupDeprecationWarnings(pod), nil
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -187,7 +188,16 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 			return nil, fmt.Errorf("can't update a running pod's external node annotation")
 		}
 	}
-	return nil, nil
+	return podGroupDeprecationWarnings(newPod), nil
+}
+
+func podGroupDeprecationWarnings(pod *corev1.Pod) admission.Warnings {
+	if pod.Labels[sched.PodGroupLabel] == "" {
+		return nil
+	}
+	return admission.Warnings{
+		"scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
+	}
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
