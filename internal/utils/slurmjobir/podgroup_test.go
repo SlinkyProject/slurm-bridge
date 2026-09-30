@@ -9,7 +9,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -34,7 +34,7 @@ func podWithSchedulingGroup(ns, name, pgName string) *corev1.Pod {
 	}
 }
 
-func newPodGroup(name, ns string, policy schedulingv1alpha2.PodGroupSchedulingPolicy) *PodGroup {
+func newPodGroup(name, ns string, policy schedulingv1beta1.PodGroupSchedulingPolicy) *PodGroup {
 	return &PodGroup{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: PodGroupSpec{
@@ -70,8 +70,8 @@ func Test_translator_fromPodGroup(t *testing.T) {
 		{
 			name: "two pods same scheduling group",
 			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-				newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-					Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+				newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+					Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 				}),
 				podWithSchedulingGroup("default", "p1", "pg1"),
 				podWithSchedulingGroup("default", "p2", "pg1"),
@@ -111,8 +111,8 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 	utilruntime.Must(corev1.AddToScheme(scheme))
 	workloadAPI := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Alpha2)
 
-	pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-		Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+	pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+		Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 	})
 	p1 := podWithSchedulingGroup("default", "p1", "pg1")
 	p2 := podWithSchedulingGroup("default", "p2", "pg1")
@@ -173,8 +173,8 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 		{
 			name: "basic policy skips gang count",
 			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-				newPodGroup("pg2", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-					Basic: &schedulingv1alpha2.BasicSchedulingPolicy{},
+				newPodGroup("pg2", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+					Basic: &schedulingv1beta1.BasicSchedulingPolicy{},
 				}),
 			).Build(),
 			args: args{
@@ -252,8 +252,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 	utilruntime.Must(batchv1.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
 
-	workloadRef := &schedulingv1alpha2.PodGroupTemplateReference{
-		Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
+	workloadRef := &PodGroupTemplateReference{
+		Workload: &WorkloadPodGroupTemplateReference{
 			WorkloadName:         "my-workload",
 			PodGroupTemplateName: "workers",
 		},
@@ -274,8 +274,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "jobset is selected instead of intermediate job",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{
 						wellknown.AnnotationPartition: "podgroup-partition",
@@ -285,6 +285,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-workload",
 						Namespace: "default",
@@ -332,14 +333,15 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "workload overrides job and podgroup",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{wellknown.AnnotationTimeLimit: "10"}
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationTimeLimit: "30"},
@@ -359,8 +361,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "job overrides podgroup without workload ref",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{wellknown.AnnotationTimeLimit: "10"}
 					return pg
@@ -378,8 +380,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "podgroup only when job has no annotations",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{
 						wellknown.AnnotationTimeLimit: "10",
@@ -399,8 +401,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "missing workload falls back to job over podgroup",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{wellknown.AnnotationTimeLimit: "10"}
 					pg.Spec.PodGroupTemplateRef = workloadRef
@@ -419,14 +421,15 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "non-conflicting annotations from each layer",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{wellknown.AnnotationPartition: "pg-partition"}
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationAccount: "wl-account"},
@@ -447,14 +450,15 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "workload wins on same key as job and podgroup",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("pg1", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{wellknown.AnnotationPartition: "pg-partition"}
 					pg.Spec.PodGroupTemplateRef = workloadRef
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "my-workload", Namespace: "default",
 						Annotations: map[string]string{wellknown.AnnotationPartition: "wl-partition"},
@@ -473,11 +477,11 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "workload job-name overrides podgroup object name when they differ",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("training-job-workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("training-job-workers", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
-					pg.Spec.PodGroupTemplateRef = &schedulingv1alpha2.PodGroupTemplateReference{
-						Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
+					pg.Spec.PodGroupTemplateRef = &PodGroupTemplateReference{
+						Workload: &WorkloadPodGroupTemplateReference{
 							WorkloadName:         "training-workload",
 							PodGroupTemplateName: "workers",
 						},
@@ -485,6 +489,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "training-workload", Namespace: "default",
 						Annotations: map[string]string{
@@ -502,14 +507,14 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			name: "workload job-name overrides podgroup job-name annotation",
 			objects: []client.Object{
 				func() *PodGroup {
-					pg := newPodGroup("training-job-workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+					pg := newPodGroup("training-job-workers", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 					})
 					pg.Annotations = map[string]string{
 						wellknown.AnnotationJobName: "pg-slurm-name",
 					}
-					pg.Spec.PodGroupTemplateRef = &schedulingv1alpha2.PodGroupTemplateReference{
-						Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{
+					pg.Spec.PodGroupTemplateRef = &PodGroupTemplateReference{
+						Workload: &WorkloadPodGroupTemplateReference{
 							WorkloadName:         "training-workload",
 							PodGroupTemplateName: "workers",
 						},
@@ -517,6 +522,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 					return pg
 				}(),
 				&Workload{
+					TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "Workload"},
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "training-workload", Namespace: "default",
 						Annotations: map[string]string{

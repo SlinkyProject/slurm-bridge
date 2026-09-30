@@ -6,7 +6,7 @@ package slurmjobir
 import (
 	"fmt"
 
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,16 +46,27 @@ type PodGroup struct {
 }
 
 type PodGroupSpec struct {
-	PodGroupTemplateRef *schedulingv1alpha2.PodGroupTemplateReference `json:"podGroupTemplateRef,omitempty"`
-	WorkloadRef         *WorkloadReference                            `json:"workloadRef,omitempty"`
-	SchedulingPolicy    schedulingv1alpha2.PodGroupSchedulingPolicy   `json:"schedulingPolicy,omitempty"`
+	PodGroupTemplateRef *PodGroupTemplateReference                 `json:"podGroupTemplateRef,omitempty"`
+	WorkloadRef         *WorkloadReference                         `json:"workloadRef,omitempty"`
+	SchedulingPolicy    schedulingv1beta1.PodGroupSchedulingPolicy `json:"schedulingPolicy,omitempty"`
+}
+
+// PodGroupTemplateReference retains the Kubernetes 1.36 wire format after
+// the v1alpha2 Go package was removed in Kubernetes 1.37.
+type PodGroupTemplateReference struct {
+	Workload *WorkloadPodGroupTemplateReference `json:"workload,omitempty"`
+}
+
+type WorkloadPodGroupTemplateReference struct {
+	WorkloadName         string `json:"workloadName"`
+	PodGroupTemplateName string `json:"podGroupTemplateName"`
 }
 
 type WorkloadReference struct {
 	WorkloadName string `json:"workloadName"`
 }
 
-type PodGroupStatus = schedulingv1alpha2.PodGroupStatus
+type PodGroupStatus = schedulingv1beta1.PodGroupStatus
 
 // Workload carries the metadata used for Slurm annotations. The remainder of
 // the Workload object is deliberately left to the API server.
@@ -69,7 +80,12 @@ func (in *PodGroup) DeepCopy() *PodGroup {
 	*out = *in
 	out.ObjectMeta = *in.ObjectMeta.DeepCopy()
 	if in.Spec.PodGroupTemplateRef != nil {
-		out.Spec.PodGroupTemplateRef = in.Spec.PodGroupTemplateRef.DeepCopy()
+		ref := *in.Spec.PodGroupTemplateRef
+		if ref.Workload != nil {
+			workload := *ref.Workload
+			ref.Workload = &workload
+		}
+		out.Spec.PodGroupTemplateRef = &ref
 	}
 	if in.Spec.WorkloadRef != nil {
 		out.Spec.WorkloadRef = new(WorkloadReference)
@@ -88,8 +104,6 @@ func (in *PodGroup) DeepCopyObject() runtime.Object {
 // version. The beta version is preferred when both are advertised.
 // A complete, supported Workload and PodGroup API is required.
 func RegisterWorkloadAPI(discovery workloadAPIResourceDiscovery, scheme *runtime.Scheme) (*WorkloadAPI, error) {
-	// TODO: Document the v1alpha2 cleanup and v1beta1 recreation steps required
-	// when upgrading a cluster from Kubernetes 1.36 to 1.37.
 	for _, version := range []string{WorkloadAPIVersionV1Beta1, WorkloadAPIVersionV1Alpha2} {
 		groupVersion := workloadAPIGroup + "/" + version
 		resources, err := discovery.ServerResourcesForGroupVersion(groupVersion)
@@ -148,7 +162,7 @@ func RegisterWorkloadAPIVersion(scheme *runtime.Scheme, version string) (*Worklo
 func ScheduledConditionForVersion(version string) (string, error) {
 	switch version {
 	case WorkloadAPIVersionV1Alpha2:
-		return schedulingv1alpha2.PodGroupScheduled, nil
+		return "PodGroupScheduled", nil
 	case WorkloadAPIVersionV1Beta1:
 		return "PodGroupInitiallyScheduled", nil
 	default:

@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -66,14 +66,14 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 				TypeMeta:   metav1.TypeMeta{APIVersion: groupVersion, Kind: "PodGroup"},
 				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "group", Generation: 1},
 				Spec: slurmjobir.PodGroupSpec{
-					SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 1},
+					SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{
+						Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 1},
 					},
 				},
 			}
 			if version == slurmjobir.WorkloadAPIVersionV1Alpha2 {
-				pg.Spec.PodGroupTemplateRef = &schedulingv1alpha2.PodGroupTemplateReference{
-					Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{WorkloadName: "workload"},
+				pg.Spec.PodGroupTemplateRef = &slurmjobir.PodGroupTemplateReference{
+					Workload: &slurmjobir.WorkloadPodGroupTemplateReference{WorkloadName: "workload"},
 				}
 			} else {
 				pg.Spec.WorkloadRef = &slurmjobir.WorkloadReference{WorkloadName: "workload"}

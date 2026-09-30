@@ -16,7 +16,7 @@ import (
 // It deliberately does not try to prove what an arbitrary CEL expression
 // implies about the driver.
 func validateDeviceProfileSelector(profile DeviceProfile) error {
-	compiled := deviceProfileCELCache.Check(profile.Selector)
+	compiled := deviceProfileCELCache.GetOrCompile(profile.Selector)
 	if compiled.Error != nil {
 		return fmt.Errorf("compile selector for device profile %q: %w", profile.Name, compiled.Error)
 	}
