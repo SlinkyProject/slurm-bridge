@@ -15,6 +15,14 @@ release:
 chart:
   version: 1.2.3
   appVersion: 1.2.3
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+  objects: []
 tests:
   - it: manifests should match snapshot
     set:
@@ -128,6 +136,198 @@ tests:
           value: 1
       - notExists:
           path: spec.minAvailable
+  - it: cert-manager injects the CA, so no caBundle is written into the webhook configurations
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - notExists:
+          path: webhooks[0].clientConfig.caBundle
+  - it: the self-signed path issues a certificate Secret and trusts it in both webhook configurations
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: false
+    asserts:
+      - hasDocuments:
+          count: 3
+      - documentSelector:
+          path: kind
+          value: Secret
+        isNotNullOrEmpty:
+          path: data["tls.crt"]
+      - documentSelector:
+          path: kind
+          value: Secret
+        isNotNullOrEmpty:
+          path: data["tls.key"]
+      - documentSelector:
+          path: kind
+          value: Secret
+        isNotNullOrEmpty:
+          path: data["ca.crt"]
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        isNotNullOrEmpty:
+          path: webhooks[0].clientConfig.caBundle
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        isNotNullOrEmpty:
+          path: webhooks[0].clientConfig.caBundle
+  - it: the self-signed path reuses the certificate already in the cluster
+    template: admission/webhook.yaml
+    kubernetesProvider:
+      objects:
+        - kind: Secret
+          apiVersion: v1
+          metadata:
+            name: slurm-bridge-admission
+            namespace: test-namespace
+          type: kubernetes.io/tls
+          data:
+            tls.crt: aW4tY2x1c3Rlci1jZXJ0
+            tls.key: aW4tY2x1c3Rlci1rZXk=
+            ca.crt: aW4tY2x1c3Rlci1jYQ==
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: false
+    asserts:
+      - documentSelector:
+          path: kind
+          value: Secret
+        equal:
+          path: data["tls.crt"]
+          value: aW4tY2x1c3Rlci1jZXJ0
+      - documentSelector:
+          path: kind
+          value: Secret
+        equal:
+          path: data["tls.key"]
+          value: aW4tY2x1c3Rlci1rZXk=
+      - documentSelector:
+          path: kind
+          value: Secret
+        equal:
+          path: data["ca.crt"]
+          value: aW4tY2x1c3Rlci1jYQ==
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].clientConfig.caBundle
+          value: aW4tY2x1c3Rlci1jYQ==
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[0].clientConfig.caBundle
+          value: aW4tY2x1c3Rlci1jYQ==
+  - it: an incomplete certificate Secret in the cluster is reissued rather than reused
+    template: admission/webhook.yaml
+    kubernetesProvider:
+      objects:
+        - kind: Secret
+          apiVersion: v1
+          metadata:
+            name: slurm-bridge-admission
+            namespace: test-namespace
+          type: kubernetes.io/tls
+          data:
+            tls.crt: aW4tY2x1c3Rlci1jZXJ0
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: false
+    asserts:
+      - documentSelector:
+          path: kind
+          value: Secret
+        notEqual:
+          path: data["tls.crt"]
+          value: aW4tY2x1c3Rlci1jZXJ0
+      - documentSelector:
+          path: kind
+          value: Secret
+        isNotNullOrEmpty:
+          path: data["tls.key"]
+  - it: an externally managed certificate is trusted verbatim and no Secret is issued
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: false
+        tls:
+          existingSecret: my-webhook-cert
+          caBundle: bXktY2EtYnVuZGxl
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].clientConfig.caBundle
+          value: bXktY2EtYnVuZGxl
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[0].clientConfig.caBundle
+          value: bXktY2EtYnVuZGxl
+  - it: the admission pod serves from the externally managed certificate Secret
+    template: admission/deployment.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: false
+        tls:
+          existingSecret: my-webhook-cert
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: certificates
+            secret:
+              defaultMode: 420
+              secretName: my-webhook-cert
+  - it: rejects an externally managed Secret while cert-manager owns the certificate
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: true
+        tls:
+          existingSecret: my-webhook-cert
+    asserts:
+      - failedTemplate:
+          errorPattern: admission.tls requires admission.certManager.enabled=false
+  - it: rejects an externally supplied caBundle while cert-manager injects its own
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        certManager:
+          enabled: true
+        tls:
+          caBundle: bXktY2EtYnVuZGxl
+    asserts:
+      - failedTemplate:
+          errorPattern: admission.tls requires admission.certManager.enabled=false
   - it: does not expose the Slurm JWT to admission
     template: admission/deployment.yaml
     set:

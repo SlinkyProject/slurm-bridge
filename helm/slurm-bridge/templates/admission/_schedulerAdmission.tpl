@@ -32,6 +32,13 @@ Determine bridge schedulerAdmission image reference (repo:tag)
 {{- end }}
 
 {{/*
+Name of the Secret holding the schedulerAdmission serving certificate
+*/}}
+{{- define "slurm-bridge.admission.certSecretName" -}}
+{{ .Values.admission.tls.existingSecret | default (include "slurm-bridge.admission.name" .) }}
+{{- end }}
+
+{{/*
 The schedulerAdmission labels
 */}}
 {{- define "slurm-bridge.admission.labels" -}}
