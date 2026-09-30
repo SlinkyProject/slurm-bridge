@@ -1,3 +1,15 @@
+## v1.0.7
+
+### Fixed
+
+- GO-2026-6354 GO-2026-6355.
+- Apply controllers.resources to the controllers container.
+- Allocate DRA GPUs when Slurm and Kubernetes node names differ.
+- GO-2026-6348 GO-2026-6441 GO-2026-6443.
+- Match Slurm host-list expansion for scheduling.
+- Ensure annotatePodsWithNodes is idempotent.
+- Exclude development files from the packaged Helm chart.
+
 ## v1.0.6
 
 ### Fixed
