@@ -90,6 +90,12 @@ push-charts: build-chart ## Push OCI packages.
 
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
 SLURM_NODE_MODE ?= external
+# The Kind script selects defaults; Skaffold also uses KUBERNETES_VERSION.
+export KUBERNETES_VERSION KIND_NODE_IMAGE KIND_CONFIG
+
+.PHONY: kind-image
+kind-image: ## Print the pinned Kind node image for KUBERNETES_VERSION.
+	@./hack/kind.sh --print-image
 
 .PHONY: kind-start
 kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
