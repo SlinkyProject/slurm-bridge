@@ -2323,6 +2323,7 @@ func Test_validateIDLabel(t *testing.T) {
 	}{
 		{name: "set missing label", id: 5, labels: map[string]string{}, wantLabels: map[string]string{label: "5"}},
 		{name: "delete stale label", id: 0, labels: map[string]string{label: "7"}, wantLabels: map[string]string{}, wantDelete: true},
+		{name: "delete present empty-value label", id: 0, labels: map[string]string{label: ""}, wantLabels: map[string]string{}, wantDelete: true},
 		{name: "no label, no delete log", id: 0, labels: map[string]string{}, wantLabels: map[string]string{}},
 	}
 	for _, tt := range tests {
