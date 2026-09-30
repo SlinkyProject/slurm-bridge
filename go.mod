@@ -3,7 +3,7 @@ module github.com/SlinkyProject/slurm-bridge
 go 1.26.6
 
 require (
-	github.com/SlinkyProject/slurm-client v1.0.7-0.20260917142937-647f6af2fb4c
+	github.com/SlinkyProject/slurm-client v1.0.7
 	github.com/onsi/ginkgo/v2 v2.28.3
 	github.com/onsi/gomega v1.40.0
 	k8s.io/api v0.36.1
