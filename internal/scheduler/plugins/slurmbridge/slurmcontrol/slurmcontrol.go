@@ -13,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/cpuset"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -375,13 +376,25 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		return []int32{}, err
 	}
 
-	// TODO This will be refactored to get and parse component jobids
-	// instead of inferring them
-	baseJobID := ptr.Deref(job.JobId, 0)
-	jobIDs := make([]int32, len(slurmJobIR.Components))
-	for i := range jobIDs {
-		jobIDs[i] = baseJobID + int32(i)
+	jobID := ptr.Deref(job.JobId, 0)
+	if jobID == 0 {
+		err := errors.New("job submission returned invalid jobid")
+		return nil, err
 	}
+
+	jobIDs := []int32{}
+	if job.HetJobIdSet != nil && *job.HetJobIdSet != "" {
+		hetJobIDs, err := cpuset.Parse(*job.HetJobIdSet)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range hetJobIDs.List() {
+			jobIDs = append(jobIDs, int32(id)) // nolint:gosec // Value bounded by Slurm
+		}
+	} else {
+		jobIDs = append(jobIDs, jobID)
+	}
+
 	return jobIDs, nil
 }
 
