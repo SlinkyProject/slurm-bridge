@@ -1,3 +1,15 @@
+## v1.2.3
+
+### Fixed
+
+- GO-2026-6354 GO-2026-6355.
+- Apply controllers.resources to the controllers container.
+- Schedule pods across nodes with different GPU resources.
+- GO-2026-6348 GO-2026-6441 GO-2026-6443.
+- Match Slurm host-list expansion for scheduling and device allocations.
+- Ensure annotatePodsWithNodes is idempotent.
+- Exclude development files from the packaged Helm chart.
+
 ## v1.2.2
 
 ### Fixed
