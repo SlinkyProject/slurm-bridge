@@ -797,9 +797,7 @@ function main() {
 		return
 	fi
 	if ! $OPT_EXISTING_CLUSTER && ! $OPT_DELETE; then
-		if [ -z "${KIND_NODE_IMAGE:-}" ]; then
-			tool::require_version kind "$KIND_VERSION" "https://kind.sigs.k8s.io/" exact
-		fi
+		tool::require_version kind "$KIND_VERSION" "https://kind.sigs.k8s.io/" exact
 		kind::defaults
 	fi
 	local cluster_name="${1:-"kind"}"
