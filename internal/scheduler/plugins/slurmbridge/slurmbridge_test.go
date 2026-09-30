@@ -13,7 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -734,8 +734,8 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 			Name:      pgName,
 		},
 		Spec: slurmjobir.PodGroupSpec{
-			SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
-				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+			SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 			},
 		},
 	}
@@ -816,8 +816,8 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 			Name:      pgName,
 		},
 		Spec: slurmjobir.PodGroupSpec{
-			SchedulingPolicy: schedulingv1alpha2.PodGroupSchedulingPolicy{
-				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+			SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 			},
 		},
 	}

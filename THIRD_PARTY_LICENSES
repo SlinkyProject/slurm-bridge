@@ -93,7 +93,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/fxamacker/cbor/v2
 - Name: github.com/fxamacker/cbor/v2
-- Version: v2.9.0
+- Version: v2.9.1
 - License: MIT
 
 ### github.com/getkin/kin-openapi/openapi3
@@ -186,11 +186,6 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v0.27.1
 - License: Apache-2.0
 
-### github.com/gogo/protobuf
-- Name: github.com/gogo/protobuf
-- Version: v1.3.2
-- License: BSD-3-Clause
-
 ### github.com/golang/protobuf/proto
 - Name: github.com/golang/protobuf/proto
 - Version: v1.5.4
@@ -238,7 +233,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/grpc-ecosystem/grpc-gateway/v2
 - Name: github.com/grpc-ecosystem/grpc-gateway/v2
-- Version: v2.28.0
+- Version: v2.29.0
 - License: BSD-3-Clause
 
 ### github.com/json-iterator/go
@@ -328,12 +323,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 - Name: github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
-- Version: v1.23.2
+- Version: v1.24.0
 - License: BSD-3-Clause
 
 ### github.com/prometheus/client_golang/prometheus
 - Name: github.com/prometheus/client_golang/prometheus
-- Version: v1.23.2
+- Version: v1.24.0
 - License: Apache-2.0
 
 ### github.com/prometheus/client_model/go
@@ -343,12 +338,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/prometheus/common
 - Name: github.com/prometheus/common
-- Version: v0.67.5
+- Version: v0.70.0
 - License: Apache-2.0
 
 ### github.com/prometheus/procfs
 - Name: github.com/prometheus/procfs
-- Version: v0.20.1
+- Version: v0.21.1
 - License: Apache-2.0
 
 ### github.com/robfig/cron/v3
@@ -378,17 +373,17 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.etcd.io/etcd/api/v3
 - Name: go.etcd.io/etcd/api/v3
-- Version: v3.6.8
+- Version: v3.7.0
 - License: Apache-2.0
 
 ### go.etcd.io/etcd/client/pkg/v3
 - Name: go.etcd.io/etcd/client/pkg/v3
-- Version: v3.6.14
+- Version: v3.7.0
 - License: Apache-2.0
 
 ### go.etcd.io/etcd/client/v3
 - Name: go.etcd.io/etcd/client/v3
-- Version: v3.6.8
+- Version: v3.7.0
 - License: Apache-2.0
 
 ### go.opentelemetry.io/auto/sdk
@@ -408,12 +403,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
 - Name: go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
-- Version: v0.68.0
+- Version: v0.69.0
 - License: Apache-2.0
 
 ### go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
 - Name: go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
-- Version: v0.68.0
+- Version: v0.69.0
 - License: BSD-3-Clause
 
 ### go.opentelemetry.io/otel
@@ -428,22 +423,22 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.opentelemetry.io/otel/exporters/otlp/otlptrace
 - Name: go.opentelemetry.io/otel/exporters/otlp/otlptrace
-- Version: v1.43.0
+- Version: v1.44.0
 - License: Apache-2.0
 
 ### go.opentelemetry.io/otel/exporters/otlp/otlptrace
 - Name: go.opentelemetry.io/otel/exporters/otlp/otlptrace
-- Version: v1.43.0
+- Version: v1.44.0
 - License: BSD-3-Clause
 
 ### go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
 - Name: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
-- Version: v1.43.0
+- Version: v1.44.0
 - License: Apache-2.0
 
 ### go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
 - Name: go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
-- Version: v1.43.0
+- Version: v1.44.0
 - License: BSD-3-Clause
 
 ### go.opentelemetry.io/otel/metric
@@ -508,7 +503,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/exp/slices
 - Name: golang.org/x/exp/slices
-- Version: v0.0.0-20260218203240-3dfff04db8fa
+- Version: v0.0.0-20260410095643-746e56fc9e2f
 - License: BSD-3-Clause
 
 ### golang.org/x/net
@@ -588,62 +583,62 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/api
 - Name: k8s.io/api
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/apiextensions-apiserver/pkg
 - Name: k8s.io/apiextensions-apiserver/pkg
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/apimachinery/pkg
 - Name: k8s.io/apimachinery/pkg
-- Version: v0.36.3
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/apimachinery/third_party/forked/golang
 - Name: k8s.io/apimachinery/third_party/forked/golang
-- Version: v0.36.3
+- Version: v0.37.1
 - License: BSD-3-Clause
 
 ### k8s.io/apiserver
 - Name: k8s.io/apiserver
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/client-go
 - Name: k8s.io/client-go
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/cloud-provider/volume
 - Name: k8s.io/cloud-provider/volume
-- Version: v0.35.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/component-base
 - Name: k8s.io/component-base
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/component-helpers
 - Name: k8s.io/component-helpers
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/controller-manager/pkg/features
 - Name: k8s.io/controller-manager/pkg/features
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/csi-translation-lib
 - Name: k8s.io/csi-translation-lib
-- Version: v0.35.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/dynamic-resource-allocation
 - Name: k8s.io/dynamic-resource-allocation
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/klog/v2
@@ -653,57 +648,57 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### k8s.io/kms
 - Name: k8s.io/kms
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg
 - Name: k8s.io/kube-openapi/pkg
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/internal/third_party/go-json-experiment/json
 - Name: k8s.io/kube-openapi/pkg/internal/third_party/go-json-experiment/json
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: BSD-3-Clause
 
 ### k8s.io/kube-openapi/pkg/internal/third_party/govalidator
 - Name: k8s.io/kube-openapi/pkg/internal/third_party/govalidator
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: MIT
 
 ### k8s.io/kube-openapi/pkg/validation/errors
 - Name: k8s.io/kube-openapi/pkg/validation/errors
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/validation/spec
 - Name: k8s.io/kube-openapi/pkg/validation/spec
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: Apache-2.0
 
 ### k8s.io/kube-openapi/pkg/validation/strfmt
 - Name: k8s.io/kube-openapi/pkg/validation/strfmt
-- Version: v0.0.0-20260319004828-5883c5ee87b9
+- Version: v0.0.0-20260721132016-d427ff9ee9ad
 - License: Apache-2.0
 
 ### k8s.io/kube-scheduler
 - Name: k8s.io/kube-scheduler
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/kubelet/pkg/apis
 - Name: k8s.io/kubelet/pkg/apis
-- Version: v0.36.2
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/kubernetes
 - Name: k8s.io/kubernetes
-- Version: v1.36.2
+- Version: v1.37.1
 - License: Apache-2.0
 
 ### k8s.io/streaming/pkg
 - Name: k8s.io/streaming/pkg
-- Version: v0.36.3
+- Version: v0.37.1
 - License: Apache-2.0
 
 ### k8s.io/utils
@@ -723,12 +718,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Name: sigs.k8s.io/apiserver-network-proxy/konnectivity-client
-- Version: v0.34.0
+- Version: v0.36.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
-- Version: v0.24.0
+- Version: v0.25.1
 - License: Apache-2.0
 
 ### sigs.k8s.io/e2e-framework
@@ -763,12 +758,12 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/scheduler-plugins/apis
 - Name: sigs.k8s.io/scheduler-plugins/apis
-- Version: v0.33.5
+- Version: v0.35.7
 - License: Apache-2.0
 
 ### sigs.k8s.io/structured-merge-diff/v6
 - Name: sigs.k8s.io/structured-merge-diff/v6
-- Version: v6.3.3
+- Version: v6.4.2
 - License: Apache-2.0
 
 ### sigs.k8s.io/yaml

@@ -19,6 +19,7 @@
   - [Pod grouping](#pod-grouping)
     - [Other controller owners](#other-controller-owners)
   - [Built-in PodGroup](#built-in-podgroup)
+    - [Upgrading from Kubernetes 1.36 to 1.37](#upgrading-from-kubernetes-136-to-137)
   - [JobSets](#jobsets)
   - [PodGroup coscheduling](#podgroup-coscheduling)
     - [Migrating from v1alpha1 PodGroups](#migrating-from-v1alpha1-podgroups)
@@ -83,6 +84,11 @@ ResourceClaim and records the allocated devices for the Pod. Additional indexed
 DeviceClasses are supported when they resolve to a configured device profile.
 Other DeviceClass extended resources are unsupported. Validation covers requests
 and limits in both init containers and regular containers.
+
+The bridge keeps `DRADeviceTaintRules` disabled by default because clusters
+older than Kubernetes 1.37 do not serve `resource.k8s.io/v1` DeviceTaintRules.
+Slurm chooses the devices, so Kubernetes device taints do not stop Slurm from
+allocating a tainted device.
 
 Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
 shared Slurm Bridge configuration. The built-in profiles cover CPU, NVIDIA GPU,
@@ -515,6 +521,42 @@ PodGroup under that Workload. Each gang still submits a separate Slurm external
 job (distinct job ID on the pods), but all share the same Slurm job **name** in
 `squeue`. Use the Workload for **shared** parameters (partition, account, QOS,
 time limit) and **PodGroup** for per-gang identifiers.
+
+### Upgrading from Kubernetes 1.36 to 1.37
+
+Kubernetes 1.37 does not serve `scheduling.k8s.io/v1alpha2`, so Workloads and
+PodGroups created on 1.36 are not available after the upgrade. A Pod's
+`spec.schedulingGroup.podGroupName` cannot change. Running Pods keep running
+with their Slurm jobs. Pending Pods wait until a PodGroup with that name exists
+again.
+
+1. Before the upgrade, save the objects you want to keep:
+
+   ```sh
+   kubectl get workloads.scheduling.k8s.io,podgroups.scheduling.k8s.io \
+     --all-namespaces --output yaml > workloads-v1alpha2.yaml
+   ```
+
+1. Upgrade the cluster. Enable `scheduling.k8s.io/v1beta1` and the
+   `GenericWorkload` gate, as in [`hack/kind.yaml`](../hack/kind.yaml).
+
+1. Restart the scheduler so it discovers `v1beta1`:
+
+   ```sh
+   kubectl --namespace slurm rollout restart deployment/slurm-bridge-scheduler
+   ```
+
+1. Convert the saved objects and apply them with the same names and namespaces.
+   Pending Pods then join their groups.
+
+   - Set `apiVersion: scheduling.k8s.io/v1beta1`.
+   - In PodGroups, replace
+     `spec.podGroupTemplateRef.workload.{workloadName,podGroupTemplateName}`
+     with `spec.workloadRef.{workloadName,templateName}`.
+   - In PodGroups and in each Workload `spec.podGroupTemplates` entry, replace
+     `disruptionMode: Pod` with `disruptionMode: {single: {}}` and
+     `disruptionMode: PodGroup` with `disruptionMode: {all: {}}`.
+   - Remove `status`, `metadata.resourceVersion`, and `metadata.uid`.
 
 ## JobSets
 

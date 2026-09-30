@@ -43,7 +43,6 @@ Third-party Dependencies:
 - github.com/go-openapi/swag/stringutils (Apache-2.0)
 - github.com/go-openapi/swag/typeutils (Apache-2.0)
 - github.com/go-openapi/swag/yamlutils (Apache-2.0)
-- github.com/gogo/protobuf (BSD-3-Clause)
 - github.com/golang/protobuf/proto (BSD-3-Clause)
 - github.com/google/cel-go (Apache-2.0)
 - github.com/google/cel-go (BSD-3-Clause)

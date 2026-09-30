@@ -9,7 +9,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -44,8 +44,8 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 			} {
 				t.Run(tt.name, func(t *testing.T) {
 					ctx := context.Background()
-					pg := newPodGroup("workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-						Basic: &schedulingv1alpha2.BasicSchedulingPolicy{},
+					pg := newPodGroup("workers", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+						Basic: &schedulingv1beta1.BasicSchedulingPolicy{},
 					})
 					pg.TypeMeta = api.PodGroupTypeMeta
 					pg.Annotations = map[string]string{
@@ -54,8 +54,8 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 						wellknown.AnnotationQOS:       "group-qos",
 					}
 					if version == WorkloadAPIVersionV1Alpha2 {
-						pg.Spec.PodGroupTemplateRef = &schedulingv1alpha2.PodGroupTemplateReference{
-							Workload: &schedulingv1alpha2.WorkloadPodGroupTemplateReference{WorkloadName: "workload"},
+						pg.Spec.PodGroupTemplateRef = &PodGroupTemplateReference{
+							Workload: &WorkloadPodGroupTemplateReference{WorkloadName: "workload"},
 						}
 					} else {
 						pg.Spec.WorkloadRef = &WorkloadReference{WorkloadName: "workload"}
@@ -144,7 +144,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupOwnerScheduling(t *testing.T) {
 					utilruntime.Must(corev1.AddToScheme(scheme))
 					utilruntime.Must(lwsv1.AddToScheme(scheme))
 					api := mustRegisterWorkloadAPI(t, scheme, version)
-					pg := newPodGroup("workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{Basic: &schedulingv1alpha2.BasicSchedulingPolicy{}})
+					pg := newPodGroup("workers", "default", schedulingv1beta1.PodGroupSchedulingPolicy{Basic: &schedulingv1beta1.BasicSchedulingPolicy{}})
 					pod := podWithSchedulingGroup("default", "p1", pg.Name)
 					pod.Annotations = map[string]string{wellknown.AnnotationPartition: "pod-partition"}
 					pod.Labels = map[string]string{lwsv1.GroupUniqueHashLabelKey: "group-0"}
@@ -199,8 +199,8 @@ func TestTranslateToSlurmJobIR_GangPodGroupReadiness(t *testing.T) {
 			scheme := runtime.NewScheme()
 			utilruntime.Must(corev1.AddToScheme(scheme))
 			api := mustRegisterWorkloadAPI(t, scheme, version)
-			pg := newPodGroup("workers", "default", schedulingv1alpha2.PodGroupSchedulingPolicy{
-				Gang: &schedulingv1alpha2.GangSchedulingPolicy{MinCount: 2},
+			pg := newPodGroup("workers", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
 			})
 			pod := podWithSchedulingGroup("default", "p1", pg.Name)
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pg, pod).Build()
