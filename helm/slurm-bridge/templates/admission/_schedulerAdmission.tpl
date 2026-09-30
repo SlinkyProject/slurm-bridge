@@ -11,6 +11,14 @@ Name of the schedulerAdmission
 {{- end }}
 
 {{/*
+Name of the schedulerAdmission for cluster-scoped objects, which two releases
+of the chart would otherwise collide on.
+*/}}
+{{- define "slurm-bridge.admission.fullname" -}}
+{{ printf "%s-admission" (include "slurm-bridge.fullname" .) }}
+{{- end }}
+
+{{/*
 Determine bridge schedulerAdmission image repository
 */}}
 {{- define "slurm-bridge.admission.image.repository" -}}

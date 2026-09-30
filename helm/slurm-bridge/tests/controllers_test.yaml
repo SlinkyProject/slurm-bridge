@@ -81,6 +81,35 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --leader-elect=true
+  - it: the controllers ClusterRole is release-scoped and carries no namespace
+    template: controllers/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-controllers
+      - notExists:
+          path: metadata.namespace
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: controllers
+  - it: the controllers ClusterRoleBinding binds the release-scoped ClusterRole to the controllers account
+    template: controllers/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRoleBinding
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-slurm-bridge-controllers
+      - equal:
+          path: roleRef.name
+          value: test-release-slurm-bridge-controllers
+      - equal:
+          path: subjects[0].name
+          value: slurm-bridge-controllers
   - it: controllers can update their leader election lease
     template: controllers/rbac.yaml
     documentSelector:
