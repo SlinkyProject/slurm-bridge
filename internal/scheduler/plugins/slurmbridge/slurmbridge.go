@@ -941,7 +941,7 @@ func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid i
 func validateIDLabel(ctx context.Context, id int32, label string, pod *corev1.Pod, newPod *corev1.Pod) {
 	logger := klog.FromContext(ctx)
 
-	currentLabel := pod.Labels[label]
+	currentLabel, labelPresent := pod.Labels[label]
 	currentID := slurmjobir.ParseSlurmJobId(currentLabel)
 
 	if id > 0 {
@@ -952,10 +952,10 @@ func validateIDLabel(ctx context.Context, id int32, label string, pod *corev1.Po
 				"slurm job id", id)
 			newPod.Labels[label] = strconv.Itoa(int(id))
 		}
-	} else {
+	} else if labelPresent {
 		logger.V(3).Info("Deleting invalid label from pod",
 			"label", label,
-			"label contents", pod.Labels[label],
+			"label contents", currentLabel,
 		)
 		delete(newPod.Labels, label)
 	}
