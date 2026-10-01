@@ -378,7 +378,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.etcd.io/etcd/client/pkg/v3
 - Name: go.etcd.io/etcd/client/pkg/v3
-- Version: v3.7.0
+- Version: v3.7.1
 - License: Apache-2.0
 
 ### go.etcd.io/etcd/client/v3
