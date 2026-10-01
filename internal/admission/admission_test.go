@@ -1427,7 +1427,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "RunningPodCantChangeJobID",
+			name: "RunningPodCanChangeJobID",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},
 			},
@@ -1454,10 +1454,10 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				},
 			},
 			want:    nil,
-			wantErr: true,
+			wantErr: false,
 		},
 		{
-			name: "RunningPodCantChangeNode",
+			name: "RunningPodCanChangeNode",
 			fields: fields{
 				ManagedNamespaces: []string{namespace},
 			},
@@ -1484,81 +1484,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 				},
 			},
 			want:    nil,
-			wantErr: true,
-		},
-		{
-			name: "RunningPodWithSchedulerNameCantChangeJobIDInUnmanagedNamespace",
-			fields: fields{
-				SchedulerName:     SchedulerName,
-				ManagedNamespaces: []string{namespace},
-			},
-			args: args{
-				ctx: contextWithAdmissionSubresource(""),
-				oldPod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "unmanaged-ns",
-						Labels: map[string]string{
-							wellknown.LabelExternalJobId: "1",
-						},
-					},
-					Spec: corev1.PodSpec{
-						SchedulerName: SchedulerName,
-					},
-				},
-				newPod: &corev1.Pod{
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "unmanaged-ns",
-						Labels: map[string]string{
-							wellknown.LabelExternalJobId: "2",
-						},
-					},
-					Spec: corev1.PodSpec{
-						SchedulerName: SchedulerName,
-					},
-				},
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
-			name: "RunningPodWithSchedulerNameCantChangeNodeInUnmanagedNamespace",
-			fields: fields{
-				SchedulerName:     SchedulerName,
-				ManagedNamespaces: []string{namespace},
-			},
-			args: args{
-				ctx: contextWithAdmissionSubresource(""),
-				oldPod: &corev1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "unmanaged-ns",
-						Annotations: map[string]string{
-							wellknown.AnnotationExternalJobNode: "node1",
-						},
-					},
-					Spec: corev1.PodSpec{
-						SchedulerName: SchedulerName,
-					},
-				},
-				newPod: &corev1.Pod{
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-					},
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: "unmanaged-ns",
-						Annotations: map[string]string{
-							wellknown.AnnotationExternalJobNode: "node2",
-						},
-					},
-					Spec: corev1.PodSpec{
-						SchedulerName: SchedulerName,
-					},
-				},
-			},
-			want:    nil,
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "PodWithDifferentSchedulerInUnmanagedNamespace",

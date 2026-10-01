@@ -176,18 +176,6 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if err := validateConstraintsAnnotation(newPod); err != nil {
 		return nil, err
 	}
-	// Once a pod has been placed by the Slurm bridge scheduler the jobid and
-	// node annotations should not be modified.
-	if newPod.Status.Phase == corev1.PodRunning {
-		if newPod.Labels[wellknown.LabelExternalJobId] !=
-			oldPod.Labels[wellknown.LabelExternalJobId] {
-			return nil, fmt.Errorf("can't update a running pod's external jobid label")
-		}
-		if newPod.Annotations[wellknown.AnnotationExternalJobNode] !=
-			oldPod.Annotations[wellknown.AnnotationExternalJobNode] {
-			return nil, fmt.Errorf("can't update a running pod's external node annotation")
-		}
-	}
 	return podGroupDeprecationWarnings(newPod), nil
 }
 
