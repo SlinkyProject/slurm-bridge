@@ -147,6 +147,7 @@ func isJobNotPendingError(err error) bool {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get
 // +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=get
+// +kubebuilder:rbac:groups=ray.io,resources=rayclusters,verbs=get
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=patch;update
 
