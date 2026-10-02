@@ -2343,3 +2343,12 @@ func Test_validateIDLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestSlurmBridge_PostFilterWithoutJobIR(t *testing.T) {
+	state := framework.NewCycleState()
+	state.Write(stateKey, &stateData{})
+	_, status := (&SlurmBridge{}).PostFilter(context.Background(), state, st.MakePod().Obj(), nil)
+	if status.Code() != fwk.Unschedulable {
+		t.Fatalf("status = %v, want Unschedulable", status)
+	}
+}

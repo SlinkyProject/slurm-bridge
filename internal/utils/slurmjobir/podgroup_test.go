@@ -5,6 +5,7 @@ package slurmjobir
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -581,6 +582,37 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			}
 			if tt.wantNoWckey && got.Components[0].JobInfo.Wckey != nil {
 				t.Errorf("Wckey = %q, want Pod annotation ignored", *got.Components[0].JobInfo.Wckey)
+			}
+		})
+	}
+}
+
+func TestValidatePodGroupSpecRejectsUnsupportedFields(t *testing.T) {
+	gang := schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2}}
+	withTopology := newPodGroup("pg", "default", gang)
+	withTopology.Spec.SchedulingConstraints = &schedulingv1beta1.PodGroupSchedulingConstraints{
+		Topology: []schedulingv1beta1.TopologyConstraint{{Key: "topology.kubernetes.io/zone"}},
+	}
+	withClaims := newPodGroup("pg", "default", gang)
+	withClaims.Spec.ResourceClaims = []schedulingv1beta1.PodGroupResourceClaim{{Name: "gpus"}}
+
+	tests := []struct {
+		name    string
+		pg      *PodGroup
+		wantErr bool
+	}{
+		{"plain gang", newPodGroup("pg", "default", gang), false},
+		{"topology constraint", withTopology, true},
+		{"group resource claims", withClaims, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePodGroupSpec(tt.pg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validatePodGroupSpec() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, ErrorPodGroupUnsupported) {
+				t.Fatalf("error %v does not wrap ErrorPodGroupUnsupported", err)
 			}
 		})
 	}

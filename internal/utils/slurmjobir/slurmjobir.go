@@ -148,6 +148,9 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 		if err := t.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
 			return nil, err
 		}
+		if err := validatePodGroupSpec(pg); err != nil {
+			return nil, err
+		}
 		if pg.Spec.SchedulingPolicy.Gang != nil {
 			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
 			rootPOM.Name = pgName

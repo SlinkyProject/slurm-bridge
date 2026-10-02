@@ -49,6 +49,9 @@ type PodGroupSpec struct {
 	PodGroupTemplateRef *PodGroupTemplateReference                 `json:"podGroupTemplateRef,omitempty"`
 	WorkloadRef         *WorkloadReference                         `json:"workloadRef,omitempty"`
 	SchedulingPolicy    schedulingv1beta1.PodGroupSchedulingPolicy `json:"schedulingPolicy,omitempty"`
+	// Read only to reject what slurm-bridge cannot honor.
+	SchedulingConstraints *schedulingv1beta1.PodGroupSchedulingConstraints `json:"schedulingConstraints,omitempty"`
+	ResourceClaims        []schedulingv1beta1.PodGroupResourceClaim        `json:"resourceClaims,omitempty"`
 }
 
 // PodGroupTemplateReference retains the Kubernetes 1.36 wire format after

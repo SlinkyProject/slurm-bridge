@@ -23,7 +23,22 @@ import (
 var (
 	ErrorPodGroupCouldNotGet = errors.New("could not get podgroup")
 	ErrorPodGroupNoPods      = errors.New("no pods for scheduling group found")
+	ErrorPodGroupUnsupported = errors.New("unsupported PodGroup field")
 )
+
+// validatePodGroupSpec rejects PodGroup fields Slurm cannot honor, rather than
+// scheduling the group as if they were not set.
+func validatePodGroupSpec(pg *PodGroup) error {
+	if pg.Spec.SchedulingConstraints != nil && len(pg.Spec.SchedulingConstraints.Topology) > 0 {
+		return fmt.Errorf("%w: PodGroup %s/%s sets schedulingConstraints.topology; place the group with a Slurm partition or constraint instead",
+			ErrorPodGroupUnsupported, pg.Namespace, pg.Name)
+	}
+	if len(pg.Spec.ResourceClaims) > 0 {
+		return fmt.Errorf("%w: PodGroup %s/%s sets resourceClaims; request devices through DeviceClass extended resources instead",
+			ErrorPodGroupUnsupported, pg.Namespace, pg.Name)
+	}
+	return nil
+}
 
 func podGroupName(pod *corev1.Pod) (string, bool) {
 	if pod.Spec.SchedulingGroup == nil || pod.Spec.SchedulingGroup.PodGroupName == nil {
