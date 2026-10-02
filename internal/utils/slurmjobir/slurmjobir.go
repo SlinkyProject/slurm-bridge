@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -129,6 +130,12 @@ func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI
 }
 
 func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+	// All calls below make live apiserver requests; bound so a slow apiserver
+	// doesn't block the single-threaded scheduling loop indefinitely.
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
 	if err := ValidatePodGroupSupport(workloadAPI, pod); err != nil {
 		return nil, err
 	}
