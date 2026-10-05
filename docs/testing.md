@@ -40,6 +40,19 @@ SLURM_NODE_MODE=hybrid \
 make kind-start test-e2e
 ```
 
+Select another supported Kubernetes version with `KUBERNETES_VERSION`:
+
+```sh
+KIND_CLUSTER_NAME=slurm-bridge-1-36 \
+KUBERNETES_VERSION=v1.36 \
+make kind-start test-e2e
+```
+
+The suite only talks to the kubeconfig context named by `E2E_KUBE_CONTEXT`,
+which defaults to `kind-$KIND_CLUSTER_NAME`. It never falls back to the current
+context. Set it explicitly to test a cluster that was not created by
+`kind-start`.
+
 `SLURM_NODE_MODE` is also passed into the test process. The readiness feature
 uses it to verify that the cluster actually contains external nodes or
 DaemonSet-mode hybrid `slurmd` pods, as requested. Hybrid runs also include a

@@ -51,7 +51,7 @@ deploy:
 profiles:
   - name: kubernetes-1-35
     activation:
-      - env: 'KUBERNETES_VERSION=^v1\.35\..*$'
+      - env: 'KUBERNETES_VERSION=^v1\.35(\..*)?$'
     patches:
       - op: add
         path: /deploy/helm/releases/0/setValues

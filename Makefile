@@ -91,6 +91,10 @@ push-charts: build-chart ## Push OCI packages.
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
 SLURM_NODE_MODE ?= external
 
+.PHONY: kind-image
+kind-image: ## Print the pinned Kind node image for KUBERNETES_VERSION.
+	@./hack/kind.sh --print-image
+
 .PHONY: kind-start
 kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
 	./hack/kind.sh --all --slurm-node-mode="$(SLURM_NODE_MODE)" "$(KIND_CLUSTER_NAME)"
@@ -155,6 +159,7 @@ LOCALBIN ?= $(shell pwd)/bin
 E2E_ARTIFACTS_DIR ?= $(shell pwd)/e2e-artifacts
 E2E_CLEANUP ?= true
 E2E_RUN ?=
+E2E_KUBE_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -535,9 +540,9 @@ test: fmt vet envtest ## Run tests.
 		fi
 
 .PHONY: test-e2e
-test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the current Kubernetes context.
+test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the E2E_KUBE_CONTEXT Kubernetes context.
 	mkdir -p "$(E2E_ARTIFACTS_DIR)"
-	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
+	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" E2E_KUBE_CONTEXT="$(E2E_KUBE_CONTEXT)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
 		--format testname \
 		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
 		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \
