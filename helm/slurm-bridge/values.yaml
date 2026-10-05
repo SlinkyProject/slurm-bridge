@@ -165,6 +165,8 @@ controllers:
   replicas: 1
   # -- Enables leader election.
   leaderElect: false
+  # -- (int) Max concurrent workers for the Pod controller. Unset keeps the default (1).
+  podWorkers: null
   # -- PodDisruptionBudget for the controllers deployment
   pdb:
     # -- Enable PodDisruptionBudget. Only rendered when `replicas` is greater
