@@ -34,6 +34,7 @@ type ExternalJob struct {
 	HetJobOffset int32
 	Nodes        string
 	Pending      bool
+	Finished     bool
 }
 
 func externalJobFromJobInfo(job *slurmtypes.V0044JobInfo) (ExternalJob, error) {
@@ -42,9 +43,10 @@ func externalJobFromJobInfo(job *slurmtypes.V0044JobInfo) (ExternalJob, error) {
 	}
 
 	extJob := ExternalJob{
-		JobId:   ptr.Deref(job.JobId, 0),
-		Nodes:   ptr.Deref(job.Nodes, ""),
-		Pending: job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
+		JobId:    ptr.Deref(job.JobId, 0),
+		Nodes:    ptr.Deref(job.Nodes, ""),
+		Pending:  job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
+		Finished: isFinishedJob(job),
 	}
 
 	return validateExternalJobID(job, extJob)
@@ -173,7 +175,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	return nil
 }
 
-// GetJobsForPods will get a list of all slurm jobs and translate them into a podToJob
+// GetJobsForPods lists Slurm jobs for pod identity validation and resource handoff checks.
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
@@ -246,6 +248,20 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	}
 
 	return &jobOut, nil
+}
+
+func isFinishedJob(job *slurmtypes.V0044JobInfo) bool {
+	return job.GetStateAsSet().HasAny(
+		api.V0044JobInfoJobStateCOMPLETED,
+		api.V0044JobInfoJobStateCANCELLED,
+		api.V0044JobInfoJobStateFAILED,
+		api.V0044JobInfoJobStateTIMEOUT,
+		api.V0044JobInfoJobStateNODEFAIL,
+		api.V0044JobInfoJobStatePREEMPTED,
+		api.V0044JobInfoJobStateBOOTFAIL,
+		api.V0044JobInfoJobStateDEADLINE,
+		api.V0044JobInfoJobStateOUTOFMEMORY,
+	)
 }
 
 func (r *realSlurmControl) findJobByID(ctx context.Context, jobID int32) (*slurmtypes.V0044JobInfo, bool, error) {

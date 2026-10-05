@@ -182,6 +182,7 @@ func (sb *SlurmBridge) Name() string {
 
 type stateData struct {
 	slurmJobIR *slurmjobir.SlurmJobIR
+	podToJob   map[string]slurmcontrol.ExternalJob
 }
 
 func (d *stateData) Clone() fwk.StateData {
@@ -361,7 +362,8 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	state.Write(stateKey, s)
 
 	// Populate podToJob representation to validate pod label and annotation
-	if err := sb.validatePodToJob(ctx, pod); err != nil {
+	s.podToJob, err = sb.validatePodToJob(ctx, pod)
+	if err != nil {
 		logger.Error(err, "error validating pod against podToJob")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
@@ -510,6 +512,20 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 	if allocatedNodeRejectedByKubernetes(pod, externalJob, m) {
+		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, m)
+		if !status.IsSuccess() {
+			return nil, status
+		}
+		if waiting {
+			logger.V(4).Info("Waiting for previous Bridge allocation to release Kubernetes resources",
+				"pod", klog.KObj(pod), "jobId", externalJob.JobId)
+			// NodeResourcesFit's queueing events retry the pod when resources
+			// change. Retain the allocation and all gang members in the meantime.
+			// TODO: Bound this wait and recover if terminating pods or pods from
+			// finished jobs never leave the node; stalled cleanup can otherwise
+			// hold this gang's Slurm allocation indefinitely.
+			return nil, fwk.NewStatus(fwk.Unschedulable, "waiting for previous Bridge allocation to release resources")
+		}
 		logger.Info("Slurm allocation rejected by Kubernetes, deleting external job for retry",
 			"pod", klog.KObj(pod), "jobId", externalJob.JobId, "nodes", externalJob.Nodes)
 		if err := sb.deleteExternalJob(ctx, pod); err != nil {
@@ -521,7 +537,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 
 	// populate the pod's SlurmJobComponent with eligible Slurm node names based
 	// on nodes that have passed Filter plugins
-	if status := sb.populateComponentWithFeasibleNodes(ctx, s, pod, m); status != nil {
+	if status := sb.populateComponentWithFeasibleNodes(ctx, state, s, pod, m); status != nil {
 		return nil, status
 	}
 
@@ -548,13 +564,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
-// populateComponentWithFeasibleNodes returns a sorted slice of eligible Slurm node names
-// based on nodes that have not been filtered out by Filter plugins.
-// Because the SlurmBridge Filter plugin runs last, and will fail if the
-// node annotation does not match, a failure from SlurmBridge means none
-// of the other Filter plugins rejected the node and it can be fed into
-// Slurm as a node to schedule with.
-func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s *stateData, pod *corev1.Pod, m fwk.NodeToStatusReader) *fwk.Status {
+// populateComponentWithFeasibleNodes records eligible Slurm node names for the
+// pod's component. Resources occupied by Bridge allocations remain eligible for
+// Slurm's pending queue; other Kubernetes constraints still exclude the node.
+func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, state fwk.CycleState, s *stateData, pod *corev1.Pod, m fwk.NodeToStatusReader) *fwk.Status {
 	logger := klog.FromContext(ctx)
 
 	feasibleNodes, err := m.NodesForStatusCode(sb.handle.SnapshotSharedLister().NodeInfos(), fwk.Unschedulable)
@@ -576,21 +589,21 @@ func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s
 	slurmNodes := set.New(slurmNodeNames...)
 	feasibleSlurmNodes := set.New[string]()
 	for _, node := range feasibleNodes {
+		slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
+		if !slurmNodes.Has(slurmName) {
+			continue
+		}
 		status := m.Get(node.Node().Name)
-		// If the Unschedulable code was set by SlurmBridge
-		// that means no other plugin filtered out this node.
-		// As long as the node is known to Slurm, we will include
-		// this node for consideration.
-		if status.Plugin() == Name {
-			slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
-			if slurmNodes.Has(slurmName) {
-				feasibleSlurmNodes.Insert(slurmName)
-			}
+		eligible, eligibilityStatus := sb.nodeEligibleForSlurm(ctx, state, pod, node, status, nil)
+		if !eligibilityStatus.IsSuccess() {
+			return eligibilityStatus
+		}
+		if eligible {
+			feasibleSlurmNodes.Insert(slurmName)
 		}
 	}
 
-	// If this situation occurs, the best we can do is trigger another
-	// scheduling cycle.
+	// A gang still needs enough eligible nodes, but they need not be free now.
 	if len(feasibleSlurmNodes) < len(component.Pods.Items) {
 		return fwk.NewStatus(fwk.Success)
 	}
@@ -883,7 +896,7 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
 }
 
-func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) error {
+func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (map[string]slurmcontrol.ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("validatePodToJob func", "pod", klog.KObj(pod))
 	namespacedName := types.NamespacedName{
@@ -893,14 +906,14 @@ func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) er
 	podToJob, err := sb.slurmControl.GetJobsForPods(ctx)
 	if err != nil {
 		logger.Error(err, "error populating podToJob")
-		return err
+		return nil, err
 	}
 	if val, ok := (*podToJob)[namespacedName.String()]; ok {
 		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.Nodes, false); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return *podToJob, nil
 }
 
 func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, nodesIn string, adopt bool) error {
