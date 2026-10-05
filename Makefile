@@ -523,7 +523,7 @@ test: fmt vet envtest ## Run tests.
 	$(eval ENVTEST_ASSETS := $(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path))
 	chmod -R -f u+w "$(ENVTEST_ASSETS)"
 	KUBEBUILDER_ASSETS="$(ENVTEST_ASSETS)" \
-		go test $$(go list ./... | grep -v /e2e) -v -coverprofile cover.out.tmp
+		go test -race $$(go list ./... | grep -v /e2e) -v -coverprofile cover.out.tmp
 	cat cover.out.tmp | grep -v "_generated." > cover.out
 	go tool cover -func cover.out
 	go tool cover -html cover.out -o cover.html
