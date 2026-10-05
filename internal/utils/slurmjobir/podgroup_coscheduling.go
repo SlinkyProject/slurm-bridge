@@ -32,9 +32,13 @@ var (
 
 // PreFilterPodGroupCoscheduling performs PodGroup coscheduling specific PreFilter functions.
 func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	// Direct apiserver call; bound so a slow apiserver doesn't stall the scheduling loop.
+	ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+	defer cancel()
+
 	podGroup := &sched.PodGroup{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.GetNamespace(), Name: slurmJobIR.RootPOM.GetName()}
-	if err := t.Get(t.ctx, key, podGroup); err != nil {
+	if err := t.Get(ctx, key, podGroup); err != nil {
 		return fwk.NewStatus(fwk.Error, ErrorPodGroupCoschedulingCouldNotGet.Error())
 	}
 
