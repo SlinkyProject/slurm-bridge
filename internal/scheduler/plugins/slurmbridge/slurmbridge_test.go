@@ -617,7 +617,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				pod:   pod.DeepCopy(),
 			},
 			want:  nil,
-			want1: fwk.NewStatus(fwk.Error, ErrorNoKubeNodeMatch.Error()),
+			want1: fwk.NewStatus(fwk.Error, fmt.Sprintf("%s: node1", ErrorNoKubeNodeMatch)),
 		},
 		{
 			name: "External job exists",
@@ -676,6 +676,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				handle:        tt.fields.handle,
 				draRegistry:   dra.DefaultRegistry(),
 			}
+			sb.kubeNodeIndex = testKubeNodeIndex(t, sb.Client)
 			got, got1 := sb.PreFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.nodeinfo)
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("SlurmBridge.PreFilter() got = %v, want %v", got, tt.want)
@@ -1555,6 +1556,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				handle:        tt.fields.handle,
 				draRegistry:   dra.DefaultRegistry(),
 			}
+			sb.kubeNodeIndex = testKubeNodeIndex(t, sb.Client)
 			s := &stateData{}
 			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, sb.draRegistry, sb.workloadAPI, tt.args.ctx, tt.args.pod)
 			tt.args.state.Write(stateKey, s)

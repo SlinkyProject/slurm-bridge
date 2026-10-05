@@ -17,7 +17,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -158,6 +157,7 @@ type SlurmBridge struct {
 	handle        fwk.Handle
 	draRegistry   *dra.Registry
 	workloadAPI   *slurmjobir.WorkloadAPI
+	kubeNodeIndex *kubeNodeNameIndex
 }
 
 var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
@@ -299,6 +299,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		handle:        handle,
 		draRegistry:   draRegistry,
 		workloadAPI:   workloadAPI,
+	}
+	plugin.kubeNodeIndex, err = newKubeNodeNameIndex(handle.SharedInformerFactory().Core().V1().Nodes().Informer())
+	if err != nil {
+		return nil, err
 	}
 	return plugin, nil
 }
@@ -795,42 +799,6 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		}
 	}
 	return nil
-}
-
-// slurmToKubeNodes will translate slurm node names to kubernetes node names
-func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string) (sets.Set[string], error) {
-	logger := klog.FromContext(ctx)
-
-	nodeList := &corev1.NodeList{}
-	if err := sb.List(ctx, nodeList); err != nil {
-		logger.Error(err, "failed to list Kubernetes nodes")
-		return nil, err
-	}
-
-	kubeNodes := make(sets.Set[string])
-	nodeNameMap := nodecontrollerutils.MakeNodeNameMap(ctx, nodeList)
-	for _, slurmNode := range slurmNodes {
-		kubeNode, ok := nodeNameMap[slurmNode]
-		if !ok {
-			// If the slurmNode exists as a kube node, they are
-			// assumed to be the same node. If not, return an error
-			// that the slurm job included an unknown node.
-			if sb.handle.ClientSet() != nil {
-				if _, err := sb.handle.ClientSet().CoreV1().Nodes().Get(ctx, slurmNode, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-					out := fmt.Sprintf("no matching kube nodes for Slurm node: %s", slurmNode)
-					logger.Error(ErrorNoKubeNodeMatch, out)
-					return nil, ErrorNoKubeNodeMatch
-				}
-				kubeNode = slurmNode
-			} else {
-				return nil, ErrorNoKubeNodeMatch
-			}
-
-		}
-		kubeNodes.Insert(kubeNode)
-	}
-
-	return kubeNodes, nil
 }
 
 // deleteExternalJob will delete the external job associated with the pod
