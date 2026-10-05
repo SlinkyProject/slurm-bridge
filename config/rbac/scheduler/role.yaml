@@ -111,6 +111,12 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - ray.io
+  resources:
+  - rayclusters
+  verbs:
+  - get
+- apiGroups:
   - resource.k8s.io
   resources:
   - deviceclasses
