@@ -4,7 +4,9 @@
 package slurmjobir
 
 import (
+	"context"
 	"errors"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,9 +32,13 @@ var (
 
 // PreFilterPodGroupCoscheduling performs PodGroup coscheduling specific PreFilter functions.
 func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	// Direct apiserver call; bound so a slow apiserver doesn't stall the scheduling loop.
+	ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+	defer cancel()
+
 	podGroup := &sched.PodGroup{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.GetNamespace(), Name: slurmJobIR.RootPOM.GetName()}
-	if err := t.Get(t.ctx, key, podGroup); err != nil {
+	if err := t.Get(ctx, key, podGroup); err != nil {
 		return fwk.NewStatus(fwk.Error, ErrorPodGroupCoschedulingCouldNotGet.Error())
 	}
 
@@ -87,15 +93,20 @@ func (t *translator) GetPodGroupCoscheduling(pod *corev1.Pod) (string, *sched.Po
 
 // fromPodGroupCoscheduling returns a SlurmJobIR with PodGroup coscheduling data translated.
 func (t *translator) fromPodGroupCoscheduling(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
+	// Direct apiserver calls; bound so a slow apiserver doesn't freeze the
+	// single-threaded scheduling loop indefinitely.
+	ctx, cancel := context.WithTimeout(t.ctx, 5*time.Second)
+	defer cancel()
+
 	podGroup := &sched.PodGroup{}
 	key := client.ObjectKey{Namespace: rootPOM.GetNamespace(), Name: rootPOM.GetName()}
-	if err := t.Get(t.ctx, key, podGroup); err != nil {
+	if err := t.Get(ctx, key, podGroup); err != nil {
 		return nil, err
 	}
 
 	component := SlurmJobComponent{}
 
-	if err := t.List(t.ctx, &component.Pods,
+	if err := t.List(ctx, &component.Pods,
 		&client.ListOptions{
 			LabelSelector: labels.SelectorFromSet(
 				labels.Set{sched.PodGroupLabel: pod.Labels[sched.PodGroupLabel]},

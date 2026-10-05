@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
@@ -20,15 +21,162 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+func TestPodGroupCoschedulingCache(t *testing.T) {
+	scheme, err := newClientScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := &sched.PodGroup{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pg1"},
+		Spec:       sched.PodGroupSpec{MinMember: 48},
+	}
+	gets := 0
+	transport := kubeRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			return nil, fmt.Errorf("unexpected %s %s", req.Method, req.URL.Path)
+		}
+		gets++
+		data, err := json.Marshal(pg)
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {runtime.ContentTypeJSON}},
+			Body:       io.NopCloser(bytes.NewReader(data)),
+			Request:    req,
+		}, nil
+	})
+	// discovery stubs so client.New can build its REST mapper
+	discovery := map[string]any{
+		"/api":                               &metav1.APIVersions{Versions: []string{"v1"}},
+		"/apis":                              &metav1.APIGroupList{Groups: []metav1.APIGroup{{Name: "scheduling.x-k8s.io", Versions: []metav1.GroupVersionForDiscovery{{GroupVersion: "scheduling.x-k8s.io/v1alpha1", Version: "v1alpha1"}}}}},
+		"/apis/scheduling.x-k8s.io/v1alpha1": &metav1.APIResourceList{GroupVersion: "scheduling.x-k8s.io/v1alpha1", APIResources: []metav1.APIResource{{Name: "podgroups", Kind: "PodGroup", Namespaced: true}}},
+	}
+	config := &rest.Config{
+		Host: "https://kubernetes.test",
+		Transport: kubeRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if d, ok := discovery[req.URL.Path]; ok {
+				data, _ := json.Marshal(d)
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {runtime.ContentTypeJSON}}, Body: io.NopCloser(bytes.NewReader(data)), Request: req}, nil
+			}
+			return transport.RoundTrip(req)
+		}),
+		ContentConfig: rest.ContentConfig{ContentType: runtime.ContentTypeJSON},
+	}
+	kubeClient, err := newKubeClient(config, scheme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	key := client.ObjectKeyFromObject(pg)
+	// First Get: hits apiserver.
+	var got1 sched.PodGroup
+	if err := kubeClient.Get(ctx, key, &got1); err != nil {
+		t.Fatalf("first Get: %v", err)
+	}
+	if got1.Spec.MinMember != 48 {
+		t.Fatalf("first Get MinMember = %d, want 48", got1.Spec.MinMember)
+	}
+	// Second Get: must be served from cache, no HTTP call.
+	var got2 sched.PodGroup
+	if err := kubeClient.Get(ctx, key, &got2); err != nil {
+		t.Fatalf("second Get: %v", err)
+	}
+	if gets != 1 {
+		t.Fatalf("apiserver Get count = %d, want 1 (second should hit cache)", gets)
+	}
+	if got2.Spec.MinMember != 48 {
+		t.Fatalf("cached Get MinMember = %d, want 48", got2.Spec.MinMember)
+	}
+
+	// Invalidating via Delete clears the cache so the next Get re-fetches.
+	// This covers slurm-bridge's own mutation path (Delete/Update/Patch).
+	if err := kubeClient.Delete(ctx, &got2); err == nil {
+		t.Fatal("Delete on fake transport should error (no DELETE handler), want error")
+	}
+	var got3 sched.PodGroup
+	if err := kubeClient.Get(ctx, key, &got3); err != nil {
+		t.Fatalf("Get after Delete-invalidation: %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("apiserver Get count after invalidation = %d, want 2 (cache was dropped)", gets)
+	}
+
+	// Storing a fresh entry sweeps expired entries for other PodGroups.
+	stale := types.NamespacedName{Namespace: "ns", Name: "gone"}
+	cache := &kubeClient.(*podGroupJSONClient).coschedulingCache
+	cache.Store(stale, coschedulingCacheEntry{expires: time.Now().Add(-time.Second)})
+	cache.Delete(types.NamespacedName(key))
+	if err := kubeClient.Get(ctx, key, &got3); err != nil {
+		t.Fatalf("Get for sweep: %v", err)
+	}
+	if _, ok := cache.Load(stale); !ok {
+		return
+	}
+	t.Fatal("expired entry for another PodGroup was not swept")
+}
+
+// TestPodGroupCoschedulingCacheTerminalPhase verifies that objects fetched in a
+// terminal phase are never cached, so each caller goes to the apiserver.
+func TestPodGroupCoschedulingCacheTerminalPhase(t *testing.T) {
+	scheme, err := newClientScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := &sched.PodGroup{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pg1"},
+		Spec:       sched.PodGroupSpec{MinMember: 48},
+		Status:     sched.PodGroupStatus{Phase: sched.PodGroupRunning},
+	}
+	gets := 0
+	discovery := map[string]any{
+		"/api":                               &metav1.APIVersions{Versions: []string{"v1"}},
+		"/apis":                              &metav1.APIGroupList{Groups: []metav1.APIGroup{{Name: "scheduling.x-k8s.io", Versions: []metav1.GroupVersionForDiscovery{{GroupVersion: "scheduling.x-k8s.io/v1alpha1", Version: "v1alpha1"}}}}},
+		"/apis/scheduling.x-k8s.io/v1alpha1": &metav1.APIResourceList{GroupVersion: "scheduling.x-k8s.io/v1alpha1", APIResources: []metav1.APIResource{{Name: "podgroups", Kind: "PodGroup", Namespaced: true}}},
+	}
+	config := &rest.Config{
+		Host: "https://kubernetes.test",
+		Transport: kubeRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if d, ok := discovery[req.URL.Path]; ok {
+				data, _ := json.Marshal(d)
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {runtime.ContentTypeJSON}}, Body: io.NopCloser(bytes.NewReader(data)), Request: req}, nil
+			}
+			gets++
+			data, _ := json.Marshal(pg)
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {runtime.ContentTypeJSON}}, Body: io.NopCloser(bytes.NewReader(data)), Request: req}, nil
+		}),
+		ContentConfig: rest.ContentConfig{ContentType: runtime.ContentTypeJSON},
+	}
+	kubeClient, err := newKubeClient(config, scheme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	key := client.ObjectKeyFromObject(pg)
+	var got1, got2 sched.PodGroup
+	if err := kubeClient.Get(ctx, key, &got1); err != nil {
+		t.Fatalf("first terminal-phase Get: %v", err)
+	}
+	if err := kubeClient.Get(ctx, key, &got2); err != nil {
+		t.Fatalf("second terminal-phase Get: %v", err)
+	}
+	if gets != 2 {
+		t.Fatalf("apiserver Get count = %d, want 2 (terminal phase must never be cached)", gets)
+	}
+}
 
 type kubeRoundTripperFunc func(*http.Request) (*http.Response, error)
 
