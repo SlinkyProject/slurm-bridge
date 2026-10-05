@@ -6,10 +6,14 @@ package slurmbridge
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
@@ -39,9 +43,22 @@ func newKubeClient(config *rest.Config, scheme *runtime.Scheme) (client.Client, 
 	return &podGroupJSONClient{Client: kubeClient, jsonClient: podGroupClient}, nil
 }
 
+// podGroupCoschedulingCacheTTL is how long a coscheduling PodGroup fetch is
+// served from memory before the next Get re-hits the apiserver. Short enough
+// that a phase transition (Scheduling → Running) is picked up within a few
+// seconds; long enough to absorb all pods in a single scheduling wave.
+// Terminal-phase objects are never cached so they're always re-fetched.
+const podGroupCoschedulingCacheTTL = 5 * time.Second
+
+type coschedulingCacheEntry struct {
+	pg      sched.PodGroup
+	expires time.Time
+}
+
 type podGroupJSONClient struct {
 	client.Client
-	jsonClient client.Client
+	jsonClient        client.Client
+	coschedulingCache sync.Map // map[types.NamespacedName]coschedulingCacheEntry
 }
 
 func (c *podGroupJSONClient) clientFor(obj client.Object) client.Client {
@@ -54,7 +71,48 @@ func (c *podGroupJSONClient) clientFor(obj client.Object) client.Client {
 }
 
 func (c *podGroupJSONClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	// Cache coscheduling PodGroup Gets: each pod in a gang triggers a separate
+	// Get for the same PodGroup during TranslateToSlurmJobIR, so an N-pod gang
+	// causes N live apiserver calls per scheduling wave without this cache.
+	if pg, ok := obj.(*sched.PodGroup); ok {
+		nn := types.NamespacedName(key)
+		if v, hit := c.coschedulingCache.Load(nn); hit {
+			e := v.(coschedulingCacheEntry)
+			if time.Now().Before(e.expires) {
+				*pg = e.pg
+				return nil
+			}
+		}
+		if err := c.clientFor(obj).Get(ctx, key, obj, opts...); err != nil {
+			return err
+		}
+		// Don't cache terminal phases so the scheduler sees the transition on
+		// the next scheduling wave rather than waiting for the TTL to expire.
+		switch pg.Status.Phase {
+		case sched.PodGroupRunning, sched.PodGroupFailed, sched.PodGroupFinished, sched.PodGroupUnknown:
+			c.coschedulingCache.Delete(nn)
+			return nil
+		}
+		now := time.Now()
+		// Sweep expired entries so PodGroups that are never fetched again don't accumulate.
+		c.coschedulingCache.Range(func(k, v any) bool {
+			if !now.Before(v.(coschedulingCacheEntry).expires) {
+				c.coschedulingCache.Delete(k)
+			}
+			return true
+		})
+		c.coschedulingCache.Store(nn, coschedulingCacheEntry{pg: *pg, expires: now.Add(podGroupCoschedulingCacheTTL)})
+		return nil
+	}
 	return c.clientFor(obj).Get(ctx, key, obj, opts...)
+}
+
+// coschedulingInvalidate drops a coscheduling PodGroup's cache entry on any
+// write, so the next Get re-fetches instead of serving pre-mutation state.
+func (c *podGroupJSONClient) coschedulingInvalidate(obj client.Object) {
+	if _, ok := obj.(*sched.PodGroup); ok {
+		c.coschedulingCache.Delete(types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()})
+	}
 }
 
 func (c *podGroupJSONClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
@@ -62,14 +120,17 @@ func (c *podGroupJSONClient) Create(ctx context.Context, obj client.Object, opts
 }
 
 func (c *podGroupJSONClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	c.coschedulingInvalidate(obj)
 	return c.clientFor(obj).Delete(ctx, obj, opts...)
 }
 
 func (c *podGroupJSONClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	c.coschedulingInvalidate(obj)
 	return c.clientFor(obj).Update(ctx, obj, opts...)
 }
 
 func (c *podGroupJSONClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	c.coschedulingInvalidate(obj)
 	return c.clientFor(obj).Patch(ctx, obj, patch, opts...)
 }
 
@@ -99,10 +160,12 @@ func (c *podGroupSubResourceClient) Create(ctx context.Context, obj client.Objec
 }
 
 func (c *podGroupSubResourceClient) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	c.client.coschedulingInvalidate(obj)
 	return c.client.clientFor(obj).SubResource(c.subResource).Update(ctx, obj, opts...)
 }
 
 func (c *podGroupSubResourceClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	c.client.coschedulingInvalidate(obj)
 	return c.client.clientFor(obj).SubResource(c.subResource).Patch(ctx, obj, patch, opts...)
 }
 
