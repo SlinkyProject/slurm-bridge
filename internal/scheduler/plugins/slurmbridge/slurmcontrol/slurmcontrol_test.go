@@ -172,7 +172,7 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "Delete job",
@@ -211,6 +211,52 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			}
 			if err := r.DeleteJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.DeleteJob() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDeleteJobConfirmsReleaseAfterCancellationError(t *testing.T) {
+	deleteErr := errors.New("cancellation failed")
+	lookupErr := errors.New("lookup unavailable")
+	for _, tt := range []struct {
+		name      string
+		state     api.V0044JobInfoJobState
+		lookupErr error
+		wantErr   bool
+	}{
+		{name: "canceled", state: api.V0044JobInfoJobStateCANCELLED},
+		{name: "completed", state: api.V0044JobInfoJobStateCOMPLETED},
+		{name: "running", state: api.V0044JobInfoJobStateRUNNING, wantErr: true},
+		{name: "pending", state: api.V0044JobInfoJobStatePENDING, wantErr: true},
+		{name: "lookup fails", lookupErr: lookupErr, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &api.V0044JobInfo{
+				JobId: ptr.To(int32(1)), JobState: &[]api.V0044JobInfoJobState{tt.state},
+			}
+			base := fake.NewClientBuilder().WithObjects(job).Build()
+			c := interceptor.NewClient(base, interceptor.Funcs{
+				Delete: func(context.Context, object.Object, ...client.DeleteOption) error {
+					return deleteErr
+				},
+				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+					if tt.lookupErr != nil {
+						return tt.lookupErr
+					}
+					return base.Get(ctx, key, obj, opts...)
+				},
+			})
+			pod := &corev1.Pod{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{wellknown.LabelExternalJobId: "1"}}}
+			err := (&realSlurmControl{Client: c, lastUpdate: lru.New(10)}).DeleteJob(t.Context(), pod)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DeleteJob() error = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, deleteErr) {
+				t.Fatalf("DeleteJob() error = %v, want cancellation error preserved", err)
+			}
+			if tt.lookupErr != nil && !errors.Is(err, tt.lookupErr) {
+				t.Fatalf("DeleteJob() error = %v, want lookup error preserved", err)
 			}
 		})
 	}

@@ -486,6 +486,7 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 			if filterStatus.Plugin() != noderesources.Name {
 				t.Fatalf("expected original resource rejection, got %v", filterStatus)
 			}
+			objects = append(objects, node)
 			kubeClient := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 			slurmObjects := []object.Object{&api.V0044JobInfo{
 				JobId: ptr.To(int32(42)), Nodes: ptr.To("node[0-47]"),
@@ -640,7 +641,6 @@ func TestPostFilterSharedGangsDoNotWaitForEachOther(t *testing.T) {
 			Spec:       sched.PodGroupSpec{MinMember: 2},
 		})
 	}
-	kubeClient := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 	var nodes []*corev1.Node
 	for _, name := range []string{"node0", "node1"} {
 		nodes = append(nodes, &corev1.Node{
@@ -651,6 +651,10 @@ func TestPostFilterSharedGangsDoNotWaitForEachOther(t *testing.T) {
 			},
 		})
 	}
+	for _, node := range nodes {
+		objects = append(objects, node)
+	}
+	kubeClient := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 	snapshot := internalcache.NewSnapshot([]*corev1.Pod{a0, b1}, nodes)
 	f, err := tf.NewFramework(ctx, []tf.RegisterPluginFunc{
 		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
