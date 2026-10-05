@@ -313,6 +313,11 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 	toUpdate := pod.DeepCopy()
 	toleration := utils.NewTolerationNodeBridged(sb.schedulerName)
 	toUpdate.Spec.Tolerations = utils.MergeTolerations(toUpdate.Spec.Tolerations, *toleration)
+	// Toleration already present (common on scheduler restart): skip the patch
+	// so O(pods) writes don't flood the HTTP/2 connection and stall the loop.
+	if len(toUpdate.Spec.Tolerations) == len(pod.Spec.Tolerations) {
+		return fwk.NewStatus(fwk.Success)
+	}
 	if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
 		logger.Error(err, "failed to update pod with slurm job id")
 		return fwk.NewStatus(fwk.Unschedulable, "error patching finalizer")
