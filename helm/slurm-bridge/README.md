@@ -53,6 +53,7 @@ Kubernetes: `>= 1.34.0-0`
 | controllers.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicas` is greater than 1, since a PDB over a single replica blocks node drains. |
 | controllers.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
 | controllers.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
+| controllers.podWorkers | int | `nil` | Max concurrent workers for the Pod controller. Unset keeps the default (1). |
 | controllers.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
 | controllers.replicas | int | `1` | Set the number of replicas to deploy. |
 | controllers.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
