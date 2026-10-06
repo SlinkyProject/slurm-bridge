@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -118,6 +120,9 @@ type realSlurmControl struct {
 	client.Client
 	mcsLabel  string
 	partition string
+	// lastUpdate holds the last job description sent per pending job ID, so an
+	// unchanged UpdateJob skips its REST round trip.
+	lastUpdate sync.Map // map[int32]api.V0044JobDescMsg
 }
 
 type NodeResources struct {
@@ -168,6 +173,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 		return nil
 	}
 	job.JobId = &jobId
+	r.lastUpdate.Delete(jobId)
 	if err := r.Delete(ctx, job); err != nil {
 		logger.Error(err, "failed to delete Slurm job", "jobId", jobId)
 		return err
@@ -216,6 +222,12 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	if jobIDLabel == "" {
 		return &jobOut, nil
 	}
+	// Only pending jobs are updated; forget the rest so entries do not outlive their job.
+	defer func() {
+		if !jobOut.Pending {
+			r.lastUpdate.Delete(slurmjobir.ParseSlurmJobId(jobIDLabel))
+		}
+	}()
 
 	err := r.Get(ctx, object.ObjectKey(jobIDLabel), job)
 	if err != nil {
@@ -357,11 +369,17 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 		Job: ptr.To(jobDesc),
 	}
 
+	if last, ok := r.lastUpdate.Load(jobID); ok && reflect.DeepEqual(last, jobDesc) {
+		logger.V(4).Info("external job unchanged, skipping update", "jobId", jobID)
+		return jobID, nil
+	}
+
 	job.JobId = ptr.To(jobID)
 	if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
 		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
 		return 0, err
 	}
+	r.lastUpdate.Store(jobID, jobDesc)
 
 	return jobID, nil
 }

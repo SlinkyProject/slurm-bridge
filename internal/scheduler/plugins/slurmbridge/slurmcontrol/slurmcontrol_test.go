@@ -1350,3 +1350,43 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 		})
 	}
 }
+
+func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	pod := st.MakePod().Name("foo").Namespace("slurm-bridge").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "7"}).Obj()
+	jobIR := func(exc ...string) *slurmjobir.SlurmJobIR {
+		return &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{
+			JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: exc},
+			Pods:    corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+		}}}
+	}
+	updates := 0
+	r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error { updates++; return nil },
+		Delete: func(context.Context, object.Object, ...client.DeleteOption) error { return nil },
+	}).Build()}
+
+	for i, step := range []struct {
+		ir     *slurmjobir.SlurmJobIR
+		delete bool
+		want   int
+	}{
+		{ir: jobIR(), want: 1},
+		{ir: jobIR(), want: 1},
+		{ir: jobIR("node2"), want: 2},
+		{ir: jobIR("node2"), delete: true, want: 3},
+	} {
+		if step.delete {
+			if err := r.DeleteJob(ctx, pod); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := r.UpdateJob(ctx, pod, step.ir); err != nil {
+			t.Fatal(err)
+		}
+		if updates != step.want {
+			t.Fatalf("step %d: updates = %d, want %d", i, updates, step.want)
+		}
+	}
+}
