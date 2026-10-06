@@ -184,7 +184,9 @@ profiles:
 				defer close(done)
 				groups.Informer().RunWithContext(ctx)
 			}()
-			defer func() { cancel(); <-done }()
+			// Defers run in reverse order: cancel the informer before waiting for it.
+			defer func() { <-done }()
+			defer cancel()
 			if !cache.WaitForCacheSync(ctx.Done(), groups.Informer().HasSynced) {
 				t.Fatal("adapted PodGroup informer failed to sync")
 			}
