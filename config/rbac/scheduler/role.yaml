@@ -147,9 +147,10 @@ rules:
   - scheduling.k8s.io
   resources:
   - podgroups
-  - workloads
   verbs:
   - get
+  - list
+  - watch
 - apiGroups:
   - scheduling.k8s.io
   resources:
@@ -157,6 +158,12 @@ rules:
   verbs:
   - patch
   - update
+- apiGroups:
+  - scheduling.k8s.io
+  resources:
+  - workloads
+  verbs:
+  - get
 - apiGroups:
   - scheduling.x-k8s.io
   resources:

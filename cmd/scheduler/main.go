@@ -13,6 +13,7 @@ import (
 	// Ensure scheme package is initialized.
 	_ "sigs.k8s.io/scheduler-plugins/apis/config/scheme"
 
+	schedulercommand "github.com/SlinkyProject/slurm-bridge/internal/scheduler/command"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge"
 )
 
@@ -22,7 +23,7 @@ func main() {
 	// Register custom plugins to the scheduler framework.
 	// Later they can consist of scheduler profile(s) and hence
 	// used by various kinds of workloads.
-	command := app.NewSchedulerCommand(
+	command := schedulercommand.New(
 		app.WithPlugin(slurmbridge.Name, slurmbridge.New),
 	)
 	// kube-scheduler's own command already owns "--config" for the KubeSchedulerConfiguration
