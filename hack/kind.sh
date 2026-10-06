@@ -414,6 +414,7 @@ function kwok::install() {
 		--version "$KWOK_CHART_VERSION" \
 		--namespace kube-system --create-namespace \
 		--wait --timeout=120s
+	kubectl apply -f "$SCRIPT_DIR/kwok-stages.yaml"
 	kubectl rollout status deployment/kwok-controller \
 		--namespace kube-system --timeout=120s
 }
