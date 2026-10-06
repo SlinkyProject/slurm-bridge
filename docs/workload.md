@@ -79,6 +79,14 @@ Users can better inform or influence `slurm-bridge` how to represent their
 Kubernetes workload within Slurm by adding
 [annotations](../internal/wellknown/annotations.go) on the parent Object.
 
+Exclusive placement is the default. Setting
+`slurmjob.slinky.slurm.net/exclusive: "false"` always requests MCS-category
+sharing; the resulting external job uses Slurm's `Shared=mcs` mode and requires
+a configured `schedulerConfig.mcsLabel`. Because Slurm's `mcs/label` plugin does
+not authorize label use, production clusters must also reserve that label from
+native users as described in
+[Production label authorization](config.md#production-label-authorization).
+
 Example "pause" bare pod to illustrate annotations:
 
 ```yaml

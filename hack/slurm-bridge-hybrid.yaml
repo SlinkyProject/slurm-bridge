@@ -3,7 +3,10 @@ configFiles:
   gres.conf: |
     Name=gpu Type=gpu.example.com File=/dev/tty[10-13] Count=4
 controller:
-  extraConf: GresTypes=gpu
+  extraConf: |
+    GresTypes=gpu
+    MCSPlugin=mcs/label
+    MCSParameters=ondemand,ondemandselect
 nodesets:
   slinky:
     enabled: false
