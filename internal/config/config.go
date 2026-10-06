@@ -4,6 +4,8 @@
 package config
 
 import (
+	"errors"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +24,13 @@ type Config struct {
 	ManagedNamespaceSelector *metav1.LabelSelector `yaml:"managedNamespaceSelector"`
 	MCSLabel                 string                `yaml:"mcsLabel"`
 	Partition                string                `yaml:"partition"`
+}
+
+func (c *Config) ValidateScheduler() error {
+	if strings.TrimSpace(c.MCSLabel) == "" {
+		return errors.New("scheduler config mcsLabel must not be empty")
+	}
+	return nil
 }
 
 func Unmarshal(in []byte) (*Config, error) {
