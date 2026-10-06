@@ -175,7 +175,45 @@ manifests should match snapshot:
             name: slurm-bridge-admission
             namespace: test-namespace
             path: /validate--v1-pod
-        name: pods.slinky.slurm.net
+        matchConditions:
+          - expression: object.spec.schedulerName != "slurm-bridge-scheduler"
+            name: scheduler-name
+        name: pods.namespaces.slinky.slurm.net
+        namespaceSelector:
+          matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - slurm-bridge
+            - key: kubernetes.io/metadata.name
+              operator: NotIn
+              values:
+                - kube-system
+                - test-namespace
+        rules:
+          - apiGroups:
+              - ""
+            apiVersions:
+              - v1
+            operations:
+              - CREATE
+              - UPDATE
+            resources:
+              - pods
+              - pods/resize
+            scope: Namespaced
+        sideEffects: None
+      - admissionReviewVersions:
+          - v1
+        clientConfig:
+          service:
+            name: slurm-bridge-admission
+            namespace: test-namespace
+            path: /validate--v1-pod
+        matchConditions:
+          - expression: object.spec.schedulerName == "slurm-bridge-scheduler"
+            name: scheduler-name
+        name: pods.scheduler.slinky.slurm.net
         namespaceSelector:
           matchExpressions:
             - key: kubernetes.io/metadata.name
@@ -219,9 +257,46 @@ manifests should match snapshot:
             name: slurm-bridge-admission
             namespace: test-namespace
             path: /mutate--v1-pod
-        name: pods.slinky.slurm.net
+        matchConditions:
+          - expression: object.spec.schedulerName == "slurm-bridge-scheduler"
+            name: scheduler-name
+        name: pods.scheduler.slinky.slurm.net
         namespaceSelector:
           matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: NotIn
+              values:
+                - kube-system
+                - test-namespace
+        rules:
+          - apiGroups:
+              - ""
+            apiVersions:
+              - v1
+            operations:
+              - CREATE
+              - UPDATE
+            resources:
+              - pods
+            scope: Namespaced
+        sideEffects: None
+      - admissionReviewVersions:
+          - v1
+        clientConfig:
+          service:
+            name: slurm-bridge-admission
+            namespace: test-namespace
+            path: /mutate--v1-pod
+        matchConditions:
+          - expression: object.spec.schedulerName != "slurm-bridge-scheduler"
+            name: scheduler-name
+        name: pods.namespaces.slinky.slurm.net
+        namespaceSelector:
+          matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values:
+                - slurm-bridge
             - key: kubernetes.io/metadata.name
               operator: NotIn
               values:
