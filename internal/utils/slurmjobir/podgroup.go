@@ -122,18 +122,26 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 	if minCount == nil {
 		return fwk.NewStatus(fwk.Success)
 	}
-	var numPodsWaiting int32
-	for _, p := range slurmJobIR.AllPods() {
-		if p.Labels[wellknown.LabelExternalJobId] == pod.Labels[wellknown.LabelExternalJobId] {
-			numPodsWaiting++
+	return gangQuorum(pod, slurmJobIR.AllPods(), int(*minCount))
+}
+
+// gangQuorum counts group membership, not label progress, since siblings are labeled one at a time.
+// Short of quorum it returns Unschedulable so the pod waits for an event instead of retrying blindly.
+func gangQuorum(pod *corev1.Pod, pods []corev1.Pod, minCount int) *fwk.Status {
+	if pod.Labels[wellknown.LabelExternalJobId] != "" {
+		if len(pods) < minCount {
+			return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
+		}
+		return fwk.NewStatus(fwk.Success)
+	}
+	unclaimed := 0
+	for _, p := range pods {
+		if p.Labels[wellknown.LabelExternalJobId] == "" {
+			unclaimed++
 		}
 	}
-	if numPodsWaiting < *minCount {
-		// Siblings are still being created; park until an event instead of retrying blindly.
-		if pod.Labels[wellknown.LabelExternalJobId] == "" {
-			return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
-		}
-		return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
+	if unclaimed < minCount {
+		return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
 	}
 	return fwk.NewStatus(fwk.Success)
 }
