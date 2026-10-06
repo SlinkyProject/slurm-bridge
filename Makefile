@@ -366,7 +366,7 @@ manifests: controller-gen yq-bin ## Generate WebhookConfiguration, ClusterRole a
 
 .PHONY: generate-docs
 generate-docs: pandoc-bin
-	$(PANDOC) --quiet README.md -o docs/index.rst
+	$(PANDOC) --quiet --from=markdown+alerts README.md -o docs/index.rst
 	cat ./docs/_static/toc.rst >> docs/index.rst
 	printf '\n' >> docs/index.rst
 	find docs -type f -name "*.md" -exec basename {} \; | awk '{print "    "$$1}' | env LC_ALL=C sort >> docs/index.rst
