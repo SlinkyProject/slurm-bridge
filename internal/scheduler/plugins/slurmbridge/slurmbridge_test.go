@@ -286,6 +286,30 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestSlurmBridge_PreEnqueue_SkipsPatchWhenTolerated(t *testing.T) {
+	pod := st.MakePod().Name("pod1").Obj()
+	pod.Spec.Tolerations = []corev1.Toleration{*utils.NewTolerationNodeBridged("")}
+
+	patches := 0
+	client := kubefake.NewClientBuilder().
+		WithObjects(pod.DeepCopy()).
+		WithInterceptorFuncs(kubeinterceptor.Funcs{
+			Patch: func(ctx context.Context, c kubeclient.WithWatch, obj kubeclient.Object, patch kubeclient.Patch, opts ...kubeclient.PatchOption) error {
+				patches++
+				return c.Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+
+	sb := &SlurmBridge{Client: client}
+	if got := sb.PreEnqueue(context.Background(), pod); got.Code() != fwk.Success {
+		t.Fatalf("SlurmBridge.PreEnqueue() = %v, want Success", got)
+	}
+	if patches != 0 {
+		t.Errorf("PreEnqueue Patch calls = %d, want 0 when the toleration is already present", patches)
+	}
+}
+
 func TestSlurmBridge_PreEnqueue(t *testing.T) {
 	ctx := context.Background()
 	pod := st.MakePod().Name("pod1").Obj()
