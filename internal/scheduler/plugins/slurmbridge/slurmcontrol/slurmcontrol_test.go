@@ -15,6 +15,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
+	"k8s.io/utils/lru"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -203,9 +204,10 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			if err := r.DeleteJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.DeleteJob() error = %v, wantErr %v", err, tt.wantErr)
@@ -353,7 +355,8 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client: tt.fields.Client,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
 			}
 			got, err := r.GetJobsForPods(tt.args.ctx)
 			if (err != nil) != tt.wantErr {
@@ -589,8 +592,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetJob(tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
@@ -852,9 +856,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.SubmitJob(tt.args.ctx, tt.args.pod, tt.args.slurmJobIR)
 			if (err != nil) != tt.wantErr {
@@ -948,6 +953,7 @@ func Test_realSlurmControl_SubmitJobRejectsMultipleComponents(t *testing.T) {
 		},
 	}
 	r := &realSlurmControl{
+		lastUpdate: lru.New(10),
 		Client: fake.NewClientBuilder().
 			WithInterceptorFuncs(f).
 			Build(),
@@ -990,9 +996,10 @@ func TestNewControl(t *testing.T) {
 				partition: "slurm-bridge",
 			},
 			want: &realSlurmControl{
-				Client:    fake.NewFakeClient(),
-				mcsLabel:  "kubernetes",
-				partition: "slurm-bridge",
+				lastUpdate: lru.New(10000),
+				Client:     fake.NewFakeClient(),
+				mcsLabel:   "kubernetes",
+				partition:  "slurm-bridge",
 			},
 		},
 	}
@@ -1125,9 +1132,10 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetNodeNames(tt.args.ctx, tt.args.partition)
 			if (err != nil) != tt.wantErr {
@@ -1335,9 +1343,10 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetResources(tt.args.ctx, tt.args.pod, tt.args.nodeName)
 			if (err != nil) != tt.wantErr {
@@ -1362,7 +1371,7 @@ func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
 		}}}
 	}
 	updates := 0
-	r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+	r := &realSlurmControl{lastUpdate: lru.New(10), Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
 		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error { updates++; return nil },
 		Delete: func(context.Context, object.Object, ...client.DeleteOption) error { return nil },
 	}).Build()}

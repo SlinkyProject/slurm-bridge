@@ -11,11 +11,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
+	"k8s.io/utils/lru"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -121,8 +121,9 @@ type realSlurmControl struct {
 	mcsLabel  string
 	partition string
 	// lastUpdate holds the last job description sent per pending job ID, so an
-	// unchanged UpdateJob skips its REST round trip.
-	lastUpdate sync.Map // map[int32]api.V0044JobDescMsg
+	// unchanged UpdateJob skips its REST round trip. Size-capped so jobs that are
+	// never looked up again can't grow it without bound.
+	lastUpdate *lru.Cache
 }
 
 type NodeResources struct {
@@ -173,7 +174,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 		return nil
 	}
 	job.JobId = &jobId
-	r.lastUpdate.Delete(jobId)
+	r.lastUpdate.Remove(jobId)
 	if err := r.Delete(ctx, job); err != nil {
 		logger.Error(err, "failed to delete Slurm job", "jobId", jobId)
 		return err
@@ -225,7 +226,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	// Only pending jobs are updated; forget the rest so entries do not outlive their job.
 	defer func() {
 		if !jobOut.Pending {
-			r.lastUpdate.Delete(slurmjobir.ParseSlurmJobId(jobIDLabel))
+			r.lastUpdate.Remove(slurmjobir.ParseSlurmJobId(jobIDLabel))
 		}
 	}()
 
@@ -369,7 +370,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 		Job: ptr.To(jobDesc),
 	}
 
-	if last, ok := r.lastUpdate.Load(jobID); ok && reflect.DeepEqual(last, jobDesc) {
+	if last, ok := r.lastUpdate.Get(jobID); ok && reflect.DeepEqual(last, jobDesc) {
 		logger.V(4).Info("external job unchanged, skipping update", "jobId", jobID)
 		return jobID, nil
 	}
@@ -379,7 +380,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
 		return 0, err
 	}
-	r.lastUpdate.Store(jobID, jobDesc)
+	r.lastUpdate.Add(jobID, jobDesc)
 
 	return jobID, nil
 }
@@ -600,5 +601,7 @@ func NewControl(client client.Client, mcsLabel string, partition string) SlurmCo
 		Client:    client,
 		mcsLabel:  mcsLabel,
 		partition: partition,
+		// Fixed cap; make it configurable if pending-job counts outgrow it.
+		lastUpdate: lru.New(10000),
 	}
 }
