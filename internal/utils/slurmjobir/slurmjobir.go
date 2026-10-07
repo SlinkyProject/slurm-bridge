@@ -32,6 +32,10 @@ const (
 	amdDevicePlugin    = "amd.com/gpu"
 )
 
+var (
+	errorTooManyComponents = errors.New("slurmjobir has too many components. Max is 128") // This is due to a hard limit in Slurm
+)
+
 type SlurmJobComponent struct {
 	ObjectMeta metav1.PartialObjectMetadata
 	JobInfo    SlurmJobIRJobInfo
@@ -190,6 +194,11 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	if err != nil {
 		return nil, err
 	}
+
+	if len(slurmJobIR.Components) > 128 {
+		return nil, errorTooManyComponents
+	}
+
 	slurmJobIR.RootPOM = *rootPOM
 	for i := range slurmJobIR.Components {
 		parsePodsCpuAndMemory(&slurmJobIR.Components[i])
