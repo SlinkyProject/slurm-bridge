@@ -308,6 +308,7 @@ manifests should match snapshot:
           - scheduling.k8s.io
         resources:
           - compositepodgroups
+          - podgroups
         verbs:
           - get
           - list
@@ -320,13 +321,6 @@ manifests should match snapshot:
         verbs:
           - patch
           - update
-      - apiGroups:
-          - scheduling.k8s.io
-        resources:
-          - podgroups
-        verbs:
-          - get
-          - list
       - apiGroups:
           - scheduling.k8s.io
         resources:

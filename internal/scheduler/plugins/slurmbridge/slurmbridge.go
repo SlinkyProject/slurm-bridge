@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -54,6 +56,7 @@ var (
 	ErrorJobNotPendingNoNodes    = errors.New("external job is no longer pending but has no nodes assigned")
 	ErrorPodWithResourceClaim    = errors.New("can't schedule pod with a resource claim")
 	ErrorPodWithRequiredAffinity = errors.New("can't schedule pod with required affinity: use a Slurm partition or constraint instead")
+	ErrorUnprocessedComponents   = errors.New("can't schedule pod: components of SlurmJobIR have not yet passed PostFilter")
 )
 
 const slurmJobNotPending = "job is no longer pending execution"
@@ -150,7 +153,7 @@ func isJobNotPendingError(err error) bool {
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get
 // +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=get
 // +kubebuilder:rbac:groups=ray.io,resources=rayclusters,verbs=get
-// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get;list
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups,verbs=get;list;watch
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups/status,verbs=patch;update
 
 // Slurmbridge is a plugin that schedules pods in a group.
@@ -162,6 +165,34 @@ type SlurmBridge struct {
 	draRegistry   *dra.Registry
 	workloadAPI   *slurmjobir.WorkloadAPI
 	kubeNodeIndex *kubeNodeNameIndex
+	mu            sync.Mutex
+	pending       map[types.UID]*groupProgress
+}
+
+// pendingTimeout drops hetjob progress no component has touched recently.
+const pendingTimeout = 5 * time.Minute
+
+type groupProgress struct {
+	components map[types.NamespacedName][]string
+	submitting bool
+	updated    time.Time
+}
+
+func (p *groupProgress) recordComponent(ir *slurmjobir.SlurmJobIR, index int) bool {
+	component := &ir.Components[index]
+	p.components[component.GetNamespacedName()] = slices.Clone(component.JobInfo.ExcNodes)
+
+	for i := range ir.Components {
+		component = &ir.Components[i]
+		excluded, processed := p.components[component.GetNamespacedName()]
+		if !processed {
+			return false
+		}
+		if len(excluded) > 0 && len(component.JobInfo.ExcNodes) == 0 {
+			component.JobInfo.ExcNodes = excluded
+		}
+	}
+	return true
 }
 
 var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
@@ -554,6 +585,50 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	// on nodes that have passed Filter plugins
 	if status := sb.populateComponentWithFeasibleNodes(ctx, state, s, pod, m); status != nil {
 		return nil, status
+	}
+
+	if s.slurmJobIR.IsHetJob() && externalJob.JobId == 0 {
+		sb.mu.Lock()
+		rootUID := s.slurmJobIR.RootPOM.UID
+
+		if sb.pending == nil {
+			sb.pending = make(map[types.UID]*groupProgress)
+		}
+		for uid, p := range sb.pending {
+			if !p.submitting && time.Since(p.updated) > pendingTimeout {
+				delete(sb.pending, uid)
+			}
+		}
+		progress := sb.pending[rootUID]
+		if progress == nil {
+			progress = &groupProgress{components: make(map[types.NamespacedName][]string)}
+			sb.pending[rootUID] = progress
+		}
+		progress.updated = time.Now()
+
+		index := s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)
+		if !progress.recordComponent(s.slurmJobIR, index) {
+			sb.mu.Unlock()
+			logger.V(4).Info("skipping slurm job submission for workload with unprocessed components", "pod", klog.KObj(pod))
+			return nil, fwk.AsStatus(ErrorUnprocessedComponents)
+		}
+
+		if sb.pending[rootUID].submitting {
+			logger.V(4).Info("skipping slurm job submission: detected concurrent submission attempt", "pod", klog.KObj(pod))
+			sb.mu.Unlock()
+			return nil, fwk.NewStatus(fwk.Success)
+
+		}
+
+		sb.pending[rootUID].submitting = true
+
+		defer func() {
+			sb.mu.Lock()
+			progress.submitting = false
+			sb.mu.Unlock()
+		}()
+
+		sb.mu.Unlock()
 	}
 
 	// If no external job exists, we should create one

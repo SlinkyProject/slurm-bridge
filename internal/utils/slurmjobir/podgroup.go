@@ -150,6 +150,7 @@ func gangQuorum(pod *corev1.Pod, pods []corev1.Pod, minCount int) *fwk.Status {
 func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
 	slurmJobIR := new(SlurmJobIR)
 	slurmJobComponent := new(SlurmJobComponent)
+	slurmJobComponent.ObjectMeta = *rootPOM
 
 	pgPods, err := t.podsForPodGroup(pod.Namespace, *pod.Spec.SchedulingGroup.PodGroupName)
 	if err != nil {

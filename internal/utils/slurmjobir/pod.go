@@ -16,6 +16,12 @@ var (
 func (t *translator) fromPod(pod *corev1.Pod) (*SlurmJobIR, error) {
 	slurmJobIR := new(SlurmJobIR)
 	slurmJobComponent := new(SlurmJobComponent)
+	slurmJobComponent.ObjectMeta = metav1.PartialObjectMetadata{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pod.Name,
+			Namespace: pod.Namespace,
+		},
+	}
 
 	slurmJobComponent.Pods.Items = append(slurmJobComponent.Pods.Items, *pod)
 	tasks := int32(1)

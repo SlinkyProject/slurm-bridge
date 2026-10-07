@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
@@ -1001,6 +1002,45 @@ func TestAllocatedNodeRejectedByKubernetes(t *testing.T) {
 				t.Errorf("allocatedNodeRejectedByKubernetes() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGroupProgressRecordComponentTracksReorderedComponents(t *testing.T) {
+	component := func(name string, excluded ...string) slurmjobir.SlurmJobComponent {
+		return slurmjobir.SlurmJobComponent{
+			ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "workload",
+				Name:      name,
+			}},
+			JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: excluded},
+		}
+	}
+	first := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+		component("leaf-a", "node-a"),
+		component("leaf-b"),
+	}}
+	progress := groupProgress{components: make(map[k8stypes.NamespacedName][]string)}
+	if complete := progress.recordComponent(first, 0); complete {
+		t.Fatal("groupProgress.recordComponent(first, 0) = true, want false")
+	}
+
+	second := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+		component("leaf-b", "node-b"),
+		component("leaf-a"),
+	}}
+	if complete := progress.recordComponent(second, 0); !complete {
+		t.Fatal("groupProgress.recordComponent(second, 0) = false, want true")
+	}
+	want := map[k8stypes.NamespacedName][]string{
+		{Namespace: "workload", Name: "leaf-a"}: {"node-a"},
+		{Namespace: "workload", Name: "leaf-b"}: {"node-b"},
+	}
+	got := make(map[k8stypes.NamespacedName][]string, len(second.Components))
+	for _, component := range second.Components {
+		got[component.GetNamespacedName()] = component.JobInfo.ExcNodes
+	}
+	if !apiequality.Semantic.DeepEqual(got, want) {
+		t.Errorf("recording reordered components produced exclusions %v, want %v", got, want)
 	}
 }
 

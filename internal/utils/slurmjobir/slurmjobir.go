@@ -33,8 +33,16 @@ const (
 )
 
 type SlurmJobComponent struct {
-	JobInfo SlurmJobIRJobInfo
-	Pods    corev1.PodList
+	ObjectMeta metav1.PartialObjectMetadata
+	JobInfo    SlurmJobIRJobInfo
+	Pods       corev1.PodList
+}
+
+func (s SlurmJobComponent) GetNamespacedName() types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: s.ObjectMeta.Namespace,
+		Name:      s.ObjectMeta.Name,
+	}
 }
 
 type SlurmJobIRJobInfo struct {
