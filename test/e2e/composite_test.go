@@ -25,6 +25,10 @@ import (
 // two native leaf PodGroups schedule as two components of one Slurm hetjob.
 // Included in the default make test-e2e suite.
 func TestCompositePodGroupScheduling(t *testing.T) {
+	testEnv, err := newTestEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
 	name := envconf.RandomName("composite-e2e", 32)
 	native := func(kind, name string, spec map[string]any) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{

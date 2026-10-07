@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -199,6 +200,7 @@ var _ fwk.PreEnqueuePlugin = &SlurmBridge{}
 var _ fwk.PreFilterPlugin = &SlurmBridge{}
 var _ fwk.FilterPlugin = &SlurmBridge{}
 var _ fwk.PostFilterPlugin = &SlurmBridge{}
+var _ fwk.PodGroupPostFilterPlugin = &SlurmBridge{}
 var _ fwk.PreBindPlugin = &SlurmBridge{}
 
 const (
@@ -374,6 +376,28 @@ func (sb *SlurmBridge) PreEnqueue(ctx context.Context, pod *corev1.Pod) *fwk.Sta
 // If an external job is found, determine which node(s) have been assigned to the
 // Slurm job and update state so the Filter plugin can filter out the assigned node(s)
 func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
+	result, status := sb.preFilterPod(ctx, state, pod, nodeInfo)
+	for groupState := state.GetPodGroupSchedulingCycle(); groupState != nil; {
+		var group *nativeGroupCycle
+		if data, err := groupState.Read(nativeGroupCycleKey); err == nil {
+			group = data.(*nativeGroupCycle)
+		} else {
+			group = &nativeGroupCycle{status: status}
+			groupState.Write(nativeGroupCycleKey, group)
+		}
+		group.pending = group.pending || status.IsSuccess() && result == nil
+		group.members = append(group.members, nativeGroupMemberCycle{state: state, pod: pod, result: result})
+
+		parentPlacement := groupState.GetParentPlacementCycleState()
+		if parentPlacement == nil {
+			break
+		}
+		groupState = parentPlacement.GetPodGroupSchedulingCycle()
+	}
+	return result, status
+}
+
+func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
 	logger := klog.FromContext(ctx)
 	var err error
 
@@ -459,7 +483,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	}
 
 	// Perform resource specific PreFilter
-	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod, s.slurmJobIR)
+	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.handle, sb.workloadAPI, ctx, pod, s.slurmJobIR)
 	if fs.Code() != fwk.Success {
 		// An Unschedulable status still reaches PostFilter; drop the IR so it can't submit.
 		s.slurmJobIR = nil
@@ -648,10 +672,112 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		}
 	}
 
+	sb.mu.Lock()
+	delete(sb.pending, s.slurmJobIR.RootPOM.UID)
+	sb.mu.Unlock()
+
 	// If we get here, that means the job started running after PreFilter occurred.
 	// Return a success so the pod will get another PreFilter attempt.
 	sb.activatePod(logger, pod)
 	return nil, fwk.NewStatus(fwk.Success, "")
+}
+
+const nativeGroupCycleKey fwk.StateKey = Name + "/native-group"
+
+// A native group cycle runs scheduling hooks serially. All members share this
+// decision, which is discarded with the cycle rather than surviving a retry.
+// Each member's ordinary state retains the immutable allocation for binding,
+// after the framework detaches the PodGroup scheduling-cycle state.
+type nativeGroupCycle struct {
+	// state          *stateData
+	// result         *fwk.PreFilterResult
+	status         *fwk.Status
+	pending        bool
+	postFilterDone bool
+	// postResult     *fwk.PostFilterResult
+	postStatus *fwk.Status
+	members    []nativeGroupMemberCycle
+}
+
+type nativeGroupMemberCycle struct {
+	state  fwk.CycleState
+	pod    *corev1.Pod
+	result *fwk.PreFilterResult
+}
+
+func (s *nativeGroupCycle) Clone() fwk.StateData { return s }
+
+func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGroupCycleState, pgInfo fwk.PodGroupInfo, _ fwk.PodGroupSchedulingFunc) (*fwk.PodGroupPostFilterResult, *fwk.Status) {
+	data, err := state.Read(nativeGroupCycleKey)
+	if err != nil {
+		return nil, fwk.NewStatus(fwk.Unschedulable, "native PodGroup has no scheduling decision")
+	}
+	group := data.(*nativeGroupCycle)
+	evaluated := make(map[types.UID]bool, len(group.members))
+	for _, member := range group.members {
+		evaluated[member.pod.UID] = true
+	}
+	var unevaluated []*corev1.Pod
+	for _, pod := range pgInfo.GetUnscheduledPods() {
+		if !evaluated[pod.UID] {
+			unevaluated = append(unevaluated, pod)
+		}
+	}
+	klog.FromContext(ctx).V(4).Info("found unevaluated PodGroup members", "count", len(unevaluated))
+	if !group.status.IsSuccess() {
+		return nil, group.status
+	}
+	if group.postFilterDone {
+		if group.postStatus.IsSuccess() {
+			return &fwk.PodGroupPostFilterResult{}, group.postStatus
+		}
+		return nil, group.postStatus
+	}
+	if pgInfo.GetType() == fwk.CompositePodGroupKeyType && len(unevaluated) > 0 {
+		runner, ok := sb.handle.(framework.Framework)
+		if !ok {
+			return nil, fwk.NewStatus(fwk.Error, "scheduler framework cannot run PreFilter plugins")
+		}
+		for _, pod := range unevaluated {
+			podState := framework.NewCycleState()
+			result, status, _ := runner.RunPreFilterPlugins(ctx, podState, pod)
+			if !status.IsSuccess() {
+				return nil, status
+			}
+			group.members = append(group.members, nativeGroupMemberCycle{state: podState, pod: pod, result: result})
+			group.pending = group.pending || result == nil
+		}
+	}
+	nodes, err := sb.handle.SnapshotSharedLister().NodeInfos().List()
+	if err != nil {
+		return nil, fwk.AsStatus(err)
+	}
+	for _, member := range group.members {
+		statuses := framework.NewDefaultNodeToStatus()
+		failed := false
+		for _, node := range nodes {
+			name := node.Node().Name
+			if member.result != nil && !member.result.AllNodes() && !member.result.NodeNames.Has(name) {
+				continue
+			}
+			status := sb.handle.RunFilterPluginsWithNominatedPods(ctx, member.state, member.pod, node)
+			if status.Code() == fwk.Error {
+				return nil, status
+			}
+			statuses.Set(name, status)
+			failed = failed || !status.IsSuccess()
+		}
+		if group.pending || failed {
+			_, status := sb.PostFilter(ctx, member.state, member.pod, statuses)
+			if status.IsSuccess() {
+				return &fwk.PodGroupPostFilterResult{}, status
+			}
+			if !errors.Is(status.AsError(), ErrorUnprocessedComponents) {
+				return nil, status
+			}
+		}
+	}
+	return nil, fwk.AsStatus(ErrorUnprocessedComponents)
 }
 
 // populateComponentWithFeasibleNodes records eligible Slurm node names for the
@@ -730,7 +856,7 @@ func (sb *SlurmBridge) submitExternalJob(ctx context.Context, s *stateData, pod 
 		baseJobID = jobIDs[0]
 	}
 	for i := range s.slurmJobIR.Components {
-		err = sb.labelPodsWithJobId(ctx, jobIDs[i], baseJobID, s.slurmJobIR.Components[i])
+		err = sb.labelPodsWithJobId(ctx, jobIDs[i], baseJobID, int32(i), s.slurmJobIR.Components[i])
 		if err != nil {
 			return fwk.NewStatus(fwk.Error, err.Error())
 		}
@@ -791,7 +917,7 @@ func (sb *SlurmBridge) updateExternalJob(ctx context.Context, s *stateData, pod 
 		return status
 	}
 
-	err = sb.labelPodsWithJobId(ctx, jobID, externalJob.HetJobId, *component)
+	err = sb.labelPodsWithJobId(ctx, jobID, externalJob.HetJobId, externalJob.HetJobOffset, *component)
 	if err != nil {
 		logger.Error(err, "error labeling pods after update")
 		return fwk.NewStatus(fwk.Error, err.Error())
@@ -832,14 +958,14 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 
 // annotatePodsWithNodes will annotate a jobid to pods and add a finalizer to
 // ensure there is an opportunity to cleanly reconcile state between k8s and Slurm
-func (sb *SlurmBridge) labelPodsWithJobId(ctx context.Context, jobid int32, hetjobid int32, slurmJobComponent slurmjobir.SlurmJobComponent) error {
+func (sb *SlurmBridge) labelPodsWithJobId(ctx context.Context, jobid int32, hetjobid int32, hetJobOffset int32, slurmJobComponent slurmjobir.SlurmJobComponent) error {
 	logger := klog.FromContext(ctx)
 	for _, p := range slurmJobComponent.Pods.Items {
 		if p.Labels == nil {
 			p.Labels = make(map[string]string)
 		}
 
-		if err := sb.syncPodMeta(ctx, &p, jobid, hetjobid, "", true); err != nil {
+		if err := sb.syncPodMeta(ctx, &p, jobid, hetjobid, hetJobOffset, "", true); err != nil {
 			// A sibling can vanish between the snapshot and this patch;
 			// don't fail the whole gang for it.
 			if apierrors.IsNotFound(err) {
@@ -978,22 +1104,30 @@ func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (m
 		return nil, err
 	}
 	if val, ok := (*podToJob)[namespacedName.String()]; ok {
-		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.Nodes, false); err != nil {
+		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false); err != nil {
 			return nil, err
 		}
 	}
 	return *podToJob, nil
 }
 
-func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, nodesIn string, adopt bool) error {
+func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) error {
 	logger := klog.FromContext(ctx)
 
 	toUpdate := pod.DeepCopy()
 
 	hasJobID := pod.Labels[wellknown.LabelExternalJobId] != ""
 	if hasJobID || adopt {
+		if toUpdate.Labels == nil {
+			toUpdate.Labels = make(map[string]string)
+		}
 		validateIDLabel(ctx, jobid, wellknown.LabelExternalJobId, pod, toUpdate)
 		validateIDLabel(ctx, hetjobid, wellknown.LabelExternalHetJobId, pod, toUpdate)
+		if hetjobid > 0 && hetJobOffset >= 0 {
+			toUpdate.Labels[wellknown.LabelExternalHetJobOffset] = strconv.FormatInt(int64(hetJobOffset), 10)
+		} else {
+			delete(toUpdate.Labels, wellknown.LabelExternalHetJobOffset)
+		}
 
 		if pod.DeletionTimestamp == nil &&
 			!slices.Contains(toUpdate.Finalizers, wellknown.FinalizerScheduler) {

@@ -4,8 +4,10 @@
 package slurmjobir
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -13,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 type fakeWorkloadAPIDiscovery struct {
@@ -195,6 +198,87 @@ func TestRegisteredWorkloadAPIEncodesGetOptions(t *testing.T) {
 			groupVersion := schema.GroupVersion{Group: workloadAPIGroup, Version: version}
 			if _, err := runtime.NewParameterCodec(scheme).EncodeParameters(&metav1.GetOptions{}, groupVersion); err != nil {
 				t.Fatalf("encode GetOptions for %s: %v", groupVersion, err)
+			}
+		})
+	}
+}
+
+func TestListCompositePodGroup(t *testing.T) {
+	inNamespace := newSchedulingV1Alpha3Object("CompositePodGroup", "matching", map[string]any{
+		"parentCompositePodGroupName": "parent",
+		"workloadRef":                 map[string]any{"templateName": "template", "workloadName": "workload"},
+		"schedulingPolicy":            map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+	})
+	inNamespace.SetNamespace("target")
+	otherNamespace := newSchedulingV1Alpha3Object("CompositePodGroup", "other", nil)
+	reader := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).WithObjects(inNamespace, otherNamespace).Build()
+	tr := &translator{Reader: reader, ctx: context.Background()}
+
+	got, err := tr.listCompositePodGroup("target")
+	if err != nil {
+		t.Fatalf("listCompositePodGroup(target) error = %v, want nil", err)
+	}
+	minGroupCount := int64(2)
+	want := []compositePodGroupInfo{{name: "matching", parentName: "parent", templateName: "template", workloadName: "workload", minGroupCount: &minGroupCount}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("listCompositePodGroup(target) = %v, want %v", got, want)
+	}
+}
+
+func TestValidateCompositePodGroup(t *testing.T) {
+	tests := []struct {
+		name      string
+		spec      map[string]any
+		wantField string
+	}{
+		{
+			name: "supported fields",
+			spec: map[string]any{
+				"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+			},
+		},
+		{
+			name: "empty unsupported fields",
+			spec: map[string]any{
+				"priorityClassName": "",
+				"schedulingConstraints": map[string]any{
+					"topology": []any{},
+				},
+			},
+		},
+		{
+			name: "topology key only",
+			spec: map[string]any{
+				"schedulingConstraints": map[string]any{
+					"topology": []any{
+						map[string]any{"key": "topology.kubernetes.io/zone"},
+					},
+				},
+			},
+			wantField: "spec.schedulingConstraints.topology",
+		},
+		{
+			name:      "priority class",
+			spec:      map[string]any{"priorityClassName": "high-priority"},
+			wantField: "spec.priorityClassName",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := newSchedulingV1Alpha3Object("CompositePodGroup", "test", tt.spec)
+			err := validateCompositePodGroup(obj)
+			if gotErr, wantErr := err != nil, tt.wantField != ""; gotErr != wantErr {
+				t.Fatalf("validateCompositePodGroup(%v) error = %v, want error presence = %t", tt.spec, err, wantErr)
+			}
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, ErrorCompositePodGroupUnsupported) {
+				t.Errorf("validateCompositePodGroup(%v) error = %v, want %v", tt.spec, err, ErrorCompositePodGroupUnsupported)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Errorf("validateCompositePodGroup(%v) error = %q, want field %q", tt.spec, err, tt.wantField)
 			}
 		})
 	}

@@ -147,12 +147,25 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 		}
 
 		if jobIsPendingOrRunning {
-			logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
-			if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
-				logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-					"jobId", jobId, "pod", podKey)
-				return err
+			hetJobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobId])
+			switch {
+			case hetJobId != 0:
+				hetJobOffset := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobOffset])
+				logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
+				if err := r.slurmControl.TerminateHetJobComponent(ctx, hetJobId, hetJobOffset); err != nil {
+					logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
+						"jobId", jobId, "pod", podKey)
+					return err
+				}
+			default:
+				logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
+				if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
+					logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
+						"jobId", jobId, "pod", podKey)
+					return err
+				}
 			}
+
 		} else {
 			logger.V(4).Info("Skipping termination of Slurm Job for Pod", "jobId", jobId, "pod", podKey)
 		}

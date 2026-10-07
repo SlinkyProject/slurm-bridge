@@ -40,7 +40,6 @@ func TestGetRootOwnerMetadata(t *testing.T) {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
 	utilruntime.Must(batchv1.AddToScheme(scheme))
-
 	type testCase struct {
 		name    string
 		client  client.Client
@@ -204,7 +203,6 @@ func TestGetRootOwnerMetadataFallbackPolicy(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(batchv1.AddToScheme(scheme))
-
 	deploymentGVK := appsv1.SchemeGroupVersion.WithKind("Deployment")
 	jobSetGVK := schema.FromAPIVersionAndKind("jobset.x-k8s.io/v1alpha2", "JobSet")
 	missingGVK := schema.FromAPIVersionAndKind("example.com/v1", "MissingController")

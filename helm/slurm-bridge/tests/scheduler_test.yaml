@@ -16,6 +16,9 @@ release:
 chart:
   version: 1.2.3
   appVersion: 1.2.3
+capabilities:
+  majorVersion: 1
+  minorVersion: 37
 tests:
   - it: manifests should match snapshot
     asserts:
@@ -41,20 +44,33 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
-  - it: requires built-in Workload APIs by default without enabling the embedded gang scheduler
+  - it: enables upstream workload cache for CompositePodGroups
     template: scheduler/deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
-  - it: allows an explicit Workload opt-out while preserving other feature gates
+          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true,TopologyAwareWorkloadScheduling=true
+  - it: allows a bridge Workload opt-out independently of upstream cache gates
     template: scheduler/deployment.yaml
     set:
       scheduler.featureGates.SlurmBridgeGenericWorkload: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=false
+          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=false,TopologyAwareWorkloadScheduling=true
+  - it: omits Kubernetes 1.37 workload gates on older clusters
+    capabilities:
+      majorVersion: 1
+      minorVersion: 36
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
+        template: scheduler/deployment.yaml
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: GangScheduling|podGroupPostFilter
+        template: scheduler/configmap.yaml
   - it: exposes authenticated metrics over HTTPS
     template: scheduler/service.yaml
     asserts:

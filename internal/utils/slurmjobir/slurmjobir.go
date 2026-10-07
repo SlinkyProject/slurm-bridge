@@ -82,6 +82,7 @@ type SlurmJobIR struct {
 type translator struct {
 	client.Reader
 	ctx                 context.Context
+	handle              fwk.Handle
 	draRegistry         *dra.Registry
 	deviceClassProfiles map[string]dra.DeviceProfile
 	workloadAPI         *WorkloadAPI
@@ -117,6 +118,8 @@ func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) 
 		return (*translator).fromPodGroupCoscheduling, true
 	case job_v1:
 		return (*translator).fromJob, true
+	case compositePodGroupV1Alpha3:
+		return (*translator).fromCompositePodGroup, true
 	case pod_v1:
 		return func(t *translator, pod *corev1.Pod, _ *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
 			return t.fromPod(pod)
@@ -137,8 +140,8 @@ func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
 	return ok
 }
 
-func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
-	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
+func PreFilter(c client.Client, registry *dra.Registry, handle fwk.Handle, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry, handle: handle, workloadAPI: workloadAPI}
 	if isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
 		return t.PreFilterPodGroup(pod, slurmJobIR)
 	}
@@ -147,6 +150,8 @@ func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI
 		return t.PreFilterPodGroupCoscheduling(pod, slurmJobIR)
 	case lws_v1:
 		return t.PreFilterLWS(pod, slurmJobIR)
+	case compositePodGroupV1Alpha3:
+		return t.PreFilterCompositePodGroup(pod, slurmJobIR)
 	default:
 		return fwk.NewStatus(fwk.Success)
 	}
@@ -169,8 +174,9 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
 
-	// Only Gang PodGroups replace the normal workload root. Basic PodGroups
-	// still supply annotations, but leave allocation membership to the owner.
+	// CompositePodGroup members use the root of their runtime group hierarchy.
+	// Otherwise, only Gang PodGroups replace the normal workload root. Basic
+	// PodGroups still supply annotations, but leave allocation membership to the owner.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 	var pg *PodGroup
 	if pgName, ok := podGroupName(pod); ok {
@@ -181,7 +187,21 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 		if err := validatePodGroupSpec(pg); err != nil {
 			return nil, err
 		}
-		if pg.Spec.SchedulingPolicy.Gang != nil {
+		if pg.Spec.ParentCompositePodGroupName != nil {
+			rootName, err := t.compositePodGroupRootName(pod.Namespace, *pg.Spec.ParentCompositePodGroupName)
+			if err != nil {
+				return nil, err
+			}
+			rootPOM.TypeMeta = compositePodGroupV1Alpha3
+			rootPOM.Name = rootName
+			obj, err := t.getUnstructuredObject(compositePodGroupV1Alpha3, client.ObjectKey{Namespace: rootPOM.Namespace, Name: rootPOM.Name})
+			if err != nil {
+				return nil, err
+			}
+			if err := validateCompositePodGroup(obj); err != nil {
+				return nil, err
+			}
+		} else if pg.Spec.SchedulingPolicy.Gang != nil {
 			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
 			rootPOM.Name = pgName
 		}

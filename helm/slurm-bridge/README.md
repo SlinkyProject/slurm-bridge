@@ -63,7 +63,7 @@ Kubernetes: `>= 1.34.0-0`
 | nameOverride | string | `""` | Overrides the name of the release. |
 | namespaceOverride | string | `""` | Overrides the namespace of the release. |
 | scheduler.affinity | object | `{}` | Set affinity for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity |
-| scheduler.featureGates | object | `{"DRAExtendedResource":true,"DynamicResourceAllocation":true,"SchedulerPopFromBackoffQ":false,"SlurmBridgeGenericWorkload":true}` | Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported built-in Workload and PodGroup API at startup; disable it for clusters without those APIs. It is independent of Kubernetes' GenericWorkload feature gate. |
+| scheduler.featureGates | object | `{"CompositePodGroup":true,"DRAExtendedResource":true,"DynamicResourceAllocation":true,"GenericWorkload":true,"SchedulerPopFromBackoffQ":false,"SlurmBridgeGenericWorkload":true,"TopologyAwareWorkloadScheduling":true}` | Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported built-in Workload and PodGroup API at startup. The upstream GenericWorkload, TopologyAwareWorkloadScheduling, and CompositePodGroup gates populate the hierarchy cache and require Kubernetes 1.37; disable them on older clusters. |
 | scheduler.image | object | `{"pullPolicy":"IfNotPresent","repository":"ghcr.io/slinkyproject/slurm-bridge-scheduler","tag":""}` | The image to use, `${repository}:${tag}`. Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names |
 | scheduler.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | scheduler.leaderElect | bool | `false` | Enables leader election. |

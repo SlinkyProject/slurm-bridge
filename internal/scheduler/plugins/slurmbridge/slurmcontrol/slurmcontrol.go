@@ -322,9 +322,6 @@ func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurm
 	if err := slurmJobIR.Validate(); err != nil {
 		return []int32{}, err
 	}
-	if slurmJobIR.IsHetJob() {
-		return []int32{}, errors.New("multi-component Slurm jobs are not supported")
-	}
 
 	return r.submitJob(ctx, pod, slurmJobIR)
 }

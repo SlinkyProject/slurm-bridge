@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/rest"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -382,6 +383,7 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 				t.Fatalf("List PodGroups = %#v, want PodGroup %q", podGroups.Items, pg.Name)
 			}
 			sb := &SlurmBridge{Client: kubeClient, workloadAPI: workloadAPI, schedulerName: "slurm-bridge"}
+			var handle fwk.Handle
 			ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, dra.DefaultRegistry(), workloadAPI, ctx, pod)
 			if err != nil {
 				t.Fatalf("TranslateToSlurmJobIR: %v", err)
@@ -394,7 +396,7 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if len(component.Pods.Items) != 1 || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" {
 				t.Fatalf("unexpected translation: %#v", ir)
 			}
-			if status := slurmjobir.PreFilter(sb.Client, dra.DefaultRegistry(), workloadAPI, ctx, pod, ir); !status.IsSuccess() {
+			if status := slurmjobir.PreFilter(sb.Client, dra.DefaultRegistry(), handle, workloadAPI, ctx, pod, ir); !status.IsSuccess() {
 				t.Fatalf("PreFilter: %v", status)
 			}
 			sb.markPodGroupScheduled(ctx, ir, component, "5")
