@@ -82,7 +82,6 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					sibling.Labels[wellknown.LabelExternalJobId] = "old-allocation"
 					objects := []client.Object{pg, workload, job, pod, sibling}
 					wantRoot := job_v1
-					wantPartition := "job-partition"
 					if tt.jobSetOwner {
 						owner := &jobset.JobSet{
 							TypeMeta: jobSet_v1alpha2,
@@ -94,7 +93,6 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 						job.OwnerReferences = []metav1.OwnerReference{controllerOwner(owner.APIVersion, owner.Kind, owner.Name)}
 						objects = append(objects, owner)
 						wantRoot = jobSet_v1alpha2
-						wantPartition = "jobset-partition"
 					}
 					cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 					ir, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), api, ctx, pod)
@@ -115,7 +113,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					if ptr.Deref(component.JobInfo.TimeLimit, 0) != 2 {
 						t.Errorf("TimeLimit = %v, want Job deadline translated to 2 minutes", component.JobInfo.TimeLimit)
 					}
-					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != wantPartition || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
+					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != "group-partition" || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
 						t.Errorf("annotation precedence changed: %#v", component.JobInfo)
 					}
 					if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); !status.IsSuccess() {

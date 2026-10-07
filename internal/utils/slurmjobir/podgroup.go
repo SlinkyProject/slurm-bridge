@@ -65,9 +65,6 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 	pg *PodGroup,
 	controllerPOM *metav1.PartialObjectMetadata,
 ) error {
-	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
-		return err
-	}
 	if controllerPOM != nil {
 		ann := controllerPOM.GetAnnotations()
 		if controllerPOM.Kind == "Job" {
@@ -84,6 +81,9 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 		if err := parseUserAnnotations(slurmJobComponent, ann); err != nil {
 			return err
 		}
+	}
+	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
+		return err
 	}
 	workloadName := pg.workloadName()
 	if workloadName == "" {
