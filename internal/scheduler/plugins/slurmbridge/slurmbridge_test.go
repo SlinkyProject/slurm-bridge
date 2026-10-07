@@ -2376,3 +2376,69 @@ func TestSlurmBridge_PostFilterWithoutJobIR(t *testing.T) {
 		t.Fatalf("status = %v, want Unschedulable", status)
 	}
 }
+
+func TestSlurmBridge_annotatePodsWithNodes_skipsDeletedSibling(t *testing.T) {
+	ctx := context.Background()
+	// pod1 is in podList (e.g. from a snapshot taken earlier) but not in the
+	// fake client, so patching it returns NotFound -- simulating a sibling
+	// deleted between the snapshot and this call.
+	pod1 := st.MakePod().Name("pod1").UID("uid1").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
+	pod2 := st.MakePod().Name("pod2").UID("uid2").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
+
+	cs := clientsetfake.NewClientset()
+	informerFactory := informers.NewSharedInformerFactory(cs, 0)
+	registeredPlugins := []tf.RegisterPluginFunc{
+		tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
+		tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
+	}
+	activator := &activateRecorder{}
+	f, err := tf.NewFramework(
+		ctx, registeredPlugins, "slurm-bridge",
+		fwkruntime.WithInformerFactory(informerFactory),
+		fwkruntime.WithPodActivator(activator))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClient := kubefake.NewFakeClient(pod2.DeepCopy())
+	sb := &SlurmBridge{Client: fakeClient, handle: f}
+
+	kubeNodes := sets.New("node1", "node2")
+	podList := &corev1.PodList{Items: []corev1.Pod{*pod1, *pod2}}
+	if err := sb.annotatePodsWithNodes(ctx, 1, kubeNodes, podList); err != nil {
+		t.Fatalf("annotatePodsWithNodes() error = %v, want nil (deleted sibling should be skipped)", err)
+	}
+
+	var got2 corev1.Pod
+	if err := fakeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod2), &got2); err != nil {
+		t.Fatal(err)
+	}
+	if got2.Annotations[wellknown.AnnotationExternalJobNode] == "" {
+		t.Error("pod2 was not assigned a node; the deleted sibling should not have starved it")
+	}
+}
+
+func TestSlurmBridge_labelPodsWithJobId_skipsDeletedSibling(t *testing.T) {
+	ctx := context.Background()
+	// pod1 is missing from the client, so its patch returns NotFound.
+	pod1 := st.MakePod().Name("pod1").UID("uid1").Obj()
+	pod2 := st.MakePod().Name("pod2").UID("uid2").Obj()
+
+	fakeClient := kubefake.NewFakeClient(pod2.DeepCopy())
+	sb := &SlurmBridge{Client: fakeClient}
+
+	component := slurmjobir.SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{*pod1, *pod2}}}
+	if err := sb.labelPodsWithJobId(ctx, 1, 0, component); err != nil {
+		t.Fatalf("labelPodsWithJobId() error = %v, want nil (deleted sibling should be skipped)", err)
+	}
+
+	var got2 corev1.Pod
+	if err := fakeClient.Get(ctx, kubeclient.ObjectKeyFromObject(pod2), &got2); err != nil {
+		t.Fatal(err)
+	}
+	if got2.Labels[wellknown.LabelExternalJobId] != "1" {
+		t.Errorf("pod2 job label = %q, want %q", got2.Labels[wellknown.LabelExternalJobId], "1")
+	}
+}
