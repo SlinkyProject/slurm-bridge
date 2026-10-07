@@ -451,12 +451,18 @@ func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponen
 		Priority:      &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
 		Qos:           jobComponent.JobInfo.QOS,
 		Reservation:   jobComponent.JobInfo.Reservation,
-		Shared:        sharedFromExclusiveAnnotation(&jobComponent),
 		TasksPerNode:  jobComponent.JobInfo.TasksPerNode,
 		TimeLimit:     &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
 		TresPerNode:   jobComponent.JobInfo.Gres,
 		UserId:        jobComponent.JobInfo.UserId,
 		Wckey:         jobComponent.JobInfo.Wckey,
+	}
+
+	// Set sharing only at submission. Slurm treats nonzero shared updates as
+	// oversubscribe and clears whole_node, including the MCS isolation flag.
+	// Omitting shared preserves the existing allocation's sharing mode.
+	if !update {
+		jobDesc.Shared = sharedFromExclusiveAnnotation(&jobComponent)
 	}
 
 	if len(excludedNodes) == 0 && !update {

@@ -5,6 +5,7 @@ package slurmcontrol
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -816,6 +817,78 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("realSlurmControl.SubmitSlurmJob() got= %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		exclusive *bool
+	}{
+		{name: "default exclusive"},
+		{name: "exclusive", exclusive: ptr.To(true)},
+		{name: "MCS", exclusive: ptr.To(false)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := st.MakePod().Name("pending").Namespace("slurm-bridge").
+				Label(wellknown.LabelExternalJobId, "42").Obj()
+			ir := &slurmjobir.SlurmJobIR{
+				Components: []slurmjobir.SlurmJobComponent{{
+					Pods: corev1.PodList{Items: []corev1.Pod{*pod}},
+					JobInfo: slurmjobir.SlurmJobIRJobInfo{
+						Exclusive:  tt.exclusive,
+						CpuPerTask: ptr.To(int32(2)),
+						MemPerNode: ptr.To(int64(200)),
+						ExcNodes:   []string{"node2"},
+					},
+				}},
+			}
+			updates := 0
+			r := &realSlurmControl{
+				mcsLabel: "kubernetes",
+				Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+					Update: func(ctx context.Context, obj object.Object, req any, opts ...client.UpdateOption) error {
+						updates++
+						if got := ptr.Deref(obj.(*slurmtypes.V0044JobInfo).JobId, 0); got != 42 {
+							t.Errorf("updated job ID = %d, want 42", got)
+						}
+						desc := req.(api.V0044JobDescMsg)
+						payload, err := json.Marshal(desc)
+						if err != nil {
+							return err
+						}
+						var fields map[string]json.RawMessage
+						if err := json.Unmarshal(payload, &fields); err != nil {
+							return err
+						}
+						// Slurm treats any nonzero shared update as oversubscribe,
+						// including MCS. Omit the field to preserve the submitted mode.
+						if shared, present := fields["shared"]; present {
+							t.Errorf("pending-job update sends shared=%s; want the field omitted to preserve isolation", shared)
+						}
+						if ptr.Deref(desc.McsLabel, "") != "kubernetes" {
+							t.Errorf("update lost the MCS label: %v", desc.McsLabel)
+						}
+						if desc.ExcludedNodes == nil || !slices.Equal(*desc.ExcludedNodes, ir.Components[0].JobInfo.ExcNodes) {
+							t.Errorf("excluded nodes were not updated: %v", desc.ExcludedNodes)
+						}
+						if ptr.Deref(desc.CpusPerTask, 0) != 2 || desc.MemoryPerNode == nil || ptr.Deref(desc.MemoryPerNode.Number, 0) != 200 {
+							t.Error("resource requirements were not updated")
+						}
+						return nil
+					},
+				}).Build(),
+			}
+			for _, excluded := range [][]string{{"node2"}, {}} {
+				ir.Components[0].JobInfo.ExcNodes = excluded
+				if id, err := r.UpdateJob(t.Context(), pod, ir); err != nil || id != 42 {
+					t.Fatalf("UpdateJob() = (%d, %v), want (42, nil)", id, err)
+				}
+			}
+			if updates != 2 {
+				t.Fatalf("update calls = %d, want 2", updates)
 			}
 		})
 	}
