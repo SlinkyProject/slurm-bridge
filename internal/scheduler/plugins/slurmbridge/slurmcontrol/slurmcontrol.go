@@ -223,7 +223,6 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 			}(),
 			Qos:          slurmJobIR.JobInfo.QOS,
 			Reservation:  slurmJobIR.JobInfo.Reservation,
-			Shared:       sharedFromExclusiveAnnotation(slurmJobIR),
 			TasksPerNode: slurmJobIR.JobInfo.TasksPerNode,
 			TimeLimit: func() *api.V0044Uint32NoValStruct {
 				if slurmJobIR.JobInfo.TimeLimit != nil {
@@ -242,6 +241,10 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 		},
 	}
 	if !update {
+		// Set sharing only at submission. Slurm treats nonzero shared updates as
+		// oversubscribe and clears whole_node, including the MCS isolation flag.
+		// Omitting shared preserves the existing allocation's sharing mode.
+		jobSubmit.Job.Shared = sharedFromExclusiveAnnotation(slurmJobIR)
 		if err := r.Create(ctx, job, jobSubmit); err != nil {
 			logger.Error(err, "could not create external job", "pod", klog.KObj(pod))
 			return 0, err
