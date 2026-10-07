@@ -34,6 +34,25 @@ func (sb *SlurmBridge) nodeEligibleForSlurm(ctx context.Context, state fwk.Cycle
 		return false, nil
 	}
 
+	// Pick the occupants that may be released before doing any copies or
+	// extra Filter runs; nodes without them cannot become eligible.
+	allocationID := podAllocationID(pod)
+	var occupants []fwk.PodInfo
+	for _, occupant := range node.GetPods() {
+		p := occupant.GetPod()
+		occupantAllocationID := podAllocationID(p)
+		if p.Spec.SchedulerName != sb.schedulerName || occupantAllocationID == 0 || occupantAllocationID == allocationID {
+			continue
+		}
+		if canRelease != nil && !canRelease(p) {
+			continue
+		}
+		occupants = append(occupants, occupant)
+	}
+	if len(occupants) == 0 {
+		return false, nil
+	}
+
 	// Filter stops at the first failure. Recheck the other plugins against the
 	// original node so a resource failure cannot conceal a taint, volume, port,
 	// or affinity constraint. Do not remove occupants for these checks.
@@ -51,27 +70,13 @@ func (sb *SlurmBridge) nodeEligibleForSlurm(ctx context.Context, state fwk.Cycle
 	// allocation. Slurm cannot account for those pods when reserving capacity.
 	availableNode := node.Snapshot()
 	availableState := state.Clone()
-	removed := false
-	allocationID := podAllocationID(pod)
-	for _, occupant := range node.GetPods() {
-		p := occupant.GetPod()
-		occupantAllocationID := podAllocationID(p)
-		if p.Spec.SchedulerName != sb.schedulerName || occupantAllocationID == 0 || occupantAllocationID == allocationID {
-			continue
-		}
-		if canRelease != nil && !canRelease(p) {
-			continue
-		}
-		if err := availableNode.RemovePod(klog.FromContext(ctx), p); err != nil {
+	for _, occupant := range occupants {
+		if err := availableNode.RemovePod(klog.FromContext(ctx), occupant.GetPod()); err != nil {
 			return false, fwk.AsStatus(err)
 		}
 		if status := sb.handle.RunPreFilterExtensionRemovePod(ctx, availableState, pod, occupant, availableNode); !status.IsSuccess() {
 			return false, status
 		}
-		removed = true
-	}
-	if !removed {
-		return false, nil
 	}
 
 	// Retain the configured NodeResourcesFit behavior, including resource
