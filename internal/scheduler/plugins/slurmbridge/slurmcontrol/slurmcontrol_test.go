@@ -6,6 +6,7 @@ package slurmcontrol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -897,7 +898,8 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 			}
 			updates := 0
 			r := &realSlurmControl{
-				mcsLabel: "kubernetes",
+				lastUpdate: lru.New(10),
+				mcsLabel:   "kubernetes",
 				Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
 					Update: func(ctx context.Context, obj object.Object, req any, opts ...client.UpdateOption) error {
 						updates++
@@ -1371,28 +1373,40 @@ func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
 		}}}
 	}
 	updates := 0
+	failUpdate := false
 	r := &realSlurmControl{lastUpdate: lru.New(10), Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error { updates++; return nil },
+		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error {
+			updates++
+			if failUpdate {
+				return errors.New("update applied but read back failed")
+			}
+			return nil
+		},
 		Delete: func(context.Context, object.Object, ...client.DeleteOption) error { return nil },
 	}).Build()}
 
 	for i, step := range []struct {
 		ir     *slurmjobir.SlurmJobIR
 		delete bool
+		fail   bool
 		want   int
 	}{
 		{ir: jobIR(), want: 1},
 		{ir: jobIR(), want: 1},
 		{ir: jobIR("node2"), want: 2},
 		{ir: jobIR("node2"), delete: true, want: 3},
+		// A failed update may still have reached Slurm, so the next request is resent.
+		{ir: jobIR(), fail: true, want: 4},
+		{ir: jobIR("node2"), want: 5},
 	} {
 		if step.delete {
 			if err := r.DeleteJob(ctx, pod); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if _, err := r.UpdateJob(ctx, pod, step.ir); err != nil {
-			t.Fatal(err)
+		failUpdate = step.fail
+		if _, err := r.UpdateJob(ctx, pod, step.ir); (err != nil) != step.fail {
+			t.Fatalf("step %d: err = %v, want failure %v", i, err, step.fail)
 		}
 		if updates != step.want {
 			t.Fatalf("step %d: updates = %d, want %d", i, updates, step.want)

@@ -377,6 +377,8 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 
 	job.JobId = ptr.To(jobID)
 	if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
+		// Slurm may have applied the update before the error; don't trust the old entry.
+		r.lastUpdate.Remove(jobID)
 		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
 		return 0, err
 	}
