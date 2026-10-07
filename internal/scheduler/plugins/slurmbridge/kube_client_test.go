@@ -401,8 +401,8 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if condition := apimeta.FindStatusCondition(pg.Status.Conditions, workloadAPI.ScheduledCondition); condition == nil || condition.Status != metav1.ConditionTrue {
 				t.Fatalf("scheduled condition = %#v, want True", condition)
 			}
-			if podGroupGets != 3 || podGroupLists != 1 || statusPatches != 1 || workloadGets != 1 {
-				t.Fatalf("requests: PodGroup GETs=%d, PodGroup LISTs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 3, 1, 1, 1", podGroupGets, podGroupLists, statusPatches, workloadGets)
+			if podGroupGets != 4 || podGroupLists != 1 || statusPatches != 1 || workloadGets != 1 {
+				t.Fatalf("requests: PodGroup GETs=%d, PodGroup LISTs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 4, 1, 1, 1", podGroupGets, podGroupLists, statusPatches, workloadGets)
 			}
 		})
 	}

@@ -4,10 +4,10 @@
 package slurmjobir
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,8 +19,8 @@ import (
 // applySlurmAnnotations applies root annotations or merges PodGroup, controller,
 // and Workload annotations when the pod belongs to a built-in PodGroup.
 func (t *translator) applySlurmAnnotations(
+	ctx context.Context,
 	slurmJobIR *SlurmJobIR,
-	pod *corev1.Pod,
 	rootPOM *metav1.PartialObjectMetadata,
 	pg *PodGroup,
 ) error {
@@ -34,21 +34,29 @@ func (t *translator) applySlurmAnnotations(
 	}
 
 	controllerPOM := rootPOM
-	if pg.Spec.SchedulingPolicy.Gang != nil {
-		c, ok := t.Reader.(client.Client)
-		if !ok {
-			return fmt.Errorf("client does not support owner metadata lookup")
-		}
-		var err error
-		controllerPOM, err = getRootOwnerMetadata(c, t.ctx, pod)
-		if err != nil {
-			return err
-		}
-	}
 
 	for i := range slurmJobIR.Components {
-		if err := t.parsePodGroupSlurmAnnotations(&slurmJobIR.Components[i], pg, controllerPOM); err != nil {
-			return err
+		firstPod := getFirstPod(slurmJobIR.Components[i].Pods)
+		if firstPod != nil {
+			if pg.Spec.SchedulingPolicy.Gang != nil || len(slurmJobIR.Components) > 1 {
+				c, ok := t.Reader.(client.Client)
+				if !ok {
+					return fmt.Errorf("client does not support owner metadata lookup")
+				}
+				var err error
+				controllerPOM, err = getRootOwnerMetadata(c, t.ctx, firstPod)
+				if err != nil {
+					return err
+				}
+			}
+			if pgName, ok := podGroupName(firstPod); ok {
+				if err := t.Get(ctx, client.ObjectKey{Namespace: firstPod.Namespace, Name: pgName}, pg); err != nil {
+					return err
+				}
+			}
+			if err := t.parsePodGroupSlurmAnnotations(&slurmJobIR.Components[i], pg, controllerPOM); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

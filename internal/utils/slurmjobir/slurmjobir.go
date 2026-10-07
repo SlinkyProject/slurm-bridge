@@ -189,7 +189,7 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 			return nil, err
 		}
 	}
-	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM, pg)
+	err = t.applySlurmAnnotations(ctx, slurmJobIR, rootPOM, pg)
 	return slurmJobIR, err
 }
 
