@@ -2004,7 +2004,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 				slurmControl: tt.fields.slurmControl,
 				handle:       tt.fields.handle,
 			}
-			if err := sb.validatePodToJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
+			if _, err := sb.validatePodToJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("SlurmBridge.validatePodToJob() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if !apiequality.Semantic.DeepEqual(tt.args.pod, tt.want) {
@@ -2144,7 +2144,7 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 			}
 			sb := &SlurmBridge{Client: kubeClient, slurmControl: control}
 
-			if err := sb.validatePodToJob(ctx, pod); err != nil {
+			if _, err := sb.validatePodToJob(ctx, pod); err != nil {
 				t.Fatalf("validatePodToJob() error = %v, want nil", err)
 			}
 			got := &corev1.Pod{}

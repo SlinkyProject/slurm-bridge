@@ -356,10 +356,55 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			}
 			got, err := r.GetJobsForPods(tt.args.ctx)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("realSlurmControl.GetJobsForPods() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("realSlurmControl.GetJobsForPods() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("realSlurmControl.GetJobsForPods() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_GetJobsForPodsFinishedJobs(t *testing.T) {
+	tests := []struct {
+		state    api.V0044JobInfoJobState
+		finished bool
+	}{
+		{api.V0044JobInfoJobStateCOMPLETED, true},
+		{api.V0044JobInfoJobStateCANCELLED, true},
+		{api.V0044JobInfoJobStateFAILED, true},
+		{api.V0044JobInfoJobStateTIMEOUT, true},
+		{api.V0044JobInfoJobStateNODEFAIL, true},
+		{api.V0044JobInfoJobStatePREEMPTED, true},
+		{api.V0044JobInfoJobStateBOOTFAIL, true},
+		{api.V0044JobInfoJobStateDEADLINE, true},
+		{api.V0044JobInfoJobStateOUTOFMEMORY, true},
+		{api.V0044JobInfoJobStateRUNNING, false},
+		{api.V0044JobInfoJobStatePENDING, false},
+		{api.V0044JobInfoJobStateSUSPENDED, false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			info := externaljobinfo.ExternalJobInfo{Pods: []string{"test/pod"}}
+			r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(
+				&slurmtypes.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+					JobId: ptr.To(int32(2)), JobState: &[]api.V0044JobInfoJobState{tt.state},
+					AdminComment: ptr.To(info.ToString()),
+					HetJobId:     &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))},
+					HetJobOffset: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))},
+				}},
+			).Build()}
+			got, err := r.GetJobsForPods(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, ok := (*got)["test/pod"]
+			if !ok || job.JobId != 2 || job.HetJobId != 1 || job.Finished != tt.finished {
+				t.Errorf("GetJobsForPods() = %v; want component 2 of job 1 with Finished=%t", got, tt.finished)
 			}
 		})
 	}
