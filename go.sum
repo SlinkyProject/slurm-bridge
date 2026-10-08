@@ -15,8 +15,8 @@ github.com/NYTimes/gziphandler v1.1.1/go.mod h1:n/CVRwUEOgIxrgPvAQhUUr9oeUtvrhMo
 github.com/OneOfOne/xxhash v1.2.8 h1:31czK/TI9sNkxIKfaUfGlU47BAxQ0ztGgd9vPyqimf8=
 github.com/OneOfOne/xxhash v1.2.8/go.mod h1:eZbhyaAYD41SGSSsnmcpxVoRiQ/MPUTjUdIIOT9Um7Q=
 github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
-github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260917142417-b9ce680ca667 h1:ZAFQlUxMPalbqtCfgSjxii8iwFK1GtE/ymwBuX+bcX4=
-github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20260917142417-b9ce680ca667/go.mod h1:GvTIUlfnOG7K3UjTLuYSbA5tKgyLSni9HRD4hTqaSJc=
+github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20261008152713-50ed000f569b h1:7Y6oSmRlyVHLePEsPvnKZHiNPw535X3M58xNhemHo3k=
+github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20261008152713-50ed000f569b/go.mod h1:GvTIUlfnOG7K3UjTLuYSbA5tKgyLSni9HRD4hTqaSJc=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d h1:licZJFw2RwpHMqeKTCYkitsPqHNxTmd4SNR5r94FGM8=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
