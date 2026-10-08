@@ -219,7 +219,7 @@ func TestTranslateToSlurmJobIR_GangPodGroupReadiness(t *testing.T) {
 					t.Fatalf("ComponentOf(%q, %q) = %d, want translated pod component", pod.Namespace, pod.Name, componentIndex)
 				}
 				component := &ir.Components[componentIndex]
-				wantPods, wantCode := 1, fwk.Error
+				wantPods, wantCode := 1, fwk.Unschedulable
 				if ready {
 					wantPods, wantCode = 2, fwk.Success
 				}

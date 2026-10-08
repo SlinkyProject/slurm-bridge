@@ -117,6 +117,8 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 	})
 	p1 := podWithSchedulingGroup("default", "p1", "pg1")
 	p2 := podWithSchedulingGroup("default", "p2", "pg1")
+	p1Labeled := p1.DeepCopy()
+	p1Labeled.Labels = map[string]string{wellknown.LabelExternalJobId: "7"}
 
 	type args struct {
 		pod        *corev1.Pod
@@ -169,7 +171,28 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 						},
 					}},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error()),
+		},
+		{
+			name:   "labeled gang short of quorum",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pg.DeepCopy()).Build(),
+			args: args{
+				pod: p1Labeled.DeepCopy(),
+				slurmJobIR: &SlurmJobIR{
+					RootPOM: metav1.PartialObjectMetadata{
+						TypeMeta: podGroupV1Alpha2,
+						ObjectMeta: metav1.ObjectMeta{
+							Namespace: "default",
+							Name:      "pg1",
+						},
+					},
+					Components: []SlurmJobComponent{
+						{
+							Pods: corev1.PodList{Items: []corev1.Pod{*p1Labeled}},
+						},
+					}},
+			},
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error()),
 		},
 		{
 			name: "basic policy skips gang count",

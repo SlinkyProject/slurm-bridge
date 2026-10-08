@@ -129,10 +129,11 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 		}
 	}
 	if numPodsWaiting < *minCount {
+		// Siblings are still being created; park until an event instead of retrying blindly.
 		if pod.Labels[wellknown.LabelExternalJobId] == "" {
-			return fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error())
+			return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
 		}
-		return fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error())
+		return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
 	}
 	return fwk.NewStatus(fwk.Success)
 }

@@ -520,7 +520,7 @@ func Test_translator_PreFilterPodGroupCoscheduling(t *testing.T) {
 				},
 				pod: &corev1.Pod{},
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorInsuffientPods.Error()),
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error()),
 		},
 		{
 			name: "Not enough pods for minmembers and invalid pod",
@@ -549,7 +549,7 @@ func Test_translator_PreFilterPodGroupCoscheduling(t *testing.T) {
 					return p
 				}(),
 			},
-			want: fwk.NewStatus(fwk.Error, ErrorExternalJobInvalid.Error()),
+			want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error()),
 		},
 		{
 			// Regression: siblings mid-labeling shouldn't look like insufficient quorum.

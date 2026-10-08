@@ -428,6 +428,8 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	// Perform resource specific PreFilter
 	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod, s.slurmJobIR)
 	if fs.Code() != fwk.Success {
+		// An Unschedulable status still reaches PostFilter; drop the IR so it can't submit.
+		s.slurmJobIR = nil
 		// If the external job is determined to no longer be valid
 		// delete the external job and remove the associated annotations
 		for _, r := range fs.Reasons() {
