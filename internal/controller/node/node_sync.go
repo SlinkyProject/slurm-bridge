@@ -117,7 +117,7 @@ func (r *NodeReconciler) taintNode(ctx context.Context, node *corev1.Node) error
 		return nil
 	}
 	logger.Info("Add taint to node", "node", klog.KObj(node))
-	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current)); err != nil {
+	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
 	}
@@ -155,7 +155,7 @@ func (r *NodeReconciler) untaintNode(ctx context.Context, node *corev1.Node) err
 		return nil
 	}
 	logger.Info("Remove taint from node", "node", klog.KObj(node))
-	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current)); err != nil {
+	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
 	}

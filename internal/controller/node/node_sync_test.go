@@ -11,6 +11,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -124,6 +126,59 @@ var _ = Describe("syncTaint()", func() {
 	})
 
 	Context("Taint and untaint Kubernetes nodes", func() {
+		DescribeTable("preserves concurrent taint changes", func(nodeName string, initiallyTainted bool) {
+			bridgeTaint := utils.NewTaintNodeBridged(schedulerName)
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			if initiallyTainted {
+				node.Spec.Taints = []corev1.Taint{*bridgeTaint}
+			}
+			concurrentTaint := corev1.Taint{
+				Key:    corev1.TaintNodeUnreachable,
+				Effect: corev1.TaintEffectNoSchedule,
+			}
+			updated := false
+			k8sClient.Client = fake.NewClientBuilder().WithObjects(node).WithInterceptorFuncs(interceptor.Funcs{
+				Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					if !updated {
+						// Another controller changes the Node after our read, before our patch.
+						latest := &corev1.Node{}
+						if err := c.Get(ctx, client.ObjectKeyFromObject(obj), latest); err != nil {
+							return err
+						}
+						latest.Spec.Taints = append(latest.Spec.Taints, concurrentTaint)
+						if err := c.Update(ctx, latest); err != nil {
+							return err
+						}
+						updated = true
+					}
+					return c.Patch(ctx, obj, patch, opts...)
+				},
+			}).Build()
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)}
+
+			By("rejecting the stale patch without losing the concurrent taint")
+			err := controllerReconciler.syncTaint(ctx, req)
+			Expect(apierrors.IsConflict(err)).To(BeTrue(), "expected a conflict, got %v", err)
+			latest := &corev1.Node{}
+			Expect(k8sClient.Get(ctx, req.NamespacedName, latest)).To(Succeed())
+			Expect(taints.TaintExists(latest.Spec.Taints, &concurrentTaint)).To(BeTrue())
+			Expect(taints.TaintExists(latest.Spec.Taints, bridgeTaint)).To(Equal(initiallyTainted))
+
+			By("retrying against fresh state and preserving the concurrent taint")
+			Expect(controllerReconciler.syncTaint(ctx, req)).To(Succeed())
+			Expect(k8sClient.Get(ctx, req.NamespacedName, latest)).To(Succeed())
+			Expect(taints.TaintExists(latest.Spec.Taints, &concurrentTaint)).To(BeTrue())
+			Expect(taints.TaintExists(latest.Spec.Taints, bridgeTaint)).To(Equal(!initiallyTainted))
+			Expect(k8sClient.patchCalls).To(Equal(2))
+
+			By("skipping the patch once the taints are reconciled")
+			Expect(controllerReconciler.syncTaint(ctx, req)).To(Succeed())
+			Expect(k8sClient.patchCalls).To(Equal(2))
+		},
+			Entry("when adding the bridge taint", "bridged-0", false),
+			Entry("when removing the bridge taint", "kube-0", true),
+		)
+
 		It("Should untaint Kubernetes node", func() {
 			By("syncTaint()")
 			req := reconcile.Request{

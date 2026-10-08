@@ -166,11 +166,8 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 		return nil
 	}
 
-	// Use the cache to make the common no-op path cheap. A cached value must never
-	// authorize an undrain, however, because an administrator may have replaced a
-	// bridge-owned drain since the last refresh. Only when the cache indicates that
-	// an undrain may be needed do a direct read and repeat the ownership check before
-	// issuing the state-changing request.
+	// The cache may only skip an undrain. A direct read must reconfirm bridge ownership first,
+	// since an admin may have re-drained the node since the last refresh.
 	slurmNode = &slurmtypes.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
