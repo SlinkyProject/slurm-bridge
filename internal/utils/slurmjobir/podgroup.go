@@ -176,15 +176,23 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 }
 
 func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodList, error) {
-	var allPods corev1.PodList
-	if err := t.List(t.ctx, &allPods, client.InNamespace(namespace)); err != nil {
-		return corev1.PodList{}, err
-	}
-	var groupPods corev1.PodList
-	for i := range allPods.Items {
-		if name, ok := podGroupName(&allPods.Items[i]); ok && name == groupName {
+	if t.podsByGroup == nil {
+		var allPods corev1.PodList
+		if err := t.List(t.ctx, &allPods, client.InNamespace(namespace)); err != nil {
+			return corev1.PodList{}, err
+		}
+
+		t.podsByGroup = make(map[string]corev1.PodList)
+		for i := range allPods.Items {
+			name, ok := podGroupName(&allPods.Items[i])
+			if !ok {
+				continue
+			}
+			groupPods := t.podsByGroup[name]
 			groupPods.Items = append(groupPods.Items, allPods.Items[i])
+			t.podsByGroup[name] = groupPods
 		}
 	}
-	return groupPods, nil
+
+	return t.podsByGroup[groupName], nil
 }
