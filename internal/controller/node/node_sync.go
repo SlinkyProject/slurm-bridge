@@ -97,32 +97,27 @@ func (r *NodeReconciler) taintNode(ctx context.Context, node *corev1.Node) error
 	}
 
 	// Fetch Node
-	toUpdate := &corev1.Node{}
+	current := &corev1.Node{}
 	key := types.NamespacedName{
 		Name: name,
 	}
-	if err := r.Get(ctx, key, toUpdate); err != nil {
+	if err := r.Get(ctx, key, current); err != nil {
 		logger.Error(err, "failed to get node", "node", klog.KObj(node))
 		return err
 	}
 
 	// Add Node Taint
-	toUpdate = toUpdate.DeepCopy()
 	taint := utils.NewTaintNodeBridged(r.SchedulerName)
-	toUpdate, _, err = taints.AddOrUpdateTaint(toUpdate, taint)
+	toUpdate, changed, err := taints.AddOrUpdateTaint(current, taint)
 	if err != nil {
 		logger.Error(err, "failed to add or update taint", "node", klog.KObj(node), "taint", taint)
 		return err
 	}
-	patch := client.StrategicMergeFrom(node)
-	if data, err := patch.Data(node); err != nil {
-		logger.Error(err, "failed to unpack patch for node", "node", klog.KObj(node))
-	} else if len(data) == 0 {
-		logger.V(2).Info("node patch is empty, skipping patch request", "node", klog.KObj(node))
+	if !changed {
 		return nil
 	}
 	logger.Info("Add taint to node", "node", klog.KObj(node))
-	if err := r.Patch(ctx, toUpdate, patch); err != nil {
+	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
 	}
@@ -142,28 +137,25 @@ func (r *NodeReconciler) untaintNode(ctx context.Context, node *corev1.Node) err
 	}
 
 	// Fetch Node
-	toUpdate := &corev1.Node{}
+	current := &corev1.Node{}
 	key := types.NamespacedName{
 		Name: name,
 	}
-	if err := r.Get(ctx, key, toUpdate); err != nil {
+	if err := r.Get(ctx, key, current); err != nil {
 		logger.Error(err, "failed to get node", "node", klog.KObj(node))
 		return err
 	}
 
 	// Delete Node Taint
-	toUpdate = toUpdate.DeepCopy()
+	toUpdate := current.DeepCopy()
 	taint := utils.NewTaintNodeBridged(r.SchedulerName)
-	toUpdate.Spec.Taints, _ = taints.DeleteTaint(toUpdate.Spec.Taints, taint)
-	patch := client.StrategicMergeFrom(node)
-	if data, err := patch.Data(node); err != nil {
-		logger.Error(err, "failed to unpack patch for node", "node", klog.KObj(node))
-	} else if len(data) == 0 {
-		logger.V(2).Info("node patch is empty, skipping patch request", "node", klog.KObj(node))
+	var changed bool
+	toUpdate.Spec.Taints, changed = taints.DeleteTaint(toUpdate.Spec.Taints, taint)
+	if !changed {
 		return nil
 	}
 	logger.Info("Remove taint from node", "node", klog.KObj(node))
-	if err := r.Patch(ctx, toUpdate, patch); err != nil {
+	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(current, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to patch node", "node", klog.KObj(node))
 		return err
 	}

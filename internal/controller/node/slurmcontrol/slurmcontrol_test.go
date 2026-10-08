@@ -26,6 +26,7 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
@@ -324,53 +325,108 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 }
 
 func Test_realSlurmControl_MakeNodeUndrain(t *testing.T) {
-	type fields struct {
-		Client slurmclient.Client
+	nodeWithState := func(state api.V0044NodeState, reason string) *types.V0044Node {
+		return &types.V0044Node{V0044Node: api.V0044Node{
+			Name:   ptr.To("node-0"),
+			State:  ptr.To([]api.V0044NodeState{state}),
+			Reason: ptr.To(reason),
+		}}
 	}
-	type args struct {
-		ctx    context.Context
-		node   *corev1.Node
-		reason string
-	}
+	bridgeDrain := nodeWithState(api.V0044NodeStateDRAIN, "slurm-bridge: cordoned")
+	adminDrain := nodeWithState(api.V0044NodeStateDRAIN, "administrator maintenance")
+	idle := nodeWithState(api.V0044NodeStateIDLE, "")
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
+		name          string
+		cached        *types.V0044Node
+		live          *types.V0044Node
+		wantLiveReads int
+		wantUpdates   int
 	}{
 		{
-			name: "not found",
-			fields: fields{
-				Client: fake.NewFakeClient(),
-			},
-			args: args{
-				ctx:  context.TODO(),
-				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
-			},
-			wantErr: false,
+			name: "missing node does not require a live read",
 		},
 		{
-			name: "found",
-			fields: func() fields {
-				node := &types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("node-0")}}
-				return fields{
-					Client: fake.NewClientBuilder().WithObjects(node).Build(),
-				}
-			}(),
-			args: args{
-				ctx:  context.TODO(),
-				node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}},
-			},
-			wantErr: false,
+			name:   "idle node does not require a live read",
+			cached: idle,
+		},
+		{
+			name:   "administrator drain is preserved without a live read",
+			cached: adminDrain,
+		},
+		{
+			name:          "bridge drain is rechecked before undraining",
+			cached:        bridgeDrain,
+			live:          bridgeDrain,
+			wantLiveReads: 1,
+			wantUpdates:   1,
+		},
+		{
+			name:          "administrator drain replacing a cached bridge drain is preserved",
+			cached:        bridgeDrain,
+			live:          adminDrain,
+			wantLiveReads: 1,
+		},
+		{
+			name:          "node already undrained since the last cache refresh is unchanged",
+			cached:        bridgeDrain,
+			live:          idle,
+			wantLiveReads: 1,
+		},
+		{
+			name:          "node removed since the last cache refresh is ignored",
+			cached:        bridgeDrain,
+			wantLiveReads: 1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &realSlurmControl{
-				Client: tt.fields.Client,
+			cachedReads, liveReads, updates := 0, 0, 0
+			funcs := interceptor.Funcs{
+				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+					options := &slurmclient.GetOptions{}
+					options.ApplyOptions(opts)
+					if options.RefreshCache || options.WaitRefreshCache {
+						t.Fatal("undrain must not force or wait for a cache refresh")
+					}
+					if key != "node-0" {
+						t.Fatalf("unexpected node key %q", key)
+					}
+					node := tt.cached
+					if options.SkipCache {
+						liveReads++
+						node = tt.live
+					} else {
+						cachedReads++
+					}
+					if node == nil {
+						return slurmerrors.ErrNotFound
+					}
+					*obj.(*types.V0044Node) = *node.DeepCopy()
+					return nil
+				},
+				Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
+					updates++
+					if liveReads != 1 {
+						t.Fatal("undrain must be authorized by a live read")
+					}
+					want := api.V0044UpdateNodeMsg{
+						State:  ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateUNDRAIN}),
+						Reason: ptr.To("slurm-bridge: test"),
+					}
+					if !apiequality.Semantic.DeepEqual(req, want) {
+						t.Errorf("Update() request = %#v, want %#v", req, want)
+					}
+					return nil
+				},
 			}
-			if err := r.MakeNodeUndrain(tt.args.ctx, tt.args.node, tt.args.reason); (err != nil) != tt.wantErr {
-				t.Errorf("realSlurmControl.MakeNodeUndrain() error = %v, wantErr %v", err, tt.wantErr)
+			r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(funcs).Build()}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-0"}}
+			if err := r.MakeNodeUndrain(context.Background(), node, "test"); err != nil {
+				t.Fatalf("MakeNodeUndrain() error = %v", err)
+			}
+			if cachedReads != 1 || liveReads != tt.wantLiveReads || updates != tt.wantUpdates {
+				t.Errorf("cached reads/live reads/updates = %d/%d/%d, want 1/%d/%d",
+					cachedReads, liveReads, updates, tt.wantLiveReads, tt.wantUpdates)
 			}
 		})
 	}

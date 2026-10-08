@@ -153,25 +153,29 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Node, reason string) error {
 	logger := log.FromContext(ctx)
 
-	slurmNode := &slurmtypes.V0044Node{}
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	opts := &slurmclient.GetOptions{RefreshCache: true}
-	if err := r.Get(ctx, key, slurmNode, opts); err != nil {
+	slurmNode := &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
 
-	nodeReason := ptr.Deref(slurmNode.Reason, "")
-	if !slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN) ||
-		slurmNode.GetStateAsSet().Has(api.V0044NodeStateUNDRAIN) {
-		logger.V(1).Info("Node is already undrained, skipping undrain request",
-			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
+	if shouldSkipUndrain(ctx, slurmNode) {
 		return nil
-	} else if nodeReason != "" && !strings.Contains(nodeReason, nodeReasonPrefix) {
-		logger.Info("Node was drained but not by slurm-bridge, skipping undrain request",
-			"node", slurmNode.GetKey(), "nodeReason", nodeReason)
+	}
+
+	// The cache may only skip an undrain. A direct read must reconfirm bridge ownership first,
+	// since an admin may have re-drained the node since the last refresh.
+	slurmNode = &slurmtypes.V0044Node{}
+	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if shouldSkipUndrain(ctx, slurmNode) {
 		return nil
 	}
 
@@ -188,6 +192,24 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	}
 
 	return nil
+}
+
+func shouldSkipUndrain(ctx context.Context, slurmNode *slurmtypes.V0044Node) bool {
+	logger := log.FromContext(ctx)
+	state := slurmNode.GetStateAsSet()
+	if !state.Has(api.V0044NodeStateDRAIN) || state.Has(api.V0044NodeStateUNDRAIN) {
+		logger.V(1).Info("Node is already undrained, skipping undrain request",
+			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
+		return true
+	}
+
+	nodeReason := ptr.Deref(slurmNode.Reason, "")
+	if nodeReason != "" && !strings.Contains(nodeReason, nodeReasonPrefix) {
+		logger.Info("Node was drained but not by slurm-bridge, skipping undrain request",
+			"node", slurmNode.GetKey(), "nodeReason", nodeReason)
+		return true
+	}
+	return false
 }
 
 // IsNodeDrain implements SlurmControlInterface.
