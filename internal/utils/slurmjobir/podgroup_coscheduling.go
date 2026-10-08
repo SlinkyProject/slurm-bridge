@@ -15,8 +15,6 @@ import (
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
-
-	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var (
@@ -55,28 +53,7 @@ func (t *translator) PreFilterPodGroupCoscheduling(pod *corev1.Pod, slurmJobIR *
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodGroupCoschedulingFinished.Error())
 	}
 
-	// Group membership, not label-propagation progress: siblings are still
-	// being labeled async, so counting only already-labeled ones races that.
-	if pod.Labels[wellknown.LabelExternalJobId] != "" {
-		if len(slurmJobIR.AllPods()) < int(podGroup.Spec.MinMember) {
-			// Siblings are still being created; park until an event instead of retrying blindly.
-			return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
-		}
-		return fwk.NewStatus(fwk.Success)
-	}
-
-	// No job yet: ensure enough unclaimed pods exist to create one.
-	numPodsWaiting := 0
-	for _, p := range slurmJobIR.AllPods() {
-		if p.Labels[wellknown.LabelExternalJobId] == "" {
-			numPodsWaiting++
-		}
-	}
-	if numPodsWaiting < int(podGroup.Spec.MinMember) {
-		// Siblings are still being created; park until an event instead of retrying blindly.
-		return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
-	}
-	return fwk.NewStatus(fwk.Success)
+	return gangQuorum(pod, slurmJobIR.AllPods(), int(podGroup.Spec.MinMember))
 }
 
 // GetPodGroupCoscheduling returns the PodGroup coscheduling object a Pod belongs to in cache.

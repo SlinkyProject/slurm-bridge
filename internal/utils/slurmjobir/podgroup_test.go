@@ -195,6 +195,21 @@ func Test_translator_PreFilterPodGroup(t *testing.T) {
 			want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error()),
 		},
 		{
+			name:   "labeled pod keeps quorum while a sibling is still being labeled",
+			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(pg.DeepCopy()).Build(),
+			args: args{
+				pod: p1Labeled.DeepCopy(),
+				slurmJobIR: &SlurmJobIR{
+					RootPOM: metav1.PartialObjectMetadata{
+						TypeMeta:   podGroupV1Alpha2,
+						ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "pg1"},
+					},
+					Components: []SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*p1Labeled, *p2}}}},
+				},
+			},
+			want: fwk.NewStatus(fwk.Success),
+		},
+		{
 			name: "basic policy skips gang count",
 			client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 				newPodGroup("pg2", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
