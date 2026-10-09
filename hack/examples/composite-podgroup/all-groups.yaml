@@ -1,0 +1,106 @@
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: Workload
+metadata:
+  name: composite-all-groups
+  namespace: slurm-bridge
+spec:
+  compositePodGroupTemplates:
+    - name: all
+      schedulingPolicy:
+        gang:
+          minGroupCount: 2
+      podGroupTemplates:
+        - name: frontend
+          schedulingPolicy:
+            gang:
+              minCount: 1
+        - name: backend
+          schedulingPolicy:
+            gang:
+              minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: CompositePodGroup
+metadata:
+  name: composite-all-groups
+  namespace: slurm-bridge
+spec:
+  workloadRef:
+    workloadName: composite-all-groups
+    templateName: all
+  schedulingPolicy:
+    gang:
+      minGroupCount: 2
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-all-groups-frontend
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-all-groups
+  workloadRef:
+    workloadName: composite-all-groups
+    templateName: frontend
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-all-groups-backend
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-all-groups
+  workloadRef:
+    workloadName: composite-all-groups
+    templateName: backend
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-all-groups-frontend
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-all-groups-frontend
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-all-groups-backend
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-all-groups-backend
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi

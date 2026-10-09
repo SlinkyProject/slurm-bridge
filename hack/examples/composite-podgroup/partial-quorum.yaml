@@ -1,0 +1,125 @@
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: Workload
+metadata:
+  name: composite-partial-quorum
+  namespace: slurm-bridge
+spec:
+  compositePodGroupTemplates:
+    - name: quorum
+      schedulingPolicy:
+        gang:
+          minGroupCount: 2
+      podGroupTemplates:
+        - name: worker-a
+          schedulingPolicy:
+            gang:
+              minCount: 1
+        - name: worker-b
+          schedulingPolicy:
+            gang:
+              minCount: 1
+        - name: worker-c
+          schedulingPolicy:
+            gang:
+              minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: CompositePodGroup
+metadata:
+  name: composite-partial-quorum
+  namespace: slurm-bridge
+spec:
+  workloadRef:
+    workloadName: composite-partial-quorum
+    templateName: quorum
+  schedulingPolicy:
+    gang:
+      minGroupCount: 2
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-partial-quorum-worker-a
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-partial-quorum
+  workloadRef:
+    workloadName: composite-partial-quorum
+    templateName: worker-a
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-partial-quorum-worker-b
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-partial-quorum
+  workloadRef:
+    workloadName: composite-partial-quorum
+    templateName: worker-b
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+# This third group is intentionally empty: the two populated groups satisfy the quorum.
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-partial-quorum-worker-c
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-partial-quorum
+  workloadRef:
+    workloadName: composite-partial-quorum
+    templateName: worker-c
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-partial-quorum-worker-a
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-partial-quorum-worker-a
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-partial-quorum-worker-b
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-partial-quorum-worker-b
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi

@@ -1,0 +1,125 @@
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: Workload
+metadata:
+  name: composite-nested
+  namespace: slurm-bridge
+spec:
+  compositePodGroupTemplates:
+    - name: all
+      schedulingPolicy:
+        gang:
+          minGroupCount: 1
+      compositePodGroupTemplates:
+        - name: workers
+          schedulingPolicy:
+            gang:
+              minGroupCount: 2
+          podGroupTemplates:
+            - name: worker-a
+              schedulingPolicy:
+                gang:
+                  minCount: 1
+            - name: worker-b
+              schedulingPolicy:
+                gang:
+                  minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: CompositePodGroup
+metadata:
+  name: composite-nested
+  namespace: slurm-bridge
+spec:
+  workloadRef:
+    workloadName: composite-nested
+    templateName: all
+  schedulingPolicy:
+    gang:
+      minGroupCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: CompositePodGroup
+metadata:
+  name: composite-nested-workers
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-nested
+  workloadRef:
+    workloadName: composite-nested
+    templateName: workers
+  schedulingPolicy:
+    gang:
+      minGroupCount: 2
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-nested-worker-a
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-nested-workers
+  workloadRef:
+    workloadName: composite-nested
+    templateName: worker-a
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: PodGroup
+metadata:
+  name: composite-nested-worker-b
+  namespace: slurm-bridge
+spec:
+  parentCompositePodGroupName: composite-nested-workers
+  workloadRef:
+    workloadName: composite-nested
+    templateName: worker-b
+  schedulingPolicy:
+    gang:
+      minCount: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-nested-worker-a
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-nested-worker-a
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: composite-nested-worker-b
+  namespace: slurm-bridge
+spec:
+  schedulerName: slurm-bridge-scheduler
+  restartPolicy: Never
+  schedulingGroup:
+    podGroupName: composite-nested-worker-b
+  containers:
+    - name: sleep
+      image: busybox:stable
+      command: [sh, -c, sleep 600]
+      resources:
+        requests:
+          cpu: '1'
+          memory: 100Mi
+        limits:
+          cpu: '1'
+          memory: 100Mi
