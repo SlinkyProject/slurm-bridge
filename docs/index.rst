@@ -21,6 +21,9 @@ Table of Contents
     - `Slurm <#slurm>`__
 
   - `Compatibility <#compatibility>`__
+
+    - `Upgrade support <#upgrade-support>`__
+
   - `Limitations <#limitations>`__
   - `Installation <#installation>`__
   - `Documentation <#documentation>`__
@@ -134,6 +137,20 @@ support is marked with the first supporting patch version.
 | ``1.0.X`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
 |           | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
 +-----------+-----------------------------------------------------------------------------------+
+
+Upgrade support
+~~~~~~~~~~~~~~~
+
+Within a major version, Slurm Bridge supports patch upgrades within the
+same minor release and upgrades to the next consecutive minor release.
+**Skipping minor releases is not supported.** For example, upgrade from
+``1.1`` to ``1.2`` before upgrading to ``1.3``; a direct ``1.1`` to
+``1.3`` upgrade is unsupported.
+
+Use the latest patch release in each minor series and verify that each
+upgrade has completed successfully before proceeding to the next minor.
+See the `upgrade guide <upgrading.html>`__ for version checks and
+preparation.
 
 Limitations
 -----------
@@ -254,5 +271,6 @@ limitations under the License.
     scheduler.md
     testing.md
     upgrades.md
+    upgrading.md
     usermanagement.md
     workload.md

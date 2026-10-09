@@ -12,6 +12,7 @@ Run [Slurm] as a [Kubernetes] scheduler. A [Slinky] project.
   - [Features](#features)
     - [Slurm](#slurm)
   - [Compatibility](#compatibility)
+    - [Upgrade support](#upgrade-support)
   - [Limitations](#limitations)
   - [Installation](#installation)
   - [Documentation](#documentation)
@@ -94,6 +95,17 @@ with the first supporting patch version.
 | `1.2.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 | `1.1.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 | `1.0.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+
+### Upgrade support
+
+Within a major version, Slurm Bridge supports patch upgrades within the same
+minor release and upgrades to the next consecutive minor release. **Skipping
+minor releases is not supported.** For example, upgrade from `1.1` to `1.2`
+before upgrading to `1.3`; a direct `1.1` to `1.3` upgrade is unsupported.
+
+Use the latest patch release in each minor series and verify that each upgrade
+has completed successfully before proceeding to the next minor. See the
+[upgrade guide](./docs/upgrading.md) for version checks and preparation.
 
 ## Limitations
 

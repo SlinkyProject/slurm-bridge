@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/env"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
+	"sigs.k8s.io/e2e-framework/pkg/flags"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -97,6 +98,10 @@ func parseSlurmNodeMode(value string) (slurmNodeMode, error) {
 // newTestEnvironment requires an explicit context so the suite never runs
 // against whatever kubeconfig context happens to be current.
 func newTestEnvironment() (types.Environment, error) {
+	labels, err := parseE2ELabels()
+	if err != nil {
+		return nil, err
+	}
 	kubeContext := os.Getenv(e2eKubeContextEnvironment)
 	if kubeContext == "" {
 		return nil, fmt.Errorf("%s must name the kubeconfig context of the e2e cluster", e2eKubeContextEnvironment)
@@ -113,8 +118,34 @@ func newTestEnvironment() (types.Environment, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create client for kubeconfig context %q: %w", kubeContext, err)
 	}
-	cfg := envconf.New().WithParallelTestEnabled().WithKubeContext(kubeContext).WithClient(kubeClient)
+	cfg := envconf.New().WithParallelTestEnabled().WithKubeContext(kubeContext).WithClient(kubeClient).WithLabels(labels)
 	return env.NewWithConfig(cfg), nil
+}
+
+func parseE2ELabels() (flags.LabelsMap, error) {
+	labels := flags.LabelsMap{}
+	if value := os.Getenv("E2E_LABELS"); value != "" {
+		if err := labels.Set(value); err != nil {
+			return nil, fmt.Errorf("E2E_LABELS: %w", err)
+		}
+	}
+	return labels, nil
+}
+
+func requireE2ESuite(t *testing.T, suite string, requireLabel bool) {
+	t.Helper()
+	labels, err := parseE2ELabels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !labels.Contains("suite", suite) && (requireLabel || len(labels["suite"]) > 0) {
+		t.Skipf("select this suite with E2E_LABELS=suite=%s", suite)
+	}
+}
+
+func withSuiteLabel(feature types.Feature, suite string) types.Feature {
+	feature.Labels()["suite"] = []string{suite}
+	return feature
 }
 
 func parseSlurmNodeModeFromEnvironment() (slurmNodeMode, error) {

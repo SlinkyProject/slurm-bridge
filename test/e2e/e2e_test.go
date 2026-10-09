@@ -10,6 +10,7 @@ import (
 )
 
 func TestScheduling(t *testing.T) {
+	requireE2ESuite(t, "scheduling", false)
 	testEnv, err := newTestEnvironment()
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +27,7 @@ func TestScheduling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = testEnv.Test(t, testSlurmBridgeReadiness(nodeMode))
+	_ = testEnv.Test(t, withSuiteLabel(testSlurmBridgeReadiness(nodeMode), "scheduling"))
 
 	testFeatures := []types.Feature{
 		testAdmissionRoutingBoundaries(),
@@ -56,18 +57,22 @@ func TestScheduling(t *testing.T) {
 		testFeatures = append(testFeatures, testHybridSlurmBatchScheduling())
 	}
 
+	for _, feature := range testFeatures {
+		withSuiteLabel(feature, "scheduling")
+	}
 	_ = testEnv.TestInParallel(t, testFeatures...)
 	if nodeMode == slurmNodeModeHybrid {
 		// MCS isolation needs a native allocation with spare resources, so run
 		// after the other scheduling features have released their allocations.
-		_ = testEnv.Test(t, testHybridMCSIsolation())
+		_ = testEnv.Test(t, withSuiteLabel(testHybridMCSIsolation(), "scheduling"))
 		// Changing GRES compatibility would disrupt the scheduling features above.
-		_ = testEnv.Test(t, testHybridGRESCompatibilityCondition())
+		_ = testEnv.Test(t, withSuiteLabel(testHybridGRESCompatibilityCondition(), "scheduling"))
 	}
 }
 
 // TestSocketCPUAllocation runs the focused CPU/GPU runtime and reuse checks.
 func TestSocketCPUAllocation(t *testing.T) {
+	requireE2ESuite(t, "scheduling", false)
 	testEnv, err := newTestEnvironment()
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +80,6 @@ func TestSocketCPUAllocation(t *testing.T) {
 	if _, err := parseE2ECleanupFromEnvironment(); err != nil {
 		t.Fatal(err)
 	}
-	_ = testEnv.Test(t, testExclusiveCPUDRARejected())
-	_ = testEnv.Test(t, testSlurmBridgeDRAResourceScheduling(true))
+	_ = testEnv.Test(t, withSuiteLabel(testExclusiveCPUDRARejected(), "scheduling"))
+	_ = testEnv.Test(t, withSuiteLabel(testSlurmBridgeDRAResourceScheduling(true), "scheduling"))
 }
