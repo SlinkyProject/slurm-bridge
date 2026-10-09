@@ -14,6 +14,7 @@ import (
 	kubefeatures "k8s.io/kubernetes/pkg/features"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
+	schedulercommand "github.com/SlinkyProject/slurm-bridge/internal/scheduler/command"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge"
 )
 
@@ -30,7 +31,7 @@ func TestSlurmBridgeGenericWorkloadFlagIsIndependent(t *testing.T) {
 		t.Fatal("bridge gate must not enable the embedded scheduler's GenericWorkload")
 	}
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, true)
-	command := app.NewSchedulerCommand(app.WithPlugin(slurmbridge.Name, slurmbridge.New))
+	command := schedulercommand.New(app.WithPlugin(slurmbridge.Name, slurmbridge.New))
 	if err := command.ParseFlags([]string{"--feature-gates=SlurmBridgeGenericWorkload=false"}); err != nil {
 		t.Fatal(err)
 	}

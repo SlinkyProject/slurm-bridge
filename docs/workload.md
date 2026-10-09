@@ -402,6 +402,13 @@ This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
 `SlurmBridgeGenericWorkload` controls the bridge's compatibility implementation
 without enabling the embedded scheduler's upstream gang-scheduling path.
 
+When the embedded scheduler's `GenericWorkload` gate is enabled, its shared
+PodGroup client and informers use the discovered native API version. Alpha
+objects and status conditions are converted to the scheduler's beta types;
+status writes are converted back to the served version. Other Kubernetes
+resources retain their original clients. This compatibility wiring does not
+enable native gang scheduling by default.
+
 Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
 out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm
 deployments, set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The
