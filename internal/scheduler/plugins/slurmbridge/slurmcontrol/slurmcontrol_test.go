@@ -6,6 +6,7 @@ package slurmcontrol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
+	"k8s.io/utils/lru"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -203,9 +205,10 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			if err := r.DeleteJob(tt.args.ctx, tt.args.pod); (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.DeleteJob() error = %v, wantErr %v", err, tt.wantErr)
@@ -353,7 +356,8 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client: tt.fields.Client,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
 			}
 			got, err := r.GetJobsForPods(tt.args.ctx)
 			if (err != nil) != tt.wantErr {
@@ -589,8 +593,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetJob(tt.args.ctx, tt.args.pod)
 			if (err != nil) != tt.wantErr {
@@ -852,9 +857,10 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.SubmitJob(tt.args.ctx, tt.args.pod, tt.args.slurmJobIR)
 			if (err != nil) != tt.wantErr {
@@ -892,7 +898,8 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 			}
 			updates := 0
 			r := &realSlurmControl{
-				mcsLabel: "kubernetes",
+				lastUpdate: lru.New(10),
+				mcsLabel:   "kubernetes",
 				Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
 					Update: func(ctx context.Context, obj object.Object, req any, opts ...client.UpdateOption) error {
 						updates++
@@ -948,6 +955,7 @@ func Test_realSlurmControl_SubmitJobRejectsMultipleComponents(t *testing.T) {
 		},
 	}
 	r := &realSlurmControl{
+		lastUpdate: lru.New(10),
 		Client: fake.NewClientBuilder().
 			WithInterceptorFuncs(f).
 			Build(),
@@ -990,9 +998,10 @@ func TestNewControl(t *testing.T) {
 				partition: "slurm-bridge",
 			},
 			want: &realSlurmControl{
-				Client:    fake.NewFakeClient(),
-				mcsLabel:  "kubernetes",
-				partition: "slurm-bridge",
+				lastUpdate: lru.New(10000),
+				Client:     fake.NewFakeClient(),
+				mcsLabel:   "kubernetes",
+				partition:  "slurm-bridge",
 			},
 		},
 	}
@@ -1125,9 +1134,10 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetNodeNames(tt.args.ctx, tt.args.partition)
 			if (err != nil) != tt.wantErr {
@@ -1335,9 +1345,10 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := &realSlurmControl{
-				Client:    tt.fields.Client,
-				mcsLabel:  tt.fields.mcsLabel,
-				partition: tt.fields.partition,
+				lastUpdate: lru.New(10),
+				Client:     tt.fields.Client,
+				mcsLabel:   tt.fields.mcsLabel,
+				partition:  tt.fields.partition,
 			}
 			got, err := r.GetResources(tt.args.ctx, tt.args.pod, tt.args.nodeName)
 			if (err != nil) != tt.wantErr {
@@ -1348,5 +1359,57 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				t.Errorf("realSlurmControl.GetResources() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	pod := st.MakePod().Name("foo").Namespace("slurm-bridge").
+		Labels(map[string]string{wellknown.LabelExternalJobId: "7"}).Obj()
+	jobIR := func(exc ...string) *slurmjobir.SlurmJobIR {
+		return &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{
+			JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: exc},
+			Pods:    corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+		}}}
+	}
+	updates := 0
+	failUpdate := false
+	r := &realSlurmControl{lastUpdate: lru.New(10), Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error {
+			updates++
+			if failUpdate {
+				return errors.New("update applied but read back failed")
+			}
+			return nil
+		},
+		Delete: func(context.Context, object.Object, ...client.DeleteOption) error { return nil },
+	}).Build()}
+
+	for i, step := range []struct {
+		ir     *slurmjobir.SlurmJobIR
+		delete bool
+		fail   bool
+		want   int
+	}{
+		{ir: jobIR(), want: 1},
+		{ir: jobIR(), want: 1},
+		{ir: jobIR("node2"), want: 2},
+		{ir: jobIR("node2"), delete: true, want: 3},
+		// A failed update may still have reached Slurm, so the next request is resent.
+		{ir: jobIR(), fail: true, want: 4},
+		{ir: jobIR("node2"), want: 5},
+	} {
+		if step.delete {
+			if err := r.DeleteJob(ctx, pod); err != nil {
+				t.Fatal(err)
+			}
+		}
+		failUpdate = step.fail
+		if _, err := r.UpdateJob(ctx, pod, step.ir); (err != nil) != step.fail {
+			t.Fatalf("step %d: err = %v, want failure %v", i, err, step.fail)
+		}
+		if updates != step.want {
+			t.Fatalf("step %d: updates = %d, want %d", i, updates, step.want)
+		}
 	}
 }
