@@ -51,4 +51,9 @@ func TestScheduling(t *testing.T) {
 	}
 
 	_ = testEnv.TestInParallel(t, testFeatures...)
+	if nodeMode == slurmNodeModeHybrid {
+		// MCS isolation needs a native allocation with spare resources, so run
+		// after the other scheduling features have released their allocations.
+		_ = testEnv.Test(t, testHybridMCSIsolation())
+	}
 }
