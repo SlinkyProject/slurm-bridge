@@ -148,6 +148,141 @@ tests:
           count: 2
       - notExists:
           path: webhooks[0].clientConfig.caBundle
+  - it: falls back to managed namespaces when the namespace selector is empty
+    template: admission/webhook.yaml
+    set:
+      admission:
+        enabled: true
+        managedNamespaceSelector: {}
+        managedNamespaces:
+          - managed-one
+          - managed-two
+      schedulerConfig.schedulerName: my-scheduler
+    asserts:
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[0]
+          value:
+            key: kubernetes.io/metadata.name
+            operator: In
+            values:
+              - managed-one
+              - managed-two
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].matchConditions[0].expression
+          value: object.spec.schedulerName != "my-scheduler"
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[1].matchConditions[0].expression
+          value: object.spec.schedulerName == "my-scheduler"
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[1].namespaceSelector.matchExpressions[0]
+          value:
+            key: kubernetes.io/metadata.name
+            operator: In
+            values:
+              - managed-one
+              - managed-two
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[1].matchConditions[0].expression
+          value: object.spec.schedulerName != "my-scheduler"
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[0].matchConditions[0].expression
+          value: object.spec.schedulerName == "my-scheduler"
+  - it: omits namespace webhooks when no managed namespaces are configured
+    template: admission/webhook.yaml
+    set:
+      admission.enabled: true
+      admission.managedNamespaces: []
+    asserts:
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        lengthEqual:
+          path: webhooks
+          count: 1
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].name
+          value: pods.scheduler.slinky.slurm.net
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        lengthEqual:
+          path: webhooks
+          count: 1
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[0].name
+          value: pods.scheduler.slinky.slurm.net
+  - it: uses the managed namespace label selector for both admission configurations
+    template: admission/webhook.yaml
+    set:
+      admission.enabled: true
+      admission.managedNamespaceSelector:
+        matchLabels:
+          slinky.slurm.net/managed: "true"
+        matchExpressions:
+          - key: workload
+            operator: In
+            values:
+              - batch
+    asserts:
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].namespaceSelector.matchLabels
+          value:
+            slinky.slurm.net/managed: "true"
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[0]
+          value:
+            key: workload
+            operator: In
+            values:
+              - batch
+      - documentSelector:
+          path: kind
+          value: ValidatingWebhookConfiguration
+        equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[1]
+          value:
+            key: kubernetes.io/metadata.name
+            operator: NotIn
+            values:
+              - kube-system
+              - test-namespace
+      - documentSelector:
+          path: kind
+          value: MutatingWebhookConfiguration
+        equal:
+          path: webhooks[1].namespaceSelector.matchLabels
+          value:
+            slinky.slurm.net/managed: "true"
   - it: the self-signed path issues a certificate Secret and trusts it in both webhook configurations
     template: admission/webhook.yaml
     set:
