@@ -32,9 +32,21 @@ const (
 	amdDevicePlugin    = "amd.com/gpu"
 )
 
+var (
+	errorTooManyComponents = errors.New("slurmjobir has too many components. Max is 128") // This is due to a hard limit in Slurm
+)
+
 type SlurmJobComponent struct {
-	JobInfo SlurmJobIRJobInfo
-	Pods    corev1.PodList
+	ObjectMeta metav1.PartialObjectMetadata
+	JobInfo    SlurmJobIRJobInfo
+	Pods       corev1.PodList
+}
+
+func (s SlurmJobComponent) GetNamespacedName() types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: s.ObjectMeta.Namespace,
+		Name:      s.ObjectMeta.Name,
+	}
 }
 
 type SlurmJobIRJobInfo struct {
@@ -70,9 +82,21 @@ type SlurmJobIR struct {
 type translator struct {
 	client.Reader
 	ctx                 context.Context
+	handle              fwk.Handle
 	draRegistry         *dra.Registry
 	deviceClassProfiles map[string]dra.DeviceProfile
 	workloadAPI         *WorkloadAPI
+	podGroupStates      fwk.PodGroupStateLister
+	podsByGroup         map[string]corev1.PodList
+}
+
+// TranslationOption customizes the source of workload membership.
+type TranslationOption func(*translator)
+
+// WithPodGroupStates uses the scheduler's existing gang membership cache.
+// Other callers retain their reader's Pod listing behavior.
+func WithPodGroupStates(states fwk.PodGroupStateLister) TranslationOption {
+	return func(t *translator) { t.podGroupStates = states }
 }
 
 func (t *translator) registry() *dra.Registry {
@@ -94,6 +118,8 @@ func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) 
 		return (*translator).fromPodGroupCoscheduling, true
 	case job_v1:
 		return (*translator).fromJob, true
+	case compositePodGroupV1Alpha3:
+		return (*translator).fromCompositePodGroup, true
 	case pod_v1:
 		return func(t *translator, pod *corev1.Pod, _ *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
 			return t.fromPod(pod)
@@ -114,8 +140,8 @@ func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
 	return ok
 }
 
-func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
-	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
+func PreFilter(c client.Client, registry *dra.Registry, handle fwk.Handle, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
+	t := translator{Reader: c, ctx: ctx, draRegistry: registry, handle: handle, workloadAPI: workloadAPI}
 	if isBuiltInPodGroup(slurmJobIR.RootPOM.TypeMeta) {
 		return t.PreFilterPodGroup(pod, slurmJobIR)
 	}
@@ -124,6 +150,8 @@ func PreFilter(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI
 		return t.PreFilterPodGroupCoscheduling(pod, slurmJobIR)
 	case lws_v1:
 		return t.PreFilterLWS(pod, slurmJobIR)
+	case compositePodGroupV1Alpha3:
+		return t.PreFilterCompositePodGroup(pod, slurmJobIR)
 	default:
 		return fwk.NewStatus(fwk.Success)
 	}
@@ -146,8 +174,9 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
 
-	// Only Gang PodGroups replace the normal workload root. Basic PodGroups
-	// still supply annotations, but leave allocation membership to the owner.
+	// CompositePodGroup members use the root of their runtime group hierarchy.
+	// Otherwise, only Gang PodGroups replace the normal workload root. Basic
+	// PodGroups still supply annotations, but leave allocation membership to the owner.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
 	var pg *PodGroup
 	if pgName, ok := podGroupName(pod); ok {
@@ -158,7 +187,21 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 		if err := validatePodGroupSpec(pg); err != nil {
 			return nil, err
 		}
-		if pg.Spec.SchedulingPolicy.Gang != nil {
+		if pg.Spec.ParentCompositePodGroupName != nil {
+			rootName, err := t.compositePodGroupRootName(pod.Namespace, *pg.Spec.ParentCompositePodGroupName)
+			if err != nil {
+				return nil, err
+			}
+			rootPOM.TypeMeta = compositePodGroupV1Alpha3
+			rootPOM.Name = rootName
+			obj, err := t.getUnstructuredObject(compositePodGroupV1Alpha3, client.ObjectKey{Namespace: rootPOM.Namespace, Name: rootPOM.Name})
+			if err != nil {
+				return nil, err
+			}
+			if err := validateCompositePodGroup(obj); err != nil {
+				return nil, err
+			}
+		} else if pg.Spec.SchedulingPolicy.Gang != nil {
 			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
 			rootPOM.Name = pgName
 		}
@@ -182,6 +225,11 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	if err != nil {
 		return nil, err
 	}
+
+	if len(slurmJobIR.Components) > 128 {
+		return nil, errorTooManyComponents
+	}
+
 	slurmJobIR.RootPOM = *rootPOM
 	for i := range slurmJobIR.Components {
 		parsePodsCpuAndMemory(&slurmJobIR.Components[i])
@@ -189,7 +237,7 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 			return nil, err
 		}
 	}
-	err = t.applySlurmAnnotations(slurmJobIR, pod, rootPOM, pg)
+	err = t.applySlurmAnnotations(ctx, slurmJobIR, rootPOM, pg)
 	return slurmJobIR, err
 }
 

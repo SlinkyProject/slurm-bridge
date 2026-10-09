@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/rest"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -227,6 +228,7 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 				pg.Spec.WorkloadRef = &slurmjobir.WorkloadReference{WorkloadName: "workload"}
 			}
 			pgPath := "/apis/" + groupVersion + "/namespaces/" + namespace + "/podgroups/group"
+			pgListPath := "/apis/" + groupVersion + "/namespaces/" + namespace + "/podgroups"
 			workloadPath := "/apis/" + groupVersion + "/namespaces/" + namespace + "/workloads/workload"
 			metadataType := metav1.TypeMeta{APIVersion: "meta.k8s.io/v1", Kind: "PartialObjectMetadata"}
 			objects := map[string]runtime.Object{
@@ -262,7 +264,7 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if !ok {
 				t.Fatal("protobuf serializer unavailable")
 			}
-			podGroupGets, statusPatches, workloadGets, podStatusPatches := 0, 0, 0, 0
+			podGroupGets, podGroupLists, statusPatches, workloadGets, podStatusPatches := 0, 0, 0, 0, 0
 			transport := kubeRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
 				var data []byte
 				var err error
@@ -270,11 +272,19 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 				accept := req.Header.Get("Accept")
 				if discoveryObject, ok := discovery[req.URL.Path]; ok {
 					data, err = json.Marshal(discoveryObject)
-				} else if (req.URL.Path == pgPath || req.URL.Path == pgPath+"/status") && !strings.Contains(accept, "as=PartialObjectMetadata") {
+				} else if (req.URL.Path == pgPath || req.URL.Path == pgPath+"/status" || req.URL.Path == pgListPath) && !strings.Contains(accept, "as=PartialObjectMetadata") {
 					if accept != runtime.ContentTypeJSON {
 						t.Errorf("PodGroup %s Accept = %q, want JSON only", req.Method, accept)
 					}
-					data, err = json.Marshal(pg)
+					if req.URL.Path == pgListPath {
+						podGroupLists++
+						data, err = json.Marshal(&slurmjobir.PodGroupList{
+							TypeMeta: metav1.TypeMeta{APIVersion: groupVersion, Kind: "PodGroupList"},
+							Items:    []slurmjobir.PodGroup{*pg},
+						})
+					} else {
+						data, err = json.Marshal(pg)
+					}
 					if req.Method == http.MethodPatch && err == nil {
 						statusPatches++
 						if req.URL.Path != pgPath+"/status" || req.Header.Get("Content-Type") != string(client.StrategicMergeFrom(pg).Type()) {
@@ -288,7 +298,7 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 						if err == nil {
 							err = json.Unmarshal(data, pg)
 						}
-					} else if req.Method == http.MethodGet {
+					} else if req.URL.Path != pgListPath && req.Method == http.MethodGet {
 						podGroupGets++
 					}
 				} else {
@@ -365,7 +375,15 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if workloadAPI == nil {
 				return
 			}
+			var podGroups slurmjobir.PodGroupList
+			if err := kubeClient.List(ctx, &podGroups, client.InNamespace(namespace)); err != nil {
+				t.Fatalf("List PodGroups: %v", err)
+			}
+			if len(podGroups.Items) != 1 || podGroups.Items[0].Name != pg.Name {
+				t.Fatalf("List PodGroups = %#v, want PodGroup %q", podGroups.Items, pg.Name)
+			}
 			sb := &SlurmBridge{Client: kubeClient, workloadAPI: workloadAPI, schedulerName: "slurm-bridge"}
+			var handle fwk.Handle
 			ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, dra.DefaultRegistry(), workloadAPI, ctx, pod)
 			if err != nil {
 				t.Fatalf("TranslateToSlurmJobIR: %v", err)
@@ -378,15 +396,15 @@ func TestKubeClientContentNegotiation(t *testing.T) {
 			if len(component.Pods.Items) != 1 || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" {
 				t.Fatalf("unexpected translation: %#v", ir)
 			}
-			if status := slurmjobir.PreFilter(sb.Client, dra.DefaultRegistry(), workloadAPI, ctx, pod, ir); !status.IsSuccess() {
+			if status := slurmjobir.PreFilter(sb.Client, dra.DefaultRegistry(), handle, workloadAPI, ctx, pod, ir); !status.IsSuccess() {
 				t.Fatalf("PreFilter: %v", status)
 			}
 			sb.markPodGroupScheduled(ctx, ir, component, "5")
 			if condition := apimeta.FindStatusCondition(pg.Status.Conditions, workloadAPI.ScheduledCondition); condition == nil || condition.Status != metav1.ConditionTrue {
 				t.Fatalf("scheduled condition = %#v, want True", condition)
 			}
-			if podGroupGets != 3 || statusPatches != 1 || workloadGets != 1 {
-				t.Fatalf("requests: PodGroup GETs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 3, 1, 1", podGroupGets, statusPatches, workloadGets)
+			if podGroupGets != 4 || podGroupLists != 1 || statusPatches != 1 || workloadGets != 1 {
+				t.Fatalf("requests: PodGroup GETs=%d, PodGroup LISTs=%d, status PATCHes=%d, Workload metadata GETs=%d; want 4, 1, 1, 1", podGroupGets, podGroupLists, statusPatches, workloadGets)
 			}
 		})
 	}

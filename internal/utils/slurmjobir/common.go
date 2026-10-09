@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -36,4 +37,11 @@ func ParseSlurmJobId(input string) int32 {
 func GetMemoryFromQuantity(quantity *resource.Quantity) int64 {
 	val := quantity.Value()
 	return val / 1048576 // value for 1024x1024 to follow what we need for slurm job IR
+}
+
+func getFirstPod(p corev1.PodList) *corev1.Pod {
+	if len(p.Items) > 0 {
+		return &p.Items[0]
+	}
+	return nil
 }

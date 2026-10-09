@@ -25,6 +25,9 @@ data:
         preEnqueue:
           enabled:
           - name: 'SlurmBridge'
+          {{- if and .Values.scheduler.featureGates.GenericWorkload (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
+          - name: 'GangScheduling'
+          {{- end }}
         preFilter:
           enabled:
           - name: 'VolumeBinding'
@@ -39,6 +42,11 @@ data:
         postFilter:
           enabled:
           - name: 'SlurmBridge'
+        {{- if and .Values.scheduler.featureGates.GenericWorkload (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
+        podGroupPostFilter:
+          enabled:
+          - name: 'SlurmBridge'
+        {{- end }}
         reserve:
           enabled:
           - name: 'VolumeBinding'

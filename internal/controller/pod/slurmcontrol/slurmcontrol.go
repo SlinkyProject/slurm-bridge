@@ -17,6 +17,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	"github.com/SlinkyProject/slurm-client/pkg/types"
 
+	jobslurmcontrol "github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -27,6 +28,8 @@ type SlurmControlInterface interface {
 	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
+	// TerminateHetJobComponent cancels only the component at hetJobOffset, including offset zero.
+	TerminateHetJobComponent(ctx context.Context, hetJobId, hetJobOffset int32) error
 }
 
 // RealSlurmControl is the default implementation of SlurmControlInterface.
@@ -98,6 +101,11 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 		return err
 	}
 	return nil
+}
+
+// TerminateHetJobComponent implements SlurmControlInterface.
+func (r *realSlurmControl) TerminateHetJobComponent(ctx context.Context, hetJobId, hetJobOffset int32) error {
+	return jobslurmcontrol.NewControl(r.Client).TerminateHetJobComponent(ctx, hetJobId, hetJobOffset)
 }
 
 var _ SlurmControlInterface = &realSlurmControl{}

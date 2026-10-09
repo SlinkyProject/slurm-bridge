@@ -56,3 +56,25 @@ Determine scheduler image reference (repo:tag)
 {{- define "slurm-bridge.scheduler.imageRef" -}}
 {{ printf "%s:%s" (include "slurm-bridge.scheduler.image.repository" .) (include "slurm-bridge.scheduler.image.tag" .) | quote }}
 {{- end }}
+
+{{/*
+Determine whether the Kubernetes version supports the built-in workload APIs
+*/}}
+{{- define "slurm-bridge.scheduler.supportsWorkloadAPI" -}}
+{{- semverCompare ">=1.37-0" .Capabilities.KubeVersion.Version -}}
+{{- end }}
+
+{{/*
+List compatible scheduler feature gates
+*/}}
+{{- define "slurm-bridge.scheduler.featureGates" -}}
+{{- $featureGates := list }}
+{{- $workloadFeatureGates := list "CompositePodGroup" "GenericWorkload" "TopologyAwareWorkloadScheduling" }}
+{{- $supportsWorkloadAPI := eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true" }}
+{{- range $name, $enabled := .Values.scheduler.featureGates }}
+    {{- if or $supportsWorkloadAPI (not (has $name $workloadFeatureGates)) }}
+    {{- $featureGates = append $featureGates (printf "%s=%t" $name $enabled) }}
+    {{- end }}
+{{- end }}
+{{- join "," $featureGates }}
+{{- end }}

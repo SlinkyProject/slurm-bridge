@@ -21,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
@@ -937,12 +938,34 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		workloadAPI:   workloadAPI,
 	}
 
-	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
+	rootGroupState := framework.NewCycleState()
+	rootPlacementState := framework.NewCycleState()
+	rootPlacementState.SetPodGroupSchedulingCycle(rootGroupState)
+	groupState := framework.NewCycleState()
+	groupState.SetPlacementCycleState(rootPlacementState)
+	state := framework.NewCycleState()
+	state.SetPodGroupSchedulingCycle(groupState)
+	got, status := sb.PreFilter(ctx, state, podA.DeepCopy(), nil)
 	if status.Code() != fwk.Success {
 		t.Fatalf("PreFilter() status = %v, want Success: %v", status.Code(), status.Reasons())
 	}
 	if !apiequality.Semantic.DeepEqual(got, &fwk.PreFilterResult{NodeNames: sets.New("node1")}) {
 		t.Fatalf("PreFilter() result = %v, want node1", got)
+	}
+
+	data, err := groupState.Read(nativeGroupCycleKey)
+	if err != nil {
+		t.Fatalf("PreFilter() did not write native group cycle state: %v", err)
+	}
+	group := data.(*nativeGroupCycle)
+	if len(group.members) != 1 || group.members[0].state != state || group.members[0].pod.Name != podA.Name {
+		t.Fatalf("PreFilter() native group members = %#v, want %s", group.members, podA.Name)
+	}
+	if group.pending || !group.status.IsSuccess() {
+		t.Fatalf("PreFilter() native group decision = pending %t, status %v; want ready Success", group.pending, group.status)
+	}
+	if _, err := rootGroupState.Read(nativeGroupCycleKey); err != nil {
+		t.Fatalf("PreFilter() did not write root composite group cycle state: %v", err)
 	}
 
 	updated := &slurmjobir.PodGroup{TypeMeta: podGroup.TypeMeta}
@@ -1001,6 +1024,45 @@ func TestAllocatedNodeRejectedByKubernetes(t *testing.T) {
 				t.Errorf("allocatedNodeRejectedByKubernetes() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGroupProgressRecordComponentTracksReorderedComponents(t *testing.T) {
+	component := func(name string, excluded ...string) slurmjobir.SlurmJobComponent {
+		return slurmjobir.SlurmJobComponent{
+			ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+				Namespace: "workload",
+				Name:      name,
+			}},
+			JobInfo: slurmjobir.SlurmJobIRJobInfo{ExcNodes: excluded},
+		}
+	}
+	first := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+		component("leaf-a", "node-a"),
+		component("leaf-b"),
+	}}
+	progress := groupProgress{components: make(map[k8stypes.NamespacedName][]string)}
+	if complete := progress.recordComponent(first, 0); complete {
+		t.Fatal("groupProgress.recordComponent(first, 0) = true, want false")
+	}
+
+	second := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+		component("leaf-b", "node-b"),
+		component("leaf-a"),
+	}}
+	if complete := progress.recordComponent(second, 0); !complete {
+		t.Fatal("groupProgress.recordComponent(second, 0) = false, want true")
+	}
+	want := map[k8stypes.NamespacedName][]string{
+		{Namespace: "workload", Name: "leaf-a"}: {"node-a"},
+		{Namespace: "workload", Name: "leaf-b"}: {"node-b"},
+	}
+	got := make(map[k8stypes.NamespacedName][]string, len(second.Components))
+	for _, component := range second.Components {
+		got[component.GetNamespacedName()] = component.JobInfo.ExcNodes
+	}
+	if !apiequality.Semantic.DeepEqual(got, want) {
+		t.Errorf("recording reordered components produced exclusions %v, want %v", got, want)
 	}
 }
 
@@ -2100,8 +2162,9 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 				HetJobId: 100,
 			},
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantFinalizer: true,
 			wantPatches:   1,
@@ -2109,16 +2172,18 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 		{
 			name: "corrects stale component and base labels",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "999",
-				wellknown.LabelExternalHetJobId: "998",
+				wellknown.LabelExternalJobId:        "999",
+				wellknown.LabelExternalHetJobId:     "998",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			job: slurmcontrol.ExternalJob{
 				JobId:    102,
 				HetJobId: 100,
 			},
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantFinalizer: true,
 			wantPatches:   1,
@@ -2126,8 +2191,9 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 		{
 			name: "removes stale base label from homogeneous job",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "101",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "101",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			finalizers: []string{wellknown.FinalizerScheduler},
 			job: slurmcontrol.ExternalJob{
@@ -2142,8 +2208,9 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 		{
 			name: "matching identity is a no-op",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			finalizers: []string{wellknown.FinalizerScheduler},
 			job: slurmcontrol.ExternalJob{
@@ -2151,8 +2218,9 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 				HetJobId: 100,
 			},
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantFinalizer: true,
 		},
@@ -2226,7 +2294,8 @@ func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
 			name:     "persists base identity before component discovery",
 			hetJobID: 100,
 			wantLabels: map[string]string{
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantPatches: 1,
 		},
@@ -2235,31 +2304,35 @@ func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
 			jobID:    102,
 			hetJobID: 100,
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantPatches: 1,
 		},
 		{
 			name: "corrects stale base label",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "999",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "999",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			finalizers: []string{wellknown.FinalizerScheduler},
 			jobID:      102,
 			hetJobID:   100,
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantPatches: 1,
 		},
 		{
 			name: "removes stale base label from homogeneous pod",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "101",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "101",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			finalizers: []string{wellknown.FinalizerScheduler},
 			jobID:      101,
@@ -2271,29 +2344,33 @@ func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
 		{
 			name: "restores missing finalizer",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			jobID:    102,
 			hetJobID: 100,
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			wantPatches: 1,
 		},
 		{
 			name: "matching state is a no-op",
 			labels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 			finalizers: []string{wellknown.FinalizerScheduler},
 			jobID:      102,
 			hetJobID:   100,
 			wantLabels: map[string]string{
-				wellknown.LabelExternalJobId:    "102",
-				wellknown.LabelExternalHetJobId: "100",
+				wellknown.LabelExternalJobId:        "102",
+				wellknown.LabelExternalHetJobId:     "100",
+				wellknown.LabelExternalHetJobOffset: "0",
 			},
 		},
 	}
@@ -2328,7 +2405,7 @@ func TestSlurmBridge_labelPodsWithJobIdReconcilesState(t *testing.T) {
 				Pods: corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
 			}
 
-			if err := sb.labelPodsWithJobId(ctx, tt.jobID, tt.hetJobID, component); err != nil {
+			if err := sb.labelPodsWithJobId(ctx, tt.jobID, tt.hetJobID, 0, component); err != nil {
 				t.Fatalf("labelPodsWithJobId() error = %v, want nil", err)
 			}
 			got := &corev1.Pod{}
@@ -2477,7 +2554,7 @@ func TestSlurmBridge_labelPodsWithJobId_skipsDeletedSibling(t *testing.T) {
 	sb := &SlurmBridge{Client: fakeClient}
 
 	component := slurmjobir.SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{*pod1, *pod2}}}
-	if err := sb.labelPodsWithJobId(ctx, 1, 0, component); err != nil {
+	if err := sb.labelPodsWithJobId(ctx, 1, 0, 0, component); err != nil {
 		t.Fatalf("labelPodsWithJobId() error = %v, want nil (deleted sibling should be skipped)", err)
 	}
 

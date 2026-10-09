@@ -141,17 +141,26 @@ rules:
   - apiGroups:
       - scheduling.k8s.io
     resources:
+      - compositepodgroups
       - podgroups
-      - workloads
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - scheduling.k8s.io
     resources:
+      - compositepodgroups/status
       - podgroups/status
     verbs:
       - patch
       - update
+  - apiGroups:
+      - scheduling.k8s.io
+    resources:
+      - workloads
+    verbs:
+      - get
   - apiGroups:
       - scheduling.x-k8s.io
     resources:

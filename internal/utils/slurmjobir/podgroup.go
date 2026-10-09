@@ -65,9 +65,6 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 	pg *PodGroup,
 	controllerPOM *metav1.PartialObjectMetadata,
 ) error {
-	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
-		return err
-	}
 	if controllerPOM != nil {
 		ann := controllerPOM.GetAnnotations()
 		if controllerPOM.Kind == "Job" {
@@ -84,6 +81,9 @@ func (t *translator) parsePodGroupSlurmAnnotations(
 		if err := parseUserAnnotations(slurmJobComponent, ann); err != nil {
 			return err
 		}
+	}
+	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
+		return err
 	}
 	workloadName := pg.workloadName()
 	if workloadName == "" {
@@ -148,23 +148,16 @@ func gangQuorum(pod *corev1.Pod, pods []corev1.Pod, minCount int) *fwk.Status {
 
 // fromPodGroup builds SlurmJobIR for pods with spec.schedulingGroup.podGroupName set.
 func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
-	var allPods corev1.PodList
-	if err := t.List(t.ctx, &allPods, client.InNamespace(pod.Namespace)); err != nil {
-		return nil, err
-	}
 	slurmJobIR := new(SlurmJobIR)
 	slurmJobComponent := new(SlurmJobComponent)
+	slurmJobComponent.ObjectMeta = *rootPOM
 
-	ref := pod.Spec.SchedulingGroup
-	for i := range allPods.Items {
-		p := &allPods.Items[i]
-		if p.Spec.SchedulingGroup == nil {
-			continue
-		}
-		if schedulingGroupsMatch(p.Spec.SchedulingGroup, ref) {
-			slurmJobComponent.Pods.Items = append(slurmJobComponent.Pods.Items, *p)
-		}
+	pgPods, err := t.podsForPodGroup(pod.Namespace, *pod.Spec.SchedulingGroup.PodGroupName)
+	if err != nil {
+		return nil, err
 	}
+
+	slurmJobComponent.Pods = pgPods
 	if len(slurmJobComponent.Pods.Items) == 0 {
 		return nil, ErrorPodGroupNoPods
 	}
@@ -180,4 +173,26 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 	}
 
 	return slurmJobIR, nil
+}
+
+func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodList, error) {
+	if t.podsByGroup == nil {
+		var allPods corev1.PodList
+		if err := t.List(t.ctx, &allPods, client.InNamespace(namespace)); err != nil {
+			return corev1.PodList{}, err
+		}
+
+		t.podsByGroup = make(map[string]corev1.PodList)
+		for i := range allPods.Items {
+			name, ok := podGroupName(&allPods.Items[i])
+			if !ok {
+				continue
+			}
+			groupPods := t.podsByGroup[name]
+			groupPods.Items = append(groupPods.Items, allPods.Items[i])
+			t.podsByGroup[name] = groupPods
+		}
+	}
+
+	return t.podsByGroup[groupName], nil
 }

@@ -348,6 +348,9 @@ func Test_translator_fromLws(t *testing.T) {
 			want: &SlurmJobIR{
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "lws", Namespace: metav1.NamespaceDefault,
+						}},
 						JobInfo: SlurmJobIRJobInfo{
 							JobName:      ptr.To("foo-1"),
 							MaxNodes:     ptr.To(int32(2)),

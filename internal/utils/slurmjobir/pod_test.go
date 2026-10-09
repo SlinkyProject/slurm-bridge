@@ -18,6 +18,9 @@ func Test_translator_fromPod(t *testing.T) {
 		Name:      "pod-a",
 	}}
 	want := &SlurmJobIR{Components: []SlurmJobComponent{{
+		ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+			Name: pod.Name, Namespace: pod.Namespace,
+		}},
 		JobInfo: SlurmJobIRJobInfo{
 			MaxNodes:     ptr.To(int32(1)),
 			TasksPerNode: ptr.To(int32(1)),

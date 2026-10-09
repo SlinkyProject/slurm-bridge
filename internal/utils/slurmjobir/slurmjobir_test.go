@@ -120,6 +120,9 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 				},
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "testpod", Namespace: "default",
+						}},
 						Pods: corev1.PodList{
 							Items: []corev1.Pod{*podWithAnnotation.DeepCopy()},
 						},
@@ -162,6 +165,9 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 				},
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "testpod", Namespace: "default",
+						}},
 						Pods: corev1.PodList{
 							Items: []corev1.Pod{*podWithBadAnnotation.DeepCopy()},
 						},

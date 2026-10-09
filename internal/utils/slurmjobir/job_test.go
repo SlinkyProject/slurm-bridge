@@ -125,6 +125,9 @@ func Test_translator_fromJob(t *testing.T) {
 			want: &SlurmJobIR{
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "foo", Namespace: metav1.NamespaceDefault,
+						}},
 						JobInfo: SlurmJobIRJobInfo{
 							MinNodes:   ptr.To(int32(1)),
 							CpuPerTask: ptr.To(int32(22)),
@@ -178,6 +181,9 @@ func Test_translator_fromJob(t *testing.T) {
 			want: &SlurmJobIR{
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "foo", Namespace: metav1.NamespaceDefault,
+						}},
 						JobInfo: SlurmJobIRJobInfo{
 							MinNodes:   ptr.To(int32(1)),
 							CpuPerTask: ptr.To(int32(22)),
@@ -232,6 +238,9 @@ func Test_translator_fromJob(t *testing.T) {
 			want: &SlurmJobIR{
 				Components: []SlurmJobComponent{
 					{
+						ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
+							Name: "foo", Namespace: metav1.NamespaceDefault,
+						}},
 						JobInfo: SlurmJobIRJobInfo{
 							MinNodes:   ptr.To(int32(1)),
 							CpuPerTask: ptr.To(int32(22)),

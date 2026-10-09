@@ -82,7 +82,6 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					sibling.Labels[wellknown.LabelExternalJobId] = "old-allocation"
 					objects := []client.Object{pg, workload, job, pod, sibling}
 					wantRoot := job_v1
-					wantPartition := "job-partition"
 					if tt.jobSetOwner {
 						owner := &jobset.JobSet{
 							TypeMeta: jobSet_v1alpha2,
@@ -94,9 +93,9 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 						job.OwnerReferences = []metav1.OwnerReference{controllerOwner(owner.APIVersion, owner.Kind, owner.Name)}
 						objects = append(objects, owner)
 						wantRoot = jobSet_v1alpha2
-						wantPartition = "jobset-partition"
 					}
 					cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+					var handle fwk.Handle
 					ir, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), api, ctx, pod)
 					if err != nil {
 						t.Fatal(err)
@@ -115,10 +114,10 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					if ptr.Deref(component.JobInfo.TimeLimit, 0) != 2 {
 						t.Errorf("TimeLimit = %v, want Job deadline translated to 2 minutes", component.JobInfo.TimeLimit)
 					}
-					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != wantPartition || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
+					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != "group-partition" || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
 						t.Errorf("annotation precedence changed: %#v", component.JobInfo)
 					}
-					if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); !status.IsSuccess() {
+					if status := PreFilter(cl, dra.DefaultRegistry(), handle, api, ctx, pod, ir); !status.IsSuccess() {
 						t.Errorf("Basic Job should schedule independently: %v", status)
 					}
 					if ptr.Deref(pod.Spec.SchedulingGroup.PodGroupName, "") != pg.Name {
@@ -164,6 +163,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupOwnerScheduling(t *testing.T) {
 					sibling.Name = "p2"
 					objects = append(objects, sibling)
 					cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+					var handle fwk.Handle
 					ir, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), api, ctx, pod)
 					if err != nil {
 						t.Fatal(err)
@@ -182,7 +182,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupOwnerScheduling(t *testing.T) {
 					if lwsOwner {
 						// Basic PodGroup membership must not bypass LWS readiness.
 						component.Pods.Items = component.Pods.Items[:1]
-						if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); status.IsSuccess() {
+						if status := PreFilter(cl, dra.DefaultRegistry(), handle, api, ctx, pod, ir); status.IsSuccess() {
 							t.Error("incomplete LWS group passed PreFilter")
 						}
 					}
@@ -210,6 +210,7 @@ func TestTranslateToSlurmJobIR_GangPodGroupReadiness(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				var handle fwk.Handle
 				ir, err := TranslateToSlurmJobIR(cl, dra.DefaultRegistry(), api, ctx, pod)
 				if err != nil {
 					t.Fatal(err)
@@ -226,7 +227,7 @@ func TestTranslateToSlurmJobIR_GangPodGroupReadiness(t *testing.T) {
 				if ir.RootPOM.TypeMeta != api.PodGroupTypeMeta || len(component.Pods.Items) != wantPods || ptr.Deref(component.JobInfo.MinNodes, 0) != int32(wantPods) {
 					t.Errorf("gang allocation changed: root=%v pods=%d minNodes=%v", ir.RootPOM.TypeMeta, len(component.Pods.Items), component.JobInfo.MinNodes)
 				}
-				if status := PreFilter(cl, dra.DefaultRegistry(), api, ctx, pod, ir); status.Code() != wantCode {
+				if status := PreFilter(cl, dra.DefaultRegistry(), handle, api, ctx, pod, ir); status.Code() != wantCode {
 					t.Errorf("PreFilter = %v, want code %v", status, wantCode)
 				}
 			}

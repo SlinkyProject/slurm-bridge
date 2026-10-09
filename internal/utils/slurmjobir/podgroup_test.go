@@ -310,7 +310,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		wantNoWckey   bool
 	}{
 		{
-			name: "jobset is selected instead of intermediate job",
+			name: "podgroup is selected instead of intermediate job",
 			objects: []client.Object{
 				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
@@ -363,7 +363,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 				podWithJobOwner(podWithSchedulingGroup("default", "p2", "pg1"), "my-job"),
 			},
 			wantJobName:   "pg1",
-			wantPartition: ptr.To("jobset-partition"),
+			wantPartition: ptr.To("podgroup-partition"),
 			wantQOS:       ptr.To("workload-qos"),
 			wantNoAccount: true,
 			wantNoWckey:   true,
@@ -397,7 +397,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			wantTimeLimit: ptr.To(int32(30)),
 		},
 		{
-			name: "job overrides podgroup without workload ref",
+			name: "podgroup overrides job without workload ref",
 			objects: []client.Object{
 				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
@@ -413,7 +413,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 				podWithJobOwner(podWithSchedulingGroup("default", "p2", "pg1"), "my-job"),
 			},
 			wantJobName:   "pg1",
-			wantTimeLimit: ptr.To(int32(5)),
+			wantTimeLimit: ptr.To(int32(10)),
 		},
 		{
 			name: "podgroup only when job has no annotations",
@@ -437,7 +437,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			wantPartition: ptr.To("pg-partition"),
 		},
 		{
-			name: "missing workload falls back to job over podgroup",
+			name: "missing workload falls back to podgroup over job",
 			objects: []client.Object{
 				func() *PodGroup {
 					pg := newPodGroup("pg1", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
@@ -454,7 +454,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 				podWithJobOwner(podWithSchedulingGroup("default", "p2", "pg1"), "my-job"),
 			},
 			wantJobName:   "pg1",
-			wantTimeLimit: ptr.To(int32(5)),
+			wantTimeLimit: ptr.To(int32(10)),
 		},
 		{
 			name: "non-conflicting annotations from each layer",

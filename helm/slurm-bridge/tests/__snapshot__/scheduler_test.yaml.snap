@@ -38,6 +38,7 @@ manifests should match snapshot:
             preEnqueue:
               enabled:
               - name: 'SlurmBridge'
+              - name: 'GangScheduling'
             preFilter:
               enabled:
               - name: 'VolumeBinding'
@@ -50,6 +51,9 @@ manifests should match snapshot:
               - name: 'NodeResourcesFit'
               - name: 'SlurmBridge'
             postFilter:
+              enabled:
+              - name: 'SlurmBridge'
+            podGroupPostFilter:
               enabled:
               - name: 'SlurmBridge'
             reserve:
@@ -94,7 +98,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
-            checksum/scheduler-config: cbda1f53c1cc2426d84a29c3f231b3c1b2d409828da5a52364e0a42c388be285
+            checksum/scheduler-config: f4b19fca5e7f63f9b0ffb785310a5652832a32ccc6d8f88bf50585d7a865b6a2
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release
@@ -106,7 +110,7 @@ manifests should match snapshot:
           containers:
             - args:
                 - --config=/etc/kubernetes/scheduler-config.yaml
-                - --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
+                - --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true,TopologyAwareWorkloadScheduling=true
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token
@@ -307,17 +311,26 @@ manifests should match snapshot:
       - apiGroups:
           - scheduling.k8s.io
         resources:
+          - compositepodgroups
           - podgroups
-          - workloads
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - scheduling.k8s.io
         resources:
+          - compositepodgroups/status
           - podgroups/status
         verbs:
           - patch
           - update
+      - apiGroups:
+          - scheduling.k8s.io
+        resources:
+          - workloads
+        verbs:
+          - get
       - apiGroups:
           - scheduling.x-k8s.io
         resources:

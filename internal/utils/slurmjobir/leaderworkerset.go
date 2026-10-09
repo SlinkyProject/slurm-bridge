@@ -74,7 +74,8 @@ func (t *translator) fromLws(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 	}
 
 	component := SlurmJobComponent{
-		Pods: groupPods,
+		ObjectMeta: *rootPOM,
+		Pods:       groupPods,
 		JobInfo: SlurmJobIRJobInfo{
 			JobName:      ptr.To(pod.Labels[lwsv1.SetNameLabelKey] + "-" + pod.Labels[lwsv1.GroupIndexLabelKey]),
 			MinNodes:     ptr.To(size),

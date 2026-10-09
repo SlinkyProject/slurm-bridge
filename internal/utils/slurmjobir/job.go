@@ -25,15 +25,17 @@ func (t *translator) fromJob(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 
 	slurmJobIR := &SlurmJobIR{
 		Components: []SlurmJobComponent{
-			*fromJobSpec([]corev1.Pod{*pod}, &job.Spec),
+			*fromJobSpec([]corev1.Pod{*pod}, &job.Spec, rootPOM),
 		},
 	}
 
 	return slurmJobIR, nil
 }
 
-func fromJobSpec(pods []corev1.Pod, jobSpec *batchv1.JobSpec) *SlurmJobComponent {
+func fromJobSpec(pods []corev1.Pod, jobSpec *batchv1.JobSpec, rootPOM *metav1.PartialObjectMetadata) *SlurmJobComponent {
 	slurmJobComponent := new(SlurmJobComponent)
+
+	slurmJobComponent.ObjectMeta = *rootPOM
 
 	slurmJobComponent.JobInfo.MinNodes = ptr.To(int32(len(pods))) //nolint:gosec // Pod count is bounded by Kubernetes object limits.
 

@@ -611,6 +611,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 
 func Test_realSlurmControl_SubmitJob(t *testing.T) {
 	pod := st.MakePod().Name("foo").Namespace("slurm-bridge").Obj()
+	secondPod := st.MakePod().Name("foo2").Namespace("slurm-bridge").Obj()
 	slurmJobIR := func(jobInfo slurmjobir.SlurmJobIRJobInfo) *slurmjobir.SlurmJobIR {
 		return &slurmjobir.SlurmJobIR{
 			Components: []slurmjobir.SlurmJobComponent{{
@@ -853,6 +854,50 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 			want:    []int32{1},
 			wantErr: false,
 		},
+		{
+			name: "Submit heterogeneous job",
+			fields: fields{
+				Client: func() client.Client {
+					f := interceptor.Funcs{
+						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
+							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(100))
+							obj.(*slurmtypes.V0044JobInfo).HetJobIdSet = ptr.To("100-101")
+							jobSubmit := req.(api.V0044JobSubmitReq)
+							if jobSubmit.Job != nil || jobSubmit.Jobs == nil {
+								return fmt.Errorf("expected heterogeneous Jobs request, got %#v", jobSubmit)
+							}
+							jobs := *jobSubmit.Jobs
+							if len(jobs) != 2 {
+								return fmt.Errorf("len(Jobs) = %d, want 2", len(jobs))
+							}
+							if ptr.Deref(jobs[0].Name, "") != "first" || ptr.Deref(jobs[1].Name, "") != "second" {
+								return fmt.Errorf("job names = %q, %q; want first, second", ptr.Deref(jobs[0].Name, ""), ptr.Deref(jobs[1].Name, ""))
+							}
+							return nil
+						},
+					}
+					return fake.NewClientBuilder().
+						WithInterceptorFuncs(f).
+						Build()
+				}(),
+			},
+			args: args{
+				ctx: context.Background(),
+				pod: pod.DeepCopy(),
+				slurmJobIR: &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+					{
+						JobInfo: slurmjobir.SlurmJobIRJobInfo{JobName: ptr.To("first")},
+						Pods:    corev1.PodList{Items: []corev1.Pod{*pod.DeepCopy()}},
+					},
+					{
+						JobInfo: slurmjobir.SlurmJobIRJobInfo{JobName: ptr.To("second")},
+						Pods:    corev1.PodList{Items: []corev1.Pod{*secondPod.DeepCopy()}},
+					},
+				}},
+			},
+			want:    []int32{100, 101},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -945,40 +990,6 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 		})
 	}
 }
-
-func Test_realSlurmControl_SubmitJobRejectsMultipleComponents(t *testing.T) {
-	createCalls := 0
-	f := interceptor.Funcs{
-		Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-			createCalls++
-			return nil
-		},
-	}
-	r := &realSlurmControl{
-		lastUpdate: lru.New(10),
-		Client: fake.NewClientBuilder().
-			WithInterceptorFuncs(f).
-			Build(),
-	}
-	slurmJobIR := &slurmjobir.SlurmJobIR{
-		Components: []slurmjobir.SlurmJobComponent{
-			{Pods: corev1.PodList{Items: []corev1.Pod{*st.MakePod().Name("pod-1").Namespace("slurm-bridge").Obj()}}},
-			{Pods: corev1.PodList{Items: []corev1.Pod{*st.MakePod().Name("pod-2").Namespace("slurm-bridge").Obj()}}},
-		},
-	}
-
-	jobIDs, err := r.SubmitJob(context.Background(), &slurmJobIR.Components[0].Pods.Items[0], slurmJobIR)
-	if err == nil {
-		t.Error("realSlurmControl.SubmitJob() error = nil, want multi-component rejection")
-	}
-	if len(jobIDs) != 0 {
-		t.Errorf("realSlurmControl.SubmitJob() job IDs = %v, want none", jobIDs)
-	}
-	if createCalls != 0 {
-		t.Errorf("realSlurmControl.SubmitJob() Create calls = %d, want 0", createCalls)
-	}
-}
-
 func TestNewControl(t *testing.T) {
 	type args struct {
 		client    client.Client
