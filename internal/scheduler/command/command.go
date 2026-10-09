@@ -5,7 +5,7 @@
 // Package command wires the upstream scheduler with a version-aware PodGroup
 // client before its shared informers and scheduling framework are constructed.
 // Command setup follows k8s.io/kubernetes/cmd/kube-scheduler/app at v1.37.1;
-// serving, leader election and the scheduler lifecycle remain in upstream Run.
+// Whenever the kubernetes go module is updated, audit this file with the upstream version
 package command
 
 import (
