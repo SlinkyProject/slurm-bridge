@@ -8,6 +8,8 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -38,15 +40,18 @@ func (c *terminationControl) TerminateHetJobComponent(_ context.Context, leader,
 func TestCleanDanglingJobTermination(t *testing.T) {
 	failure := errors.New("cancellation failed")
 	for _, tt := range []struct {
-		name    string
-		leader  int32
-		offset  *int32
-		err     error
-		wantErr bool
+		name     string
+		leader   int32
+		offset   *int32
+		err      error
+		wantErr  bool
+		replaced bool
 	}{
 		{name: "homogeneous job"},
 		{name: "leader component", leader: 93, offset: ptr.To[int32](0)},
 		{name: "non-leader component", leader: 93, offset: ptr.To[int32](2)},
+		{name: "replaced leader pod", leader: 93, offset: ptr.To[int32](0), replaced: true},
+		{name: "replaced non-leader pod", leader: 93, offset: ptr.To[int32](2), replaced: true},
 		{name: "missing offset", leader: 93, wantErr: true},
 		{name: "component cancellation error", leader: 93, offset: ptr.To[int32](2), err: failure, wantErr: true},
 	} {
@@ -61,8 +66,15 @@ func TestCleanDanglingJobTermination(t *testing.T) {
 			if tt.offset != nil {
 				job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: tt.offset}
 			}
+			kubeBuilder := kubefake.NewClientBuilder()
+			if tt.replaced {
+				job.AdminComment = ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`)
+				kubeBuilder.WithObjects(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default", Name: "work", UID: "new-uid",
+				}})
+			}
 			cl := fake.NewClientBuilder().WithObjects(job).Build()
-			r := NewRunnable(kubefake.NewClientBuilder().Build(), cl, nil)
+			r := NewRunnable(kubeBuilder.Build(), cl, nil)
 			control := &terminationControl{SlurmControlInterface: r.slurmControl, err: tt.err}
 			r.slurmControl = control
 			err := r.cleanDanglingJob(context.Background(), 95)

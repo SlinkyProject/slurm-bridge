@@ -54,19 +54,22 @@ func (r *SlurmJobRunnable) Sync(ctx context.Context) error {
 func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) error {
 	logger := log.FromContext(ctx)
 
-	podKeys, err := r.slurmControl.GetPodsFromJob(ctx, jobId)
+	podRefs, err := r.slurmControl.GetPodsFromJob(ctx, jobId)
 	if err != nil {
 		return err
 	}
 
 	hasPods := false
-	for _, podKey := range podKeys {
+	for _, ref := range podRefs {
 		pod := &corev1.Pod{}
-		if err := r.Get(ctx, client.ObjectKey(podKey), pod); err != nil {
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}, pod); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
 			}
 			return err
+		}
+		if ref.UID != "" && ref.UID != pod.UID {
+			continue
 		}
 		hasPods = true
 		break

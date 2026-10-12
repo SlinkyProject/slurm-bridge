@@ -7,12 +7,12 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/noderesources"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -128,8 +128,7 @@ func (sb *SlurmBridge) allocatedNodeWaitingForBridge(ctx context.Context, state 
 		// Reuse PreFilter's pod-to-job map, but require the exact component ID:
 		// another job may reference the same pod name. Missing or mismatched
 		// entries are not proof that resources are being released.
-		key := types.NamespacedName{Namespace: occupant.Namespace, Name: occupant.Name}
-		job, ok := s.podToJob[key.String()]
+		job, ok := slurmcontrol.JobForPod(s.podToJob, occupant)
 		jobID := slurmjobir.ParseSlurmJobId(occupant.Labels[wellknown.LabelExternalJobId])
 		return ok && job.JobId == jobID && job.Finished
 	}

@@ -4,9 +4,11 @@
 package externaljobinfo
 
 import (
+	"encoding/json"
 	"testing"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
@@ -156,5 +158,34 @@ func TestParseIntoExternalJobInfo(t *testing.T) {
 				t.Errorf("ParseIntoExternalJobInfo() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExternalJobInfoPodUIDs(t *testing.T) {
+	info := ExternalJobInfo{
+		Pods:    []string{"default/work", "default/member"},
+		PodUIDs: map[string]types.UID{"default/work": "work-uid", "default/member": "member-uid"},
+	}
+	comment := info.ToString()
+	var parsed ExternalJobInfo
+	if err := ParseIntoExternalJobInfo(&comment, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if !info.Equal(parsed) {
+		t.Fatalf("round trip = %#v, want %#v", parsed, info)
+	}
+	parsed.PodUIDs["default/work"] = "replacement-uid"
+	if info.Equal(parsed) {
+		t.Error("different pod incarnations compare equal")
+	}
+	// Older bridge versions must still be able to read new comments.
+	var legacy struct {
+		Pods []string `json:"pods"`
+	}
+	if err := json.Unmarshal([]byte(comment), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if !apiequality.Semantic.DeepEqual(legacy.Pods, info.Pods) {
+		t.Errorf("legacy pod names = %v, want %v", legacy.Pods, info.Pods)
 	}
 }

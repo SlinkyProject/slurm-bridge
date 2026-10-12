@@ -8,6 +8,7 @@ import (
 	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -195,7 +196,7 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 		name        string
 		slurmClient client.Client
 		jobId       int32
-		want        []kubetypes.NamespacedName
+		want        []corev1.ObjectReference
 		wantErr     bool
 	}{
 		{
@@ -212,7 +213,7 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 				}).
 				Build(),
 			jobId: 1,
-			want:  []kubetypes.NamespacedName{},
+			want:  []corev1.ObjectReference{},
 		},
 		{
 			name: "ours",
@@ -225,8 +226,21 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 				}).
 				Build(),
 			jobId: 1,
-			want: []kubetypes.NamespacedName{
+			want: []corev1.ObjectReference{
 				{Namespace: "foo", Name: "bar-123"},
+			},
+		},
+		{
+			name: "ours with UID",
+			slurmClient: fake.NewClientBuilder().WithObjects(&types.V0044JobInfo{
+				V0044JobInfo: api.V0044JobInfo{
+					JobId:        ptr.To(int32(1)),
+					AdminComment: ptr.To(`{"pods":["foo/bar-123"],"podUIDs":{"foo/bar-123":"pod-uid"}}`),
+				},
+			}).Build(),
+			jobId: 1,
+			want: []corev1.ObjectReference{
+				{Namespace: "foo", Name: "bar-123", UID: "pod-uid"},
 			},
 		},
 	}

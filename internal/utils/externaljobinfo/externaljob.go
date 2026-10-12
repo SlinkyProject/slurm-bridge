@@ -7,11 +7,16 @@ import (
 	"bytes"
 	"encoding/json"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
 type ExternalJobInfo struct {
 	Pods []string `json:"pods"`
+	// PodUIDs associates each namespace/name in Pods with its immutable identity.
+	// Keeping Pods unchanged lets older bridge versions read these comments.
+	// Missing UIDs retain name-only matching for jobs created before an upgrade.
+	PodUIDs map[string]types.UID `json:"podUIDs,omitempty"`
 }
 
 func (extInfo *ExternalJobInfo) Equal(cmp ExternalJobInfo) bool {

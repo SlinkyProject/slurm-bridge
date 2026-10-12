@@ -1094,16 +1094,12 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (map[string]slurmcontrol.ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("validatePodToJob func", "pod", klog.KObj(pod))
-	namespacedName := types.NamespacedName{
-		Name:      pod.Name,
-		Namespace: pod.Namespace,
-	}
 	podToJob, err := sb.slurmControl.GetJobsForPods(ctx)
 	if err != nil {
 		logger.Error(err, "error populating podToJob")
 		return nil, err
 	}
-	if val, ok := (*podToJob)[namespacedName.String()]; ok {
+	if val, ok := slurmcontrol.JobForPod(*podToJob, pod); ok {
 		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false); err != nil {
 			return nil, err
 		}

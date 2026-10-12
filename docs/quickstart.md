@@ -316,9 +316,14 @@ JobId=1 JobName=job-sleep-single
    OverSubscribe=NO Contiguous=0 Licenses=(null) LicensesAlloc=(null) Network=(null)
    Command=(null)
    WorkDir=/tmp
-   AdminComment={"pods":["slurm-bridge/job-sleep-single-8wtc2"]}
+   AdminComment={"pods":["slurm-bridge/job-sleep-single-8wtc2"],"podUIDs":{"slurm-bridge/job-sleep-single-8wtc2":"4035b798-e371-4b45-8d84-c9026568c7ec"}}
    OOMKillStep=0
 ```
+
+`AdminComment` records each pod's namespace/name and UID. The UID distinguishes
+replacement pods that reuse the same name, allowing the controller to cancel
+jobs whose original pods no longer exist. Comments from older versions without
+`podUIDs` remain supported using namespace/name matching.
 
 Note that the `Command` field is equal to `(null)`, and that the `JobState`
 field is equal to `CANCELLED`. This is because this Slurm job is only an

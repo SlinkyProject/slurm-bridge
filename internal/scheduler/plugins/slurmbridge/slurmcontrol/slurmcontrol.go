@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 	"k8s.io/utils/lru"
@@ -183,6 +184,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 }
 
 // GetJobsForPods lists Slurm jobs for pod identity validation and resource handoff checks.
+// Use JobForPod to look up entries by UID with support for legacy comments.
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
@@ -206,11 +208,29 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 			continue
 		}
 		for _, pod := range extInfo.Pods {
-			podToJob[pod] = extJob
+			podToJob[podJobKey(pod, extInfo.PodUIDs[pod])] = extJob
 		}
 	}
 
 	return &podToJob, nil
+}
+
+// JobForPod looks up an exact pod incarnation before falling back to legacy
+// comments that only recorded namespace/name.
+func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
+	name := pod.Namespace + "/" + pod.Name
+	if job, ok := jobs[podJobKey(name, pod.UID)]; ok {
+		return job, true
+	}
+	job, ok := jobs[name]
+	return job, ok
+}
+
+func podJobKey(name string, uid kubetypes.UID) string {
+	if uid == "" {
+		return name
+	}
+	return name + "/" + string(uid)
 }
 
 // GetJob will check if an external job has been created for a given pod
@@ -455,9 +475,11 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 }
 
 func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
-	extInfo := externaljobinfo.ExternalJobInfo{}
+	extInfo := externaljobinfo.ExternalJobInfo{PodUIDs: make(map[string]kubetypes.UID)}
 	for _, p := range jobComponent.Pods.Items {
-		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
+		name := p.Namespace + "/" + p.Name
+		extInfo.Pods = append(extInfo.Pods, name)
+		extInfo.PodUIDs[name] = p.UID
 	}
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {
