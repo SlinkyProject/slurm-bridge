@@ -29,6 +29,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -581,6 +582,10 @@ var _ = Describe("Sync()", func() {
 			slurmControl:  slurmcontrol.NewControl(c),
 			eventRecorder: record.NewFakeRecorder(10),
 		}
+		var err error
+		controller.jobIndex, err = slurmjob.NewPodIndex(c, c.GetInformer(api.ObjectTypeV0044JobInfo))
+		Expect(err).NotTo(HaveOccurred())
+
 	})
 
 	Context("With pods and jobs", func() {

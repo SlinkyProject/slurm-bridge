@@ -26,76 +26,12 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-type ExternalJob struct {
-	JobId        int32
-	HetJobId     int32
-	HetJobOffset int32
-	Nodes        string
-	Pending      bool
-	Finished     bool
-}
-
-func externalJobFromJobInfo(job *api.V0044JobInfo) (ExternalJob, error) {
-	if job == nil {
-		return ExternalJob{}, errors.New("cannot convert nil Slurm job")
-	}
-
-	extJob := ExternalJob{
-		JobId:    ptr.Deref(job.JobId, 0),
-		Nodes:    ptr.Deref(job.Nodes, ""),
-		Pending:  slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStatePENDING),
-		Finished: isFinishedJob(job),
-	}
-
-	return validateExternalJobID(job, extJob)
-}
-
-func validateExternalJobID(job *api.V0044JobInfo, extJob ExternalJob) (ExternalJob, error) {
-	if extJob.JobId <= 0 {
-		return ExternalJob{}, errors.New("invalid or unset job ID")
-	}
-
-	if job.HetJobId == nil || !ptr.Deref(job.HetJobId.Set, false) {
-		return extJob, nil
-	}
-	if job.HetJobId.Number == nil {
-		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but its value is missing")
-	}
-	if job.HetJobOffset == nil {
-		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but het job offset is missing")
-	}
-	if !ptr.Deref(job.HetJobOffset.Set, false) {
-		return ExternalJob{}, errors.New("malformed het-job: het job ID is set but het job offset is unset")
-	}
-	if job.HetJobOffset.Number == nil {
-		return ExternalJob{}, errors.New("malformed het-job: het job offset is set but its value is missing")
-	}
-
-	extJob.HetJobId = *job.HetJobId.Number
-	extJob.HetJobOffset = *job.HetJobOffset.Number
-
-	if extJob.HetJobId == 0 {
-		if extJob.HetJobOffset != 0 {
-			return ExternalJob{}, errors.New("invalid het job offset: homogeneous job has non-zero offset")
-		}
-		return extJob, nil
-	}
-	if extJob.HetJobId < 0 {
-		return ExternalJob{}, fmt.Errorf("invalid het job ID %d: value must be positive", extJob.HetJobId)
-	}
-	if extJob.HetJobOffset < 0 {
-		return ExternalJob{}, errors.New("invalid het job offset: value is negative")
-	}
-	if extJob.HetJobId != extJob.JobId && extJob.HetJobOffset == 0 {
-		return ExternalJob{}, errors.New("invalid het job offset: non-leader component has offset zero")
-	}
-
-	return extJob, nil
-}
+type ExternalJob = slurmjob.ExternalJob
 
 func isActiveJob(job *api.V0044JobInfo) bool {
 	state := slurmutils.GetStateAsSet(job.JobState)
@@ -119,9 +55,9 @@ type SlurmControlInterface interface {
 // RealPodControl is the default implementation of SlurmControlInterface.
 type realSlurmControl struct {
 	client.Client
-	jobInformer client.InformerCache
-	mcsLabel    string
-	partition   string
+	*slurmjob.PodIndex
+	mcsLabel  string
+	partition string
 	// lastUpdate holds the last job description sent per pending job ID, so an
 	// unchanged UpdateJob skips its REST round trip. Size-capped so jobs that are
 	// never looked up again can't grow it without bound.
@@ -186,12 +122,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 
 // JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
 func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
-	name := pod.Namespace + "/" + pod.Name
-	if job, ok := jobs[externaljobinfo.PodKey(pod)]; ok {
-		return job, true
-	}
-	job, ok := jobs[name]
-	return job, ok
+	return slurmjob.JobForPod(jobs, pod)
 }
 
 // GetJob will check if an external job has been created for a given pod
@@ -229,26 +160,12 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 		return &jobOut, nil
 	}
 	logger.V(5).Info("found matching job")
-	jobOut, err = externalJobFromJobInfo(job)
+	jobOut, err = slurmjob.FromJobInfo(job)
 	if err != nil {
 		return nil, err
 	}
 
 	return &jobOut, nil
-}
-
-func isFinishedJob(job *api.V0044JobInfo) bool {
-	return slurmutils.GetStateAsSet(job.JobState).HasAny(
-		api.V0044JobInfoJobStateCOMPLETED,
-		api.V0044JobInfoJobStateCANCELLED,
-		api.V0044JobInfoJobStateFAILED,
-		api.V0044JobInfoJobStateTIMEOUT,
-		api.V0044JobInfoJobStateNODEFAIL,
-		api.V0044JobInfoJobStatePREEMPTED,
-		api.V0044JobInfoJobStateBOOTFAIL,
-		api.V0044JobInfoJobStateDEADLINE,
-		api.V0044JobInfoJobStateOUTOFMEMORY,
-	)
 }
 
 // SubmitJob submits an external job to Slurm for a node placement decision. The
@@ -531,14 +448,15 @@ func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (s
 var _ SlurmControlInterface = &realSlurmControl{}
 
 func NewControl(slurmClient client.Client, jobInformer client.InformerCache, mcsLabel string, partition string) (SlurmControlInterface, error) {
-	if err := jobInformer.AddIndex(podJobIndex, jobPodKeys); err != nil {
-		return nil, fmt.Errorf("register Slurm job index: %w", err)
+	index, err := slurmjob.NewPodIndex(slurmClient, jobInformer)
+	if err != nil {
+		return nil, err
 	}
 	return &realSlurmControl{
-		Client:      slurmClient,
-		jobInformer: jobInformer,
-		mcsLabel:    mcsLabel,
-		partition:   partition,
+		Client:    slurmClient,
+		PodIndex:  index,
+		mcsLabel:  mcsLabel,
+		partition: partition,
 		// Fixed cap; make it configurable if pending-job counts outgrow it.
 		lastUpdate: lru.New(10000),
 	}, nil

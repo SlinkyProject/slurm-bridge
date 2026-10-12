@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package slurmcontrol
+package slurmjob
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 
@@ -22,7 +23,20 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-const podJobIndex = "bridge.pod"
+const PodJobIndex = "bridge.pod"
+
+// PodIndex provides cached Pod ownership lookups and explicit live verification.
+type PodIndex struct {
+	client.Client
+	jobInformer client.InformerCache
+}
+
+func NewPodIndex(slurmClient client.Client, jobInformer client.InformerCache) (*PodIndex, error) {
+	if err := jobInformer.AddIndex(PodJobIndex, jobPodKeys); err != nil {
+		return nil, fmt.Errorf("register Slurm job index: %w", err)
+	}
+	return &PodIndex{Client: slurmClient, jobInformer: jobInformer}, nil
+}
 
 func jobPodKeys(obj object.Object) []string {
 	job, ok := obj.(*api.V0044JobInfo)
@@ -36,19 +50,29 @@ func jobPodKeys(obj object.Object) []string {
 	return info.Pods
 }
 
+// JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
+func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
+	name := pod.Namespace + "/" + pod.Name
+	if job, ok := jobs[externaljobinfo.PodKey(pod)]; ok {
+		return job, true
+	}
+	job, ok := jobs[name]
+	return job, ok
+}
+
 // GetJobsForPods returns cached candidates for the requested Pods.
 // Ambiguous matches are omitted unless the Pod's job-ID label selects one.
 // Verify candidates before repairing metadata or deciding a handoff.
-func (r *realSlurmControl) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
+func (r *PodIndex) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
 	podToJob := make(map[string]ExternalJob, len(pods))
 	for _, pod := range pods {
 		key := externaljobinfo.PodKey(pod)
 		jobs := &api.V0044JobInfoObjectList{}
-		if err := r.jobInformer.ByIndex(ctx, podJobIndex, key, jobs); err != nil {
+		if err := r.jobInformer.ByIndex(ctx, PodJobIndex, key, jobs); err != nil {
 			return nil, err
 		}
 		if len(jobs.Items) == 0 && pod.UID != "" {
-			if err := r.jobInformer.ByIndex(ctx, podJobIndex, pod.Namespace+"/"+pod.Name, jobs); err != nil {
+			if err := r.jobInformer.ByIndex(ctx, PodJobIndex, pod.Namespace+"/"+pod.Name, jobs); err != nil {
 				return nil, err
 			}
 		}
@@ -56,7 +80,7 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context, pods ...*corev1.P
 		var candidate ExternalJob
 		matches := 0
 		for i := range jobs.Items {
-			job, err := externalJobFromJobInfo(&jobs.Items[i])
+			job, err := FromJobInfo(&jobs.Items[i])
 			if err != nil {
 				continue
 			}
@@ -76,7 +100,7 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context, pods ...*corev1.P
 
 // VerifyJobsForPods reads candidates directly from Slurm, confirming ownership
 // and state without replacing another live allocation. Shared jobs are read once.
-func (r *realSlurmControl) VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
+func (r *PodIndex) VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
 	podToJob := make(map[string]ExternalJob, len(pods))
 	liveJobs := make(map[int32]*api.V0044JobInfo)
 	readJob := func(id int32) (*api.V0044JobInfo, error) {
@@ -123,7 +147,7 @@ func (r *realSlurmControl) VerifyJobsForPods(ctx context.Context, candidates map
 		if !slices.Contains(keys, key) && !slices.Contains(keys, pod.Namespace+"/"+pod.Name) {
 			continue
 		}
-		extJob, err := externalJobFromJobInfo(job)
+		extJob, err := FromJobInfo(job)
 		if err != nil || extJob.JobId != candidateID {
 			continue
 		}

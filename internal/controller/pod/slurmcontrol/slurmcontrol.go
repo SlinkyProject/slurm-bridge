@@ -59,12 +59,15 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 
 	// Any other outcome (not running, or not found) drives Pod deletion downstream, so
 	// recheck live before trusting a cached result that would delete the pod.
-	err = r.Get(ctx, jobId, job, &client.GetOptions{RefreshCache: true})
+	err = r.Get(ctx, jobId, job, &client.GetOptions{SkipCache: true})
 	if err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
+	}
+	if job.GetKey() != jobId {
+		return false, fmt.Errorf("slurm returned job %s when requesting job %s", job.GetKey(), jobId)
 	}
 	if slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStateRUNNING) {
 		return true, nil
