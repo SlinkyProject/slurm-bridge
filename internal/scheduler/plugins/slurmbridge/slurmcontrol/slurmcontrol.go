@@ -183,8 +183,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	return nil
 }
 
-// GetJobsForPods lists Slurm jobs for pod identity validation and resource handoff checks.
-// Use JobForPod to look up entries by UID with support for legacy comments.
+// GetJobsForPods returns jobs indexed by pod identity for use with JobForPod.
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
@@ -215,8 +214,7 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 	return &podToJob, nil
 }
 
-// JobForPod looks up an exact pod incarnation before falling back to legacy
-// comments that only recorded namespace/name.
+// JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
 func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
 	name := pod.Namespace + "/" + pod.Name
 	if job, ok := jobs[podJobKey(name, pod.UID)]; ok {

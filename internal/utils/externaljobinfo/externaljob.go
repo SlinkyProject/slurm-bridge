@@ -13,9 +13,7 @@ import (
 
 type ExternalJobInfo struct {
 	Pods []string `json:"pods"`
-	// PodUIDs associates each namespace/name in Pods with its immutable identity.
-	// Keeping Pods unchanged lets older bridge versions read these comments.
-	// Missing UIDs retain name-only matching for jobs created before an upgrade.
+	// PodUIDs maps namespace/name to UID; missing entries allow name-only matching.
 	PodUIDs map[string]types.UID `json:"podUIDs,omitempty"`
 }
 

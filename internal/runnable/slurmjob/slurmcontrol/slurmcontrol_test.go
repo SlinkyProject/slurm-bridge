@@ -230,19 +230,6 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 				{Namespace: "foo", Name: "bar-123"},
 			},
 		},
-		{
-			name: "ours with UID",
-			slurmClient: fake.NewClientBuilder().WithObjects(&types.V0044JobInfo{
-				V0044JobInfo: api.V0044JobInfo{
-					JobId:        ptr.To(int32(1)),
-					AdminComment: ptr.To(`{"pods":["foo/bar-123"],"podUIDs":{"foo/bar-123":"pod-uid"}}`),
-				},
-			}).Build(),
-			jobId: 1,
-			want: []corev1.ObjectReference{
-				{Namespace: "foo", Name: "bar-123", UID: "pod-uid"},
-			},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

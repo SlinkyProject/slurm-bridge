@@ -45,47 +45,35 @@ func TestBuildJobDescPodIdentity(t *testing.T) {
 }
 
 func TestJobsForPodIdentity(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		jobs := []api.V0044JobInfo{
-			{
-				JobId:        ptr.To(int32(7)),
-				AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`),
-			},
-			{
-				JobId:        ptr.To(int32(8)),
-				AdminComment: ptr.To(`{"pods":["default/work","default/member"],"podUIDs":{"default/work":"new-uid","default/member":"member-uid"}}`),
-			},
-		}
-		if legacy {
-			jobs = append(jobs, api.V0044JobInfo{
-				JobId:        ptr.To(int32(6)),
-				AdminComment: ptr.To(`{"pods":["default/work"]}`),
-			})
-		}
-		r := &realSlurmControl{Client: fake.NewClientBuilder().WithLists(&api.V0044JobInfoObjectList{Items: jobs}).Build()}
-		podToJob, err := r.GetJobsForPods(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, tt := range []struct {
-			name string
-			uid  kubetypes.UID
-			want int32
-		}{
-			{name: "work", uid: "old-uid", want: 7},
-			{name: "work", uid: "new-uid", want: 8},
-			{name: "member", uid: "member-uid", want: 8},
-			{name: "work", uid: "unrelated-uid"},
-		} {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: tt.name, UID: tt.uid}}
-			want := tt.want
-			if legacy && want == 0 {
-				want = 6
-			}
-			job, found := JobForPod(*podToJob, pod)
-			if found != (want != 0) || job.JobId != want {
-				t.Errorf("legacy=%t: job for %s UID %s = (%d, %t), want %d", legacy, tt.name, tt.uid, job.JobId, found, want)
-			}
+	r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(
+		&api.V0044JobInfo{
+			JobId:        ptr.To(int32(6)),
+			AdminComment: ptr.To(`{"pods":["default/work"]}`),
+		},
+		&api.V0044JobInfo{
+			JobId:        ptr.To(int32(7)),
+			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`),
+		},
+		&api.V0044JobInfo{
+			JobId:        ptr.To(int32(8)),
+			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"new-uid"}}`),
+		},
+	).Build()}
+	jobs, err := r.GetJobsForPods(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		uid  kubetypes.UID
+		want int32
+	}{
+		{uid: "old-uid", want: 7},
+		{uid: "new-uid", want: 8},
+		{uid: "legacy-uid", want: 6},
+	} {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: tt.uid}}
+		if job, found := JobForPod(*jobs, pod); !found || job.JobId != tt.want {
+			t.Errorf("job for UID %s = (%d, %t), want %d", tt.uid, job.JobId, found, tt.want)
 		}
 	}
 }

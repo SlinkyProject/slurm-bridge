@@ -320,11 +320,6 @@ JobId=1 JobName=job-sleep-single
    OOMKillStep=0
 ```
 
-`AdminComment` records each pod's namespace/name and UID. The UID distinguishes
-replacement pods that reuse the same name, allowing the controller to cancel
-jobs whose original pods no longer exist. Comments from older versions without
-`podUIDs` remain supported using namespace/name matching.
-
 Note that the `Command` field is equal to `(null)`, and that the `JobState`
 field is equal to `CANCELLED`. This is because this Slurm job is only an
 external job - no work is actually done by the external job. Instead, the job is
