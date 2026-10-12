@@ -245,26 +245,6 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "List jobs fails",
-			fields: fields{
-				Client: func() client.Client {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
-							return fmt.Errorf("failed to list resources")
-						},
-					}
-					return fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
-				}(),
-			},
-			args: args{
-				ctx: context.Background(),
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
 			name: "List jobs",
 			fields: fields{
 				Client: func() client.Client {
@@ -309,7 +289,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Later duplicate job wins",
+			name: "Ambiguous jobs leave metadata untouched",
 			fields: fields{
 				Client: func() client.Client {
 					adminComment := func() *string {
@@ -332,23 +312,13 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 							Nodes:        ptr.To("node2"),
 						},
 					}
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
-							list.(*api.V0044JobInfoObjectList).Items = items
-							return nil
-						},
-					}
-					return fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
+					return fake.NewClientBuilder().WithLists(&api.V0044JobInfoObjectList{Items: items}).Build()
 				}(),
 			},
 			args: args{
 				ctx: context.Background(),
 			},
-			want: &map[string]ExternalJob{
-				"slurm/pod1": {JobId: 2, Nodes: "node2", Pending: true},
-			},
+			want:    &map[string]ExternalJob{},
 			wantErr: false,
 		},
 	}
@@ -358,7 +328,14 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 				lastUpdate: lru.New(10),
 				Client:     tt.fields.Client,
 			}
-			got, err := r.GetJobsForPods(tt.args.ctx)
+			control, err := NewControl(r.Client, r.GetInformer(api.ObjectTypeV0044JobInfo), "kubernetes", "slurm-bridge")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := control.GetJobsForPods(tt.args.ctx,
+				&corev1.Pod{ObjectMeta: v1.ObjectMeta{Namespace: "slurm", Name: "pod1"}},
+				&corev1.Pod{ObjectMeta: v1.ObjectMeta{Namespace: "slurm", Name: "pod2"}},
+			)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("realSlurmControl.GetJobsForPods() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -402,7 +379,11 @@ func Test_realSlurmControl_GetJobsForPodsFinishedJobs(t *testing.T) {
 					HetJobOffset: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))},
 				},
 			).Build()}
-			got, err := r.GetJobsForPods(context.Background())
+			control, err := NewControl(r.Client, r.GetInformer(api.ObjectTypeV0044JobInfo), "kubernetes", "slurm-bridge")
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := control.GetJobsForPods(context.Background(), &corev1.Pod{ObjectMeta: v1.ObjectMeta{Namespace: "test", Name: "pod"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -989,41 +970,6 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 		})
 	}
 }
-func TestNewControl(t *testing.T) {
-	type args struct {
-		client    client.Client
-		mcsLabel  string
-		partition string
-	}
-	tests := []struct {
-		name string
-		args args
-		want SlurmControlInterface
-	}{
-		{
-			name: "NewControl returns",
-			args: args{
-				client:    fake.NewFakeClient(),
-				mcsLabel:  "kubernetes",
-				partition: "slurm-bridge",
-			},
-			want: &realSlurmControl{
-				lastUpdate: lru.New(10000),
-				Client:     fake.NewFakeClient(),
-				mcsLabel:   "kubernetes",
-				partition:  "slurm-bridge",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := NewControl(tt.args.client, tt.args.mcsLabel, tt.args.partition); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewControl() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	type fields struct {
 		Client    client.Client

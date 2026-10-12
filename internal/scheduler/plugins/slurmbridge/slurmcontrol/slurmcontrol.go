@@ -108,7 +108,8 @@ func isActiveJob(job *api.V0044JobInfo) bool {
 type SlurmControlInterface interface {
 	GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error)
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
-	GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error)
+	GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
+	VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
 	GetNodeNames(ctx context.Context, partition *string) ([]string, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error)
@@ -118,8 +119,9 @@ type SlurmControlInterface interface {
 // RealPodControl is the default implementation of SlurmControlInterface.
 type realSlurmControl struct {
 	client.Client
-	mcsLabel  string
-	partition string
+	jobInformer client.InformerCache
+	mcsLabel    string
+	partition   string
 	// lastUpdate holds the last job description sent per pending job ID, so an
 	// unchanged UpdateJob skips its REST round trip. Size-capped so jobs that are
 	// never looked up again can't grow it without bound.
@@ -182,37 +184,6 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	return nil
 }
 
-// GetJobsForPods returns jobs indexed by pod identity for use with JobForPod.
-func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
-	logger := klog.FromContext(ctx)
-
-	jobs := &api.V0044JobInfoObjectList{}
-
-	err := r.List(ctx, jobs)
-	if err != nil {
-		logger.Error(err, "could not list jobs")
-		return nil, err
-	}
-	podToJob := make(map[string]ExternalJob)
-	for i := range jobs.Items {
-		job := &jobs.Items[i]
-		extInfo := externaljobinfo.ExternalJobInfo{}
-		if err := externaljobinfo.ParseIntoExternalJobInfo(job.AdminComment, &extInfo); err != nil {
-			continue
-		}
-		extJob, err := externalJobFromJobInfo(job)
-		if err != nil {
-			logger.Error(err, "skipping malformed external job", "jobId", ptr.Deref(job.JobId, 0))
-			continue
-		}
-		for _, pod := range extInfo.Pods {
-			podToJob[pod] = extJob
-		}
-	}
-
-	return &podToJob, nil
-}
-
 // JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
 func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
 	name := pod.Namespace + "/" + pod.Name
@@ -240,7 +211,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 		}
 	}()
 
-	err := r.Get(ctx, object.ObjectKey(jobIDLabel), job)
+	err := r.Get(ctx, object.ObjectKey(jobIDLabel), job, &client.GetOptions{SkipCache: true})
 	if err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return &jobOut, nil
@@ -250,15 +221,8 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	}
 
 	expectedJobID := slurmjobir.ParseSlurmJobId(jobIDLabel)
-	if ptr.Deref(job.JobId, 0) != expectedJobID {
-		var found bool
-		job, found, err = r.findJobByID(ctx, expectedJobID)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return &jobOut, nil
-		}
+	if actualJobID := ptr.Deref(job.JobId, 0); actualJobID != expectedJobID {
+		return nil, fmt.Errorf("slurm returned job %d when requesting job %d", actualJobID, expectedJobID)
 	}
 
 	if !isActiveJob(job) {
@@ -444,7 +408,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 
 func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
 	list := &api.V0044NodeObjectList{}
-	if err := r.List(ctx, list); err != nil {
+	if err := r.List(ctx, list, &client.ListOptions{SkipCache: true}); err != nil {
 		return nil, err
 	}
 	partitionNames := strings.Split(ptr.Deref(partition, r.partition), ",")
@@ -558,7 +522,7 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 		return &NodeResources{}, nil
 	}
 
-	err := r.Get(ctx, jobId, nodes)
+	err := r.Get(ctx, jobId, nodes, &client.GetOptions{SkipCache: true})
 	if err != nil {
 		logger.Error(err, "could not get node resource layout for pod", "pod", klog.KObj(pod))
 		return nil, err
@@ -597,7 +561,7 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {
 	node := &api.V0044Node{}
-	if err := r.Get(ctx, object.ObjectKey(nodeName), node); err != nil {
+	if err := r.Get(ctx, object.ObjectKey(nodeName), node, &client.GetOptions{SkipCache: true}); err != nil {
 		return "", err
 	}
 	return ptr.Deref(node.Extra, ""), nil
@@ -605,12 +569,16 @@ func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (s
 
 var _ SlurmControlInterface = &realSlurmControl{}
 
-func NewControl(client client.Client, mcsLabel string, partition string) SlurmControlInterface {
+func NewControl(slurmClient client.Client, jobInformer client.InformerCache, mcsLabel string, partition string) (SlurmControlInterface, error) {
+	if err := jobInformer.AddIndex(podJobIndex, jobPodKeys); err != nil {
+		return nil, fmt.Errorf("register Slurm job index: %w", err)
+	}
 	return &realSlurmControl{
-		Client:    client,
-		mcsLabel:  mcsLabel,
-		partition: partition,
+		Client:      slurmClient,
+		jobInformer: jobInformer,
+		mcsLabel:    mcsLabel,
+		partition:   partition,
 		// Fixed cap; make it configurable if pending-job counts outgrow it.
 		lastUpdate: lru.New(10000),
-	}
+	}, nil
 }

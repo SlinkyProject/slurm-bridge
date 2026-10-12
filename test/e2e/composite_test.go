@@ -15,10 +15,16 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
+
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
+	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
+	"github.com/SlinkyProject/slurm-client/pkg/client/token"
+	"github.com/SlinkyProject/slurm-client/pkg/object"
 )
 
 // TestCompositePodGroupScheduling checks that gang children share one Slurm hetjob.
@@ -231,6 +237,47 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 			}
 			if !offsets.Equal(sets.New("0", "1")) {
 				t.Errorf("expected one Pod in each hetjob component, got offsets %v", sets.List(offsets))
+			}
+			return ctx
+		}).
+		Assess("live job lookups return the requested hetjob component", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			controller, err := getSlurmControllerPod(ctx, crClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jwt, err := execInPod(ctx, config, controller, "scontrol", "token", "username=slurm", "lifespan=60")
+			if err != nil {
+				t.Fatal(err)
+			}
+			restConfig := config.Client().RESTConfig()
+			httpClient, err := rest.HTTPClientFor(restConfig)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slurmClient, err := slurmclient.NewClient(&slurmclient.Config{
+				Server:        restConfig.Host + "/api/v1/namespaces/" + slurmNamespace + "/services/http:slurm-restapi:6820/proxy",
+				HTTPClient:    httpClient,
+				TokenProvider: token.StaticProvider(strings.TrimPrefix(strings.TrimSpace(jwt), "SLURM_JWT=")),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, pod := range pods {
+				jobID := pod.Labels[slurmJobIDLabel]
+				job := &api.V0044JobInfo{}
+				if err := slurmClient.Get(ctx, object.ObjectKey(jobID), job, &slurmclient.GetOptions{SkipCache: true}); err != nil {
+					t.Fatal(err)
+				}
+				if got := strconv.Itoa(int(ptr.Deref(job.JobId, 0))); got != jobID {
+					t.Errorf("live client Get(%s) returned job %s", jobID, got)
+				}
+				if got := ptr.Deref(job.Nodes, ""); got != pod.Spec.NodeName {
+					t.Errorf("live client Get(%s) returned nodes %q, want %q", jobID, got, pod.Spec.NodeName)
+				}
 			}
 			return ctx
 		}).

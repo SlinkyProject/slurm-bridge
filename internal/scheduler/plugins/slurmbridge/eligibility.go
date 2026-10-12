@@ -120,7 +120,28 @@ func (sb *SlurmBridge) allocatedNodeWaitingForBridge(ctx context.Context, state 
 	if err != nil {
 		return false, fwk.AsStatus(err)
 	}
-	s, err := getStateData(state)
+	var occupants []*corev1.Pod
+	for _, info := range node.GetPods() {
+		p := info.GetPod()
+		if p.Spec.SchedulerName != sb.schedulerName || podAllocationID(p) == 0 || podAllocationID(p) == podAllocationID(pod) ||
+			p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		occupants = append(occupants, p)
+	}
+	podToJob, err := sb.slurmControl.GetJobsForPods(ctx, occupants...)
+	if err != nil {
+		return false, fwk.AsStatus(err)
+	}
+	var verify []*corev1.Pod
+	for _, occupant := range occupants {
+		if job, ok := slurmcontrol.JobForPod(*podToJob, occupant); ok && job.JobId == slurmjobir.ParseSlurmJobId(occupant.Labels[wellknown.LabelExternalJobId]) {
+			verify = append(verify, occupant)
+		}
+	}
+	// Verify cached matches with Slurm before deciding whether to wait for
+	// cleanup or cancel the incoming allocation.
+	podToJob, err = sb.slurmControl.VerifyJobsForPods(ctx, *podToJob, verify...)
 	if err != nil {
 		return false, fwk.AsStatus(err)
 	}
@@ -128,10 +149,10 @@ func (sb *SlurmBridge) allocatedNodeWaitingForBridge(ctx context.Context, state 
 		if occupant.DeletionTimestamp != nil || occupant.Status.Phase == corev1.PodSucceeded || occupant.Status.Phase == corev1.PodFailed {
 			return true
 		}
-		// Reuse PreFilter's pod-to-job map, but require the exact component ID:
+		// Query only this node's occupants and require the exact component ID:
 		// another job may reference the same pod name. Missing or mismatched
 		// entries are not proof that resources are being released.
-		job, ok := slurmcontrol.JobForPod(s.podToJob, occupant)
+		job, ok := slurmcontrol.JobForPod(*podToJob, occupant)
 		jobID := slurmjobir.ParseSlurmJobId(occupant.Labels[wellknown.LabelExternalJobId])
 		return ok && job.JobId == jobID && job.Finished
 	}

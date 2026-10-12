@@ -56,6 +56,15 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
+func newTestSlurmControl(t *testing.T, c slurmclient.Client, mcsLabel, partition string) slurmcontrol.SlurmControlInterface {
+	t.Helper()
+	control, err := slurmcontrol.NewControl(c, c.GetInformer(api.ObjectTypeV0044JobInfo), mcsLabel, partition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return control
+}
+
 func slurmNode(name string, partitions ...string) api.V0044Node {
 	return api.V0044Node{
 		Name:       ptr.To(name),
@@ -151,6 +160,8 @@ type postFilterSlurmControl struct {
 	getJobs              []*slurmcontrol.ExternalJob
 	nodeNamesByPartition map[string][]string
 	podToJobs            map[string]slurmcontrol.ExternalJob
+	podToJobsError       error
+	verifyCalls          int
 	submitCalls          int
 	submitIDs            []int32
 	submittedIR          *slurmjobir.SlurmJobIR
@@ -167,11 +178,19 @@ func (c *postFilterSlurmControl) DeleteJob(_ context.Context, pod *corev1.Pod) e
 	return nil
 }
 
-func (c *postFilterSlurmControl) GetJobsForPods(context.Context) (*map[string]slurmcontrol.ExternalJob, error) {
+func (c *postFilterSlurmControl) GetJobsForPods(context.Context, ...*corev1.Pod) (*map[string]slurmcontrol.ExternalJob, error) {
+	if c.podToJobsError != nil {
+		return nil, c.podToJobsError
+	}
 	if c.podToJobs != nil {
 		return &c.podToJobs, nil
 	}
 	return &map[string]slurmcontrol.ExternalJob{}, nil
+}
+
+func (c *postFilterSlurmControl) VerifyJobsForPods(_ context.Context, candidates map[string]slurmcontrol.ExternalJob, _ ...*corev1.Pod) (*map[string]slurmcontrol.ExternalJob, error) {
+	c.verifyCalls++
+	return &candidates, nil
 }
 
 func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
@@ -478,7 +497,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -529,7 +548,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -558,7 +577,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithInterceptorFuncs(f).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -593,7 +612,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -631,7 +650,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -677,7 +696,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -774,7 +793,7 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	slurmClient := fake.NewClientBuilder().Build()
 	sb := &SlurmBridge{
 		Client:       kubeClient,
-		slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"),
+		slurmControl: newTestSlurmControl(t, slurmClient, "kubernetes", "slurm-bridge"),
 		draRegistry:  testutils.DRARegistryWithExampleGPU(),
 		workloadAPI:  workloadAPI,
 	}
@@ -824,7 +843,7 @@ func TestSlurmBridge_PostFilterSkipsGangShortOfQuorum(t *testing.T) {
 		Build()
 	sb := &SlurmBridge{
 		Client:       kubeClient,
-		slurmControl: slurmcontrol.NewControl(fake.NewClientBuilder().Build(), "kubernetes", "slurm-bridge"),
+		slurmControl: newTestSlurmControl(t, fake.NewClientBuilder().Build(), "kubernetes", "slurm-bridge"),
 		workloadAPI:  workloadAPI,
 	}
 
@@ -927,7 +946,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		c := fake.NewClientBuilder().
 			WithLists(list).
 			Build()
-		return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+		return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 	}()
 	sb := &SlurmBridge{
 		Client:        kubeClient,
@@ -1146,7 +1165,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				)
 			},
 		}
-		return slurmcontrol.NewControl(interceptor.NewClient(base, f), "kubernetes", "slurm-bridge")
+		return newTestSlurmControl(t, interceptor.NewClient(base, f), "kubernetes", "slurm-bridge")
 	}
 	tests := []struct {
 		name         string
@@ -1171,7 +1190,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithInterceptorFuncs(f).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1205,7 +1224,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						},
 					}
 					c := fake.NewClientBuilder().WithLists(jobs).Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1232,7 +1251,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return ErrorNodeConfigInvalid
 						},
 					}
-					return slurmcontrol.NewControl(interceptor.NewClient(fake.NewFakeClient(), f), "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, interceptor.NewClient(fake.NewFakeClient(), f), "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1265,7 +1284,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithInterceptorFuncs(f).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1305,7 +1324,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1345,7 +1364,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1392,7 +1411,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1434,7 +1453,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1498,7 +1517,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(jobs, nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1554,7 +1573,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(jobs, nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1658,7 +1677,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 						WithInterceptorFuncs(f).
 						WithLists(jobs, nodes).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1787,7 +1806,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			name: "Node in annotation matches",
 			fields: fields{
 				client: nil,
-				slurmControl: slurmcontrol.NewControl(
+				slurmControl: newTestSlurmControl(t,
 					fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
 			},
 			args: args{
@@ -1802,7 +1821,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			name: "Node in annotation does not match",
 			fields: fields{
 				client:       nil,
-				slurmControl: slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+				slurmControl: newTestSlurmControl(t, fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
 			},
 			args: args{
 				ctx:      ctx,
@@ -1815,7 +1834,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 		{
 			name: "GRES compatibility condition is informational",
 			fields: fields{
-				slurmControl: slurmcontrol.NewControl(fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
+				slurmControl: newTestSlurmControl(t, fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
 			},
 			args: args{
 				ctx:   ctx,
@@ -1890,7 +1909,7 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 			name: "Delete fails on job that does not exist",
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod.DeepCopy()),
-				slurmControl: slurmcontrol.NewControl(
+				slurmControl: newTestSlurmControl(t,
 					fake.NewFakeClient(), "kubernetes", "slurm-bridge"),
 				handle: f,
 			},
@@ -1915,7 +1934,7 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: f,
 			},
@@ -1962,19 +1981,9 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 		{
 			name: "Fail to get jobs",
 			fields: fields{
-				Client: kubefake.NewFakeClient(),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
-							return ErrorNoKubeNode
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: nil,
+				Client:       kubefake.NewFakeClient(),
+				slurmControl: &postFilterSlurmControl{podToJobsError: ErrorNoKubeNode},
+				handle:       nil,
 			},
 			args: args{
 				ctx: context.TODO(),
@@ -2005,7 +2014,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: nil,
 			},
@@ -2042,7 +2051,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: nil,
 			},
@@ -2075,7 +2084,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 					c := fake.NewClientBuilder().
 						WithLists(list).
 						Build()
-					return slurmcontrol.NewControl(c, "kubernetes", "slurm-bridge")
+					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
 				}(),
 				handle: nil,
 			},
@@ -2271,6 +2280,9 @@ func TestSlurmBridge_validatePodToJobReconcilesIdentity(t *testing.T) {
 			}
 			if patches != tt.wantPatches {
 				t.Errorf("validatePodToJob() Patch calls = %d, want %d", patches, tt.wantPatches)
+			}
+			if control.verifyCalls != tt.wantPatches {
+				t.Errorf("validatePodToJob() verification calls = %d, want %d", control.verifyCalls, tt.wantPatches)
 			}
 			if !apiequality.Semantic.DeepEqual(pod.Labels, tt.wantLabels) {
 				t.Errorf("validatePodToJob() in-memory labels = %v, want %v", pod.Labels, tt.wantLabels)
