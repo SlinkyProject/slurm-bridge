@@ -138,7 +138,7 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 		if pg.Spec.ParentCompositePodGroupName != nil {
 
 			if *pg.Spec.ParentCompositePodGroupName != rootPOM.GetName() {
-				if found := t.traverseParentChain(rootPOM.Namespace, *pg.Spec.ParentCompositePodGroupName, rootPOM.Name, compositePodGroups, 0); !found {
+				if found := t.traverseParentChain(*pg.Spec.ParentCompositePodGroupName, rootPOM.Name, compositePodGroups, 0); !found {
 					continue
 				}
 			}
@@ -167,9 +167,9 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 	return slurmJobIR, nil
 }
 
-// traverseParentChain checks membership in an allocation without crossing a
-// basic CompositePodGroup boundary.
-func (t *translator) traverseParentChain(namespace string, parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
+// traverseParentChain follows each CompositePodGroup's parent up until it reaches the root
+// object, then returns the name of that object
+func (t *translator) traverseParentChain(parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
 	if depth == len(compositePodGroups) {
 		return false
 	}
@@ -186,7 +186,7 @@ func (t *translator) traverseParentChain(namespace string, parentName string, ta
 		if compositePodGroup.parentName == "" {
 			return false
 		}
-		return t.traverseParentChain(namespace, compositePodGroup.parentName, targetName, compositePodGroups, depth+1)
+		return t.traverseParentChain(compositePodGroup.parentName, targetName, compositePodGroups, depth+1)
 	}
 	return false
 }

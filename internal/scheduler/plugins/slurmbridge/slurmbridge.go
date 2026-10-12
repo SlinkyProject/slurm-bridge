@@ -703,8 +703,8 @@ const nativeGroupCycleKey fwk.StateKey = Name + "/native-group"
 // Each member's ordinary state retains the immutable allocation for binding,
 // after the framework detaches the PodGroup scheduling-cycle state.
 type nativeGroupCycle struct {
-	members   []nativeGroupMemberCycle
 	completed map[types.UID]bool
+	members   []nativeGroupMemberCycle
 }
 
 type nativeGroupMemberCycle struct {

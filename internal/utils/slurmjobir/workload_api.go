@@ -27,7 +27,6 @@ var (
 	podGroupV1Alpha2          = metav1.TypeMeta{APIVersion: workloadAPIGroup + "/" + WorkloadAPIVersionV1Alpha2, Kind: "PodGroup"}
 	podGroupV1Beta1           = metav1.TypeMeta{APIVersion: workloadAPIGroup + "/" + WorkloadAPIVersionV1Beta1, Kind: "PodGroup"}
 	compositePodGroupV1Alpha3 = metav1.TypeMeta{APIVersion: workloadAPIGroup + "/v1alpha3", Kind: "CompositePodGroup"}
-	// workloadV1Alpha3          = metav1.TypeMeta{APIVersion: workloadAPIGroup + "/v1alpha3", Kind: "Workload"}
 )
 
 type workloadAPIResourceDiscovery interface {
@@ -354,17 +353,6 @@ func (t *translator) compositePodGroupRootName(namespace, name string) (string, 
 	}
 	return "", fmt.Errorf("CompositePodGroup parent chain exceeds maximum depth of %d at %s/%s", maxCompositePodGroupTreeDepth, namespace, name)
 }
-
-// func (t *translator) getWireObject(typeMeta metav1.TypeMeta, key client.ObjectKey, out any) error {
-// 	obj, err := t.getUnstructuredObject(typeMeta, key)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, out); err != nil {
-// 		return fmt.Errorf("decode %s %s/%s: %w", typeMeta.Kind, key.Namespace, key.Name, err)
-// 	}
-// 	return nil
-// }
 
 func (t *translator) getUnstructuredObject(typeMeta metav1.TypeMeta, key client.ObjectKey) (*unstructured.Unstructured, error) {
 	obj := &unstructured.Unstructured{}

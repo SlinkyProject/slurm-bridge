@@ -90,15 +90,6 @@ type translator struct {
 	podsByGroup         map[string]corev1.PodList
 }
 
-// TranslationOption customizes the source of workload membership.
-type TranslationOption func(*translator)
-
-// WithPodGroupStates uses the scheduler's existing gang membership cache.
-// Other callers retain their reader's Pod listing behavior.
-func WithPodGroupStates(states fwk.PodGroupStateLister) TranslationOption {
-	return func(t *translator) { t.podGroupStates = states }
-}
-
 func (t *translator) registry() *dra.Registry {
 	if t.draRegistry != nil {
 		return t.draRegistry
