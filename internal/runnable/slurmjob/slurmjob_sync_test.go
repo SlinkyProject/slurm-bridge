@@ -19,7 +19,6 @@ import (
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -75,23 +74,21 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 				},
 			}),
 			slurmClient: slurmclientfake.NewClientBuilder().
-				WithLists(&slurmtypes.V0044JobInfoList{
-					Items: []slurmtypes.V0044JobInfo{
+				WithLists(&slurmapi.V0044JobInfoObjectList{
+					Items: []slurmapi.V0044JobInfo{
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/foo-1", "default/foo-2"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](1),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/foo-1", "default/foo-2"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/bar-1"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](2),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/bar-1"},
+							}).ToString()),
 						},
 					},
 				}).
@@ -115,23 +112,21 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 				},
 			}),
 			slurmClient: slurmclientfake.NewClientBuilder().
-				WithLists(&slurmtypes.V0044JobInfoList{
-					Items: []slurmtypes.V0044JobInfo{
+				WithLists(&slurmapi.V0044JobInfoObjectList{
+					Items: []slurmapi.V0044JobInfo{
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/foo-1", "default/foo-2"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](1),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/foo-1", "default/foo-2"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/bar-1"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](2),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/bar-1"},
+							}).ToString()),
 						},
 					},
 				}).
@@ -211,23 +206,21 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 				},
 			}),
 			slurmClient: slurmclientfake.NewClientBuilder().
-				WithLists(&slurmtypes.V0044JobInfoList{
-					Items: []slurmtypes.V0044JobInfo{
+				WithLists(&slurmapi.V0044JobInfoObjectList{
+					Items: []slurmapi.V0044JobInfo{
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](1),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/foo-1", "default/foo-2"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](1),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/foo-1", "default/foo-2"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/bar-1"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](2),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/bar-1"},
+							}).ToString()),
 						},
 					},
 				}).
@@ -251,24 +244,22 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 				},
 			}),
 			slurmClient: slurmclientfake.NewClientBuilder().
-				WithLists(&slurmtypes.V0044JobInfoList{
-					Items: []slurmtypes.V0044JobInfo{
+				WithLists(&slurmapi.V0044JobInfoObjectList{
+					Items: []slurmapi.V0044JobInfo{
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobState: ptr.To([]slurmapi.V0044JobInfoJobState{slurmapi.V0044JobInfoJobStatePENDING}),
-								JobId:    ptr.To[int32](1),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/foo-1", "default/foo-2"},
-								}).ToString()),
-							},
+
+							JobState: ptr.To([]slurmapi.V0044JobInfoJobState{slurmapi.V0044JobInfoJobStatePENDING}),
+							JobId:    ptr.To[int32](1),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/foo-1", "default/foo-2"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: slurmapi.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"default/bar-1"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](2),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"default/bar-1"},
+							}).ToString()),
 						},
 					},
 				}).

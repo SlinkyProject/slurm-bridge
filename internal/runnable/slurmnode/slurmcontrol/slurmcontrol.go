@@ -8,8 +8,8 @@ import (
 
 	"k8s.io/utils/ptr"
 
+	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
 type SlurmControlInterface interface {
@@ -26,7 +26,7 @@ type realSlurmControl struct {
 
 // RefreshNodeCache implements SlurmControlInterface.
 func (r *realSlurmControl) RefreshNodeCache(ctx context.Context) error {
-	nodeList := &types.V0044NodeList{}
+	nodeList := &slurmapi.V0044NodeObjectList{}
 	opts := &client.ListOptions{
 		RefreshCache: true,
 	}
@@ -38,7 +38,7 @@ func (r *realSlurmControl) RefreshNodeCache(ctx context.Context) error {
 
 // ListNodeNames implements SlurmControlInterface.
 func (r *realSlurmControl) ListNodeNames(ctx context.Context) ([]string, error) {
-	list := &types.V0044NodeList{}
+	list := &slurmapi.V0044NodeObjectList{}
 	if err := r.List(ctx, list); err != nil {
 		return nil, err
 	}

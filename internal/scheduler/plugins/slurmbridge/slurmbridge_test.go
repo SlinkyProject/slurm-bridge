@@ -46,7 +46,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
@@ -57,11 +56,11 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-func slurmNode(name string, partitions ...string) types.V0044Node {
-	return types.V0044Node{V0044Node: api.V0044Node{
+func slurmNode(name string, partitions ...string) api.V0044Node {
+	return api.V0044Node{
 		Name:       ptr.To(name),
 		Partitions: ptr.To(api.V0044CsvString(partitions)),
-	}}
+	}
 }
 
 type activateRecorder struct {
@@ -461,9 +460,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -473,7 +472,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -512,9 +511,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -524,7 +523,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -576,9 +575,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -588,7 +587,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -614,9 +613,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				),
 				schedulerName: "slurm-bridge-scheduler",
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -626,7 +625,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -660,9 +659,9 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				),
 				schedulerName: "slurm-bridge-scheduler",
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -672,7 +671,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -907,9 +906,9 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		WithStatusSubresource(&slurmjobir.PodGroup{}).
 		Build()
 	slurmControl := func() slurmcontrol.SlurmControlInterface {
-		list := &types.V0044JobInfoList{
-			Items: []types.V0044JobInfo{
-				{V0044JobInfo: api.V0044JobInfo{
+		list := &api.V0044JobInfoObjectList{
+			Items: []api.V0044JobInfo{
+				{
 					AdminComment: func() *string {
 						pi := externaljobinfo.ExternalJobInfo{
 							Pods: []string{
@@ -922,7 +921,7 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 					JobId:    ptr.To(jobID),
 					JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 					Nodes:    ptr.To("node[1-2]"),
-				}},
+				},
 			},
 		}
 		c := fake.NewClientBuilder().
@@ -1109,8 +1108,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		m     fwk.NodeToStatusReader
 	}
 	newUpdateRaceSlurmControl := func(nodesAfterUpdate string) slurmcontrol.SlurmControlInterface {
-		nodes := &types.V0044NodeList{
-			Items: []types.V0044Node{
+		nodes := &api.V0044NodeObjectList{
+			Items: []api.V0044Node{
 				slurmNode("node1", "slurm-bridge"),
 				slurmNode("node2", "slurm-bridge"),
 			},
@@ -1121,7 +1120,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		jobGets := 0
 		f := interceptor.Funcs{
 			Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
-				job, ok := obj.(*types.V0044JobInfo)
+				job, ok := obj.(*api.V0044JobInfo)
 				if !ok {
 					return base.Get(ctx, key, obj, opts...)
 				}
@@ -1133,11 +1132,11 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					state = api.V0044JobInfoJobStateRUNNING
 					nodes = nodesAfterUpdate
 				}
-				*job = types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+				*job = api.V0044JobInfo{
 					JobId:    ptr.To(int32(1)),
 					JobState: &[]api.V0044JobInfoJobState{state},
 					Nodes:    ptr.To(nodes),
-				}}
+				}
 				return nil
 			},
 			Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
@@ -1192,9 +1191,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 				),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					jobs := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					jobs := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId:    ptr.To(int32(1)),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
@@ -1202,7 +1201,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 									pi := externaljobinfo.ExternalJobInfo{Pods: []string{"/pod1"}}
 									return ptr.To(pi.ToString())
 								}(),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().WithLists(jobs).Build()
@@ -1259,7 +1258,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.CreateOption) error {
-							obj.(*types.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							return nil
 						},
 					}
@@ -1296,8 +1295,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return errors.Join(errors.New("Bad Request"), ErrorNodeConfigInvalid)
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1336,8 +1335,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return ErrorPodUpdateFailed
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1378,12 +1377,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							if !reflect.DeepEqual(jobSubmit.Job.ExcludedNodes, want) {
 								return fmt.Errorf("ExcludedNodes = %v, want %v", jobSubmit.Job.ExcludedNodes, want)
 							}
-							obj.(*types.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							return nil
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 							slurmNode("node3", "other"),
@@ -1421,12 +1420,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					f := interceptor.Funcs{
 						Create: func(_ context.Context, obj object.Object, _ any, _ ...slurmclient.CreateOption) error {
-							obj.(*types.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							return nil
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1474,9 +1473,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return nil
 						},
 					}
-					jobs := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					jobs := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId:    ptr.To(int32(1)),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 								Nodes:    ptr.To(""),
@@ -1485,12 +1484,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
-								}()},
+								}(),
 							},
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1530,9 +1529,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return errors.Join(ErrorPodUpdateFailed)
 						},
 					}
-					jobs := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					jobs := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId:    ptr.To(int32(1)),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 								Nodes:    ptr.To(""),
@@ -1541,12 +1540,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
-								}()},
+								}(),
 							},
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1634,9 +1633,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 							return errors.Join(ErrorPodUpdateFailed)
 						},
 					}
-					jobs := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					jobs := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId:    ptr.To(int32(1)),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
@@ -1645,12 +1644,12 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 										Pods: []string{"/pod1"},
 									}
 									return ptr.To(pi.ToString())
-								}()},
+								}(),
 							},
 						},
 					}
-					nodes := &types.V0044NodeList{
-						Items: []types.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
 							slurmNode("node1", "slurm-bridge"),
 							slurmNode("node2", "slurm-bridge"),
 						},
@@ -1906,11 +1905,11 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId: ptr.To[int32](1),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -1989,9 +1988,9 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
@@ -2000,7 +1999,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 								}(),
 								JobId: ptr.To[int32](1),
 								Nodes: ptr.To(""),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -2026,9 +2025,9 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 			fields: fields{
 				Client: kubefake.NewFakeClient(),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
@@ -2037,7 +2036,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 								}(),
 								JobId: ptr.To[int32](2),
 								Nodes: ptr.To(""),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -2059,9 +2058,9 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					list := &types.V0044JobInfoList{
-						Items: []types.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"/pod1"},
@@ -2070,7 +2069,7 @@ func TestSlurmBridge_validatePodToJob(t *testing.T) {
 								}(),
 								JobId: ptr.To[int32](2),
 								Nodes: ptr.To(""),
-							}},
+							},
 						},
 					}
 					c := fake.NewClientBuilder().

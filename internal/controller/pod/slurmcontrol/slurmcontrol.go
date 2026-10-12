@@ -15,7 +15,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
+	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
 	jobslurmcontrol "github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -39,7 +39,7 @@ type realSlurmControl struct {
 
 // IsJobRunning implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error) {
-	job := &types.V0044JobInfo{}
+	job := &api.V0044JobInfo{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
 		return false, nil
@@ -53,7 +53,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 	if err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
 		return false, err
 	}
-	if err == nil && job.GetStateAsSet().Has(api.V0044JobInfoJobStateRUNNING) {
+	if err == nil && slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStateRUNNING) {
 		return true, nil
 	}
 
@@ -66,7 +66,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 		}
 		return false, err
 	}
-	if job.GetStateAsSet().Has(api.V0044JobInfoJobStateRUNNING) {
+	if slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStateRUNNING) {
 		return true, nil
 	}
 	return false, nil
@@ -74,7 +74,7 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 
 // IsJobPendingOrRunning implements SlurmControlInterface.
 func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error) {
-	job := &types.V0044JobInfo{}
+	job := &api.V0044JobInfo{}
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
@@ -83,16 +83,14 @@ func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int3
 		}
 		return false, err
 	}
-	state := job.GetStateAsSet()
+	state := slurmutils.GetStateAsSet(job.JobState)
 	return state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING), nil
 }
 
 // TerminateJob implements SlurmControlInterface.
 func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error {
-	job := &types.V0044JobInfo{
-		V0044JobInfo: api.V0044JobInfo{
-			JobId: ptr.To(jobId),
-		},
+	job := &api.V0044JobInfo{
+		JobId: ptr.To(jobId),
 	}
 	if err := r.Delete(ctx, job); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {

@@ -24,7 +24,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -153,11 +152,11 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job that does not exist",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId: ptr.To[int32](2),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -179,11 +178,11 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 			name: "Delete job",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								JobId: ptr.To[int32](1),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -269,9 +268,9 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 			name: "List jobs",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -281,8 +280,8 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1, node2"),
-							}},
-							{V0044JobInfo: api.V0044JobInfo{
+							},
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod2"},
@@ -292,7 +291,7 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 								JobId:    ptr.To[int32](2),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 								Nodes:    ptr.To(""),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -319,23 +318,23 @@ func Test_realSlurmControl_GetJobsForPods(t *testing.T) {
 						}
 						return ptr.To(pi.ToString())
 					}
-					items := []slurmtypes.V0044JobInfo{
-						{V0044JobInfo: api.V0044JobInfo{
+					items := []api.V0044JobInfo{
+						{
 							AdminComment: adminComment(),
 							JobId:        ptr.To[int32](1),
 							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 							Nodes:        ptr.To("node1"),
-						}},
-						{V0044JobInfo: api.V0044JobInfo{
+						},
+						{
 							AdminComment: adminComment(),
 							JobId:        ptr.To[int32](2),
 							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 							Nodes:        ptr.To("node2"),
-						}},
+						},
 					}
 					f := interceptor.Funcs{
 						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
-							list.(*slurmtypes.V0044JobInfoList).Items = items
+							list.(*api.V0044JobInfoObjectList).Items = items
 							return nil
 						},
 					}
@@ -396,12 +395,12 @@ func Test_realSlurmControl_GetJobsForPodsFinishedJobs(t *testing.T) {
 		t.Run(string(tt.state), func(t *testing.T) {
 			info := externaljobinfo.ExternalJobInfo{Pods: []string{"test/pod"}}
 			r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(
-				&slurmtypes.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+				&api.V0044JobInfo{
 					JobId: ptr.To(int32(2)), JobState: &[]api.V0044JobInfoJobState{tt.state},
 					AdminComment: ptr.To(info.ToString()),
 					HetJobId:     &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))},
 					HetJobOffset: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))},
-				}},
+				},
 			).Build()}
 			got, err := r.GetJobsForPods(context.Background())
 			if err != nil {
@@ -456,9 +455,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not found",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -468,7 +467,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To(""),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -500,9 +499,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/pod1"},
@@ -512,7 +511,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
 								Nodes:    ptr.To(""),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -531,9 +530,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found and running",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/foo"},
@@ -543,7 +542,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 								Nodes:    ptr.To("node1"),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -562,9 +561,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found and pending",
 			fields: fields{
 				Client: func() client.Client {
-					list := &slurmtypes.V0044JobInfoList{
-						Items: []slurmtypes.V0044JobInfo{
-							{V0044JobInfo: api.V0044JobInfo{
+					list := &api.V0044JobInfoObjectList{
+						Items: []api.V0044JobInfo{
+							{
 								AdminComment: func() *string {
 									pi := externaljobinfo.ExternalJobInfo{
 										Pods: []string{"slurm/foo"},
@@ -574,7 +573,7 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 								JobId:    ptr.To[int32](1),
 								JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 								Nodes:    ptr.To(""),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -678,7 +677,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							job := obj.(*slurmtypes.V0044JobInfo)
+							job := obj.(*api.V0044JobInfo)
 							job.JobId = ptr.To(int32(1))
 							job.HetJobIdSet = ptr.To("1,3-4")
 							return nil
@@ -702,7 +701,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							job := obj.(*slurmtypes.V0044JobInfo)
+							job := obj.(*api.V0044JobInfo)
 							job.JobId = ptr.To(int32(1))
 							job.HetJobIdSet = ptr.To("invalid")
 							return nil
@@ -726,7 +725,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job.RequiredNodes != nil {
 								return fmt.Errorf("expected RequiredNodes to be nil, got %v", *jobSubmit.Job.RequiredNodes)
@@ -757,7 +756,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil || len(*jobSubmit.Job.Shared) != 1 {
 								return fmt.Errorf("expected Shared to have one element, got %v", jobSubmit.Job.Shared)
@@ -793,7 +792,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job == nil || jobSubmit.Job.Priority == nil {
 								return fmt.Errorf("expected Priority to be set, got nil")
@@ -827,7 +826,7 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(1))
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(1))
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job == nil || jobSubmit.Job.Shared == nil {
 								return fmt.Errorf("expected Shared to be set, got %v", jobSubmit.Job.Shared)
@@ -860,8 +859,8 @@ func Test_realSlurmControl_SubmitJob(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Create: func(ctx context.Context, obj object.Object, req any, opts ...client.CreateOption) error {
-							obj.(*slurmtypes.V0044JobInfo).JobId = ptr.To(int32(100))
-							obj.(*slurmtypes.V0044JobInfo).HetJobIdSet = ptr.To("100-101")
+							obj.(*api.V0044JobInfo).JobId = ptr.To(int32(100))
+							obj.(*api.V0044JobInfo).HetJobIdSet = ptr.To("100-101")
 							jobSubmit := req.(api.V0044JobSubmitReq)
 							if jobSubmit.Job != nil || jobSubmit.Jobs == nil {
 								return fmt.Errorf("expected heterogeneous Jobs request, got %#v", jobSubmit)
@@ -948,7 +947,7 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 				Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
 					Update: func(ctx context.Context, obj object.Object, req any, opts ...client.UpdateOption) error {
 						updates++
-						if got := ptr.Deref(obj.(*slurmtypes.V0044JobInfo).JobId, 0); got != 42 {
+						if got := ptr.Deref(obj.(*api.V0044JobInfo).JobId, 0); got != 42 {
 							t.Errorf("updated job ID = %d, want 42", got)
 						}
 						desc := req.(api.V0044JobDescMsg)
@@ -1081,20 +1080,20 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			fields: fields{
 				partition: "slurm-bridge, gpu",
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0044NodeList{
-						Items: []slurmtypes.V0044Node{
-							{V0044Node: api.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
+							{
 								Name:       ptr.To("node1"),
 								Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
-							}},
-							{V0044Node: api.V0044Node{
+							},
+							{
 								Name:       ptr.To("node2"),
 								Partitions: ptr.To(api.V0044CsvString{"other", "gpu"}),
-							}},
-							{V0044Node: api.V0044Node{
+							},
+							{
 								Name:       ptr.To("node3"),
 								Partitions: ptr.To(api.V0044CsvString{"other"}),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -1113,20 +1112,20 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			fields: fields{
 				partition: "slurm-bridge",
 				Client: func() client.Client {
-					nodes := &slurmtypes.V0044NodeList{
-						Items: []slurmtypes.V0044Node{
-							{V0044Node: api.V0044Node{
+					nodes := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
+							{
 								Name:       ptr.To("node1"),
 								Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
-							}},
-							{V0044Node: api.V0044Node{
+							},
+							{
 								Name:       ptr.To("node2"),
 								Partitions: ptr.To(api.V0044CsvString{"other", "gpu"}),
-							}},
-							{V0044Node: api.V0044Node{
+							},
+							{
 								Name:       ptr.To("node3"),
 								Partitions: ptr.To(api.V0044CsvString{"batch"}),
-							}},
+							},
 						},
 					}
 					return fake.NewClientBuilder().
@@ -1260,13 +1259,11 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
-							resources := slurmtypes.V0044NodeResourceLayout{
-								V0044NodeResourceLayoutList: []api.V0044NodeResourceLayout{
-									{Node: "node1"},
-									{Node: "node2"},
-								},
+							resources := api.V0044NodeResourceLayoutListObject{
+								{Node: "node1"},
+								{Node: "node2"},
 							}
-							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+							if o, ok := obj.(*api.V0044NodeResourceLayoutListObject); ok {
 								layout := resources.DeepCopy()
 								*o = *layout
 							}
@@ -1298,27 +1295,25 @@ func Test_realSlurmControl_GetResources(t *testing.T) {
 				Client: func() client.Client {
 					f := interceptor.Funcs{
 						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
-							resources := slurmtypes.V0044NodeResourceLayout{
-								V0044NodeResourceLayoutList: []api.V0044NodeResourceLayout{
-									{Node: "node1"},
-									{
-										Node: "node2",
-										Gres: &api.V0044NodeGresLayoutList{
-											{
-												Count: ptr.To(int64(2)),
-												Index: ptr.To("1-2"),
-												Name:  "gpu",
-												Type:  ptr.To("gpu.example.com"),
-											},
+							resources := api.V0044NodeResourceLayoutListObject{
+								{Node: "node1"},
+								{
+									Node: "node2",
+									Gres: &api.V0044NodeGresLayoutList{
+										{
+											Count: ptr.To(int64(2)),
+											Index: ptr.To("1-2"),
+											Name:  "gpu",
+											Type:  ptr.To("gpu.example.com"),
 										},
 									},
 								},
 							}
-							if o, ok := obj.(*slurmtypes.V0044NodeResourceLayout); ok {
+							if o, ok := obj.(*api.V0044NodeResourceLayoutListObject); ok {
 								layout := resources.DeepCopy()
 								*o = *layout
 							}
-							if o, ok := obj.(*slurmtypes.V0044Node); ok {
+							if o, ok := obj.(*api.V0044Node); ok {
 								o.Extra = ptr.To("slurm-bridge.dra-gres-map={}")
 							}
 							return nil

@@ -26,7 +26,6 @@ import (
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -124,55 +123,49 @@ var _ = Describe("syncKubernetes()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0044JobInfoList{
-			Items: []slurmtypes.V0044JobInfo{
+		jobList := &api.V0044JobInfoObjectList{
+			Items: []api.V0044JobInfo{
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To(jobId),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-					},
+
+					JobId:        ptr.To(jobId),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To[int32](2),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
-					},
+
+					JobId:        ptr.To[int32](2),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To[int32](3),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo("crashloop").ToString()),
-					},
+
+					JobId:        ptr.To[int32](3),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo("crashloop").ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId: ptr.To[int32](4),
-						JobState: &[]api.V0044JobInfoJobState{
-							api.V0044JobInfoJobStatePENDING,
-							api.V0044JobInfoJobStatePREEMPTED,
-						},
-						AdminComment: ptr.To(newExternalJobInfo("requeued").ToString()),
+
+					JobId: ptr.To[int32](4),
+					JobState: &[]api.V0044JobInfoJobState{
+						api.V0044JobInfoJobStatePENDING,
+						api.V0044JobInfoJobStatePREEMPTED,
 					},
+					AdminComment: ptr.To(newExternalJobInfo("requeued").ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId: ptr.To[int32](5),
-						JobState: &[]api.V0044JobInfoJobState{
-							api.V0044JobInfoJobStatePENDING,
-							api.V0044JobInfoJobStatePREEMPTED,
-						},
-						AdminComment: ptr.To(newExternalJobInfo("requeued-bound").ToString()),
+
+					JobId: ptr.To[int32](5),
+					JobState: &[]api.V0044JobInfoJobState{
+						api.V0044JobInfoJobStatePENDING,
+						api.V0044JobInfoJobStatePREEMPTED,
 					},
+					AdminComment: ptr.To(newExternalJobInfo("requeued-bound").ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To[int32](6),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateSUSPENDED},
-						AdminComment: ptr.To(newExternalJobInfo("suspended").ToString()),
-					},
+
+					JobId:        ptr.To[int32](6),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateSUSPENDED},
+					AdminComment: ptr.To(newExternalJobInfo("suspended").ToString()),
 				},
 			},
 		}
@@ -351,21 +344,19 @@ var _ = Describe("syncSlurm()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0044JobInfoList{
-			Items: []slurmtypes.V0044JobInfo{
+		jobList := &api.V0044JobInfoObjectList{
+			Items: []api.V0044JobInfo{
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To(jobId),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-					},
+
+					JobId:        ptr.To(jobId),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To[int32](2),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
-					},
+
+					JobId:        ptr.To[int32](2),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 				},
 			},
 		}
@@ -451,14 +442,13 @@ var _ = Describe("syncSlurm()", func() {
 			podList := &corev1.PodList{
 				Items: []corev1.Pod{*terminalPod, *terminatingPod},
 			}
-			jobList := &slurmtypes.V0044JobInfoList{
-				Items: []slurmtypes.V0044JobInfo{
+			jobList := &api.V0044JobInfoObjectList{
+				Items: []api.V0044JobInfo{
 					{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:        ptr.To(jobId),
-							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-							AdminComment: ptr.To(newExternalJobInfo("foo-terminal").ToString()),
-						},
+
+						JobId:        ptr.To(jobId),
+						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+						AdminComment: ptr.To(newExternalJobInfo("foo-terminal").ToString()),
 					},
 				},
 			}
@@ -511,14 +501,13 @@ var _ = Describe("syncSlurm()", func() {
 			By("Creating a terminal pod and canceled Slurm job")
 			podName := "canceled"
 			pod := newTerminalPod(podName, jobId)
-			jobList := &slurmtypes.V0044JobInfoList{
-				Items: []slurmtypes.V0044JobInfo{
+			jobList := &api.V0044JobInfoObjectList{
+				Items: []api.V0044JobInfo{
 					{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:        ptr.To(jobId),
-							JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
-							AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-						},
+
+						JobId:        ptr.To(jobId),
+						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
+						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 					},
 				},
 			}
@@ -560,21 +549,19 @@ var _ = Describe("Sync()", func() {
 	var jobId int32 = 1
 
 	BeforeEach(func() {
-		jobList := &slurmtypes.V0044JobInfoList{
-			Items: []slurmtypes.V0044JobInfo{
+		jobList := &api.V0044JobInfoObjectList{
+			Items: []api.V0044JobInfo{
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To(jobId),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-					},
+
+					JobId:        ptr.To(jobId),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
 				},
 				{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId:        ptr.To[int32](2),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
-					},
+
+					JobId:        ptr.To[int32](2),
+					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+					AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
 				},
 			},
 		}

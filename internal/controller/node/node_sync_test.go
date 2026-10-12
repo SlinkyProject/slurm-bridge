@@ -29,7 +29,6 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
@@ -110,11 +109,11 @@ var _ = Describe("syncTaint()", func() {
 		k8sClient = &patchCountingClient{Client: fake.NewFakeClient(nodeList)}
 		Expect(k8sClient).NotTo(BeNil())
 
-		slurmNodeList := &slurmtypes.V0044NodeList{
-			Items: []slurmtypes.V0044Node{
-				{V0044Node: api.V0044Node{Name: ptr.To("slurm-0")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-0")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-1")}},
+		slurmNodeList := &api.V0044NodeObjectList{
+			Items: []api.V0044Node{
+				{Name: ptr.To("slurm-0")},
+				{Name: ptr.To("bridged-0")},
+				{Name: ptr.To("bridged-1")},
 			},
 		}
 		slurmClient := slurmclientfake.NewClientBuilder().WithLists(slurmNodeList).Build()
@@ -310,18 +309,18 @@ var _ = Describe("syncState()", func() {
 		k8sClient := fake.NewFakeClient(nodeList)
 		Expect(k8sClient).NotTo(BeNil())
 
-		slurmNodeList := &slurmtypes.V0044NodeList{
-			Items: []slurmtypes.V0044Node{
-				{V0044Node: api.V0044Node{Name: ptr.To("slurm-0")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-0")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-1")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-2")}},
-				{V0044Node: api.V0044Node{Name: ptr.To("bridged-3")}},
+		slurmNodeList := &api.V0044NodeObjectList{
+			Items: []api.V0044Node{
+				{Name: ptr.To("slurm-0")},
+				{Name: ptr.To("bridged-0")},
+				{Name: ptr.To("bridged-1")},
+				{Name: ptr.To("bridged-2")},
+				{Name: ptr.To("bridged-3")},
 			},
 		}
 		updateFn := func(_ context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
 			switch o := obj.(type) {
-			case *slurmtypes.V0044Node:
+			case *api.V0044Node:
 				r, ok := req.(api.V0044UpdateNodeMsg)
 				if !ok {
 					return errors.New("failed to cast request object")
@@ -525,10 +524,10 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			return nil
 		}
 		slurmClient := slurmclientfake.NewClientBuilder().
-			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+			WithObjects(&api.V0044Node{
 				Name: ptr.To(node.Name),
 				Gres: ptr.To("gpu:gpu.example.com:1,nic:infiniband:1"),
-			}}).
+			}).
 			WithUpdateFn(updateFn).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
@@ -564,10 +563,10 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		}
 		kubeClient := fake.NewClientBuilder().WithObjects(node, resourceSlice).Build()
 		slurmClient := slurmclientfake.NewClientBuilder().
-			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+			WithObjects(&api.V0044Node{
 				Name: ptr.To(node.Name),
 				Gres: ptr.To("gpu:gpu.example.com:2"),
-			}}).
+			}).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
 
@@ -624,7 +623,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			if failUpdate {
 				return errors.New("feature update failed")
 			}
-			slurmNode := obj.(*slurmtypes.V0044Node)
+			slurmNode := obj.(*api.V0044Node)
 			if update.Features != nil {
 				slurmNode.Features = update.Features
 			}
@@ -639,7 +638,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		}
 		appliedInventory := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/hybrid-0/gpu-0"]}}}`
 		slurmClient := slurmclientfake.NewClientBuilder().
-			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+			WithObjects(&api.V0044Node{
 				Name:           ptr.To(node.Name),
 				Cpus:           ptr.To(int32(4)),
 				RealMemory:     ptr.To(int64(8192)),
@@ -648,7 +647,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 				Features:       ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				Extra:          ptr.To(appliedInventory),
-			}}).
+			}).
 			WithUpdateFn(updateFn).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())
@@ -683,7 +682,7 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		Expect(condition.Reason).To(Equal(reasonSlurmGRESVerificationError))
 
 		By("preserving the Slurm node and its last applied inventory")
-		slurmNode := &slurmtypes.V0044Node{}
+		slurmNode := &api.V0044Node{}
 		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), slurmNode)).To(Succeed())
 		Expect(*slurmNode.State).To(Equal(state))
 		Expect(*slurmNode.Gres).To(Equal("gpu:gpu.example.com:1"))
@@ -775,12 +774,12 @@ var _ = Describe("syncNodeRegistration() labeled hybrid nodes", func() {
 			return nil
 		}
 		slurmClient := slurmclientfake.NewClientBuilder().
-			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+			WithObjects(&api.V0044Node{
 				Name:           ptr.To(node.Name),
 				Gres:           ptr.To("gpu:gpu.example.com:2"),
 				Features:       ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}),
-			}}).
+			}).
 			WithUpdateFn(updateFn).
 			Build()
 		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), testutils.DRARegistryWithExampleGPU())

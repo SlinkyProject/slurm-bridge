@@ -17,7 +17,6 @@ import (
 	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
 func TestSlurmNodeRunnable_Sync(t *testing.T) {
@@ -45,10 +44,10 @@ func TestSlurmNodeRunnable_Sync(t *testing.T) {
 				},
 			}),
 			slurmClient: slurmclientfake.NewClientBuilder().
-				WithLists(&slurmtypes.V0044NodeList{
-					Items: []slurmtypes.V0044Node{
-						{V0044Node: slurmapi.V0044Node{Name: ptr.To("slurm-1")}},
-						{V0044Node: slurmapi.V0044Node{Name: ptr.To("bridge-1")}},
+				WithLists(&slurmapi.V0044NodeObjectList{
+					Items: []slurmapi.V0044Node{
+						{Name: ptr.To("slurm-1")},
+						{Name: ptr.To("bridge-1")},
 					},
 				}).
 				Build(),

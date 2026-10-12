@@ -21,7 +21,6 @@ import (
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
 const (
@@ -97,10 +96,10 @@ var _ = Describe("Node Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			eventCh := make(chan event.TypedGenericEvent[client.Object])
-			list := &slurmtypes.V0044NodeList{
-				Items: []slurmtypes.V0044Node{
-					{V0044Node: api.V0044Node{Name: ptr.To(resourceName)}},
-					{V0044Node: api.V0044Node{Name: ptr.To("node-0")}},
+			list := &api.V0044NodeObjectList{
+				Items: []api.V0044Node{
+					{Name: ptr.To(resourceName)},
+					{Name: ptr.To("node-0")},
 				},
 			}
 			slurmClient := slurmclientfake.NewClientBuilder().WithLists(list).Build()
