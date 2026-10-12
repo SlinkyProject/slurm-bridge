@@ -251,45 +251,6 @@ func isFinishedJob(job *api.V0044JobInfo) bool {
 	)
 }
 
-func (r *realSlurmControl) findJobByID(ctx context.Context, jobID int32) (*api.V0044JobInfo, bool, error) {
-	jobs := &api.V0044JobInfoObjectList{}
-	if err := r.List(ctx, jobs); err != nil {
-		return nil, false, err
-	}
-	for i := range jobs.Items {
-		if ptr.Deref(jobs.Items[i].JobId, 0) == jobID {
-			return &jobs.Items[i], true, nil
-		}
-	}
-	return nil, false, nil
-}
-
-func (r *realSlurmControl) ListJobs(ctx context.Context) ([]ExternalJob, error) {
-	logger := klog.FromContext(ctx)
-	jobsOut := []ExternalJob{}
-
-	jobs := &api.V0044JobInfoObjectList{}
-
-	err := r.List(ctx, jobs)
-	if err != nil {
-		logger.Error(err, "could not list jobs")
-		return nil, err
-	}
-
-	for i := range jobs.Items {
-		if !isActiveJob(&jobs.Items[i]) {
-			continue
-		}
-		extJob, err := externalJobFromJobInfo(&jobs.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		jobsOut = append(jobsOut, extJob)
-	}
-
-	return jobsOut, nil
-}
-
 // SubmitJob submits an external job to Slurm for a node placement decision. The
 // external job is later used to determine which node to bind a k8s pod to.
 func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
