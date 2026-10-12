@@ -153,10 +153,21 @@ func TestCleanDanglingJobConfirmsPodIdentity(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: tt.jobUID},
 			})}}
 			deleted := false
-			slurm := fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
+			refreshes := 0
+			builder := fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
 				JobId: ptr.To(int32(7)), AdminComment: ptr.To(info.ToString()),
 				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-			}).WithInterceptorFuncs(interceptor.Funcs{
+			})
+			baseClient := builder.Build()
+			slurm := builder.WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+					options := &slurmclient.GetOptions{}
+					options.ApplyOptions(opts)
+					if options.RefreshCache {
+						refreshes++
+					}
+					return baseClient.Get(ctx, key, obj, opts...)
+				},
 				Delete: func(_ context.Context, _ object.Object, _ ...slurmclient.DeleteOption) error {
 					deleted = true
 					return nil
@@ -170,6 +181,13 @@ func TestCleanDanglingJobConfirmsPodIdentity(t *testing.T) {
 			}
 			if !errors.Is(err, wantErr) {
 				t.Errorf("Sync() error = %v, want %v", err, wantErr)
+			}
+			wantRefreshes := 0
+			if tt.wantDeleted {
+				wantRefreshes = 1
+			}
+			if refreshes != wantRefreshes {
+				t.Errorf("Sync() Slurm refreshes = %d, want %d", refreshes, wantRefreshes)
 			}
 			if deleted != tt.wantDeleted {
 				t.Errorf("canceled job = %t, want %t", deleted, tt.wantDeleted)

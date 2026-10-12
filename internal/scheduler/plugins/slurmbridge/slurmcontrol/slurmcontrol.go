@@ -111,6 +111,10 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	if jobId == 0 {
 		return nil
 	}
+	hetJobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobId])
+	if hetJobId != 0 {
+		jobId = hetJobId
+	}
 	job.JobId = &jobId
 	r.lastUpdate.Remove(jobId)
 	if err := r.Delete(ctx, job); err != nil {

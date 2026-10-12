@@ -63,8 +63,8 @@ type failingSocketCleanup struct {
 	fail bool
 }
 
-func (c *failingSocketCleanup) IsJobPendingOrRunning(context.Context, int32) (bool, error) {
-	return true, nil
+func (c *failingSocketCleanup) IsJobPendingOrRunning(context.Context, int32) (bool, bool, error) {
+	return true, false, nil
 }
 func (c *failingSocketCleanup) TerminateJob(context.Context, int32) error {
 	if c.fail {

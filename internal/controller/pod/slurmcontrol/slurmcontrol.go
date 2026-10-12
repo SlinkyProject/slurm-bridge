@@ -24,8 +24,9 @@ import (
 type SlurmControlInterface interface {
 	// IsJobRunning returns true if the Slurm job is running, false if not.
 	IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error)
-	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
-	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
+	// IsJobPendingOrRunning returns true, false if the Slurm job with the given jobId is pending,
+	// and false, true if the Slurm job with the give jobId is running.
+	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
 	// TerminateHetJobComponent cancels only the component at hetJobOffset, including offset zero.
@@ -76,18 +77,30 @@ func (r *realSlurmControl) IsJobRunning(ctx context.Context, pod *corev1.Pod) (b
 }
 
 // IsJobPendingOrRunning implements SlurmControlInterface.
-func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error) {
+func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, bool, error) {
 	job := &api.V0044JobInfo{}
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
 	err := r.Get(ctx, key, job)
 	if err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
-			return false, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
 	state := slurmutils.GetStateAsSet(job.JobState)
-	return state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING), nil
+	if !state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING) {
+		return false, false, nil
+	}
+
+	// Confirm an active job before returning a state that permits cancellation.
+	if err := r.Get(ctx, key, job, &client.GetOptions{RefreshCache: true}); err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	state = slurmutils.GetStateAsSet(job.JobState)
+	return state.Has(api.V0044JobInfoJobStatePENDING), state.Has(api.V0044JobInfoJobStateRUNNING), nil
 }
 
 // TerminateJob implements SlurmControlInterface.

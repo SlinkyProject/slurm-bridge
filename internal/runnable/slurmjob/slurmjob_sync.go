@@ -59,7 +59,6 @@ func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) er
 		return err
 	}
 
-	hasPods := false
 	for _, ref := range podRefs {
 		pod := &corev1.Pod{}
 		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
@@ -81,37 +80,44 @@ func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) er
 		if ref.UID != "" && ref.UID != pod.UID {
 			continue
 		}
-		hasPods = true
-		break
+		return nil
 	}
 
-	isPendingOrRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
+	jobIsPending, jobIsRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
 	if err != nil {
 		return fmt.Errorf("failed to check if job is pending or running: %w", err)
 	}
 
-	if !hasPods && isPendingOrRunning {
-		job := &slurmapi.V0044JobInfo{}
-		if err := r.slurmClient.Get(ctx, object.ObjectKey(fmt.Sprintf("%d", jobId)), job); err != nil {
-			if errors.Is(err, slurmerrors.ErrNotFound) {
-				return nil
-			}
-			return err
+	if !jobIsPending && !jobIsRunning {
+		return nil
+	}
+
+	job := &slurmapi.V0044JobInfo{}
+	if err := r.slurmClient.Get(ctx, object.ObjectKey(fmt.Sprintf("%d", jobId)), job); err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return nil
 		}
-		logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
-		var err error
-		switch {
-		case job.HetJobId != nil && ptr.Deref(job.HetJobId.Set, false) && ptr.Deref(job.HetJobId.Number, 0) != 0:
-			if job.HetJobOffset == nil || !ptr.Deref(job.HetJobOffset.Set, false) || job.HetJobOffset.Number == nil {
-				return fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
-			}
-			err = r.slurmControl.TerminateHetJobComponent(ctx, *job.HetJobId.Number, *job.HetJobOffset.Number)
-		default:
-			err = r.slurmControl.TerminateJob(ctx, jobId)
+		return err
+	}
+	logger.Info("Terminating Slurm Job, its Pods were deleted", "jobId", jobId)
+
+	switch {
+	case job.HetJobId != nil && ptr.Deref(job.HetJobId.Set, false) && ptr.Deref(job.HetJobId.Number, 0) != 0:
+		if job.HetJobOffset == nil || !ptr.Deref(job.HetJobOffset.Set, false) || job.HetJobOffset.Number == nil {
+			return fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
 		}
-		if err != nil {
-			return fmt.Errorf("failed to terminate jobId(%d): %w", jobId, err)
+
+		if jobIsRunning {
+			return r.slurmControl.TerminateHetJobComponent(ctx, *job.HetJobId.Number, *job.HetJobOffset.Number)
 		}
+
+		jobId = *job.HetJobId.Number
+		fallthrough
+	default:
+		err = r.slurmControl.TerminateJob(ctx, jobId)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to terminate jobId(%d): %w", jobId, err)
 	}
 
 	return nil

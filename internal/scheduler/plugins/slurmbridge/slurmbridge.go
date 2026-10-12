@@ -1145,7 +1145,7 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 }
 
 // deleteExternalJob will delete the external job associated with the pod
-// and remove any annotations for pods in slurmJobIR that have a matching JobID.
+// and remove allocation metadata from pods sharing its job or heterogeneous job ID.
 func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	// Construct an intermediate representation of the Slurm external job
@@ -1159,15 +1159,20 @@ func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) e
 		logger.Error(err, "failed to delete Slurm job for pod", "jobId", jobId, "pod", klog.KObj(pod))
 		return err
 	}
+	hetJobId := pod.Labels[wellknown.LabelExternalHetJobId]
 	for _, p := range slurmJobIR.AllPods() {
 		toUpdate := p.DeepCopy()
 		if toUpdate.Labels[wellknown.LabelExternalJobId] == "" {
 			continue
 		}
-		if toUpdate.Labels[wellknown.LabelExternalJobId] == jobId {
-			delete(toUpdate.Labels, wellknown.LabelExternalJobId)
-			delete(toUpdate.Annotations, wellknown.AnnotationExternalJobNode)
+		if toUpdate.Labels[wellknown.LabelExternalJobId] != jobId &&
+			(hetJobId == "" || toUpdate.Labels[wellknown.LabelExternalHetJobId] != hetJobId) {
+			continue
 		}
+		delete(toUpdate.Labels, wellknown.LabelExternalJobId)
+		delete(toUpdate.Labels, wellknown.LabelExternalHetJobId)
+		delete(toUpdate.Labels, wellknown.LabelExternalHetJobOffset)
+		delete(toUpdate.Annotations, wellknown.AnnotationExternalJobNode)
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
 			logger.Error(err, "failed to delete jobid and node annotation")
 			return err

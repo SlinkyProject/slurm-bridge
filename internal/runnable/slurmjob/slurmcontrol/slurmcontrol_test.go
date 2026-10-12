@@ -5,6 +5,7 @@ package slurmcontrol
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -16,6 +17,9 @@ import (
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
+	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
+	"github.com/SlinkyProject/slurm-client/pkg/object"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
@@ -290,11 +294,12 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 		jobId int32
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    bool
-		wantErr bool
+		name        string
+		fields      fields
+		args        args
+		wantPending bool
+		wantRunning bool
+		wantErr     bool
 	}{
 		{
 			name: "job not found",
@@ -305,7 +310,6 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 				ctx:   ctx,
 				jobId: 1,
 			},
-			want:    false,
 			wantErr: false,
 		},
 		{
@@ -319,8 +323,8 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
 			},
-			args: args{ctx: ctx, jobId: 1},
-			want: true,
+			args:        args{ctx: ctx, jobId: 1},
+			wantPending: true,
 		},
 		{
 			name: "job running",
@@ -333,8 +337,8 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
 			},
-			args: args{ctx: ctx, jobId: 1},
-			want: true,
+			args:        args{ctx: ctx, jobId: 1},
+			wantRunning: true,
 		},
 		{
 			name: "job pending and running (multiple states)",
@@ -350,8 +354,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
 			},
-			args: args{ctx: ctx, jobId: 1},
-			want: true,
+			args:        args{ctx: ctx, jobId: 1},
+			wantPending: true,
+			wantRunning: true,
 		},
 		{
 			name: "job completed",
@@ -365,7 +370,6 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 				}(),
 			},
 			args: args{ctx: ctx, jobId: 1},
-			want: false,
 		},
 		{
 			name: "job canceled",
@@ -379,7 +383,6 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 				}(),
 			},
 			args: args{ctx: ctx, jobId: 1},
-			want: false,
 		},
 	}
 	for _, tt := range tests {
@@ -387,13 +390,74 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			r := &realSlurmControl{
 				Client: tt.fields.Client,
 			}
-			got, err := r.IsJobPendingOrRunning(tt.args.ctx, tt.args.jobId)
+			gotPending, gotRunning, err := r.IsJobPendingOrRunning(tt.args.ctx, tt.args.jobId)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("realSlurmControl.IsJobPendingOrRunning() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if got != tt.want {
-				t.Errorf("realSlurmControl.IsJobPendingOrRunning() = %v, want %v", got, tt.want)
+			if gotPending != tt.wantPending || gotRunning != tt.wantRunning {
+				t.Errorf("realSlurmControl.IsJobPendingOrRunning(%d) = (%t, %t), want (%t, %t)", tt.args.jobId, gotPending, gotRunning, tt.wantPending, tt.wantRunning)
+			}
+		})
+	}
+}
+
+func Test_realSlurmControl_IsJobPendingOrRunningRefresh(t *testing.T) {
+	failure := errors.New("get failed")
+	for _, tt := range []struct {
+		name        string
+		cached      api.V0044JobInfoJobState
+		live        api.V0044JobInfoJobState
+		cachedErr   error
+		liveErr     error
+		wantPending bool
+		wantRunning bool
+		wantRefresh bool
+		wantErr     error
+	}{
+		{name: "pending stays pending", cached: api.V0044JobInfoJobStatePENDING, live: api.V0044JobInfoJobStatePENDING, wantPending: true, wantRefresh: true},
+		{name: "running stays running", cached: api.V0044JobInfoJobStateRUNNING, live: api.V0044JobInfoJobStateRUNNING, wantRunning: true, wantRefresh: true},
+		{name: "pending becomes running", cached: api.V0044JobInfoJobStatePENDING, live: api.V0044JobInfoJobStateRUNNING, wantRunning: true, wantRefresh: true},
+		{name: "running becomes pending", cached: api.V0044JobInfoJobStateRUNNING, live: api.V0044JobInfoJobStatePENDING, wantPending: true, wantRefresh: true},
+		{name: "running completes", cached: api.V0044JobInfoJobStateRUNNING, live: api.V0044JobInfoJobStateCOMPLETED, wantRefresh: true},
+		{name: "pending disappears", cached: api.V0044JobInfoJobStatePENDING, liveErr: slurmerrors.ErrNotFound, wantRefresh: true},
+		{name: "refresh fails", cached: api.V0044JobInfoJobStateRUNNING, liveErr: failure, wantErr: failure, wantRefresh: true},
+		{name: "completed skips refresh", cached: api.V0044JobInfoJobStateCOMPLETED, liveErr: failure},
+		{name: "canceled skips refresh", cached: api.V0044JobInfoJobStateCANCELLED, liveErr: failure},
+		{name: "unknown skips refresh", liveErr: failure},
+		{name: "missing skips refresh", cachedErr: slurmerrors.ErrNotFound, liveErr: failure},
+		{name: "cache error skips refresh", cachedErr: failure, liveErr: failure, wantErr: failure},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			cl := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(_ context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+					options := &client.GetOptions{}
+					options.ApplyOptions(opts)
+					wantRefresh := calls > 0
+					calls++
+					if key != "1" || options.RefreshCache != wantRefresh {
+						t.Errorf("Get(%s) RefreshCache = %t, want key 1 and RefreshCache %t", key, options.RefreshCache, wantRefresh)
+					}
+					state, err := tt.cached, tt.cachedErr
+					if options.RefreshCache {
+						state, err = tt.live, tt.liveErr
+					}
+					obj.(*api.V0044JobInfo).JobState = &[]api.V0044JobInfoJobState{state}
+					return err
+				},
+			}).Build()
+			r := &realSlurmControl{Client: cl}
+			pending, running, err := r.IsJobPendingOrRunning(context.Background(), 1)
+			if pending != tt.wantPending || running != tt.wantRunning || !errors.Is(err, tt.wantErr) {
+				t.Errorf("IsJobPendingOrRunning(1) = (%t, %t, %v), want (%t, %t, %v)", pending, running, err, tt.wantPending, tt.wantRunning, tt.wantErr)
+			}
+			wantCalls := 1
+			if tt.wantRefresh {
+				wantCalls++
+			}
+			if calls != wantCalls {
+				t.Errorf("IsJobPendingOrRunning(1) Get calls = %d, want %d", calls, wantCalls)
 			}
 		})
 	}

@@ -453,7 +453,14 @@ var _ = Describe("syncSlurm()", func() {
 					},
 				},
 			}
-			c := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
+			baseClient := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
+			getCalls := 0
+			c := slurmclientfake.NewClientBuilder().WithInterceptorFuncs(slurminterceptor.Funcs{
+				Get: func(ctx context.Context, key slurmobject.ObjectKey, obj slurmobject.Object, opts ...slurmclient.GetOption) error {
+					getCalls++
+					return baseClient.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
 			localController := &PodReconciler{
 				Client:        fake.NewFakeClient(podList),
 				Scheme:        scheme.Scheme,
@@ -474,6 +481,7 @@ var _ = Describe("syncSlurm()", func() {
 			By("Reconciling the terminal pod")
 			err = localController.syncSlurm(ctx, newRequest("foo-terminal"))
 			Expect(err).NotTo(HaveOccurred())
+			Expect(getCalls).To(BeZero())
 
 			By("Check job is still running because a non-terminal pod still exists")
 			exists, err := localController.slurmControl.IsJobRunning(ctx, terminatingPod)
@@ -496,6 +504,29 @@ var _ = Describe("syncSlurm()", func() {
 			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(exists).To(BeFalse())
+		})
+
+		It("Should cancel a pending heterogeneous job through its leader", func() {
+			pod := newTerminalPod("pending-component", 95)
+			pod.Labels[wellknown.LabelExternalHetJobId] = "93"
+			pod.Labels[wellknown.LabelExternalHetJobOffset] = "2"
+			var cancelledID int32
+			c := slurmclientfake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
+				JobId:    ptr.To[int32](95),
+				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+			}).WithInterceptorFuncs(slurminterceptor.Funcs{
+				Delete: func(_ context.Context, obj slurmobject.Object, _ ...slurmclient.DeleteOption) error {
+					cancelledID = *obj.(*api.V0044JobInfo).JobId
+					return nil
+				},
+			}).Build()
+			localController := &PodReconciler{
+				Client:       fake.NewFakeClient(pod),
+				slurmControl: slurmcontrol.NewControl(c),
+			}
+
+			Expect(localController.syncSlurm(ctx, newRequest(pod.Name))).To(Succeed())
+			Expect(cancelledID).To(Equal(int32(93)))
 		})
 
 		It("Should not terminate an already canceled job", func() {
