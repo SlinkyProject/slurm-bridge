@@ -31,7 +31,9 @@ manifests should match snapshot:
             helm.sh/chart: slurm-bridge-1.2.3
         spec:
           containers:
-            - image: ghcr.io/slinkyproject/slurm-bridge-admission:1.2.3
+            - args:
+                - --feature-gates=EnableLegacyLWSGangs=true,EnableLegacyv1alpha1PodGroups=true
+              image: ghcr.io/slinkyproject/slurm-bridge-admission:1.2.3
               imagePullPolicy: IfNotPresent
               livenessProbe:
                 httpGet:

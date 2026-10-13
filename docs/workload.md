@@ -584,6 +584,11 @@ marked as completed.
 > Pod creation and update when the `scheduling.x-k8s.io/pod-group` label is
 > non-empty. This deprecation does not remove scheduling support.
 
+To reject legacy PodGroup Pods instead of warning, set
+`admission.featureGates.EnableLegacyv1alpha1PodGroups: false`. The gate defaults
+to `true`; see
+[legacy workload admission](admission.md#legacy-workload-support).
+
 For compatibility on clusters where the supported built-in PodGroup API is
 unavailable, legacy workloads still require the
 [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
@@ -631,6 +636,10 @@ schemas. Changing only `apiVersion` is not sufficient.
 > the `leaderworkerset.sigs.k8s.io/name` label is non-empty and
 > `spec.schedulingGroup.podGroupName` is missing or empty. This deprecation does
 > not remove scheduling support.
+
+To reject legacy LWS Pods instead of warning, set
+`admission.featureGates.EnableLegacyLWSGangs: false`. The gate defaults to
+`true`; see [legacy workload admission](admission.md#legacy-workload-support).
 
 This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 

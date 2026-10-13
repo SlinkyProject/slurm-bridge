@@ -8,6 +8,7 @@
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Design](#design)
+    - [Legacy workload support](#legacy-workload-support)
     - [Sequence Diagram](#sequence-diagram)
 
 <!-- mdformat-toc end -->
@@ -70,6 +71,33 @@ configured device profiles. See [Device resources] for the built-in classes,
 profile configuration, and legacy device-plugin resources. Pods outside managed
 namespaces that do not select the `slurm-bridge` scheduler are not subject to
 this validation.
+
+### Legacy workload support
+
+The admission webhook warns about deprecated workload grouping by default. Two
+independent feature gates control whether these Pods are allowed:
+
+| Feature gate                    | Default | Setting to `false` rejects                                                        |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------- |
+| `EnableLegacyv1alpha1PodGroups` | `true`  | Pods with a non-empty `scheduling.x-k8s.io/pod-group` label.                      |
+| `EnableLegacyLWSGangs`          | `true`  | LWS-labelled Pods without a native `spec.schedulingGroup.podGroupName` reference. |
+
+Configure the gates through Helm:
+
+```yaml
+admission:
+  featureGates:
+    EnableLegacyv1alpha1PodGroups: true
+    EnableLegacyLWSGangs: true
+```
+
+Set either value to `false` to replace its warning with an admission failure.
+For a standalone admission binary, use
+`--feature-gates=EnableLegacyv1alpha1PodGroups=false,EnableLegacyLWSGangs=false`
+to reject both. These gates apply to Pod creation and update, including updates
+to existing Pods, within the webhook's managed namespace and scheduler scope.
+Pod deletion remains allowed. See the [workload documentation](workload.md) for
+migration guidance.
 
 ### Sequence Diagram
 

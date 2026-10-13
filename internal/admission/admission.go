@@ -5,6 +5,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -15,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/component-base/featuregate"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,6 +27,7 @@ import (
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
@@ -148,7 +152,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateConstraintsAnnotation(pod); err != nil {
 		return nil, err
 	}
-	return workloadDeprecationWarnings(pod), nil
+	return validateDeprecatedWorkloads(pod)
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -177,24 +181,43 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if err := validateConstraintsAnnotation(newPod); err != nil {
 		return nil, err
 	}
-	return workloadDeprecationWarnings(newPod), nil
+	return validateDeprecatedWorkloads(newPod)
 }
 
-func workloadDeprecationWarnings(pod *corev1.Pod) admission.Warnings {
-	var warnings admission.Warnings
-	if pod.Labels[sched.PodGroupLabel] != "" {
-		warnings = append(warnings,
-			"scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
-		)
-	}
+func validateDeprecatedWorkloads(pod *corev1.Pod) (admission.Warnings, error) {
 	hasPodGroup := pod.Spec.SchedulingGroup != nil &&
 		pod.Spec.SchedulingGroup.PodGroupName != nil && *pod.Spec.SchedulingGroup.PodGroupName != ""
-	if pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup {
-		warnings = append(warnings,
-			"Implicit LeaderWorkerSet gang scheduling is deprecated and will be removed in a future release in slurm-bridge; set LeaderWorkerSet spec.scheduling to use Kubernetes native PodGroups (Pod spec.schedulingGroup.podGroupName)",
-		)
+	var warnings admission.Warnings
+	var rejected []string
+	for _, legacy := range []struct {
+		used    bool
+		gate    featuregate.Feature
+		message string
+	}{
+		{
+			used:    pod.Labels[sched.PodGroupLabel] != "",
+			gate:    features.EnableLegacyv1alpha1PodGroups,
+			message: "scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
+		},
+		{
+			used:    pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup,
+			gate:    features.EnableLegacyLWSGangs,
+			message: "Implicit LeaderWorkerSet gang scheduling is deprecated and will be removed in a future release in slurm-bridge; set LeaderWorkerSet spec.scheduling to use Kubernetes native PodGroups (Pod spec.schedulingGroup.podGroupName)",
+		},
+	} {
+		if !legacy.used {
+			continue
+		}
+		if utilfeature.DefaultFeatureGate.Enabled(legacy.gate) {
+			warnings = append(warnings, legacy.message)
+		} else {
+			rejected = append(rejected, fmt.Sprintf("%s=false: %s", legacy.gate, legacy.message))
+		}
 	}
-	return warnings
+	if len(rejected) > 0 {
+		return nil, errors.New(strings.Join(rejected, "; "))
+	}
+	return warnings, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type
