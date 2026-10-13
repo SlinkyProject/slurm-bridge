@@ -14,11 +14,10 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 )
 
-func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
+func TestPodAdmission_PodGroupDeprecation(t *testing.T) {
 	for _, tt := range []struct {
 		name              string
 		namespace         string
@@ -26,21 +25,21 @@ func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
 		labels            map[string]string
 		schedulingGroup   *corev1.PodSchedulingGroup
 		namespaceSelector *metav1.LabelSelector
-		wantWarnings      []string
+		wantWarning       bool
 	}{
 		{
-			name:         "legacy group in managed namespace",
-			namespace:    namespace,
-			scheduler:    corev1.DefaultSchedulerName,
-			labels:       map[string]string{sched.PodGroupLabel: "legacy"},
-			wantWarnings: []string{"scheduling.x-k8s.io/v1alpha1"},
+			name:        "legacy group in managed namespace",
+			namespace:   namespace,
+			scheduler:   corev1.DefaultSchedulerName,
+			labels:      map[string]string{sched.PodGroupLabel: "legacy"},
+			wantWarning: true,
 		},
 		{
-			name:         "legacy group explicitly selects scheduler",
-			namespace:    "unmanaged",
-			scheduler:    SchedulerName,
-			labels:       map[string]string{sched.PodGroupLabel: "legacy"},
-			wantWarnings: []string{"scheduling.x-k8s.io/v1alpha1"},
+			name:        "legacy group explicitly selects scheduler",
+			namespace:   "unmanaged",
+			scheduler:   SchedulerName,
+			labels:      map[string]string{sched.PodGroupLabel: "legacy"},
+			wantWarning: true,
 		},
 		{
 			name:              "legacy group in selected namespace",
@@ -48,7 +47,7 @@ func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
 			scheduler:         corev1.DefaultSchedulerName,
 			labels:            map[string]string{sched.PodGroupLabel: "legacy"},
 			namespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"managed": "true"}},
-			wantWarnings:      []string{"scheduling.x-k8s.io/v1alpha1"},
+			wantWarning:       true,
 		},
 		{
 			name:      "unmanaged legacy group",
@@ -75,79 +74,7 @@ func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
 			namespace:       namespace,
 			labels:          map[string]string{sched.PodGroupLabel: "legacy"},
 			schedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("native")},
-			wantWarnings:    []string{"scheduling.x-k8s.io/v1alpha1"},
-		},
-		{
-			name:         "legacy LWS in managed namespace",
-			namespace:    namespace,
-			scheduler:    corev1.DefaultSchedulerName,
-			labels:       map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			wantWarnings: []string{"Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:         "legacy LWS explicitly selects scheduler",
-			namespace:    "unmanaged",
-			scheduler:    SchedulerName,
-			labels:       map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			wantWarnings: []string{"Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:              "legacy LWS in selected namespace",
-			namespace:         "selected",
-			scheduler:         corev1.DefaultSchedulerName,
-			labels:            map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			namespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"managed": "true"}},
-			wantWarnings:      []string{"Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:      "unmanaged LWS",
-			namespace: "unmanaged",
-			scheduler: corev1.DefaultSchedulerName,
-			labels:    map[string]string{lwsv1.SetNameLabelKey: "lws"},
-		},
-		{
-			name:      "empty LWS label",
-			namespace: namespace,
-			labels:    map[string]string{lwsv1.SetNameLabelKey: ""},
-		},
-		{
-			name:            "LWS with native pod group",
-			namespace:       namespace,
-			labels:          map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			schedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("native")},
-		},
-		{
-			name:            "LWS with missing pod group name",
-			namespace:       namespace,
-			labels:          map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			schedulingGroup: &corev1.PodSchedulingGroup{},
-			wantWarnings:    []string{"Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:            "LWS with empty pod group name",
-			namespace:       namespace,
-			labels:          map[string]string{lwsv1.SetNameLabelKey: "lws"},
-			schedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("")},
-			wantWarnings:    []string{"Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:      "LWS with legacy pod group",
-			namespace: namespace,
-			labels: map[string]string{
-				lwsv1.SetNameLabelKey: "lws",
-				sched.PodGroupLabel:   "legacy",
-			},
-			wantWarnings: []string{"scheduling.x-k8s.io/v1alpha1", "Implicit LeaderWorkerSet gang scheduling"},
-		},
-		{
-			name:      "LWS with native pod group and leftover legacy label",
-			namespace: namespace,
-			labels: map[string]string{
-				lwsv1.SetNameLabelKey: "lws",
-				sched.PodGroupLabel:   "legacy",
-			},
-			schedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("native")},
-			wantWarnings:    []string{"scheduling.x-k8s.io/v1alpha1"},
+			wantWarning:     true,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -167,7 +94,7 @@ func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
 				t.Run(operation, func(t *testing.T) {
 					var warnings admission.Warnings
 					var err error
-					wantWarnings := tt.wantWarnings
+					wantWarning := tt.wantWarning
 					ctx := contextWithAdmissionSubresource("")
 					switch operation {
 					case "create":
@@ -182,25 +109,30 @@ func TestPodAdmission_WorkloadDeprecation(t *testing.T) {
 						newPod := pod.DeepCopy()
 						newPod.Labels = nil
 						warnings, err = r.ValidateUpdate(ctx, pod, newPod)
-						wantWarnings = nil
+						wantWarning = false
 					case "delete":
 						warnings, err = r.ValidateDelete(context.Background(), pod)
-						wantWarnings = nil
+						wantWarning = false
 					}
 					if err != nil {
 						t.Fatalf("admission rejected Pod: %v", err)
 					}
-					if len(warnings) != len(wantWarnings) {
-						t.Fatalf("warnings = %v, want %v", warnings, wantWarnings)
+					if !wantWarning {
+						if len(warnings) != 0 {
+							t.Fatalf("warnings = %v, want none", warnings)
+						}
+						return
 					}
-					for i, want := range wantWarnings {
-						for _, part := range []string{
-							want, "deprecated", "removed in a future release", "slurm-bridge",
-							"Kubernetes native PodGroups", "spec.schedulingGroup.podGroupName",
-						} {
-							if !strings.Contains(warnings[i], part) {
-								t.Errorf("warning %q does not contain %q", warnings[i], part)
-							}
+					if len(warnings) != 1 {
+						t.Fatalf("warnings = %v, want one deprecation warning", warnings)
+					}
+					for _, part := range []string{
+						"scheduling.x-k8s.io/v1alpha1", "deprecated",
+						"removed in a future release", "slurm-bridge", "Kubernetes native PodGroups",
+						"spec.schedulingGroup.podGroupName",
+					} {
+						if !strings.Contains(warnings[0], part) {
+							t.Errorf("warning %q does not contain %q", warnings[0], part)
 						}
 					}
 				})

@@ -43,33 +43,33 @@ type Flags struct {
 	enableHTTP2          bool
 }
 
-func bindFlags(fs *flag.FlagSet, flags *Flags) {
-	fs.Func("feature-gates", "A set of key=value pairs that enable or disable feature gates.",
+func parseFlags(flags *Flags) {
+	flag.Func("feature-gates", "A set of key=value pairs that enable or disable feature gates.",
 		utilfeature.DefaultMutableFeatureGate.Set)
-	fs.StringVar(&flags.configFile, "config", config.ConfigFile,
+	flag.StringVar(&flags.configFile, "config", config.ConfigFile,
 		"The path to the configuration file.")
 
-	fs.StringVar(&flags.metricsAddr, "metrics-bind-address", ":8080",
+	flag.StringVar(&flags.metricsAddr, "metrics-bind-address", ":8080",
 		"The address the metric endpoint binds to.")
-	fs.StringVar(&flags.probeAddr, "health-probe-bind-address", ":8081",
+	flag.StringVar(&flags.probeAddr, "health-probe-bind-address", ":8081",
 		"The address the probe endpoint binds to.",
 	)
-	fs.BoolVar(&flags.enableLeaderElection, "leader-elect", false,
+	flag.BoolVar(&flags.enableLeaderElection, "leader-elect", false,
 		("Enable leader election for controller manager. " +
 			"Enabling this will ensure there is only one active controller manager."),
 	)
-	fs.BoolVar(&flags.secureMetrics, "metrics-secure", false,
+	flag.BoolVar(&flags.secureMetrics, "metrics-secure", false,
 		"If set the metrics endpoint is served securely")
-	fs.BoolVar(&flags.enableHTTP2, "enable-http2", false,
+	flag.BoolVar(&flags.enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.Parse()
 }
 
 func main() {
 	var flags Flags
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
-	bindFlags(flag.CommandLine, &flags)
-	flag.Parse()
+	parseFlags(&flags)
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled

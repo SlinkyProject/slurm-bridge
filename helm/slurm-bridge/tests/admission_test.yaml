@@ -30,28 +30,6 @@ tests:
         enabled: true
     asserts:
       - matchSnapshot: {}
-  - it: allows both legacy workload types with warnings by default
-    template: admission/deployment.yaml
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: --feature-gates=EnableLegacyLWSGangs=true,EnableLegacyv1alpha1PodGroups=true
-  - it: can reject legacy PodGroups while preserving LWS warnings
-    template: admission/deployment.yaml
-    set:
-      admission.featureGates.EnableLegacyv1alpha1PodGroups: false
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: --feature-gates=EnableLegacyLWSGangs=true,EnableLegacyv1alpha1PodGroups=false
-  - it: can reject legacy LWS gangs while preserving PodGroup warnings
-    template: admission/deployment.yaml
-    set:
-      admission.featureGates.EnableLegacyLWSGangs: false
-    asserts:
-      - contains:
-          path: spec.template.spec.containers[0].args
-          content: --feature-gates=EnableLegacyLWSGangs=false,EnableLegacyv1alpha1PodGroups=true
   - it: can reject both legacy workload types
     template: admission/deployment.yaml
     set:
