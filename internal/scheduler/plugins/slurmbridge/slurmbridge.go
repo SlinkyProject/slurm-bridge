@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -347,6 +348,17 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		return nil, err
 	}
 	go jobInformer.Run(ctx.Done())
+	if err := wait.PollUntilContextCancel(ctx, time.Millisecond, true, func(context.Context) (bool, error) {
+		return jobInformer.HasStarted(), nil
+	}); err != nil {
+		return nil, err
+	}
+	// Prime the index without waiting for the informer's first periodic refresh.
+	go func() {
+		if err := jobInformer.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true}); err != nil && ctx.Err() == nil {
+			logger.Error(err, "unable to initialize Slurm job index")
+		}
+	}()
 	return plugin, nil
 }
 
