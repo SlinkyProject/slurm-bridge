@@ -6,6 +6,7 @@ package pod
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -175,6 +176,9 @@ func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) er
 	hetJobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobId])
 	switch {
 	case hetJobId != 0:
+		if pod.Labels[wellknown.LabelExternalHetJobOffset] == "" {
+			return fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
+		}
 		hetJobOffset := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobOffset])
 		logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
 

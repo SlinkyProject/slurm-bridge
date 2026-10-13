@@ -529,6 +529,22 @@ var _ = Describe("syncSlurm()", func() {
 			Expect(cancelledID).To(Equal(int32(93)))
 		})
 
+		It("Should reject a heterogeneous job with a missing offset", func() {
+			pod := &corev1.Pod{}
+			err := controller.Get(ctx, newRequest("bar").NamespacedName, pod)
+			Expect(err).NotTo(HaveOccurred())
+			pod.Labels[wellknown.LabelExternalHetJobId] = "2"
+			err = controller.Update(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+
+			err = controller.syncSlurm(ctx, newRequest("bar"))
+			Expect(err).To(MatchError("missing heterogeneous job offset for job 2"))
+
+			running, err := controller.slurmControl.IsJobRunning(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(running).To(BeTrue())
+		})
+
 		It("Should not terminate an already canceled job", func() {
 			By("Creating a terminal pod and canceled Slurm job")
 			podName := "canceled"
