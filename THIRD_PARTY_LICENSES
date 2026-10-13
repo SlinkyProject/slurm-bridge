@@ -323,27 +323,27 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 - Name: github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
-- Version: v1.24.0
+- Version: v1.25.0
 - License: BSD-3-Clause
 
 ### github.com/prometheus/client_golang/prometheus
 - Name: github.com/prometheus/client_golang/prometheus
-- Version: v1.24.0
+- Version: v1.25.0
 - License: Apache-2.0
 
 ### github.com/prometheus/client_model/go
 - Name: github.com/prometheus/client_model/go
-- Version: v0.6.2
+- Version: v0.6.3
 - License: Apache-2.0
 
 ### github.com/prometheus/common
 - Name: github.com/prometheus/common
-- Version: v0.70.0
+- Version: v0.72.0
 - License: Apache-2.0
 
 ### github.com/prometheus/procfs
 - Name: github.com/prometheus/procfs
-- Version: v0.21.1
+- Version: v0.22.0
 - License: Apache-2.0
 
 ### github.com/robfig/cron/v3
@@ -493,7 +493,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### go.yaml.in/yaml/v3
 - Name: go.yaml.in/yaml/v3
-- Version: v3.0.4
+- Version: v3.0.5
 - License: MIT
 
 ### golang.org/x/crypto
@@ -513,7 +513,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### golang.org/x/oauth2
 - Name: golang.org/x/oauth2
-- Version: v0.36.0
+- Version: v0.37.0
 - License: BSD-3-Clause
 
 ### golang.org/x/sync
@@ -563,7 +563,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### google.golang.org/protobuf
 - Name: google.golang.org/protobuf
-- Version: v1.36.12-0.20260120151049-f2248ac996af
+- Version: v1.36.12
 - License: BSD-3-Clause
 
 ### gopkg.in/evanphx/json-patch.v4
@@ -723,7 +723,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/controller-runtime
 - Name: sigs.k8s.io/controller-runtime
-- Version: v0.25.1
+- Version: v0.25.2
 - License: Apache-2.0
 
 ### sigs.k8s.io/e2e-framework
@@ -733,7 +733,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/jobset/api/jobset/v1alpha2
 - Name: sigs.k8s.io/jobset/api/jobset/v1alpha2
-- Version: v0.11.1
+- Version: v0.13.0
 - License: Apache-2.0
 
 ### sigs.k8s.io/json
