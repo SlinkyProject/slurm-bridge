@@ -316,7 +316,7 @@ JobId=1 JobName=job-sleep-single
    OverSubscribe=NO Contiguous=0 Licenses=(null) LicensesAlloc=(null) Network=(null)
    Command=(null)
    WorkDir=/tmp
-   AdminComment={"pods":["slurm-bridge/job-sleep-single-8wtc2"]}
+   AdminComment={"pods":"slurm-bridge/job-sleep-single-8wtc2/4035b798-e371-4b45-8d84-c9026568c7ec"}
    OOMKillStep=0
 ```
 

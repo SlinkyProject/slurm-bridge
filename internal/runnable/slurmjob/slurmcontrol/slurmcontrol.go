@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
 
@@ -28,8 +28,8 @@ type SlurmControlInterface interface {
 	RefreshJobCache(ctx context.Context) error
 	// ListPodsFromJobs returns a list of Slurm jobIds and their pods
 	ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error)
-	// GetPodsFromJob returns a list of pod keys associated to the Slurm job.
-	GetPodsFromJob(ctx context.Context, jobId int32) ([]kubetypes.NamespacedName, error)
+	// GetPodsFromJob returns the pod identities associated with the Slurm job.
+	GetPodsFromJob(ctx context.Context, jobId int32) ([]corev1.ObjectReference, error)
 	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
 	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
@@ -87,8 +87,9 @@ func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kub
 		}
 		jobId := ptr.Deref(job.JobId, 0)
 		jobIds = append(jobIds, jobId)
-		for _, podName := range extInfo.Pods {
-			pods = append(pods, utils.NamespacedNameFromString(podName))
+		for _, podKey := range extInfo.Pods {
+			ref := externaljobinfo.ParsePodKey(podKey)
+			pods = append(pods, kubetypes.NamespacedName{Namespace: ref.Namespace, Name: ref.Name})
 		}
 	}
 
@@ -96,7 +97,7 @@ func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kub
 }
 
 // GetPodsFromJob implements SlurmControlInterface.
-func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]kubetypes.NamespacedName, error) {
+func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]corev1.ObjectReference, error) {
 	job := &api.V0044JobInfo{}
 	key := client.ObjectKey(fmt.Sprintf("%v", jobId))
 	if err := r.Get(ctx, key, job); err != nil {
@@ -112,12 +113,12 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]k
 		return nil, nil //nolint:nilerr
 	}
 
-	podKeys := []kubetypes.NamespacedName{}
-	for _, podName := range extInfo.Pods {
-		podKeys = append(podKeys, utils.NamespacedNameFromString(podName))
+	pods := []corev1.ObjectReference{}
+	for _, podKey := range extInfo.Pods {
+		pods = append(pods, externaljobinfo.ParsePodKey(podKey))
 	}
 
-	return podKeys, nil
+	return pods, nil
 }
 
 // TerminateJob implements SlurmControlInterface.

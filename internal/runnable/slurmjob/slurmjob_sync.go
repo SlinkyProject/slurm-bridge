@@ -54,19 +54,32 @@ func (r *SlurmJobRunnable) Sync(ctx context.Context) error {
 func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) error {
 	logger := log.FromContext(ctx)
 
-	podKeys, err := r.slurmControl.GetPodsFromJob(ctx, jobId)
+	podRefs, err := r.slurmControl.GetPodsFromJob(ctx, jobId)
 	if err != nil {
 		return err
 	}
 
 	hasPods := false
-	for _, podKey := range podKeys {
+	for _, ref := range podRefs {
 		pod := &corev1.Pod{}
-		if err := r.Get(ctx, client.ObjectKey(podKey), pod); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
+		key := client.ObjectKey{Namespace: ref.Namespace, Name: ref.Name}
+		err := r.Get(ctx, key, pod)
+		if err != nil && !apierrors.IsNotFound(err) {
 			return err
+		}
+		if err != nil || (ref.UID != "" && ref.UID != pod.UID) {
+			// Slurm and Kubernetes caches refresh independently. Confirm a missing
+			// or replaced pod through the API before canceling its allocation.
+			pod = &corev1.Pod{}
+			if err := r.apiReader.Get(ctx, key, pod); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("failed to confirm pod %s for job %d: %w", key, jobId, err)
+			}
+		}
+		if ref.UID != "" && ref.UID != pod.UID {
+			continue
 		}
 		hasPods = true
 		break

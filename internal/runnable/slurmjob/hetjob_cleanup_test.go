@@ -62,7 +62,8 @@ func TestCleanDanglingJobTermination(t *testing.T) {
 				job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: tt.offset}
 			}
 			cl := fake.NewClientBuilder().WithObjects(job).Build()
-			r := NewRunnable(kubefake.NewClientBuilder().Build(), cl, nil)
+			kube := kubefake.NewClientBuilder().Build()
+			r := NewRunnable(kube, kube, cl, nil)
 			control := &terminationControl{SlurmControlInterface: r.slurmControl, err: tt.err}
 			r.slurmControl = control
 			err := r.cleanDanglingJob(context.Background(), 95)

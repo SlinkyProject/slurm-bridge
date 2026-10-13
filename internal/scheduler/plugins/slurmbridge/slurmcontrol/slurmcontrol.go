@@ -182,7 +182,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	return nil
 }
 
-// GetJobsForPods lists Slurm jobs for pod identity validation and resource handoff checks.
+// GetJobsForPods returns jobs indexed by pod identity for use with JobForPod.
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
@@ -211,6 +211,16 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 	}
 
 	return &podToJob, nil
+}
+
+// JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
+func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
+	name := pod.Namespace + "/" + pod.Name
+	if job, ok := jobs[externaljobinfo.PodKey(pod)]; ok {
+		return job, true
+	}
+	job, ok := jobs[name]
+	return job, ok
 }
 
 // GetJob will check if an external job has been created for a given pod
@@ -457,7 +467,7 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
 	extInfo := externaljobinfo.ExternalJobInfo{}
 	for _, p := range jobComponent.Pods.Items {
-		extInfo.Pods = append(extInfo.Pods, p.Namespace+"/"+p.Name)
+		extInfo.Pods = append(extInfo.Pods, externaljobinfo.PodKey(&p))
 	}
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {
