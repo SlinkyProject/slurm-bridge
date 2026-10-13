@@ -748,7 +748,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### sigs.k8s.io/lws/api/leaderworkerset
 - Name: sigs.k8s.io/lws/api/leaderworkerset
-- Version: v0.8.0
+- Version: v0.11.1
 - License: Apache-2.0
 
 ### sigs.k8s.io/randfill

@@ -26,7 +26,7 @@ func testLeaderWorkerSetScheduling() types.Feature {
 	lws := &lwsv1.LeaderWorkerSet{
 		ObjectMeta: metav1.ObjectMeta{Name: lwsName, Namespace: slurmBridgeNamespace},
 		Spec: lwsv1.LeaderWorkerSetSpec{
-			Replicas:      ptr.To[int32](1),
+			Replicas:      ptr.To[int32](2),
 			StartupPolicy: lwsv1.LeaderCreatedStartupPolicy,
 			LeaderWorkerTemplate: lwsv1.LeaderWorkerTemplate{
 				Size:           ptr.To[int32](2),
@@ -48,28 +48,43 @@ func testLeaderWorkerSetScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("leader and worker share one two-node Slurm job", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("each replica shares its own two-node Slurm job", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("get client: %v", err)
 			}
 			pods, err := waitForLabeledPods(ctx, crClient, slurmBridgeNamespace,
-				map[string]string{lwsv1.SetNameLabelKey: lwsName}, 2, podHasSlurmAllocation)
+				map[string]string{lwsv1.SetNameLabelKey: lwsName}, 4, podHasSlurmAllocation)
 			if err != nil {
 				t.Fatalf("LeaderWorkerSet pods were not allocated: %v", err)
 			}
 			jobIDs := podSlurmJobIDs(pods)
-			if len(jobIDs) != 1 {
-				t.Fatalf("LeaderWorkerSet pods have %d Slurm jobs, want 1: %v", len(jobIDs), jobIDs)
+			if len(jobIDs) != 2 {
+				t.Fatalf("LeaderWorkerSet replicas have %d Slurm jobs, want 2: %v", len(jobIDs), jobIDs)
 			}
-			assertSlurmNodeCount(ctx, t, config, crClient, jobIDs[0], 2)
-			nodes := map[string]struct{}{}
+			groups := map[string][]corev1.Pod{}
 			for i := range pods {
 				assertBridgePod(t, ctx, crClient, &pods[i])
-				nodes[pods[i].Spec.NodeName] = struct{}{}
+				index := pods[i].Labels[lwsv1.GroupIndexLabelKey]
+				groups[index] = append(groups[index], pods[i])
 			}
-			if len(nodes) != 2 {
-				t.Errorf("LeaderWorkerSet group uses %d nodes, want 2: %v", len(nodes), nodes)
+			for _, index := range []string{"0", "1"} {
+				members := groups[index]
+				if len(members) != 2 {
+					t.Fatalf("LeaderWorkerSet replica %s has %d Pods, want 2", index, len(members))
+				}
+				groupJobIDs := podSlurmJobIDs(members)
+				if len(groupJobIDs) != 1 {
+					t.Fatalf("LeaderWorkerSet replica %s has %d Slurm jobs, want 1: %v", index, len(groupJobIDs), groupJobIDs)
+				}
+				assertSlurmNodeCount(ctx, t, config, crClient, groupJobIDs[0], 2)
+				nodes := map[string]struct{}{}
+				for i := range members {
+					nodes[members[i].Spec.NodeName] = struct{}{}
+				}
+				if len(nodes) != 2 {
+					t.Errorf("LeaderWorkerSet replica %s uses %d nodes, want 2: %v", index, len(nodes), nodes)
+				}
 			}
 			return ctx
 		}).
@@ -117,6 +132,7 @@ func testLeaderWorkerSetPodGroupScheduling(api kubernetesPodGroupAPI) types.Feat
 		ObjectMeta: metav1.ObjectMeta{Name: lwsName, Namespace: slurmBridgeNamespace},
 		Spec: lwsv1.LeaderWorkerSetSpec{
 			Replicas:      ptr.To[int32](1),
+			GroupIdentity: lwsv1.GroupIdentityOrdinal,
 			StartupPolicy: lwsv1.LeaderCreatedStartupPolicy,
 			LeaderWorkerTemplate: lwsv1.LeaderWorkerTemplate{
 				Size:           ptr.To[int32](2),
