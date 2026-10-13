@@ -49,12 +49,13 @@ func (t *translator) applySlurmAnnotations(
 					return err
 				}
 			}
+			componentPg := new(PodGroup)
 			if pgName, ok := podGroupName(firstPod); ok {
-				if err := t.Get(ctx, client.ObjectKey{Namespace: firstPod.Namespace, Name: pgName}, pg); err != nil {
+				if err := t.Get(ctx, client.ObjectKey{Namespace: firstPod.Namespace, Name: pgName}, componentPg); err != nil {
 					return err
 				}
 			}
-			if err := t.parsePodGroupSlurmAnnotations(&slurmJobIR.Components[i], pg, controllerPOM); err != nil {
+			if err := t.parsePodGroupSlurmAnnotations(&slurmJobIR.Components[i], componentPg, controllerPOM); err != nil {
 				return err
 			}
 		}
