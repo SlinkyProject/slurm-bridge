@@ -4,7 +4,6 @@
 package slurmcontrol
 
 import (
-	"maps"
 	"slices"
 	"testing"
 
@@ -34,12 +33,11 @@ func TestBuildJobDescPodIdentity(t *testing.T) {
 		if err := externaljobinfo.ParseIntoExternalJobInfo(desc.AdminComment, &info); err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(info.Pods, []string{"default/work", "default/member"}) {
-			t.Errorf("update=%t: pod names = %v", update, info.Pods)
+		if !slices.Equal(info.Pods, []string{"default/work/work-uid", "default/member/member-uid"}) {
+			t.Errorf("update=%t: pod identities = %v", update, info.Pods)
 		}
-		wantUIDs := map[string]kubetypes.UID{"default/work": "work-uid", "default/member": "member-uid"}
-		if !maps.Equal(info.PodUIDs, wantUIDs) {
-			t.Errorf("update=%t: pod UIDs = %v, want %v", update, info.PodUIDs, wantUIDs)
+		if want := `{"pods":"default/work/work-uid,default/member/member-uid"}`; ptr.Deref(desc.AdminComment, "") != want {
+			t.Errorf("update=%t: admin comment = %s, want %s", update, ptr.Deref(desc.AdminComment, ""), want)
 		}
 	}
 }
@@ -52,11 +50,15 @@ func TestJobsForPodIdentity(t *testing.T) {
 		},
 		&api.V0044JobInfo{
 			JobId:        ptr.To(int32(7)),
-			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`),
+			AdminComment: ptr.To(`{"pods":"default/work/old-uid"}`),
 		},
 		&api.V0044JobInfo{
 			JobId:        ptr.To(int32(8)),
-			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"new-uid"}}`),
+			AdminComment: ptr.To(`{"pods":"default/work/new-uid"}`),
+		},
+		&api.V0044JobInfo{
+			JobId:        ptr.To(int32(9)),
+			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"map-uid"}}`),
 		},
 	).Build()}
 	jobs, err := r.GetJobsForPods(t.Context())
@@ -70,6 +72,7 @@ func TestJobsForPodIdentity(t *testing.T) {
 		{uid: "old-uid", want: 7},
 		{uid: "new-uid", want: 8},
 		{uid: "legacy-uid", want: 6},
+		{uid: "map-uid", want: 9},
 	} {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: tt.uid}}
 		if job, found := JobForPod(*jobs, pod); !found || job.JobId != tt.want {

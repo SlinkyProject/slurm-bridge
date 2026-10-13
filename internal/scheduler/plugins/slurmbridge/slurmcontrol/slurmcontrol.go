@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	kubetypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 	"k8s.io/utils/lru"
@@ -207,7 +206,7 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 			continue
 		}
 		for _, pod := range extInfo.Pods {
-			podToJob[podJobKey(pod, extInfo.PodUIDs[pod])] = extJob
+			podToJob[pod] = extJob
 		}
 	}
 
@@ -217,18 +216,11 @@ func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]Exte
 // JobForPod matches a pod's UID, falling back to namespace/name for legacy jobs.
 func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool) {
 	name := pod.Namespace + "/" + pod.Name
-	if job, ok := jobs[podJobKey(name, pod.UID)]; ok {
+	if job, ok := jobs[externaljobinfo.PodKey(pod)]; ok {
 		return job, true
 	}
 	job, ok := jobs[name]
 	return job, ok
-}
-
-func podJobKey(name string, uid kubetypes.UID) string {
-	if uid == "" {
-		return name
-	}
-	return name + "/" + string(uid)
 }
 
 // GetJob will check if an external job has been created for a given pod
@@ -473,11 +465,9 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 }
 
 func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
-	extInfo := externaljobinfo.ExternalJobInfo{PodUIDs: make(map[string]kubetypes.UID)}
+	extInfo := externaljobinfo.ExternalJobInfo{}
 	for _, p := range jobComponent.Pods.Items {
-		name := p.Namespace + "/" + p.Name
-		extInfo.Pods = append(extInfo.Pods, name)
-		extInfo.PodUIDs[name] = p.UID
+		extInfo.Pods = append(extInfo.Pods, externaljobinfo.PodKey(&p))
 	}
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {

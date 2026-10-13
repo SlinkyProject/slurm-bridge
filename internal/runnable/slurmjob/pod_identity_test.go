@@ -35,16 +35,16 @@ func TestSyncPodIdentity(t *testing.T) {
 	}{
 		{
 			name:        "recreated pod leaves old job dangling",
-			comment:     `{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`,
+			comment:     `{"pods":"default/work/old-uid"}`,
 			wantDeleted: []int32{7},
 		},
 		{
 			name:    "matching UID keeps job alive",
-			comment: `{"pods":["default/work"],"podUIDs":{"default/work":"current-uid"}}`,
+			comment: `{"pods":"default/work/current-uid"}`,
 		},
 		{
 			name:    "one matching member keeps gang alive",
-			comment: `{"pods":["default/work","default/member"],"podUIDs":{"default/work":"old-uid","default/member":"member-uid"}}`,
+			comment: `{"pods":"default/work/old-uid,default/member/member-uid"}`,
 		},
 		{
 			name:    "legacy comment retains name lookup",
@@ -64,7 +64,7 @@ func TestSyncPodIdentity(t *testing.T) {
 				},
 				&api.V0044JobInfo{
 					JobId:        ptr.To(int32(8)),
-					AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"current-uid"}}`),
+					AdminComment: ptr.To(`{"pods":"default/work/current-uid"}`),
 					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 				},
 			).WithInterceptorFuncs(interceptor.Funcs{
@@ -149,10 +149,9 @@ func TestCleanDanglingJobConfirmsPodIdentity(t *testing.T) {
 						return c.Get(ctx, key, obj, opts...)
 					},
 				}).Build()
-			info := externaljobinfo.ExternalJobInfo{Pods: []string{"default/work"}}
-			if tt.jobUID != "" {
-				info.PodUIDs = map[string]kubetypes.UID{"default/work": tt.jobUID}
-			}
+			info := externaljobinfo.ExternalJobInfo{Pods: []string{externaljobinfo.PodKey(&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: tt.jobUID},
+			})}}
 			deleted := false
 			slurm := fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
 				JobId: ptr.To(int32(7)), AdminComment: ptr.To(info.ToString()),

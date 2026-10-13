@@ -20,7 +20,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
 
@@ -88,8 +87,9 @@ func (r *realSlurmControl) ListPodsFromJobs(ctx context.Context) ([]int32, []kub
 		}
 		jobId := ptr.Deref(job.JobId, 0)
 		jobIds = append(jobIds, jobId)
-		for _, podName := range extInfo.Pods {
-			pods = append(pods, utils.NamespacedNameFromString(podName))
+		for _, podKey := range extInfo.Pods {
+			ref := externaljobinfo.ParsePodKey(podKey)
+			pods = append(pods, kubetypes.NamespacedName{Namespace: ref.Namespace, Name: ref.Name})
 		}
 	}
 
@@ -114,13 +114,8 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]c
 	}
 
 	pods := []corev1.ObjectReference{}
-	for _, podName := range extInfo.Pods {
-		key := utils.NamespacedNameFromString(podName)
-		pods = append(pods, corev1.ObjectReference{
-			Namespace: key.Namespace,
-			Name:      key.Name,
-			UID:       extInfo.PodUIDs[podName],
-		})
+	for _, podKey := range extInfo.Pods {
+		pods = append(pods, externaljobinfo.ParsePodKey(podKey))
 	}
 
 	return pods, nil

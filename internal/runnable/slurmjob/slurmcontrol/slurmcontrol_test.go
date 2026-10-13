@@ -191,6 +191,35 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 	}
 }
 
+func TestCompactPodReferences(t *testing.T) {
+	control := NewControl(fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
+		JobId:        ptr.To(int32(7)),
+		AdminComment: ptr.To(`{"pods":"default/work/work-uid,default/member/member-uid"}`),
+	}).Build())
+	ids, names, err := control.ListPodsFromJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNames := []kubetypes.NamespacedName{
+		{Namespace: "default", Name: "work"},
+		{Namespace: "default", Name: "member"},
+	}
+	if !slices.Equal(ids, []int32{7}) || !slices.Equal(names, wantNames) {
+		t.Errorf("job events = %v, %v; want job 7 and pod names %v", ids, names, wantNames)
+	}
+	refs, err := control.GetPodsFromJob(t.Context(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRefs := []corev1.ObjectReference{
+		{Namespace: "default", Name: "work", UID: "work-uid"},
+		{Namespace: "default", Name: "member", UID: "member-uid"},
+	}
+	if !slices.Equal(refs, wantRefs) {
+		t.Errorf("cleanup references = %v, want %v", refs, wantRefs)
+	}
+}
+
 func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 	tests := []struct {
 		name        string

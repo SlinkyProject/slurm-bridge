@@ -27,7 +27,7 @@ func TestValidatePodToJobIgnoresReplacedPod(t *testing.T) {
 	kubeClient := kubefake.NewClientBuilder().WithObjects(pod).Build()
 	slurmClient := fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
 		JobId:        ptr.To(int32(7)),
-		AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"old-uid"}}`),
+		AdminComment: ptr.To(`{"pods":"default/work/old-uid"}`),
 	}).Build()
 	sb := &SlurmBridge{Client: kubeClient, slurmControl: slurmcontrol.NewControl(slurmClient, "", "")}
 	if _, err := sb.validatePodToJob(t.Context(), pod); err != nil {
