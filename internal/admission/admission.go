@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
@@ -147,7 +148,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateConstraintsAnnotation(pod); err != nil {
 		return nil, err
 	}
-	return podGroupDeprecationWarnings(pod), nil
+	return workloadDeprecationWarnings(pod), nil
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -176,16 +177,24 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if err := validateConstraintsAnnotation(newPod); err != nil {
 		return nil, err
 	}
-	return podGroupDeprecationWarnings(newPod), nil
+	return workloadDeprecationWarnings(newPod), nil
 }
 
-func podGroupDeprecationWarnings(pod *corev1.Pod) admission.Warnings {
-	if pod.Labels[sched.PodGroupLabel] == "" {
-		return nil
+func workloadDeprecationWarnings(pod *corev1.Pod) admission.Warnings {
+	var warnings admission.Warnings
+	if pod.Labels[sched.PodGroupLabel] != "" {
+		warnings = append(warnings,
+			"scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
+		)
 	}
-	return admission.Warnings{
-		"scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
+	hasPodGroup := pod.Spec.SchedulingGroup != nil &&
+		pod.Spec.SchedulingGroup.PodGroupName != nil && *pod.Spec.SchedulingGroup.PodGroupName != ""
+	if pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup {
+		warnings = append(warnings,
+			"Implicit LeaderWorkerSet gang scheduling is deprecated and will be removed in a future release in slurm-bridge; set LeaderWorkerSet spec.scheduling to use Kubernetes native PodGroups (Pod spec.schedulingGroup.podGroupName)",
+		)
 	}
+	return warnings
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type

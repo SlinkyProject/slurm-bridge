@@ -624,10 +624,27 @@ schemas. Changing only `apiVersion` is not sufficient.
 
 ## LeaderWorkerSet
 
+> [!WARNING]
+> Implicit LeaderWorkerSet gang scheduling is deprecated in `slurm-bridge` and
+> will be removed in a future release. Existing workloads remain supported, but
+> the [admission webhook](admission.md) warns on Pod creation and update when
+> the `leaderworkerset.sigs.k8s.io/name` label is non-empty and
+> `spec.schedulingGroup.podGroupName` is missing or empty. This deprecation does
+> not remove scheduling support.
+
 This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 
-LeaderWorkerSet groups will be co-scheduled so pods of each group will be
-guaranteed to launch together.
+The legacy behavior implicitly co-schedules each LeaderWorkerSet group so its
+pods launch together.
+
+For new workloads, enable [native LWS gang scheduling][lws-gang-scheduling] with
+`spec.scheduling: {}` on the LeaderWorkerSet at creation. LWS creates a native
+PodGroup for each replica and sets `spec.schedulingGroup.podGroupName` on its
+pods. Leave that field out of the leader and worker Pod templates. This requires
+LWS **v0.11 or later**, Kubernetes **1.37**, and the feature gates and scheduler
+provider described in the [LWS installation requirements][lws-installation]. Use
+`startupPolicy: LeaderCreated`; `LeaderReady` cannot form a complete gang.
+Existing LeaderWorkerSets must be recreated to opt in to native scheduling.
 
 > [!NOTE]
 > Topology-aware placement is not supported yet, so some features of
@@ -638,6 +655,8 @@ guaranteed to launch together.
 [jobs]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
 [jobsets]: https://jobset.sigs.k8s.io/
 [leaderworkersets]: https://lws.sigs.k8s.io/
+[lws-gang-scheduling]: https://lws.sigs.k8s.io/docs/concepts/leaderworkerset/gang-scheduling/
+[lws-installation]: https://lws.sigs.k8s.io/docs/installation/#enable-native-gang-scheduling
 [podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [pods]: https://kubernetes.io/docs/concepts/workloads/pods/
 [workload-api]: https://kubernetes.io/docs/concepts/workloads/workload-api/
