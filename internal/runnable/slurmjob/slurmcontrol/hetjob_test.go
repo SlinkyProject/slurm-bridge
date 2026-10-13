@@ -11,10 +11,60 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/utils/ptr"
+
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/token"
+	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 )
+
+func TestGetHetJobComponent(t *testing.T) {
+	leader := &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](93)}
+	for _, tt := range []struct {
+		name    string
+		leader  *api.V0044Uint32NoValStruct
+		offset  *api.V0044Uint32NoValStruct
+		wantHet bool
+		wantErr bool
+	}{
+		{name: "ordinary job"},
+		{name: "unset leader", leader: &api.V0044Uint32NoValStruct{Number: ptr.To[int32](93)}},
+		{name: "false leader set", leader: &api.V0044Uint32NoValStruct{Set: ptr.To(false), Number: ptr.To[int32](93)}},
+		{name: "missing leader number", leader: &api.V0044Uint32NoValStruct{Set: ptr.To(true)}},
+		{name: "zero leader", leader: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](0)}},
+		{name: "leader component", leader: leader, offset: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](0)}, wantHet: true},
+		{name: "other component", leader: leader, offset: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](2)}, wantHet: true},
+		{name: "missing offset", leader: leader, wantErr: true},
+		{name: "unset offset", leader: leader, offset: &api.V0044Uint32NoValStruct{Number: ptr.To[int32](0)}, wantErr: true},
+		{name: "false offset set", leader: leader, offset: &api.V0044Uint32NoValStruct{Set: ptr.To(false), Number: ptr.To[int32](0)}, wantErr: true},
+		{name: "missing offset number", leader: leader, offset: &api.V0044Uint32NoValStruct{Set: ptr.To(true)}, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			control := NewControl(fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
+				JobId: ptr.To[int32](95), HetJobId: tt.leader, HetJobOffset: tt.offset,
+			}).Build())
+			id, offset, isHet, err := control.GetHetJobComponent(context.Background(), 95)
+			if (err != nil) != tt.wantErr || isHet != tt.wantHet {
+				t.Errorf("GetHetJobComponent(95) = (%d, %d, %t, %v), want isHet %t, error presence %t", id, offset, isHet, err, tt.wantHet, tt.wantErr)
+			}
+			if tt.wantHet && (id != 93 || offset != *tt.offset.Number) {
+				t.Errorf("GetHetJobComponent(95) component = %d+%d, want 93+%d", id, offset, *tt.offset.Number)
+			}
+			if !tt.wantHet && (id != 0 || offset != 0) {
+				t.Errorf("GetHetJobComponent(95) component = %d+%d, want zero values", id, offset)
+			}
+		})
+	}
+}
+
+func TestGetHetJobComponentNotFound(t *testing.T) {
+	_, _, _, err := NewControl(fake.NewFakeClient()).GetHetJobComponent(context.Background(), 95)
+	if !errors.Is(err, slurmerrors.ErrNotFound) {
+		t.Errorf("GetHetJobComponent(95) error = %v, want ErrNotFound", err)
+	}
+}
 
 func TestTerminateHetJobComponent(t *testing.T) {
 	tests := []struct {

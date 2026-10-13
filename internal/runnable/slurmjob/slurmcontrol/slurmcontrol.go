@@ -30,6 +30,9 @@ type SlurmControlInterface interface {
 	ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error)
 	// GetPodsFromJob returns the pod identities associated with the Slurm job.
 	GetPodsFromJob(ctx context.Context, jobId int32) ([]corev1.ObjectReference, error)
+	// GetHetJobComponent returns the heterogeneous job ID and offset, or isHetJob false for ordinary jobs.
+	// Missing jobs and incomplete heterogeneous job offsets return an error.
+	GetHetJobComponent(ctx context.Context, jobId int32) (hetJobId, hetJobOffset int32, isHetJob bool, err error)
 	// IsJobRunning returns true if the Slurm job is running, false if not.
 	IsJobRunning(ctx context.Context, jobId int32) (bool, error)
 	// IsJobPendingOrRunning reports whether the Slurm job is pending and whether it is running.
@@ -159,6 +162,21 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]c
 	}
 
 	return pods, nil
+}
+
+// GetHetJobComponent implements SlurmControlInterface.
+func (r *realSlurmControl) GetHetJobComponent(ctx context.Context, jobId int32) (hetJobId, hetJobOffset int32, isHetJob bool, err error) {
+	job := &api.V0044JobInfo{}
+	if err := r.Get(ctx, object.ObjectKey(fmt.Sprintf("%d", jobId)), job); err != nil {
+		return 0, 0, false, err
+	}
+	if job.HetJobId == nil || !ptr.Deref(job.HetJobId.Set, false) || ptr.Deref(job.HetJobId.Number, 0) == 0 {
+		return 0, 0, false, nil
+	}
+	if job.HetJobOffset == nil || !ptr.Deref(job.HetJobOffset.Set, false) || job.HetJobOffset.Number == nil {
+		return 0, 0, false, fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
+	}
+	return *job.HetJobId.Number, *job.HetJobOffset.Number, true, nil
 }
 
 // TerminateJob implements SlurmControlInterface.
