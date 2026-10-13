@@ -22,7 +22,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
+	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
@@ -39,7 +39,7 @@ type ExternalJob struct {
 	Finished     bool
 }
 
-func externalJobFromJobInfo(job *slurmtypes.V0044JobInfo) (ExternalJob, error) {
+func externalJobFromJobInfo(job *api.V0044JobInfo) (ExternalJob, error) {
 	if job == nil {
 		return ExternalJob{}, errors.New("cannot convert nil Slurm job")
 	}
@@ -47,14 +47,14 @@ func externalJobFromJobInfo(job *slurmtypes.V0044JobInfo) (ExternalJob, error) {
 	extJob := ExternalJob{
 		JobId:    ptr.Deref(job.JobId, 0),
 		Nodes:    ptr.Deref(job.Nodes, ""),
-		Pending:  job.GetStateAsSet().Has(api.V0044JobInfoJobStatePENDING),
+		Pending:  slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStatePENDING),
 		Finished: isFinishedJob(job),
 	}
 
 	return validateExternalJobID(job, extJob)
 }
 
-func validateExternalJobID(job *slurmtypes.V0044JobInfo, extJob ExternalJob) (ExternalJob, error) {
+func validateExternalJobID(job *api.V0044JobInfo, extJob ExternalJob) (ExternalJob, error) {
 	if extJob.JobId <= 0 {
 		return ExternalJob{}, errors.New("invalid or unset job ID")
 	}
@@ -97,8 +97,8 @@ func validateExternalJobID(job *slurmtypes.V0044JobInfo, extJob ExternalJob) (Ex
 	return extJob, nil
 }
 
-func isActiveJob(job *slurmtypes.V0044JobInfo) bool {
-	state := job.GetStateAsSet()
+func isActiveJob(job *api.V0044JobInfo) bool {
+	state := slurmutils.GetStateAsSet(job.JobState)
 	return state.Len() == 0 || !state.HasAny(
 		api.V0044JobInfoJobStateCANCELLED,
 		api.V0044JobInfoJobStateCOMPLETED,
@@ -168,7 +168,7 @@ func gresCompatibilityConstraint(constraints *string) (*string, error) {
 // DeleteSlurmJob will delete an external job
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
-	job := &slurmtypes.V0044JobInfo{}
+	job := &api.V0044JobInfo{}
 	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == 0 {
 		return nil
@@ -186,7 +186,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 func (r *realSlurmControl) GetJobsForPods(ctx context.Context) (*map[string]ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 
-	jobs := &slurmtypes.V0044JobInfoList{}
+	jobs := &api.V0044JobInfoObjectList{}
 
 	err := r.List(ctx, jobs)
 	if err != nil {
@@ -218,7 +218,7 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	logger := klog.FromContext(ctx)
 	jobOut := ExternalJob{}
 
-	job := &slurmtypes.V0044JobInfo{}
+	job := &api.V0044JobInfo{}
 	jobIDLabel := pod.Labels[wellknown.LabelExternalJobId]
 	if jobIDLabel == "" {
 		return &jobOut, nil
@@ -263,8 +263,8 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	return &jobOut, nil
 }
 
-func isFinishedJob(job *slurmtypes.V0044JobInfo) bool {
-	return job.GetStateAsSet().HasAny(
+func isFinishedJob(job *api.V0044JobInfo) bool {
+	return slurmutils.GetStateAsSet(job.JobState).HasAny(
 		api.V0044JobInfoJobStateCOMPLETED,
 		api.V0044JobInfoJobStateCANCELLED,
 		api.V0044JobInfoJobStateFAILED,
@@ -277,8 +277,8 @@ func isFinishedJob(job *slurmtypes.V0044JobInfo) bool {
 	)
 }
 
-func (r *realSlurmControl) findJobByID(ctx context.Context, jobID int32) (*slurmtypes.V0044JobInfo, bool, error) {
-	jobs := &slurmtypes.V0044JobInfoList{}
+func (r *realSlurmControl) findJobByID(ctx context.Context, jobID int32) (*api.V0044JobInfo, bool, error) {
+	jobs := &api.V0044JobInfoObjectList{}
 	if err := r.List(ctx, jobs); err != nil {
 		return nil, false, err
 	}
@@ -294,7 +294,7 @@ func (r *realSlurmControl) ListJobs(ctx context.Context) ([]ExternalJob, error) 
 	logger := klog.FromContext(ctx)
 	jobsOut := []ExternalJob{}
 
-	jobs := &slurmtypes.V0044JobInfoList{}
+	jobs := &api.V0044JobInfoObjectList{}
 
 	err := r.List(ctx, jobs)
 	if err != nil {
@@ -358,7 +358,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	}
 	jobID := int32(jobIDValue)
 
-	job := new(slurmtypes.V0044JobInfo)
+	job := new(api.V0044JobInfo)
 	jobDesc, err := r.buildJobDesc(component, true)
 	if err != nil {
 		return 0, err
@@ -387,7 +387,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 // submitJob will create or update an external job in Slurm.
 func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
 	logger := klog.FromContext(ctx)
-	job := new(slurmtypes.V0044JobInfo)
+	job := new(api.V0044JobInfo)
 	var jobSubmit api.V0044JobSubmitReq
 
 	var jobDescList []api.V0044JobDescMsg
@@ -433,7 +433,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 }
 
 func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
-	list := &slurmtypes.V0044NodeList{}
+	list := &api.V0044NodeObjectList{}
 	if err := r.List(ctx, list); err != nil {
 		return nil, err
 	}
@@ -542,7 +542,7 @@ func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponen
 func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error) {
 	logger := klog.FromContext(ctx)
 
-	nodes := &slurmtypes.V0044NodeResourceLayout{}
+	nodes := &api.V0044NodeResourceLayoutListObject{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
 		return &NodeResources{}, nil
@@ -553,7 +553,7 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 		logger.Error(err, "could not get node resource layout for pod", "pod", klog.KObj(pod))
 		return nil, err
 	}
-	for _, n := range nodes.V0044NodeResourceLayoutList {
+	for _, n := range *nodes {
 		if n.Node != nodeName {
 			continue
 		}
@@ -586,7 +586,7 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 }
 
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {
-	node := &slurmtypes.V0044Node{}
+	node := &api.V0044Node{}
 	if err := r.Get(ctx, object.ObjectKey(nodeName), node); err != nil {
 		return "", err
 	}

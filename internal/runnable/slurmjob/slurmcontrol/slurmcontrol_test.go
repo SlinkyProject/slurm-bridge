@@ -15,7 +15,6 @@ import (
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 )
@@ -33,17 +32,15 @@ func Test_realSlurmControl_RefreshJobCache(t *testing.T) {
 		{
 			name: "jobs",
 			slurmClient: fake.NewClientBuilder().
-				WithLists(&types.V0044JobInfoList{
-					Items: []types.V0044JobInfo{
+				WithLists(&api.V0044JobInfoObjectList{
+					Items: []api.V0044JobInfo{
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](1),
-							},
+
+							JobId: ptr.To[int32](1),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-							},
+
+							JobId: ptr.To[int32](2),
 						},
 					},
 				}).
@@ -84,70 +81,64 @@ func Test_realSlurmControl_ListPodsFromJobs(t *testing.T) {
 		{
 			name: "running",
 			slurmClient: fake.NewClientBuilder().
-				WithLists(&types.V0044JobInfoList{
-					Items: []types.V0044JobInfo{
+				WithLists(&api.V0044JobInfoObjectList{
+					Items: []api.V0044JobInfo{
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](1),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStateRUNNING,
-								}),
-							},
+
+							JobId: ptr.To[int32](1),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateRUNNING,
+							}),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](2),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStateRUNNING,
-								}),
-								AdminComment: ptr.To("foo"),
-							},
+
+							JobId: ptr.To[int32](2),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateRUNNING,
+							}),
+							AdminComment: ptr.To("foo"),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](3),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStateRUNNING,
-								}),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"foo/bar-0"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](3),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateRUNNING,
+							}),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"foo/bar-0"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](4),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStateRUNNING,
-									api.V0044JobInfoJobStateCOMPLETING,
-								}),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"foo/bar-1"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](4),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateRUNNING,
+								api.V0044JobInfoJobStateCOMPLETING,
+							}),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"foo/bar-1"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](5),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStateRUNNING,
-									api.V0044JobInfoJobStateCOMPLETING,
-								}),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"foo/bar-2", "foo/bar-3"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](5),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStateRUNNING,
+								api.V0044JobInfoJobStateCOMPLETING,
+							}),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"foo/bar-2", "foo/bar-3"},
+							}).ToString()),
 						},
 						{
-							V0044JobInfo: api.V0044JobInfo{
-								JobId: ptr.To[int32](6),
-								JobState: ptr.To([]api.V0044JobInfoJobState{
-									api.V0044JobInfoJobStatePENDING,
-								}),
-								AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-									Pods: []string{"foo/bar-4"},
-								}).ToString()),
-							},
+
+							JobId: ptr.To[int32](6),
+							JobState: ptr.To([]api.V0044JobInfoJobState{
+								api.V0044JobInfoJobStatePENDING,
+							}),
+							AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+								Pods: []string{"foo/bar-4"},
+							}).ToString()),
 						},
 					},
 				}).
@@ -216,10 +207,8 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 		{
 			name: "not ours",
 			slurmClient: fake.NewClientBuilder().
-				WithObjects(&types.V0044JobInfo{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId: ptr.To[int32](1),
-					},
+				WithObjects(&api.V0044JobInfo{
+					JobId: ptr.To[int32](1),
 				}).
 				Build(),
 			jobId: 1,
@@ -228,13 +217,11 @@ func Test_realSlurmControl_GetPodsFromJob(t *testing.T) {
 		{
 			name: "ours",
 			slurmClient: fake.NewClientBuilder().
-				WithObjects(&types.V0044JobInfo{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId: ptr.To[int32](1),
-						AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
-							Pods: []string{"foo/bar-123"},
-						}).ToString()),
-					},
+				WithObjects(&api.V0044JobInfo{
+					JobId: ptr.To[int32](1),
+					AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{
+						Pods: []string{"foo/bar-123"},
+					}).ToString()),
 				}).
 				Build(),
 			jobId: 1,
@@ -295,11 +282,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job pending",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -311,11 +296,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job running",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -327,13 +310,11 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job pending and running (multiple states)",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId: ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{
-								api.V0044JobInfoJobStatePENDING,
-								api.V0044JobInfoJobStateRUNNING,
-							},
+					obj := &api.V0044JobInfo{
+						JobId: ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{
+							api.V0044JobInfoJobStatePENDING,
+							api.V0044JobInfoJobStateRUNNING,
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -346,11 +327,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job completed",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -362,11 +341,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job canceled",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -416,10 +393,8 @@ func Test_realSlurmControl_TerminateJob(t *testing.T) {
 		{
 			name: "Job deleted",
 			slurmClient: func() client.Client {
-				obj := &types.V0044JobInfo{
-					V0044JobInfo: api.V0044JobInfo{
-						JobId: ptr.To[int32](1),
-					},
+				obj := &api.V0044JobInfo{
+					JobId: ptr.To[int32](1),
 				}
 				return fake.NewClientBuilder().WithObjects(obj).Build()
 			}(),

@@ -16,7 +16,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -74,11 +73,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job not found in cache but found on refresh",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 					}
 					return &staleCacheClient{Client: fake.NewClientBuilder().WithObjects(obj).Build()}
 				}(),
@@ -118,11 +115,9 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -144,12 +139,10 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found but canceled",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId: ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{
-								api.V0044JobInfoJobStateCANCELLED,
-							},
+					obj := &api.V0044JobInfo{
+						JobId: ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{
+							api.V0044JobInfoJobStateCANCELLED,
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -172,12 +165,10 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 			name: "Job found but completed",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId: ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{
-								api.V0044JobInfoJobStateCOMPLETED,
-							},
+					obj := &api.V0044JobInfo{
+						JobId: ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{
+							api.V0044JobInfoJobStateCOMPLETED,
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -246,11 +237,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job pending",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -262,11 +251,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job running",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -278,13 +265,11 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job pending and running (multiple states)",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId: ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{
-								api.V0044JobInfoJobStatePENDING,
-								api.V0044JobInfoJobStateRUNNING,
-							},
+					obj := &api.V0044JobInfo{
+						JobId: ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{
+							api.V0044JobInfoJobStatePENDING,
+							api.V0044JobInfoJobStateRUNNING,
 						},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
@@ -297,11 +282,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job completed",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -313,11 +296,9 @@ func Test_realSlurmControl_IsJobPendingOrRunning(t *testing.T) {
 			name: "job canceled",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId:    ptr.To[int32](1),
-							JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
-						},
+					obj := &api.V0044JobInfo{
+						JobId:    ptr.To[int32](1),
+						JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),
@@ -373,10 +354,8 @@ func Test_realSlurmControl_TerminateJob(t *testing.T) {
 			name: "Job deleted",
 			fields: fields{
 				Client: func() client.Client {
-					obj := &types.V0044JobInfo{
-						V0044JobInfo: api.V0044JobInfo{
-							JobId: ptr.To[int32](1),
-						},
+					obj := &api.V0044JobInfo{
+						JobId: ptr.To[int32](1),
 					}
 					return fake.NewClientBuilder().WithObjects(obj).Build()
 				}(),

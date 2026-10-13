@@ -28,7 +28,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
@@ -121,10 +120,10 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			name: "Not empty",
 			fields: fields{
 				Client: func() slurmclient.Client {
-					list := &types.V0044NodeList{
-						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node-0")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node-1")}},
+					list := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
+							{Name: ptr.To("node-0")},
+							{Name: ptr.To("node-1")},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -191,7 +190,7 @@ func Test_realSlurmControl_NodeExists(t *testing.T) {
 	}{
 		{
 			name:   "node exists",
-			client: fake.NewClientBuilder().WithObjects(&types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("worker-0")}}).Build(),
+			client: fake.NewClientBuilder().WithObjects(&api.V0044Node{Name: ptr.To("worker-0")}).Build(),
 			want:   true,
 		},
 		{
@@ -257,7 +256,7 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 		{
 			name: "found",
 			fields: func() fields {
-				node := &types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("node-0")}}
+				node := &api.V0044Node{Name: ptr.To("node-0")}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
 				}
@@ -271,11 +270,9 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 		{
 			name: "node already in DRAIN state skips update",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
@@ -290,11 +287,9 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 		{
 			name: "update fails",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
 				}
 				f := interceptor.Funcs{
 					Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
@@ -325,20 +320,20 @@ func Test_realSlurmControl_MakeNodeDrain(t *testing.T) {
 }
 
 func Test_realSlurmControl_MakeNodeUndrain(t *testing.T) {
-	nodeWithState := func(state api.V0044NodeState, reason string) *types.V0044Node {
-		return &types.V0044Node{V0044Node: api.V0044Node{
+	nodeWithState := func(state api.V0044NodeState, reason string) *api.V0044Node {
+		return &api.V0044Node{
 			Name:   ptr.To("node-0"),
 			State:  ptr.To([]api.V0044NodeState{state}),
 			Reason: ptr.To(reason),
-		}}
+		}
 	}
 	bridgeDrain := nodeWithState(api.V0044NodeStateDRAIN, "slurm-bridge: cordoned")
 	adminDrain := nodeWithState(api.V0044NodeStateDRAIN, "administrator maintenance")
 	idle := nodeWithState(api.V0044NodeStateIDLE, "")
 	tests := []struct {
 		name          string
-		cached        *types.V0044Node
-		live          *types.V0044Node
+		cached        *api.V0044Node
+		live          *api.V0044Node
 		wantLiveReads int
 		wantUpdates   int
 	}{
@@ -401,7 +396,7 @@ func Test_realSlurmControl_MakeNodeUndrain(t *testing.T) {
 					if node == nil {
 						return slurmerrors.ErrNotFound
 					}
-					*obj.(*types.V0044Node) = *node.DeepCopy()
+					*obj.(*api.V0044Node) = *node.DeepCopy()
 					return nil
 				},
 				Update: func(ctx context.Context, obj object.Object, req any, opts ...slurmclient.UpdateOption) error {
@@ -464,11 +459,9 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 		{
 			name: "not drain",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
@@ -484,11 +477,9 @@ func Test_realSlurmControl_IsNodeDrain(t *testing.T) {
 		{
 			name: "is drain",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
@@ -551,11 +542,9 @@ func Test_realSlurmControl_IsNodeExternal(t *testing.T) {
 		{
 			name: "not external",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
@@ -571,11 +560,9 @@ func Test_realSlurmControl_IsNodeExternal(t *testing.T) {
 		{
 			name: "is external",
 			fields: func() fields {
-				node := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateEXTERNAL}),
-					},
+				node := &api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateEXTERNAL}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(node).Build(),
@@ -624,11 +611,9 @@ func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 		{
 			name: "not drained - node idle",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
-					},
+				&api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
 				},
 			).Build(),
 			want: false,
@@ -636,11 +621,9 @@ func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 		{
 			name: "drained and idle - eligible for removal",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
-					},
+				&api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE, api.V0044NodeStateDRAIN}),
 				},
 			).Build(),
 			want: true,
@@ -648,11 +631,9 @@ func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 		{
 			name: "drained but busy - has ALLOCATED",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateALLOCATED}),
-					},
+				&api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateALLOCATED}),
 				},
 			).Build(),
 			want: false,
@@ -660,11 +641,9 @@ func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 		{
 			name: "drained but busy - has MIXED",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateMIXED}),
-					},
+				&api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateMIXED}),
 				},
 			).Build(),
 			want: false,
@@ -672,11 +651,9 @@ func Test_realSlurmControl_IsNodeDrained(t *testing.T) {
 		{
 			name: "drain with undrain - not considered drained",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:  ptr.To("node-0"),
-						State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateUNDRAIN}),
-					},
+				&api.V0044Node{
+					Name:  ptr.To("node-0"),
+					State: ptr.To([]api.V0044NodeState{api.V0044NodeStateDRAIN, api.V0044NodeStateUNDRAIN}),
 				},
 			).Build(),
 			want: false,
@@ -731,13 +708,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists, same cpu memory gres",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       nil,
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       nil,
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
@@ -746,13 +721,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists, different cpus",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       nil,
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       nil,
 				},
 			).Build(),
 			node: makeNode("worker-0", 8, 8),
@@ -761,15 +734,13 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with matching DRA CPU topology",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Sockets:    ptr.To(int32(1)),
-						Cores:      ptr.To(int32(2)),
-						Threads:    ptr.To(int32(2)),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Sockets:    ptr.To(int32(1)),
+					Cores:      ptr.To(int32(2)),
+					Threads:    ptr.To(int32(2)),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
 				},
 			).Build(),
 			node:     makeNode("worker-0", 12, 8),
@@ -779,15 +750,13 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with different DRA CPU topology",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Sockets:    ptr.To(int32(1)),
-						Cores:      ptr.To(int32(4)),
-						Threads:    ptr.To(int32(1)),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Sockets:    ptr.To(int32(1)),
+					Cores:      ptr.To(int32(4)),
+					Threads:    ptr.To(int32(1)),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
 				},
 			).Build(),
 			node:     makeNode("worker-0", 12, 8),
@@ -797,13 +766,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists, different memory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       nil,
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       nil,
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 16),
@@ -812,13 +779,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "hybrid node preserves unmanaged gres",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:driver:1"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:driver:1"),
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
@@ -827,14 +792,12 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "external node recreates for different gres",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:driver:1"),
-						State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:driver:1"),
+					State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
@@ -843,14 +806,12 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with matching profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:2"),
+					Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -860,14 +821,12 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with stale applied profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:2"),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0"]}}}`),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:2"),
+					Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0"]}}}`),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -877,13 +836,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with removed profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Extra:      ptr.To(`slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`),
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
@@ -892,13 +849,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "hybrid node accepts additional gres",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:2,nic:infiniband:1"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:2,nic:infiniband:1"),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -908,13 +863,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "hybrid node accepts gres topology suffix",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:2(S:0-1)"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:2(S:0-1)"),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -924,13 +877,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "hybrid node rejects incompatible gres with configuration hint",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:1,nic:infiniband:1"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:1,nic:infiniband:1"),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -941,13 +892,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with unrelated extra and no profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Extra:      ptr.To("owned by an administrator"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Extra:      ptr.To("owned by an administrator"),
 				},
 			).Build(),
 			node: makeNode("worker-0", 4, 8),
@@ -956,14 +905,12 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node exists with unrelated extra and profile inventory",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       ptr.To("gpu:gpu.example.com:2"),
-						Extra:      ptr.To("owned by an administrator"),
-					},
+				&api.V0044Node{
+					Name:       ptr.To("worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       ptr.To("gpu:gpu.example.com:2"),
+					Extra:      ptr.To("owned by an administrator"),
 				},
 			).Build(),
 			node:         makeNode("worker-0", 4, 8),
@@ -988,13 +935,11 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 		{
 			name: "node uses slurm node name label",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("slurm-worker-0"),
-						Cpus:       ptr.To(int32(4)),
-						RealMemory: ptr.To(int64(8192)),
-						Gres:       nil,
-					},
+				&api.V0044Node{
+					Name:       ptr.To("slurm-worker-0"),
+					Cpus:       ptr.To(int32(4)),
+					RealMemory: ptr.To(int64(8192)),
+					Gres:       nil,
 				},
 			).Build(),
 			node: func() *corev1.Node {
@@ -1056,14 +1001,14 @@ func Test_realSlurmControl_NodeNeedsRecreate_ExternalGRES(t *testing.T) {
 		{name: "stale applied inventory", gres: "gpu:gpu.example.com:2,nic:dranet0:1", extra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{}}`, want: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			slurmClient := fake.NewClientBuilder().WithObjects(&types.V0044Node{V0044Node: api.V0044Node{
+			slurmClient := fake.NewClientBuilder().WithObjects(&api.V0044Node{
 				Name:       ptr.To(node.Name),
 				Cpus:       ptr.To(int32(4)),
 				RealMemory: ptr.To(int64(8192)),
 				State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 				Gres:       ptr.To(tt.gres),
 				Extra:      ptr.To(tt.extra),
-			}}).Build()
+			}).Build()
 			r := &realSlurmControl{Client: slurmClient}
 			got, err := r.NodeNeedsRecreate(context.Background(), node, nil, inventory)
 			if err != nil {
@@ -1092,8 +1037,8 @@ func Test_realSlurmControl_RemoveNode(t *testing.T) {
 		{
 			name: "node exists - removed",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{Name: ptr.To("worker-0")},
+				&api.V0044Node{
+					Name: ptr.To("worker-0"),
 				},
 			).Build(),
 			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-0"}},
@@ -1120,7 +1065,7 @@ func Test_realSlurmControl_RemoveNode(t *testing.T) {
 					},
 				}
 				return fake.NewClientBuilder().
-					WithObjects(&types.V0044Node{V0044Node: api.V0044Node{Name: ptr.To("worker-0")}}).
+					WithObjects(&api.V0044Node{Name: ptr.To("worker-0")}).
 					WithInterceptorFuncs(f).
 					Build()
 			}(),
@@ -1130,8 +1075,8 @@ func Test_realSlurmControl_RemoveNode(t *testing.T) {
 		{
 			name: "node uses slurm node name label",
 			client: fake.NewClientBuilder().WithObjects(
-				&types.V0044Node{
-					V0044Node: api.V0044Node{Name: ptr.To("slurm-worker-0")},
+				&api.V0044Node{
+					Name: ptr.To("slurm-worker-0"),
 				},
 			).Build(),
 			node: &corev1.Node{
@@ -1194,10 +1139,8 @@ func Test_realSlurmControl_validatePartitionExists(t *testing.T) {
 		{
 			name: "partition exists",
 			fields: func() fields {
-				partition := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("slurm-bridge"),
-					},
+				partition := &api.V0044PartitionInfo{
+					Name: ptr.To("slurm-bridge"),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(partition).Build(),
@@ -1272,10 +1215,8 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 		{
 			name: "add node with valid partition annotation",
 			fields: func() fields {
-				partition := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("slurm-bridge"),
-					},
+				partition := &api.V0044PartitionInfo{
+					Name: ptr.To("slurm-bridge"),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(partition).Build(),
@@ -1303,15 +1244,11 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 		{
 			name: "add node with multiple valid partition annotations",
 			fields: func() fields {
-				partition1 := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("slurm-bridge"),
-					},
+				partition1 := &api.V0044PartitionInfo{
+					Name: ptr.To("slurm-bridge"),
 				}
-				partition2 := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("gpu"),
-					},
+				partition2 := &api.V0044PartitionInfo{
+					Name: ptr.To("gpu"),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(partition1, partition2).Build(),
@@ -1363,17 +1300,13 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 		{
 			name: "node already in Slurm with matching features skips update",
 			fields: func() fields {
-				partition := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("slurm-bridge"),
-					},
+				partition := &api.V0044PartitionInfo{
+					Name: ptr.To("slurm-bridge"),
 				}
-				existingNode := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("test-node"),
-						Features:   ptr.To(api.V0044CsvString{"slurm-bridge"}),
-						Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
-					},
+				existingNode := &api.V0044Node{
+					Name:       ptr.To("test-node"),
+					Features:   ptr.To(api.V0044CsvString{"slurm-bridge"}),
+					Partitions: ptr.To(api.V0044CsvString{"slurm-bridge"}),
 				}
 				return fields{
 					Client: fake.NewClientBuilder().WithObjects(partition, existingNode).Build(),
@@ -1399,25 +1332,21 @@ func Test_realSlurmControl_AddNode(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "node already in Slurm with different features reconfigure Get fails",
+			name: "node already in Slurm with different features node Get fails",
 			fields: func() fields {
-				partition := &types.V0044PartitionInfo{
-					V0044PartitionInfo: api.V0044PartitionInfo{
-						Name: ptr.To("slurm-bridge"),
-					},
+				partition := &api.V0044PartitionInfo{
+					Name: ptr.To("slurm-bridge"),
 				}
-				existingNode := &types.V0044Node{
-					V0044Node: api.V0044Node{
-						Name:       ptr.To("test-node"),
-						Features:   ptr.To(api.V0044CsvString{"old-partition"}),
-						Partitions: ptr.To(api.V0044CsvString{"old-partition"}),
-					},
+				existingNode := &api.V0044Node{
+					Name:       ptr.To("test-node"),
+					Features:   ptr.To(api.V0044CsvString{"old-partition"}),
+					Partitions: ptr.To(api.V0044CsvString{"old-partition"}),
 				}
-				reconfigureKey := (&types.V0044Reconfigure{}).GetKey()
+				nodeKey := existingNode.GetKey()
 				f := interceptor.Funcs{
 					Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
-						if key == reconfigureKey {
-							return errors.New("reconfigure failed")
+						if key == nodeKey {
+							return errors.New("node lookup failed")
 						}
 						return nil
 					},
@@ -1673,12 +1602,12 @@ func Test_realSlurmControl_AddNode_addsGRESCompatibilityFeatureToExistingExterna
 			return nil
 		},
 	}
-	existingNode := &types.V0044Node{V0044Node: api.V0044Node{
+	existingNode := &api.V0044Node{
 		Name:           ptr.To("test-node"),
 		State:          ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 		Features:       ptr.To(api.V0044CsvString{"admin-feature"}),
 		ActiveFeatures: ptr.To(api.V0044CsvString{"admin-feature"}),
-	}}
+	}
 	r := &realSlurmControl{Client: fake.NewClientBuilder().
 		WithObjects(existingNode).
 		WithInterceptorFuncs(f).
@@ -1738,13 +1667,13 @@ func Test_realSlurmControl_AddNode_updatesExistingHybridNodeInventory(t *testing
 					return nil
 				},
 			}
-			slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
+			slurmNode := &api.V0044Node{
 				Name:           ptr.To("test-node"),
 				Cpus:           ptr.To(int32(4)),
 				RealMemory:     ptr.To(int64(8192)),
 				Features:       ptr.To(api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
 				ActiveFeatures: ptr.To(api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
-			}}
+			}
 			var inventory []dra.GRESInventory
 			if tt.wantExtra != "" {
 				slurmNode.Gres = ptr.To("gpu:gpu.example.com:2,nic:infiniband:1")
@@ -1812,12 +1741,12 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 					return nil
 				},
 			}
-			slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
+			slurmNode := &api.V0044Node{
 				Name:           ptr.To("test-node"),
 				Gres:           ptr.To(tt.gres),
 				Features:       ptr.To(tt.features),
 				ActiveFeatures: ptr.To(tt.active),
-			}}
+			}
 			r := &realSlurmControl{Client: fake.NewClientBuilder().
 				WithObjects(slurmNode).
 				WithInterceptorFuncs(f).
@@ -1851,10 +1780,10 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 }
 
 func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
-	slurmNode := &types.V0044Node{V0044Node: api.V0044Node{
+	slurmNode := &api.V0044Node{
 		Name: ptr.To("test-node"),
 		Gres: ptr.To("gpu:gpu.example.com:1"),
-	}}
+	}
 	r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(slurmNode).Build()}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
 
@@ -1874,7 +1803,7 @@ func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
 func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t *testing.T) {
 	tests := []struct {
 		name      string
-		slurmNode *types.V0044Node
+		slurmNode *api.V0044Node
 		inventory []dra.GRESInventory
 	}{
 		{
@@ -1883,10 +1812,10 @@ func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t
 		},
 		{
 			name: "external node",
-			slurmNode: &types.V0044Node{V0044Node: api.V0044Node{
+			slurmNode: &api.V0044Node{
 				Name:  ptr.To("test-node"),
 				State: ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
-			}},
+			},
 			inventory: testExampleDRAInventory(),
 		},
 	}
@@ -1995,11 +1924,9 @@ func Test_realSlurmControl_AddNode_updatesExistingNodeTopology(t *testing.T) {
 			return nil
 		},
 	}
-	existingNode := &types.V0044Node{
-		V0044Node: api.V0044Node{
-			Name:     ptr.To("test-node"),
-			Topology: ptr.To("topo-switch:s1"),
-		},
+	existingNode := &api.V0044Node{
+		Name:     ptr.To("test-node"),
+		Topology: ptr.To("topo-switch:s1"),
 	}
 	r := &realSlurmControl{
 		Client: fake.NewClientBuilder().WithObjects(existingNode).WithInterceptorFuncs(f).Build(),
@@ -2036,11 +1963,9 @@ func Test_realSlurmControl_AddNode_clearsExistingNodeTopology(t *testing.T) {
 			return nil
 		},
 	}
-	existingNode := &types.V0044Node{
-		V0044Node: api.V0044Node{
-			Name:     ptr.To("test-node"),
-			Topology: ptr.To("topo-switch:s1"),
-		},
+	existingNode := &api.V0044Node{
+		Name:     ptr.To("test-node"),
+		Topology: ptr.To("topo-switch:s1"),
 	}
 	r := &realSlurmControl{
 		Client: fake.NewClientBuilder().WithObjects(existingNode).WithInterceptorFuncs(f).Build(),

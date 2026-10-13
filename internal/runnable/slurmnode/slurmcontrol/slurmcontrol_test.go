@@ -17,7 +17,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
 func Test_realSlurmControl_RefreshNodeCache(t *testing.T) {
@@ -33,17 +32,15 @@ func Test_realSlurmControl_RefreshNodeCache(t *testing.T) {
 		{
 			name: "jobs",
 			slurmClient: fake.NewClientBuilder().
-				WithLists(&types.V0044NodeList{
-					Items: []types.V0044Node{
+				WithLists(&api.V0044NodeObjectList{
+					Items: []api.V0044Node{
 						{
-							V0044Node: api.V0044Node{
-								Name: ptr.To("node-0"),
-							},
+
+							Name: ptr.To("node-0"),
 						},
 						{
-							V0044Node: api.V0044Node{
-								Name: ptr.To("node-1"),
-							},
+
+							Name: ptr.To("node-1"),
 						},
 					},
 				}).
@@ -97,10 +94,10 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 			name: "Not empty",
 			fields: fields{
 				Client: func() client.Client {
-					list := &types.V0044NodeList{
-						Items: []types.V0044Node{
-							{V0044Node: api.V0044Node{Name: ptr.To("node-0")}},
-							{V0044Node: api.V0044Node{Name: ptr.To("node-1")}},
+					list := &api.V0044NodeObjectList{
+						Items: []api.V0044Node{
+							{Name: ptr.To("node-0")},
+							{Name: ptr.To("node-1")},
 						},
 					}
 					c := fake.NewClientBuilder().

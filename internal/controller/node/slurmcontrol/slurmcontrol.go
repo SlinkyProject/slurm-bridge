@@ -20,7 +20,7 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
-	slurmtypes "github.com/SlinkyProject/slurm-client/pkg/types"
+	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
@@ -89,7 +89,7 @@ func (e *IncompatibleGRESConfigurationError) Error() string {
 
 // GetNodeNames implements SlurmControlInterface.
 func (r *realSlurmControl) GetNodeNames(ctx context.Context) ([]string, error) {
-	list := &slurmtypes.V0044NodeList{}
+	list := &api.V0044NodeObjectList{}
 	if err := r.List(ctx, list); err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context) ([]string, error) {
 // NodeExists implements SlurmControlInterface.
 func (r *realSlurmControl) NodeExists(ctx context.Context, node *corev1.Node) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
@@ -119,7 +119,7 @@ const nodeReasonPrefix = "slurm-bridge:"
 func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node, reason string) error {
 	logger := log.FromContext(ctx)
 
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
@@ -128,7 +128,7 @@ func (r *realSlurmControl) MakeNodeDrain(ctx context.Context, node *corev1.Node,
 		return err
 	}
 
-	if slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN) {
+	if slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateDRAIN) {
 		logger.V(1).Info("node is already drained, skipping drain request",
 			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
 		return nil
@@ -154,7 +154,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	logger := log.FromContext(ctx)
 
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
@@ -168,7 +168,7 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 
 	// The cache may only skip an undrain. A direct read must reconfirm bridge ownership first,
 	// since an admin may have re-drained the node since the last refresh.
-	slurmNode = &slurmtypes.V0044Node{}
+	slurmNode = &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
@@ -194,9 +194,9 @@ func (r *realSlurmControl) MakeNodeUndrain(ctx context.Context, node *corev1.Nod
 	return nil
 }
 
-func shouldSkipUndrain(ctx context.Context, slurmNode *slurmtypes.V0044Node) bool {
+func shouldSkipUndrain(ctx context.Context, slurmNode *api.V0044Node) bool {
 	logger := log.FromContext(ctx)
-	state := slurmNode.GetStateAsSet()
+	state := slurmutils.GetStateAsSet(slurmNode.State)
 	if !state.Has(api.V0044NodeStateDRAIN) || state.Has(api.V0044NodeStateUNDRAIN) {
 		logger.V(1).Info("Node is already undrained, skipping undrain request",
 			"node", slurmNode.GetKey(), "nodeState", slurmNode.State)
@@ -215,24 +215,24 @@ func shouldSkipUndrain(ctx context.Context, slurmNode *slurmtypes.V0044Node) boo
 // IsNodeDrain implements SlurmControlInterface.
 func (r *realSlurmControl) IsNodeDrain(ctx context.Context, node *corev1.Node) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		return false, err
 	}
 
-	isDrain := slurmNode.GetStateAsSet().Has(api.V0044NodeStateDRAIN)
+	isDrain := slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateDRAIN)
 	return isDrain, nil
 }
 
 // IsNodeDrained implements SlurmControlInterface.
 func (r *realSlurmControl) IsNodeDrained(ctx context.Context, node *corev1.Node) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{RefreshCache: true}); err != nil {
 		return false, err
 	}
 
-	state := slurmNode.GetStateAsSet()
+	state := slurmutils.GetStateAsSet(slurmNode.State)
 	isDrain := state.Has(api.V0044NodeStateDRAIN) && !state.Has(api.V0044NodeStateUNDRAIN)
 	isBusy := state.HasAny(api.V0044NodeStateALLOCATED, api.V0044NodeStateMIXED, api.V0044NodeStateCOMPLETING)
 	return isDrain && !isBusy, nil
@@ -241,7 +241,7 @@ func (r *realSlurmControl) IsNodeDrained(ctx context.Context, node *corev1.Node)
 // IsNodeExternal implements SlurmControlInterface.
 func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
@@ -249,14 +249,14 @@ func (r *realSlurmControl) IsNodeExternal(ctx context.Context, node *corev1.Node
 		return false, err
 	}
 
-	isNodeExternal := slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL)
+	isNodeExternal := slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL)
 	return isNodeExternal, nil
 }
 
 // NodeNeedsRecreate implements SlurmControlInterface.
 func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error) {
 	key := slurmobject.ObjectKey(nodeutils.GetSlurmNodeName(node))
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
@@ -274,7 +274,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
 	currentGres := ptr.Deref(slurmNode.Gres, "")
 	currentExtra := ptr.Deref(slurmNode.Extra, "")
-	isExternal := slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL)
+	isExternal := slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL)
 	if desiredGRES.extra != "" && currentExtra != "" && !strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix) {
 		return false, fmt.Errorf("cannot record applied DRA inventory on Slurm node %q: Extra field is already in use", key)
 	}
@@ -317,7 +317,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		return err
 	}
 
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	err = r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true})
 	if err == nil {
 		return r.updateExistingNode(ctx, node, slurmNode, gresConfig)
@@ -377,7 +377,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 		return err
 	}
 	if gresConfig.extra != "" {
-		createdNode := &slurmtypes.V0044Node{V0044Node: api.V0044Node{Name: ptr.To(slurmNodeName)}}
+		createdNode := &api.V0044Node{Name: ptr.To(slurmNodeName)}
 		req := api.V0044UpdateNodeMsg{Extra: ptr.To(gresConfig.extra)}
 		if err := r.Update(ctx, createdNode, req); err != nil {
 			return fmt.Errorf("could not record applied DRA inventory on Slurm node %q: %w", slurmNodeName, err)
@@ -396,14 +396,14 @@ func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.No
 		return err
 	}
 
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}
 		return err
 	}
-	if slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL) {
+	if slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
 		return nil
 	}
 	return r.reconcileHybridNode(ctx, slurmNode, gresConfig)
@@ -413,7 +413,7 @@ func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.No
 func (r *realSlurmControl) DisableNodeGRESCompatibility(ctx context.Context, node *corev1.Node) error {
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 	key := slurmobject.ObjectKey(slurmNodeName)
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
@@ -425,7 +425,7 @@ func (r *realSlurmControl) DisableNodeGRESCompatibility(ctx context.Context, nod
 
 func (r *realSlurmControl) reconcileHybridNode(
 	ctx context.Context,
-	slurmNode *slurmtypes.V0044Node,
+	slurmNode *api.V0044Node,
 	gresConfig nodeGRESConfig,
 ) error {
 	if err := validateHybridNodeGRES(string(slurmNode.GetKey()), ptr.Deref(slurmNode.Gres, ""), gresConfig); err != nil {
@@ -520,10 +520,10 @@ func buildNodeGRESConfig(draInventory []dra.GRESInventory) (nodeGRESConfig, erro
 func (r *realSlurmControl) updateExistingNode(
 	ctx context.Context,
 	node *corev1.Node,
-	slurmNode *slurmtypes.V0044Node,
+	slurmNode *api.V0044Node,
 	gresConfig nodeGRESConfig,
 ) error {
-	if !slurmNode.GetStateAsSet().Has(api.V0044NodeStateEXTERNAL) {
+	if !slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
 		if err := r.reconcileHybridNode(ctx, slurmNode, gresConfig); err != nil {
 			return err
 		}
@@ -540,7 +540,7 @@ func (r *realSlurmControl) updateExistingNode(
 // requires active features to be removed before their available feature.
 func (r *realSlurmControl) updateGRESCompatibilityFeature(
 	ctx context.Context,
-	slurmNode *slurmtypes.V0044Node,
+	slurmNode *api.V0044Node,
 	compatible bool,
 ) error {
 	available := updateFeatureList(
@@ -657,7 +657,7 @@ func validateHybridNodeGRES(nodeName, current string, desired nodeGRESConfig) er
 // updateNodeExtra reconciles only the Extra values owned by slurm-bridge. An
 // unrelated non-empty value is preserved unless DRA inventory needs the field,
 // in which case callers receive an actionable error rather than data loss.
-func (r *realSlurmControl) updateNodeExtra(ctx context.Context, slurmNode *slurmtypes.V0044Node, desired string) error {
+func (r *realSlurmControl) updateNodeExtra(ctx context.Context, slurmNode *api.V0044Node, desired string) error {
 	current := ptr.Deref(slurmNode.Extra, "")
 	if current == desired || desired == "" && !strings.HasPrefix(current, dra.AppliedInventoryExtraPrefix) {
 		return nil
@@ -680,7 +680,7 @@ func (r *realSlurmControl) updateNodeExtra(ctx context.Context, slurmNode *slurm
 
 // updateNodeTopology updates an existing Slurm node so its dynamic topology
 // matches the Kubernetes node topology annotation.
-func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.Node, slurmNode *slurmtypes.V0044Node) error {
+func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.Node, slurmNode *api.V0044Node) error {
 	logger := log.FromContext(ctx)
 
 	topologySpec := node.GetAnnotations()[wellknown.AnnotationNodeTopologySpec]
@@ -703,7 +703,7 @@ func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.
 // updateNodeFeatures updates an existing external Slurm node so its features
 // include GRES compatibility and, when configured, match the partitions
 // annotation.
-func (r *realSlurmControl) updateNodeFeatures(ctx context.Context, node *corev1.Node, slurmNode *slurmtypes.V0044Node) error {
+func (r *realSlurmControl) updateNodeFeatures(ctx context.Context, node *corev1.Node, slurmNode *api.V0044Node) error {
 	logger := log.FromContext(ctx)
 
 	annotations := node.GetAnnotations()
@@ -753,7 +753,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 
 	key := slurmobject.ObjectKey(slurmNodeName)
-	slurmNode := &slurmtypes.V0044Node{}
+	slurmNode := &api.V0044Node{}
 	if err := r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
@@ -775,7 +775,7 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 
 // validatePartitionExists checks if a Slurm partition exists using the GetPartitionInfo API.
 func (r *realSlurmControl) validatePartitionExists(ctx context.Context, partitionName string) error {
-	partition := &slurmtypes.V0044PartitionInfo{}
+	partition := &api.V0044PartitionInfo{}
 	key := slurmobject.ObjectKey(partitionName)
 	if err := r.Get(ctx, key, partition); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {

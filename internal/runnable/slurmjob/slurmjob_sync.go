@@ -16,9 +16,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 )
 
 func (r *SlurmJobRunnable) Sync(ctx context.Context) error {
@@ -78,7 +78,7 @@ func (r *SlurmJobRunnable) cleanDanglingJob(ctx context.Context, jobId int32) er
 	}
 
 	if !hasPods && isPendingOrRunning {
-		job := &types.V0044JobInfo{}
+		job := &slurmapi.V0044JobInfo{}
 		if err := r.slurmClient.Get(ctx, object.ObjectKey(fmt.Sprintf("%d", jobId)), job); err != nil {
 			if errors.Is(err, slurmerrors.ErrNotFound) {
 				return nil

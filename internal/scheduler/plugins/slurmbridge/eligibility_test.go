@@ -43,7 +43,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -171,7 +170,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 			pending := newPod("pending0", "", resources("1", "1Gi", "8"))
 			var nodes []*corev1.Node
 			var occupants []*corev1.Pod
-			slurmNodes := &types.V0044NodeList{}
+			slurmNodes := &api.V0044NodeObjectList{}
 			for i := range nodeCount {
 				name := fmt.Sprintf("node%d", i)
 				allocatable := resources("96", "1024Gi", "8")
@@ -263,15 +262,15 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 					t.Errorf("excluded nodes = %v, want %v", job.ExcludedNodes, wantExcluded)
 				}
 			}
-			jobs := &types.V0044JobInfoList{Items: []types.V0044JobInfo{{V0044JobInfo: api.V0044JobInfo{
+			jobs := &api.V0044JobInfoObjectList{Items: []api.V0044JobInfo{{
 				JobId: ptr.To(int32(42)), Nodes: ptr.To(""),
 				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
-			}}}}
+			}}}
 			slurm := fake.NewClientBuilder().WithLists(slurmNodes, jobs).WithInterceptorFuncs(interceptor.Funcs{
 				Create: func(_ context.Context, obj object.Object, req any, _ ...slurmclient.CreateOption) error {
 					creates++
 					checkRequest(req.(api.V0044JobSubmitReq).Job)
-					obj.(*types.V0044JobInfo).JobId = ptr.To(int32(42))
+					obj.(*api.V0044JobInfo).JobId = ptr.To(int32(42))
 					return nil
 				},
 				Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
@@ -482,10 +481,10 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 				t.Fatalf("expected original resource rejection, got %v", filterStatus)
 			}
 			kubeClient := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
-			slurmObjects := []object.Object{&types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+			slurmObjects := []object.Object{&api.V0044JobInfo{
 				JobId: ptr.To(int32(42)), Nodes: ptr.To("node[0-47]"),
 				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-			}}}
+			}}
 			jobState := tt.jobState
 			if jobState == "" {
 				jobState = api.V0044JobInfoJobStateCOMPLETED
@@ -501,10 +500,10 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 						info := externaljobinfo.ExternalJobInfo{Pods: []string{namespace + "/" + p.Name}}
 						comment = ptr.To(info.ToString())
 					}
-					slurmObjects = append(slurmObjects, &types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+					slurmObjects = append(slurmObjects, &api.V0044JobInfo{
 						JobId: ptr.To(int32(i + 1)), JobState: &[]api.V0044JobInfoJobState{jobState},
 						AdminComment: comment,
-					}})
+					})
 				}
 			}
 			baseSlurm := fake.NewClientBuilder().WithObjects(slurmObjects...).Build()
@@ -639,16 +638,16 @@ func TestPostFilterSharedGangsDoNotWaitForEachOther(t *testing.T) {
 	t.Cleanup(func() { _ = f.Close() })
 	deletes := 0
 	slurm := fake.NewClientBuilder().WithObjects(
-		&types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+		&api.V0044JobInfo{
 			JobId: ptr.To(int32(42)), Nodes: ptr.To("node[0-1]"),
 			JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/a0", "test/a1"}}).ToString()),
-		}},
-		&types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+		},
+		&api.V0044JobInfo{
 			JobId: ptr.To(int32(43)), Nodes: ptr.To("node[0-1]"),
 			JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/b0", "test/b1"}}).ToString()),
-		}},
+		},
 	).WithInterceptorFuncs(interceptor.Funcs{
 		Delete: func(context.Context, object.Object, ...slurmclient.DeleteOption) error { deletes++; return nil },
 	}).Build()

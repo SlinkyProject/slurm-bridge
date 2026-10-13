@@ -13,7 +13,6 @@ import (
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	"github.com/SlinkyProject/slurm-client/pkg/types"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob/slurmcontrol"
 )
@@ -52,10 +51,10 @@ func TestCleanDanglingJobTermination(t *testing.T) {
 		{name: "component cancellation error", leader: 93, offset: ptr.To[int32](2), err: failure, wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			job := &types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+			job := &api.V0044JobInfo{
 				JobId:    ptr.To[int32](95),
 				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
-			}}
+			}
 			if tt.leader != 0 {
 				job.HetJobId = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(tt.leader)}
 			}
