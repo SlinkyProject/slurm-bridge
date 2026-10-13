@@ -23,6 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func newSchedulingV1Alpha3Object(kind, name string, spec map[string]any) *unstructured.Unstructured {
@@ -431,9 +433,20 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 	tests := []struct {
 		name   string
 		change func(*readinessSnapshot)
+		jobID  string
 		want   *fwk.Status
 	}{
 		{name: "nested child ready but root gang short", want: waiting},
+		{name: "existing component job with root gang short", jobID: "42", want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())},
+		{name: "zero component job with root gang short", jobID: "0", want: waiting},
+		{name: "invalid component job with root gang short", jobID: "invalid", want: waiting},
+		{name: "existing component job with leaf gang short", jobID: "42", change: func(s *readinessSnapshot) {
+			s.groups["leaf"].Spec.SchedulingPolicy.Gang = &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2}
+			s.composites["root"].Spec.SchedulingPolicy.Gang = nil
+		}, want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())},
+		{name: "existing component job with quorum met", jobID: "42", change: func(s *readinessSnapshot) {
+			s.composites["root"].Spec.SchedulingPolicy.Gang = nil
+		}},
 		{name: "root gang met", change: func(s *readinessSnapshot) {
 			s.groups["other"] = &schedulingv1beta1.PodGroup{}
 			s.counts["other"] = 1
@@ -498,7 +511,25 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 				tt.change(snapshot)
 			}
 			tr := translator{handle: readinessHandle{manager: snapshot}}
-			got := tr.PreFilterCompositePodGroup(podWithSchedulingGroup(ns, "pod", "leaf"), &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root"}}})
+			if ParseSlurmJobId(tt.jobID) != 0 {
+				scheme := runtime.NewScheme()
+				utilruntime.Must(corev1.AddToScheme(scheme))
+				tr.workloadAPI = mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+				root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+					"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+				})
+				tr.Reader = fake.NewClientBuilder().WithScheme(scheme).WithObjects(root).Build()
+				tr.ctx = context.Background()
+			}
+			jobIR := &SlurmJobIR{
+				RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root"}},
+				Components: []SlurmJobComponent{
+					{Pods: corev1.PodList{Items: []corev1.Pod{{}}}},
+					{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{wellknown.LabelExternalJobId: tt.jobID},
+					}}}}},
+				}}
+			got := tr.PreFilterCompositePodGroup(podWithSchedulingGroup(ns, "pod", "leaf"), jobIR)
 			if !got.Equal(tt.want) {
 				t.Errorf("PreFilterCompositePodGroup(%q) = %v, want %v", tt.name, got, tt.want)
 			}
@@ -506,5 +537,86 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 	}
 	if got := (&translator{}).PreFilterCompositePodGroup(&corev1.Pod{}, &SlurmJobIR{}); got != nil {
 		t.Errorf("PreFilterCompositePodGroup(pod without scheduling group) = %v, want nil", got)
+	}
+}
+
+func TestPreFilterCompositePodGroupConfirmsLiveQuorum(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	waiting := fwk.NewStatus(fwk.UnschedulableAndUnresolvable, `waiting for composite pod group "root" tree to meet quorum`)
+	readErr := errors.New("API unavailable")
+	for _, tt := range []struct {
+		name      string
+		livePods  int
+		minPods   int32
+		minGroups int64
+		liveOther bool
+		failKind  string
+		want      *fwk.Status
+	}{
+		{name: "scheduler missing a pod", livePods: 2, minPods: 2, minGroups: 1, want: waiting},
+		{name: "scheduler missing a group", livePods: 2, minPods: 2, minGroups: 2, liveOther: true, want: waiting},
+		{name: "live leaf quorum still short", livePods: 1, minPods: 2, minGroups: 1, want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())},
+		{name: "live policy lowered quorum", livePods: 1, minPods: 1, minGroups: 1, want: waiting},
+		{name: "live root quorum still short", livePods: 2, minPods: 2, minGroups: 2, want: fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())},
+		{name: "composite list failure", failKind: "CompositePodGroupList", want: fwk.AsStatus(readErr)},
+		{name: "pod group list failure", failKind: "PodGroupList", want: fwk.AsStatus(readErr)},
+		{name: "pod list failure", minPods: 2, minGroups: 1, failKind: "PodList", want: fwk.AsStatus(readErr)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+			root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+				"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": tt.minGroups}},
+			})
+			child := newSchedulingV1Alpha3Object("CompositePodGroup", "child", map[string]any{"parentCompositePodGroupName": "root"})
+			pg := newPodGroup("leaf", ns, schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: tt.minPods},
+			})
+			pg.Spec.ParentCompositePodGroupName = ptr.To("child")
+			objects := []client.Object{root, child, pg}
+			if tt.liveOther {
+				other := newPodGroup("other", ns, schedulingv1beta1.PodGroupSchedulingPolicy{})
+				other.Spec.ParentCompositePodGroupName = ptr.To("root")
+				objects = append(objects, other, podWithSchedulingGroup(ns, "other-pod", "other"))
+			}
+			for i := range tt.livePods {
+				objects = append(objects, podWithSchedulingGroup(ns, fmt.Sprintf("pod-%d", i), "leaf"))
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					kind := list.GetObjectKind().GroupVersionKind().Kind
+					if _, ok := list.(*corev1.PodList); ok {
+						kind = "PodList"
+					}
+					if tt.failKind != "" && kind == tt.failKind {
+						return readErr
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build()
+			snapshot := &readinessSnapshot{
+				groups: map[string]*schedulingv1beta1.PodGroup{"leaf": {Spec: schedulingv1beta1.PodGroupSpec{
+					SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2}},
+				}}},
+				counts:     map[string]int{"leaf": 1},
+				composites: map[string]*schedulingv1alpha3.CompositePodGroup{"root": {}, "child": {}},
+				children: map[string][]fwk.EntityKey{
+					"root": {fwk.CompositePodGroupKey(ns, "child")}, "child": {fwk.PodGroupKey(ns, "leaf")},
+				},
+				root: fwk.CompositePodGroupKey(ns, "root"), found: true,
+			}
+			pod := podWithSchedulingGroup(ns, "pod-0", "leaf")
+			pod.Labels = map[string]string{wellknown.LabelExternalJobId: "42"}
+			ir := &SlurmJobIR{
+				RootPOM:    metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}},
+				Components: []SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}},
+			}
+			tr := translator{Reader: cl, ctx: context.Background(), workloadAPI: api, handle: readinessHandle{manager: snapshot},
+				podsByGroup: map[string]corev1.PodList{"leaf": {Items: []corev1.Pod{*pod}}}}
+			if got := tr.PreFilterCompositePodGroup(pod, ir); !got.Equal(tt.want) {
+				t.Errorf("PreFilterCompositePodGroup(%s) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
 	}
 }
