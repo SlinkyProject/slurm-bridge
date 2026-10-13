@@ -137,7 +137,7 @@ func TestSlurmJobRunnable_Sync(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewRunnable(tt.kubeClient, tt.slurmClient, tt.eventCh)
+			r := NewRunnable(tt.kubeClient, tt.kubeClient, tt.slurmClient, tt.eventCh)
 			gotErr := r.Sync(context.Background())
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -276,7 +276,7 @@ func TestSlurmJobRunnable_cleanDanglingJob(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewRunnable(tt.kubeClient, tt.slurmClient, nil)
+			r := NewRunnable(tt.kubeClient, tt.kubeClient, tt.slurmClient, nil)
 			callCnt = 0
 			gotErr := r.cleanDanglingJob(context.Background(), tt.jobId)
 			if gotErr != nil {

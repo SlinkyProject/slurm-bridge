@@ -26,6 +26,7 @@ const (
 // SlurmJobRunnable reconciles a Pod object
 type SlurmJobRunnable struct {
 	client.Client
+	apiReader client.Reader
 
 	eventCh chan<- event.GenericEvent
 
@@ -60,9 +61,10 @@ func (r *SlurmJobRunnable) Start(ctx context.Context) error {
 	}
 }
 
-func NewRunnable(kubeClient client.Client, slurmClient slurmclient.Client, eventCh chan<- event.GenericEvent) *SlurmJobRunnable {
+func NewRunnable(kubeClient client.Client, apiReader client.Reader, slurmClient slurmclient.Client, eventCh chan<- event.GenericEvent) *SlurmJobRunnable {
 	r := &SlurmJobRunnable{
 		Client:       kubeClient,
+		apiReader:    apiReader,
 		eventCh:      eventCh,
 		slurmControl: slurmcontrol.NewControl(slurmClient),
 		slurmClient:  slurmClient,

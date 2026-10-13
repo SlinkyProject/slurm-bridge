@@ -162,7 +162,7 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
-	if err := slurmjob.NewRunnable(mgr.GetClient(), slurmClient, podEventCh).SetupWithManager(mgr); err != nil {
+	if err := slurmjob.NewRunnable(mgr.GetClient(), mgr.GetAPIReader(), slurmClient, podEventCh).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmJob")
 		os.Exit(1)
 	}
