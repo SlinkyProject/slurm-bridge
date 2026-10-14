@@ -6,7 +6,6 @@ package slurmcontrol
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -88,95 +87,6 @@ func testExampleDRAInventory() []dra.GRESInventory {
 			structured.MakeDeviceID("gpu.example.com", "pool-a", "gpu-1"),
 		},
 	}}
-}
-
-func Test_realSlurmControl_GetNodeNames(t *testing.T) {
-	ctx := context.Background()
-	type fields struct {
-		Client slurmclient.Client
-	}
-	type args struct {
-		ctx context.Context
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    []string
-		wantErr bool
-	}{
-		{
-			name: "Empty",
-			fields: fields{
-				Client: fake.NewFakeClient(),
-			},
-			args: args{
-				ctx: ctx,
-			},
-			want:    []string{},
-			wantErr: false,
-		},
-		{
-			name: "Not empty",
-			fields: fields{
-				Client: func() slurmclient.Client {
-					list := &api.V0044NodeObjectList{
-						Items: []api.V0044Node{
-							{Name: ptr.To("node-0")},
-							{Name: ptr.To("node-1")},
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithLists(list).
-						Build()
-					return c
-				}(),
-			},
-			args: args{
-				ctx: ctx,
-			},
-			want:    []string{"node-0", "node-1"},
-			wantErr: false,
-		},
-		{
-			name: "Failure",
-			fields: fields{
-				Client: func() slurmclient.Client {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
-							return fmt.Errorf("failed to list resources")
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
-					return c
-				}(),
-			},
-			args: args{
-				ctx: ctx,
-			},
-			want:    nil,
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := &realSlurmControl{
-				Client: tt.fields.Client,
-			}
-			got, err := r.GetNodeNames(tt.args.ctx)
-			slices.Sort(got)
-			slices.Sort(tt.want)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("realSlurmControl.GetNodeNames() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !apiequality.Semantic.DeepEqual(got, tt.want) {
-				t.Errorf("realSlurmControl.GetNodeNames() = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 func Test_realSlurmControl_NodeExists(t *testing.T) {

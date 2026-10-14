@@ -29,8 +29,6 @@ import (
 )
 
 type SlurmControlInterface interface {
-	// GetNodeNames returns the list Slurm nodes by name.
-	GetNodeNames(ctx context.Context) ([]string, error)
 	// NodeExists returns true if the Slurm node exists, false if not found.
 	NodeExists(ctx context.Context, node *corev1.Node) (bool, error)
 	// MakeNodeDrain handles adding the DRAIN state to the Slurm node.
@@ -85,19 +83,6 @@ func (e *IncompatibleGRESConfigurationError) Error() string {
 		e.required,
 		strings.Join(e.gresConf, "\n"),
 	)
-}
-
-// GetNodeNames implements SlurmControlInterface.
-func (r *realSlurmControl) GetNodeNames(ctx context.Context) ([]string, error) {
-	list := &api.V0044NodeObjectList{}
-	if err := r.List(ctx, list); err != nil {
-		return nil, err
-	}
-	nodenames := make([]string, len(list.Items))
-	for i, node := range list.Items {
-		nodenames[i] = *node.Name
-	}
-	return nodenames, nil
 }
 
 // NodeExists implements SlurmControlInterface.

@@ -14,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/util/taints"
-	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -60,17 +59,11 @@ func (r *NodeReconciler) syncTaint(ctx context.Context, req reconcile.Request) e
 		return err
 	}
 
-	// Get Slurm NodeNames
-	slurmNodeNames, err := r.slurmControl.GetNodeNames(ctx)
+	exists, err := r.slurmControl.NodeExists(ctx, node)
 	if err != nil {
 		return err
 	}
-	slurmNodeNameSet := set.New(slurmNodeNames...)
-
-	// `node` is by definition a Kubernetes node, so its own Slurm name is trivially a
-	// member of the set of all Kubernetes nodes' Slurm names; no need to list every
-	// Kubernetes node to compute that intersection.
-	if slurmNodeNameSet.Has(nodeutils.GetSlurmNodeName(node)) {
+	if exists {
 		// Requeue until no longer a bridged node
 		durationStore.Push(node.Name, 30*time.Second)
 
