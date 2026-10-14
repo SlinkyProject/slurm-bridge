@@ -9,6 +9,26 @@ fullnameOverride: ""
 # -- Overrides the namespace of the release.
 namespaceOverride: ""
 
+# Stop all bridge components before applying an upgrade.
+upgradeHook:
+  # -- Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading.
+  enabled: true
+  image:
+    # -- Image containing /bin/sh and kubectl for the upgrade hook.
+    repository: docker.io/alpine/k8s
+    # -- Kubectl image tag. Use a version compatible with the Kubernetes API server.
+    tag: "1.36.0"
+    # -- Image pull policy for the upgrade hook.
+    pullPolicy: IfNotPresent
+  # -- Maximum hook runtime in seconds, including pod scheduling and shutdown. Set the Helm timeout higher than this.
+  activeDeadlineSeconds: 300
+  # -- Resource requests and limits for the upgrade hook.
+  resources: {}
+  # -- Node selector for the upgrade hook.
+  nodeSelector: {}
+  # -- Tolerations for the upgrade hook.
+  tolerations: []
+
 # Default values for slurm-bridge.
 scheduler:
   # -- The image to use, `${repository}:${tag}`.
