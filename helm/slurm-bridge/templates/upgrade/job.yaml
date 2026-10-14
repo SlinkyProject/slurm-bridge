@@ -1,0 +1,71 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if .Values.upgradeHook.enabled }}
+{{- $name := printf "%s-pre-upgrade" (include "slurm-bridge.fullname" . | trunc 51 | trimSuffix "-") }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
+  labels:
+    {{- include "slurm-bridge.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: {{ .Values.upgradeHook.activeDeadlineSeconds }}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "slurm-bridge.labels" . | nindent 8 }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: pre-upgrade
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      schedulerName: default-scheduler
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: shutdown
+          image: {{ printf "%s:%s" .Values.upgradeHook.image.repository .Values.upgradeHook.image.tag | quote }}
+          imagePullPolicy: {{ .Values.upgradeHook.image.pullPolicy }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              {{- .Files.Get "files/pre-upgrade.sh" | nindent 14 }}
+          env:
+            - name: BRIDGE_NAMESPACE
+              value: {{ include "slurm-bridge.namespace" . | quote }}
+            - name: BRIDGE_SELECTOR
+              value: {{ printf "app.kubernetes.io/instance=%s,app.kubernetes.io/component in (scheduler,controllers,admission)" .Release.Name | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.upgradeHook.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.upgradeHook.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.upgradeHook.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -112,6 +112,9 @@ For additional instructions, see the [quickstart] guide.
 
 ## Documentation
 
+Follow the [upgrade policy](./docs/upgrades.md) when updating an existing
+installation. Upgrades stop all bridge components before applying changes.
+
 Project documentation is located in the [docs] directory of this repository.
 
 [Slinky documentation][slinky-docs] is hosted on the web.
