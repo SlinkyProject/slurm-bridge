@@ -360,7 +360,7 @@ function jobset::install() {
 	chartName="jobset"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing jobset..."
-		local version="0.12.0"
+		local version="0.13.0"
 		helm install "$chartName" oci://registry.k8s.io/jobset/charts/jobset \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi
@@ -371,7 +371,7 @@ function lws::install() {
 	chartName="lws"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.9.x"
+		local version="0.11.1"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi

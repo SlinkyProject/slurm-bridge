@@ -6,6 +6,8 @@ metadata:
   namespace: slurm-bridge
 spec:
   replicas: 2
+  groupIdentity: Ordinal
+  startupPolicy: LeaderCreated
   leaderWorkerTemplate:
     size: 3
     restartPolicy: RecreateGroupOnPodRestart

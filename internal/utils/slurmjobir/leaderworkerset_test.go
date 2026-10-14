@@ -8,10 +8,12 @@ import (
 	"errors"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
@@ -382,6 +384,94 @@ func Test_translator_fromLws(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("translator.fromLws() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// Exercise the StatefulSet ownership chains used by ordinal LWS controllers,
+// including manifests created before groupIdentity was introduced.
+func TestTranslateOrdinalLWSReplicaGroups(t *testing.T) {
+	for _, identity := range []struct {
+		name  string
+		value lwsv1.GroupIdentityType
+	}{
+		{name: "default"},
+		{name: "explicit ordinal", value: lwsv1.GroupIdentityOrdinal},
+	} {
+		t.Run(identity.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			utilruntime.Must(appsv1.AddToScheme(scheme))
+			utilruntime.Must(lwsv1.AddToScheme(scheme))
+
+			lws := newLWS("lws", 2)
+			lws.UID = "lws-uid"
+			lws.Spec.Replicas = ptr.To[int32](2)
+			lws.Spec.GroupIdentity = identity.value
+			lws.Annotations = map[string]string{wellknown.AnnotationPartition: "lws-partition"}
+			leaders := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+				Name: "lws", Namespace: lws.Namespace, UID: "leaders-uid",
+				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(lws, lwsv1.GroupVersion.WithKind("LeaderWorkerSet"))},
+			}}
+			objects := []client.Object{lws, leaders}
+			groups := map[string][]*corev1.Pod{}
+			for _, index := range []string{"0", "1"} {
+				leaderName := "lws-" + index
+				newPod := func(name, workerIndex string, owner *appsv1.StatefulSet) *corev1.Pod {
+					return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+						Name: name, Namespace: lws.Namespace, UID: types.UID(name + "-uid"),
+						// Literal wire labels detect upstream label changes during upgrades.
+						Labels: map[string]string{
+							"leaderworkerset.sigs.k8s.io/name":         lws.Name,
+							"leaderworkerset.sigs.k8s.io/group-index":  index,
+							"leaderworkerset.sigs.k8s.io/group-key":    "group-" + index,
+							"leaderworkerset.sigs.k8s.io/worker-index": workerIndex,
+						},
+						OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(owner, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+					}}
+				}
+				leader := newPod(leaderName, "0", leaders)
+				workers := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{
+					Name: leaderName, Namespace: lws.Namespace, UID: types.UID(leaderName + "-workers-uid"),
+					OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(leader, corev1.SchemeGroupVersion.WithKind("Pod"))},
+				}}
+				worker := newPod(leaderName+"-1", "1", workers)
+				groups[index] = []*corev1.Pod{leader, worker}
+				objects = append(objects, leader, workers, worker)
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			for _, index := range []string{"0", "1"} {
+				for _, pod := range groups[index] {
+					t.Run(pod.Name, func(t *testing.T) {
+						ir, err := TranslateToSlurmJobIR(c, nil, nil, context.Background(), pod)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if ir.RootPOM.TypeMeta != lws_v1 || ir.RootPOM.Name != lws.Name {
+							t.Fatalf("scheduling root = %s %s, want LeaderWorkerSet %s", ir.RootPOM.Kind, ir.RootPOM.Name, lws.Name)
+						}
+						if len(ir.Components) != 1 || len(ir.AllPods()) != 2 {
+							t.Fatalf("replica allocation has %d components and %d Pods, want 1 and 2", len(ir.Components), len(ir.AllPods()))
+						}
+						for _, member := range ir.AllPods() {
+							if member.Labels["leaderworkerset.sigs.k8s.io/group-index"] != index {
+								t.Errorf("replica %s contains Pod %s from another replica", index, member.Name)
+							}
+						}
+						info := ir.Components[0].JobInfo
+						if ptr.Deref(info.JobName, "") != "lws-"+index || ptr.Deref(info.Partition, "") != "lws-partition" {
+							t.Errorf("job name or LWS annotations changed: %+v", info)
+						}
+						if ptr.Deref(info.MinNodes, 0) != 2 || ptr.Deref(info.MaxNodes, 0) != 2 || ptr.Deref(info.TasksPerNode, 0) != 1 {
+							t.Errorf("replica allocation sizing changed: %+v", info)
+						}
+						tr := &translator{Reader: c, ctx: context.Background()}
+						if status := tr.PreFilterLWS(pod, ir); !status.IsSuccess() {
+							t.Fatalf("complete replica was rejected: %v", status.AsError())
+						}
+					})
+				}
 			}
 		})
 	}

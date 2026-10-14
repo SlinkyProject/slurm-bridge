@@ -629,6 +629,23 @@ This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 LeaderWorkerSet groups will be co-scheduled so pods of each group will be
 guaranteed to launch together.
 
+Use `spec.groupIdentity: Ordinal` (the LWS default) and
+`spec.startupPolicy: LeaderCreated` for this integration. Each replica group
+receives its own Slurm allocation, with a default job name of
+`<set-name>-<group-index>`. Existing manifests that omit `groupIdentity` retain
+ordinal behavior with LWS v0.11.1. The `Hash` identity mode is not currently
+supported by slurm-bridge.
+
+The development installer uses LWS v0.11.1 with its default feature gates. Keep
+the LWS `WorkloadAwareScheduling` gate disabled when using this direct
+LeaderWorkerSet group scheduling. The existing
+[built-in PodGroup](#built-in-podgroup) integration can still group LWS Pods
+through `spec.schedulingGroup.podGroupName` on their Pod templates.
+
+When upgrading an existing Helm installation, apply the updated LWS CRDs before
+upgrading the controller, following the
+[upstream upgrade instructions](https://lws.sigs.k8s.io/docs/installation/#upgrade-by-helm).
+
 > [!NOTE]
 > Topology-aware placement is not supported yet, so some features of
 > LeaderWorkerSet may not behave as expected.

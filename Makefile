@@ -221,7 +221,7 @@ GOTESTSUM_VERSION ?= v1.13.0
 # Written by `make govulncheck`: CSV (see file header comments). CI uploads as an artifact.
 GOVULNCHECK_REPORT ?= govulncheck-vulns.csv
 
-GOLANGCI_LINT_VERSION ?= v2.11.1
+GOLANGCI_LINT_VERSION ?= v2.14.0
 GOLANGCI_LINT_BASE_REV ?= HEAD
 HELM_DOCS_VERSION ?= v1.14.2
 PANDOC_VERSION ?= 3.9
