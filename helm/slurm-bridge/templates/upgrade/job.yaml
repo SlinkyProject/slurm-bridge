@@ -9,7 +9,6 @@ SPDX-License-Identifier: Apache-2.0
       (printf "--namespace=%s" (include "slurm-bridge.namespace" .))
       (printf "--selector=app.kubernetes.io/instance=%s,app.kubernetes.io/component in (scheduler,controllers,admission)" .Release.Name)
       (printf "--timeout=%vs" .Values.upgradeHook.activeDeadlineSeconds)
-      "--request-timeout=30s"
       "--cache-dir=/tmp/kubectl-cache"
 }}
 apiVersion: batch/v1
