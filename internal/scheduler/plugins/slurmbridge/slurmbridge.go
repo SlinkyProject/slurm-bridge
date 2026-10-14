@@ -382,11 +382,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		if data, err := groupState.Read(nativeGroupCycleKey); err == nil {
 			group = data.(*nativeGroupCycle)
 		} else {
-			group = &nativeGroupCycle{status: status}
+			group = &nativeGroupCycle{}
 			groupState.Write(nativeGroupCycleKey, group)
 		}
-		group.pending = group.pending || status.IsSuccess() && result == nil
-		group.members = append(group.members, nativeGroupMemberCycle{state: state, pod: pod, result: result})
+		group.members = append(group.members, nativeGroupMemberCycle{state: state, pod: pod, result: result, status: status})
 
 		parentPlacement := groupState.GetParentPlacementCycleState()
 		if parentPlacement == nil {
@@ -684,37 +683,40 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 
 const nativeGroupCycleKey fwk.StateKey = Name + "/native-group"
 
-// A native group cycle runs scheduling hooks serially. All members share this
-// decision, which is discarded with the cycle rather than surviving a retry.
+// A native group cycle runs scheduling hooks serially. Allocation outcomes are
+// discarded with the cycle rather than surviving a retry.
 // Each member's ordinary state retains the immutable allocation for binding,
 // after the framework detaches the PodGroup scheduling-cycle state.
 type nativeGroupCycle struct {
-	// state          *stateData
-	// result         *fwk.PreFilterResult
-	status         *fwk.Status
-	pending        bool
-	postFilterDone bool
-	// postResult     *fwk.PostFilterResult
-	postStatus *fwk.Status
-	members    []nativeGroupMemberCycle
+	members   []nativeGroupMemberCycle
+	completed map[types.UID]bool
 }
 
 type nativeGroupMemberCycle struct {
 	state  fwk.CycleState
 	pod    *corev1.Pod
 	result *fwk.PreFilterResult
+	status *fwk.Status
 }
 
 func (s *nativeGroupCycle) Clone() fwk.StateData { return s }
 
 func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGroupCycleState, pgInfo fwk.PodGroupInfo, _ fwk.PodGroupSchedulingFunc) (*fwk.PodGroupPostFilterResult, *fwk.Status) {
 	data, err := state.Read(nativeGroupCycleKey)
-	if err != nil {
+	if err != nil && pgInfo.GetType() != fwk.CompositePodGroupKeyType {
 		return nil, fwk.NewStatus(fwk.Unschedulable, "native PodGroup has no scheduling decision")
 	}
-	group := data.(*nativeGroupCycle)
+	group := &nativeGroupCycle{}
+	if err == nil {
+		group = data.(*nativeGroupCycle)
+	} else {
+		state.Write(nativeGroupCycleKey, group)
+	}
 	evaluated := make(map[types.UID]bool, len(group.members))
 	for _, member := range group.members {
+		if member.status.IsError() {
+			return nil, member.status
+		}
 		evaluated[member.pod.UID] = true
 	}
 	var unevaluated []*corev1.Pod
@@ -724,15 +726,6 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 		}
 	}
 	klog.FromContext(ctx).V(4).Info("found unevaluated PodGroup members", "count", len(unevaluated))
-	if !group.status.IsSuccess() {
-		return nil, group.status
-	}
-	if group.postFilterDone {
-		if group.postStatus.IsSuccess() {
-			return &fwk.PodGroupPostFilterResult{}, group.postStatus
-		}
-		return nil, group.postStatus
-	}
 	if pgInfo.GetType() == fwk.CompositePodGroupKeyType && len(unevaluated) > 0 {
 		runner, ok := sb.handle.(framework.Framework)
 		if !ok {
@@ -741,21 +734,67 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 		for _, pod := range unevaluated {
 			podState := framework.NewCycleState()
 			result, status, _ := runner.RunPreFilterPlugins(ctx, podState, pod)
-			if !status.IsSuccess() {
+			if status.IsError() {
 				return nil, status
 			}
-			group.members = append(group.members, nativeGroupMemberCycle{state: podState, pod: pod, result: result})
-			group.pending = group.pending || result == nil
+			group.members = append(group.members, nativeGroupMemberCycle{state: podState, pod: pod, result: result, status: status})
 		}
+	}
+	allocations := make(map[types.UID]types.UID)
+	pending := make(map[types.UID]bool)
+	// Translation defines both the root and complete membership of an allocation.
+	// Index each allocation once, including members rejected before translation.
+	for _, member := range group.members {
+		s, err := getStateData(member.state)
+		if err != nil {
+			if member.status.IsSuccess() {
+				return nil, fwk.AsStatus(err)
+			}
+			continue
+		}
+		if s.slurmJobIR == nil {
+			continue
+		}
+		root := s.slurmJobIR.RootPOM.UID
+		if _, found := pending[root]; !found {
+			for _, component := range s.slurmJobIR.Components {
+				for _, pod := range component.Pods.Items {
+					allocations[pod.UID] = root
+				}
+			}
+		}
+		pending[root] = pending[root] || member.status.IsSuccess() && member.result == nil
+	}
+	blocked := make(map[types.UID]bool)
+	var failure *fwk.Status
+	for _, member := range group.members {
+		if member.status.IsSuccess() {
+			continue
+		}
+		if allocation, found := allocations[member.pod.UID]; found {
+			blocked[allocation] = true
+		}
+		failure = member.status
 	}
 	nodes, err := sb.handle.SnapshotSharedLister().NodeInfos().List()
 	if err != nil {
 		return nil, fwk.AsStatus(err)
 	}
+	if group.completed == nil {
+		group.completed = make(map[types.UID]bool)
+	}
+	completed := group.completed
 	for _, member := range group.members {
+		allocation, found := allocations[member.pod.UID]
+		if !found || blocked[allocation] || completed[allocation] {
+			continue
+		}
 		statuses := framework.NewDefaultNodeToStatus()
 		failed := false
 		for _, node := range nodes {
+			if node.Node() == nil {
+				continue
+			}
 			name := node.Node().Name
 			if member.result != nil && !member.result.AllNodes() && !member.result.NodeNames.Has(name) {
 				continue
@@ -767,15 +806,26 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 			statuses.Set(name, status)
 			failed = failed || !status.IsSuccess()
 		}
-		if group.pending || failed {
+		if pending[allocation] || failed {
 			_, status := sb.PostFilter(ctx, member.state, member.pod, statuses)
 			if status.IsSuccess() {
-				return &fwk.PodGroupPostFilterResult{}, status
+				completed[allocation] = true
+				continue
 			}
 			if !errors.Is(status.AsError(), ErrorUnprocessedComponents) {
-				return nil, status
+				if status.IsError() {
+					return nil, status
+				}
+				blocked[allocation] = true
+				failure = status
 			}
 		}
+	}
+	if len(completed) > 0 {
+		return &fwk.PodGroupPostFilterResult{}, nil
+	}
+	if failure != nil {
+		return nil, failure
 	}
 	return nil, fwk.AsStatus(ErrorUnprocessedComponents)
 }
@@ -786,7 +836,7 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, state fwk.CycleState, s *stateData, pod *corev1.Pod, m fwk.NodeToStatusReader) *fwk.Status {
 	logger := klog.FromContext(ctx)
 
-	feasibleNodes, err := m.NodesForStatusCode(sb.handle.SnapshotSharedLister().NodeInfos(), fwk.Unschedulable)
+	feasibleNodes, err := sb.handle.SnapshotSharedLister().NodeInfos().List()
 	if err != nil {
 		logger.Error(err, "error getting nodes that SlurmBridge can use")
 		return fwk.NewStatus(fwk.Error, err.Error())
@@ -805,6 +855,9 @@ func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s
 	slurmNodes := set.New(slurmNodeNames...)
 	feasibleSlurmNodes := set.New[string]()
 	for _, node := range feasibleNodes {
+		if node.Node() == nil {
+			continue
+		}
 		slurmName := nodecontrollerutils.GetSlurmNodeName(node.Node())
 		if !slurmNodes.Has(slurmName) {
 			continue

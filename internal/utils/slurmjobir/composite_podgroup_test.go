@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -78,6 +79,120 @@ func TestTranslateToSlurmJobIRSelectsCompositePodGroupRoot(t *testing.T) {
 	}
 	if got.RootPOM.TypeMeta != compositePodGroupV1Alpha3 || got.RootPOM.Name != rootName {
 		t.Errorf("TranslateToSlurmJobIR() root = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, compositePodGroupV1Alpha3, rootName)
+	}
+}
+
+func TestTranslateToSlurmJobIRBasicCompositeBoundaries(t *testing.T) {
+	tests := []struct {
+		name              string
+		rootBasic         bool
+		childBasic        bool
+		unsupportedBasic  bool
+		missingController bool
+		wantRoot          string
+		wantGroups        []string
+	}{
+		{name: "gang hierarchy", wantRoot: "root", wantGroups: []string{"leaf0", "leaf1", "other"}},
+		{name: "gang below basic", rootBasic: true, wantRoot: "child", wantGroups: []string{"leaf0", "leaf1"}},
+		{name: "basic below gang", childBasic: true, wantRoot: "leaf0", wantGroups: []string{"leaf0"}},
+		{name: "basic hierarchy", rootBasic: true, childBasic: true, wantRoot: "leaf0", wantGroups: []string{"leaf0"}},
+		{name: "basic allocation does not resolve controller ancestry", rootBasic: true, childBasic: true, missingController: true, wantRoot: "leaf0", wantGroups: []string{"leaf0"}},
+		{name: "unsupported basic boundary is rejected", rootBasic: true, unsupportedBasic: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+			root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+				"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+			})
+			child := newSchedulingV1Alpha3Object("CompositePodGroup", "child", map[string]any{
+				"parentCompositePodGroupName": "root",
+				"schedulingPolicy":            map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+			})
+			for obj, basic := range map[*unstructured.Unstructured]bool{root: tt.rootBasic, child: tt.childBasic} {
+				if basic {
+					obj.Object["spec"].(map[string]any)["schedulingPolicy"] = map[string]any{"basic": map[string]any{}}
+				}
+			}
+			if tt.unsupportedBasic {
+				root.Object["spec"].(map[string]any)["priorityClassName"] = "unsupported"
+			}
+			objects := []client.Object{root, child}
+			var firstPod *corev1.Pod
+			for _, name := range []string{"leaf0", "leaf1", "other"} {
+				pg := newPodGroup(name, corev1.NamespaceDefault, schedulingv1beta1.PodGroupSchedulingPolicy{
+					Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 1},
+				})
+				if tt.missingController {
+					pg.Spec.SchedulingPolicy = schedulingv1beta1.PodGroupSchedulingPolicy{Basic: &schedulingv1beta1.BasicSchedulingPolicy{}}
+				}
+				pg.Spec.ParentCompositePodGroupName = ptr.To("child")
+				if name == "other" {
+					pg.Spec.ParentCompositePodGroupName = ptr.To("root")
+				}
+				pod := podWithSchedulingGroup(corev1.NamespaceDefault, name+"-pod", name)
+				if tt.missingController {
+					pod.OwnerReferences = []metav1.OwnerReference{controllerOwner(job_v1.APIVersion, job_v1.Kind, "unreadable")}
+				}
+				objects = append(objects, pg, pod)
+				if firstPod == nil {
+					firstPod = pod
+				}
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			ir, err := TranslateToSlurmJobIR(cl, nil, api, context.Background(), firstPod)
+			if tt.unsupportedBasic {
+				if !errors.Is(err, ErrorCompositePodGroupUnsupported) {
+					t.Fatalf("TranslateToSlurmJobIR(%s) error = %v, want %v", tt.name, err, ErrorCompositePodGroupUnsupported)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("TranslateToSlurmJobIR(%s): %v", tt.name, err)
+			}
+			wantType := compositePodGroupV1Alpha3
+			if tt.wantRoot == "leaf0" {
+				wantType = api.PodGroupTypeMeta
+			}
+			if ir.RootPOM.Name != tt.wantRoot || ir.RootPOM.TypeMeta != wantType {
+				t.Errorf("TranslateToSlurmJobIR(%s) root = %v %s, want %v %s", tt.name, ir.RootPOM.TypeMeta, ir.RootPOM.Name, wantType, tt.wantRoot)
+			}
+			var groups []string
+			for _, component := range ir.Components {
+				groups = append(groups, component.ObjectMeta.Name)
+			}
+			slices.Sort(groups)
+			if !slices.Equal(groups, tt.wantGroups) {
+				t.Errorf("TranslateToSlurmJobIR(%s) groups = %v, want %v", tt.name, groups, tt.wantGroups)
+			}
+		})
+	}
+}
+
+func TestCompositeReadinessStopsAtBasicParent(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	snapshot := &readinessSnapshot{
+		groups: map[string]*schedulingv1beta1.PodGroup{"leaf": {}},
+		counts: map[string]int{"leaf": 1},
+		composites: map[string]*schedulingv1alpha3.CompositePodGroup{
+			"basic": {Spec: schedulingv1alpha3.CompositePodGroupSpec{SchedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{Basic: &schedulingv1alpha3.CompositeBasicSchedulingPolicy{}}}},
+			"gang":  {Spec: schedulingv1alpha3.CompositePodGroupSpec{SchedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{Gang: &schedulingv1alpha3.CompositeGangSchedulingPolicy{MinGroupCount: 1}}}},
+		},
+		// No parent state: only the selected allocation's readiness matters.
+		children: map[string][]fwk.EntityKey{"gang": {fwk.PodGroupKey(ns, "leaf")}},
+		root:     fwk.CompositePodGroupKey(ns, "basic"), found: true,
+	}
+	tr := translator{handle: readinessHandle{manager: snapshot}}
+	ir := &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "gang"}}}
+	pod := podWithSchedulingGroup(ns, "pod", "leaf")
+	if status := tr.PreFilterCompositePodGroup(pod, ir); !status.IsSuccess() {
+		t.Fatalf("PreFilterCompositePodGroup(ready gang below basic) = %v, want success", status)
+	}
+	snapshot.counts["leaf"] = 0
+	if status := tr.PreFilterCompositePodGroup(pod, ir); status.IsSuccess() {
+		t.Error("PreFilterCompositePodGroup(unready gang below basic) = success, want unschedulable")
 	}
 }
 
@@ -359,7 +474,7 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 		}, want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, `waiting for pods's pod group "leaf" to appear in scheduling queue`)},
 		{name: "root missing", change: func(s *readinessSnapshot) {
 			s.found = false
-		}, want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "failed to build hierarchy snapshot: composite pod group object not found in state for compositepodgroup/default/child")},
+		}, want: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, "failed to build hierarchy snapshot: composite pod group object not found in state for compositepodgroup/default/root")},
 		{name: "root lookup error", change: func(s *readinessSnapshot) {
 			s.rootErr = lookupErr
 		}, want: fwk.AsStatus(lookupErr)},
@@ -383,7 +498,7 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 				tt.change(snapshot)
 			}
 			tr := translator{handle: readinessHandle{manager: snapshot}}
-			got := tr.PreFilterCompositePodGroup(podWithSchedulingGroup(ns, "pod", "leaf"), &SlurmJobIR{})
+			got := tr.PreFilterCompositePodGroup(podWithSchedulingGroup(ns, "pod", "leaf"), &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root"}}})
 			if !got.Equal(tt.want) {
 				t.Errorf("PreFilterCompositePodGroup(%q) = %v, want %v", tt.name, got, tt.want)
 			}

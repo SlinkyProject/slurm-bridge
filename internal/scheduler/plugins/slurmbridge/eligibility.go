@@ -27,6 +27,9 @@ func eligibleFilterStatus(status *fwk.Status) bool {
 // released. canRelease, when supplied, limits removal to pods that are already
 // releasing resources. Normal Kubernetes Filter and PreBind checks gate binding.
 func (sb *SlurmBridge) nodeEligibleForSlurm(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, node fwk.NodeInfo, status *fwk.Status, canRelease func(*corev1.Pod) bool) (bool, *fwk.Status) {
+	if status.IsSuccess() {
+		return true, nil
+	}
 	if status.Code() == fwk.Unschedulable && status.Plugin() == Name {
 		return true, nil
 	}

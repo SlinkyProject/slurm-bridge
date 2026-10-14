@@ -42,11 +42,11 @@ type WorkloadAPI struct {
 }
 
 type compositePodGroupInfo struct {
-	name          string
-	parentName    string
-	templateName  string
-	workloadName  string
-	minGroupCount *int64
+	name             string
+	parentName       string
+	templateName     string
+	workloadName     string
+	schedulingPolicy schedulingv1beta1.CompositePodGroupSchedulingPolicy
 }
 
 // PodGroup is the common wire shape used by the v1alpha2 and v1beta1 APIs.
@@ -266,6 +266,9 @@ func (t *translator) getCompositePodGroup(key client.ObjectKey) (compositePodGro
 	if err != nil {
 		return compositePodGroupInfo{}, err
 	}
+	if err := validateCompositePodGroup(obj); err != nil {
+		return compositePodGroupInfo{}, err
+	}
 	return decodeCompositePodGroup(obj)
 }
 
@@ -286,7 +289,15 @@ func decodeCompositePodGroup(obj *unstructured.Unstructured) (compositePodGroupI
 		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s workload name: %w", key.Namespace, key.Name, err)
 	}
 
-	gang, found, err := unstructured.NestedMap(obj.Object, "spec", "schedulingPolicy", "gang")
+	policy, _, err := unstructured.NestedMap(obj.Object, "spec", "schedulingPolicy")
+	if err != nil {
+		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s scheduling policy: %w", key.Namespace, key.Name, err)
+	}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(policy, &info.schedulingPolicy); err != nil {
+		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s scheduling policy: %w", key.Namespace, key.Name, err)
+	}
+
+	gang, found, err := unstructured.NestedMap(policy, "gang")
 	if err != nil {
 		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s gang policy: %w", key.Namespace, key.Name, err)
 	}
@@ -294,14 +305,13 @@ func decodeCompositePodGroup(obj *unstructured.Unstructured) (compositePodGroupI
 		return info, nil
 	}
 
-	minGroupCount, found, err := unstructured.NestedInt64(gang, "minGroupCount")
+	_, found, err = unstructured.NestedInt64(gang, "minGroupCount")
 	if err != nil {
 		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s minGroupCount: %w", key.Namespace, key.Name, err)
 	}
 	if !found {
 		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s: gang policy has no minGroupCount", key.Namespace, key.Name)
 	}
-	info.minGroupCount = &minGroupCount
 	return info, nil
 }
 
@@ -323,14 +333,22 @@ func validateCompositePodGroup(obj *unstructured.Unstructured) error {
 	return nil
 }
 
+// compositePodGroupRootName returns the highest composite below a basic boundary.
+// An empty name means the PodGroup itself is the independent allocation.
 func (t *translator) compositePodGroupRootName(namespace, name string) (string, error) {
+	var rootName string
 	for range maxCompositePodGroupTreeDepth {
 		info, err := t.getCompositePodGroup(client.ObjectKey{Namespace: namespace, Name: name})
 		if err != nil {
 			return "", err
 		}
+		// A basic parent separates its children into independent allocations.
+		if info.schedulingPolicy.Basic != nil {
+			return rootName, nil
+		}
+		rootName = name
 		if info.parentName == "" {
-			return name, nil
+			return rootName, nil
 		}
 		name = info.parentName
 	}
