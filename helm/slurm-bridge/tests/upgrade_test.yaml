@@ -41,9 +41,33 @@ tests:
       - equal:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: pre-upgrade
-      - matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: 'scale deployments.*--replicas=0'
+  - it: scales and observes deployments before waiting for pod deletion without a shell
+    template: upgrade/job.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: scale-down
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: --replicas=0
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: wait-for-deployments
+      - contains:
+          path: spec.template.spec.initContainers[1].args
+          content: --for=condition=Available
+      - contains:
+          path: spec.template.spec.initContainers[1].args
+          content: --for=jsonpath={.spec.replicas}=0
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --for=delete
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: [kubectl]
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.k8s.io/kubectl:v1.36.0
   - it: targets existing components even when admission is being disabled or names change
     template: upgrade/job.yaml
     set:
@@ -55,13 +79,24 @@ tests:
       - equal:
           path: metadata.namespace
           value: custom-namespace
-      - equal:
-          path: spec.template.spec.containers[0].env
-          value:
-            - name: BRIDGE_NAMESPACE
-              value: custom-namespace
-            - name: BRIDGE_SELECTOR
-              value: app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: --namespace=custom-namespace
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: --selector=app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
+      - contains:
+          path: spec.template.spec.initContainers[1].args
+          content: --namespace=custom-namespace
+      - contains:
+          path: spec.template.spec.initContainers[1].args
+          content: --selector=app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --namespace=custom-namespace
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --selector=app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
   - it: creates namespace permissions before the job with matching identities
     template: upgrade/rbac.yaml
     set:
@@ -111,13 +146,13 @@ tests:
           value:
             - apiGroups: [apps]
               resources: [deployments]
-              verbs: [get, list]
+              verbs: [get, list, watch]
             - apiGroups: [apps]
               resources: [deployments/scale]
               verbs: [get, patch, update]
             - apiGroups: [""]
               resources: [pods]
-              verbs: [list]
+              verbs: [get, list, watch]
   - it: allows configuring the hook image deadline and placement
     template: upgrade/job.yaml
     set:
@@ -142,6 +177,21 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].image
           value: registry.example.com/kubectl:v1.36.1
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: registry.example.com/kubectl:v1.36.1
+      - equal:
+          path: spec.template.spec.initContainers[1].image
+          value: registry.example.com/kubectl:v1.36.1
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: --timeout=600s
+      - contains:
+          path: spec.template.spec.initContainers[1].args
+          content: --timeout=600s
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --timeout=600s
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always

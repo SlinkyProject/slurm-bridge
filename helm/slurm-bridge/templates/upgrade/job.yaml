@@ -5,6 +5,13 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.upgradeHook.enabled }}
 {{- $name := printf "%s-pre-upgrade" (include "slurm-bridge.fullname" . | trunc 51 | trimSuffix "-") }}
+{{- $args := list
+      (printf "--namespace=%s" (include "slurm-bridge.namespace" .))
+      (printf "--selector=app.kubernetes.io/instance=%s,app.kubernetes.io/component in (scheduler,controllers,admission)" .Release.Name)
+      (printf "--timeout=%vs" .Values.upgradeHook.activeDeadlineSeconds)
+      "--request-timeout=30s"
+      "--cache-dir=/tmp/kubectl-cache"
+}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -35,30 +42,32 @@ spec:
         runAsUser: 65534
         seccompProfile:
           type: RuntimeDefault
-      containers:
-        - name: shutdown
-          image: {{ printf "%s:%s" .Values.upgradeHook.image.repository .Values.upgradeHook.image.tag | quote }}
-          imagePullPolicy: {{ .Values.upgradeHook.image.pullPolicy }}
-          command: [/bin/sh, -ec]
+      initContainers:
+        - name: scale-down
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
           args:
-            - |
-              {{- .Files.Get "files/pre-upgrade.sh" | nindent 14 }}
-          env:
-            - name: BRIDGE_NAMESPACE
-              value: {{ include "slurm-bridge.namespace" . | quote }}
-            - name: BRIDGE_SELECTOR
-              value: {{ printf "app.kubernetes.io/instance=%s,app.kubernetes.io/component in (scheduler,controllers,admission)" .Release.Name | quote }}
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: [ALL]
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-          {{- with .Values.upgradeHook.resources }}
-          resources: {{- toYaml . | nindent 12 }}
-          {{- end }}
+            - scale
+            - deployments
+            - --replicas=0
+            {{- toYaml $args | nindent 12 }}
+        # At zero replicas a Deployment is Available once its controller has
+        # observed the scale-down. kubectl wait checks observedGeneration too.
+        - name: wait-for-deployments
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - wait
+            - deployments
+            - --for=condition=Available
+            - --for=jsonpath={.spec.replicas}=0
+            {{- toYaml $args | nindent 12 }}
+      containers:
+        - name: wait-for-pods
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - wait
+            - pods
+            - --for=delete
+            {{- toYaml $args | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
