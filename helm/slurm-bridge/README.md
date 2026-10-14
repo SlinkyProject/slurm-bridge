@@ -88,8 +88,8 @@ Kubernetes: `>= 1.34.0-0`
 | upgradeHook.activeDeadlineSeconds | int | `300` | Maximum hook runtime in seconds, including pod scheduling and shutdown. Set the Helm timeout higher than this. |
 | upgradeHook.enabled | bool | `true` | Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading. |
 | upgradeHook.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the upgrade hook. |
-| upgradeHook.image.repository | string | `"docker.io/alpine/k8s"` | Image containing /bin/sh and kubectl for the upgrade hook. |
-| upgradeHook.image.tag | string | `"1.36.0"` | Kubectl image tag. Use a version compatible with the Kubernetes API server. |
+| upgradeHook.image.repository | string | `"registry.k8s.io/kubectl"` | Kubectl image for the upgrade hook. |
+| upgradeHook.image.tag | string | `"v1.36.0"` | Kubectl image tag. Use a version compatible with the Kubernetes API server. |
 | upgradeHook.nodeSelector | object | `{}` | Node selector for the upgrade hook. |
 | upgradeHook.resources | object | `{}` | Resource requests and limits for the upgrade hook. |
 | upgradeHook.tolerations | list | `[]` | Tolerations for the upgrade hook. |

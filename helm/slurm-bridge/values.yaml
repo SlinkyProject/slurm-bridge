@@ -14,10 +14,10 @@ upgradeHook:
   # -- Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading.
   enabled: true
   image:
-    # -- Image containing /bin/sh and kubectl for the upgrade hook.
-    repository: docker.io/alpine/k8s
+    # -- Kubectl image for the upgrade hook.
+    repository: registry.k8s.io/kubectl
     # -- Kubectl image tag. Use a version compatible with the Kubernetes API server.
-    tag: "1.36.0"
+    tag: "v1.36.0"
     # -- Image pull policy for the upgrade hook.
     pullPolicy: IfNotPresent
   # -- Maximum hook runtime in seconds, including pod scheduling and shutdown. Set the Helm timeout higher than this.
