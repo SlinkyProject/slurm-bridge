@@ -33,6 +33,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultbinder"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
 	fwkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
+	"k8s.io/kubernetes/pkg/scheduler/metrics"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	tf "k8s.io/kubernetes/pkg/scheduler/testing/framework"
 	"k8s.io/utils/ptr"
@@ -763,6 +764,161 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	wantReason := `pod slurm-bridge/podgroup-b: DRA DeviceClass "gpu.example.com" is requested by multiple containers "first" and "second"; slurm-bridge currently supports one requesting container per DeviceClass`
 	if !apiequality.Semantic.DeepEqual(status.Reasons(), []string{wantReason}) {
 		t.Fatalf("PreFilter() reasons = %v, want %q", status.Reasons(), wantReason)
+	}
+}
+
+func TestSlurmBridge_PostFilterWaitsForExistingGroupAllocation(t *testing.T) {
+	api := &slurmjobir.WorkloadAPI{PodGroupTypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1beta1", Kind: "PodGroup"}}
+	running := &slurmcontrol.ExternalJob{JobId: 42, Nodes: "node-a"}
+	finished := &slurmcontrol.ExternalJob{}
+	for _, rootMeta := range []metav1.TypeMeta{api.PodGroupTypeMeta, {APIVersion: "scheduling.k8s.io/v1alpha3", Kind: "CompositePodGroup"}} {
+		for _, tt := range []struct {
+			name       string
+			jobs       []*slurmcontrol.ExternalJob
+			wantChecks int
+		}{
+			{name: "running", jobs: []*slurmcontrol.ExternalJob{running}, wantChecks: 0},
+			{name: "finished before running", jobs: []*slurmcontrol.ExternalJob{finished, running}, wantChecks: 0},
+			{name: "running before finished", jobs: []*slurmcontrol.ExternalJob{running, finished}, wantChecks: 0},
+		} {
+			t.Run(rootMeta.Kind+"/"+tt.name, func(t *testing.T) {
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "late"}}
+				pods := []corev1.Pod{*pod}
+				for i := range tt.jobs {
+					pods = append(pods, corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+						Namespace: "test", Name: fmt.Sprintf("member-%d", i),
+						Labels: map[string]string{wellknown.LabelExternalJobId: fmt.Sprint(42 + i)},
+					}})
+				}
+				control := &postFilterSlurmControl{getJobs: append([]*slurmcontrol.ExternalJob{{}}, tt.jobs...)}
+				sb := &SlurmBridge{slurmControl: control, workloadAPI: api}
+				state := framework.NewCycleState()
+				state.Write(stateKey, &stateData{slurmJobIR: &slurmjobir.SlurmJobIR{
+					RootPOM:    metav1.PartialObjectMetadata{TypeMeta: rootMeta},
+					Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: pods}}},
+				}})
+				// No node handle or Kubernetes client: waiting must precede any allocation changes.
+				_, status := sb.PostFilter(context.Background(), state, pod, framework.NewDefaultNodeToStatus())
+				if status.Code() != fwk.Unschedulable {
+					t.Errorf("PostFilter(%s) status = %v, want Unschedulable", tt.name, status)
+				}
+				if control.getJobCalls != tt.wantChecks {
+					t.Errorf("PostFilter(%s) job checks = %d, want %d", tt.name, control.getJobCalls, tt.wantChecks)
+				}
+			})
+		}
+	}
+}
+
+func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T) {
+	metrics.Register()
+	for _, lateFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("late member first=%v", lateFirst), func(t *testing.T) {
+			ctx := context.Background()
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			workloadAPI := mustRegisterTestWorkloadAPI(t, scheme, slurmjobir.WorkloadAPIVersionV1Beta1)
+			podGroup := &slurmjobir.PodGroup{
+				TypeMeta:   workloadAPI.PodGroupTypeMeta,
+				ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: "gang", UID: "gang"},
+				Spec: slurmjobir.PodGroupSpec{SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{
+					Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
+				}},
+			}
+			var pods []corev1.Pod
+			objects := []kubeclient.Object{podGroup}
+			var nodes []*corev1.Node
+			slurmNodes := &api.V0044NodeObjectList{}
+			for i := range 3 {
+				name := fmt.Sprintf("member-%d", i)
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Namespace: "test", Name: name, UID: k8stypes.UID(name)},
+					Spec:       corev1.PodSpec{SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(podGroup.Name)}},
+				}
+				// Registration publishes the existing allocation before scheduling.
+				pod.Labels = map[string]string{wellknown.LabelExternalJobId: "42"}
+				pods = append(pods, *pod)
+				objects = append(objects, pod)
+				nodes = append(nodes, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
+				slurmNodes.Items = append(slurmNodes.Items, slurmNode(name, "slurm-bridge"))
+			}
+			info := externaljobinfo.ExternalJobInfo{
+				PodGroup: externaljobinfo.NewGroupIdentity(metav1.PartialObjectMetadata{TypeMeta: podGroup.TypeMeta, ObjectMeta: podGroup.ObjectMeta}),
+				Pods:     []string{"test/member-0/member-0", "test/member-1/member-1", "test/member-2/member-2"},
+			}
+			jobs := &api.V0044JobInfoObjectList{Items: []api.V0044JobInfo{{
+				JobId: ptr.To(int32(42)), JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+				AdminComment: ptr.To(info.ToString()),
+			}}}
+			updates := 0
+			slurm := fake.NewClientBuilder().WithLists(jobs, slurmNodes).WithInterceptorFuncs(interceptor.Funcs{
+				Create: func(context.Context, object.Object, any, ...slurmclient.CreateOption) error {
+					t.Error("PostFilter submitted a replacement job, want an update to job 42")
+					return errors.New("unexpected job submission")
+				},
+				Update: func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
+					updates++
+					if id := ptr.Deref(obj.(*api.V0044JobInfo).JobId, 0); id != 42 {
+						t.Errorf("updated job ID = %d, want 42", id)
+					}
+					if count := ptr.Deref(req.(api.V0044JobDescMsg).Nodes, ""); count != "3" {
+						t.Errorf("updated node count = %q, want 3", count)
+					}
+					return nil
+				},
+			}).Build()
+			f, err := tf.NewFramework(ctx, []tf.RegisterPluginFunc{
+				tf.RegisterQueueSortPlugin(queuesort.Name, queuesort.New),
+				tf.RegisterBindPlugin(defaultbinder.Name, defaultbinder.New),
+				tf.RegisterFilterPlugin(Name, func(context.Context, runtime.Object, fwk.Handle) (fwk.Plugin, error) { return &SlurmBridge{}, nil }),
+			}, "slurm-bridge", fwkruntime.WithInformerFactory(informers.NewSharedInformerFactory(clientsetfake.NewClientset(), 0)),
+				fwkruntime.WithSnapshotSharedLister(internalcache.NewSnapshot(nil, nodes)),
+				fwkruntime.WithPodActivator(&activateRecorder{}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := f.Close(); err != nil {
+					t.Errorf("close framework: %v", err)
+				}
+			})
+			cl := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			control, err := slurmcontrol.NewControl(slurm, slurm.GetInformer(api.ObjectTypeV0044JobInfo), "kubernetes", "slurm-bridge")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sb := &SlurmBridge{Client: cl, handle: compositePostFilterHandle{Framework: f}, workloadAPI: workloadAPI,
+				slurmControl: control}
+			if lateFirst {
+				pods[0], pods[2] = pods[2], pods[0]
+			}
+			groupState := framework.NewCycleState()
+			groupInfo := &framework.PodGroupInfo{Namespace: "test", Name: podGroup.Name,
+				Type: fwk.PodGroupKeyType, PodGroup: &schedulingv1beta1.PodGroup{}}
+			for i := range pods {
+				pod := &pods[i]
+				groupInfo.UnscheduledPods = append(groupInfo.UnscheduledPods, pod)
+				state := framework.NewCycleState()
+				state.SetPodGroupSchedulingCycle(groupState)
+				result, status := sb.PreFilter(ctx, state, pod, nil)
+				if !status.IsSuccess() || result != nil {
+					t.Errorf("PreFilter(%s) = %v, %v; want no node allocation and Success", pod.Name, result, status)
+				}
+			}
+			_, status := sb.PodGroupPostFilter(ctx, groupState, groupInfo, nil)
+			if !status.IsSuccess() || updates != 1 {
+				t.Fatalf("PodGroupPostFilter status = %v, updates = %d, want Success and one update", status, updates)
+			}
+			for _, pod := range pods {
+				observed := &corev1.Pod{}
+				if err := cl.Get(ctx, kubeclient.ObjectKeyFromObject(&pod), observed); err != nil {
+					t.Fatal(err)
+				}
+				if id := observed.Labels[wellknown.LabelExternalJobId]; id != "42" {
+					t.Errorf("member %s job ID = %q, want 42", pod.Name, id)
+				}
+			}
+		})
 	}
 }
 
