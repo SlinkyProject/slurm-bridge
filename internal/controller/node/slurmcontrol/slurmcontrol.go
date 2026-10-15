@@ -44,17 +44,16 @@ type SlurmControlInterface interface {
 	// AddNode registers an external Kubernetes node in Slurm, or reconciles
 	// bridge-owned metadata when the Slurm node already exists.
 	AddNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error
-	// UpdateHybridNode reconciles the bridge-owned Extra inventory on an
-	// existing hybrid node. It never creates an absent node or modifies an
-	// external node.
-	UpdateHybridNode(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) error
+	// UpdateHybridNode reconciles the CPU fingerprint and GRES inventory in Extra
+	// for an existing hybrid node. It leaves external nodes unchanged.
+	UpdateHybridNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error
 	// DisableNodeGRESCompatibility removes the bridge-owned compatibility
 	// feature from an existing node without modifying its Extra inventory.
 	DisableNodeGRESCompatibility(ctx context.Context, node *corev1.Node) error
 	// NodeNeedsRecreate returns true when an external Slurm node's CPU, memory,
 	// or GRES configuration must be applied by draining and recreating it. For
-	// hybrid nodes, it validates that the static GRES configuration can
-	// represent the DRA inventory.
+	// hybrid nodes, it validates the static GRES and CPU configuration and
+	// never requests recreation of the slurmd-managed node.
 	NodeNeedsRecreate(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) (bool, error)
 	// RemoveNode removes a Kubernetes node from Slurm.
 	RemoveNode(ctx context.Context, node *corev1.Node) error
@@ -249,33 +248,46 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 		return false, err
 	}
 
-	desiredCPU := desiredNodeCPUConfig(node, nodeInfo)
-	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
 	desiredGRES, err := buildNodeGRESConfig(draInventory)
 	if err != nil {
 		return false, err
 	}
+	if !slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
+		if err := validateHybridNodeGRES(string(key), ptr.Deref(slurmNode.Gres, ""), desiredGRES); err != nil {
+			return false, err
+		}
+		_, err := hybridNodeExtra(slurmNode, nodeInfo, desiredGRES.extra)
+		return false, err
+	}
 
+	desiredCPU, err := desiredNodeCPUConfig(node, nodeInfo)
+	if err != nil {
+		return false, err
+	}
+	desiredMemoryMB := node.Status.Capacity.Memory().Value() / (1024 * 1024)
+
+	desiredGRES.extra, err = nodeInfo.EncodeApplied(desiredGRES.extra)
+	if err != nil {
+		return false, err
+	}
 	currentMemoryMB := ptr.Deref(slurmNode.RealMemory, int64(0))
 	currentGres := ptr.Deref(slurmNode.Gres, "")
 	currentExtra := ptr.Deref(slurmNode.Extra, "")
-	isExternal := slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL)
+	if !desiredCPU.fromDRA && strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix) {
+		fingerprint, err := dra.AppliedCPUFingerprint(currentExtra)
+		if err != nil {
+			return false, err
+		}
+		if fingerprint != "" {
+			return false, fmt.Errorf("applied CPU inventory disappeared; refusing CPU fallback")
+		}
+	}
 	if desiredGRES.extra != "" && currentExtra != "" && !strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix) {
 		return false, fmt.Errorf("cannot record applied DRA inventory on Slurm node %q: Extra field is already in use", key)
 	}
 	extraChanged := desiredGRES.extra != currentExtra &&
 		(desiredGRES.extra != "" || strings.HasPrefix(currentExtra, dra.AppliedInventoryExtraPrefix))
 	gresChanged := !gresEqual(desiredGRES.gres, currentGres)
-	if !isExternal {
-		if err := validateHybridNodeGRES(string(key), currentGres, desiredGRES); err != nil {
-			return false, err
-		}
-		// Hybrid nodes are registered by slurmd. Their static GRES configuration
-		// is validated above, and their bridge-owned Extra value is patched in
-		// AddNode instead of draining and recreating the node.
-		gresChanged = false
-		extraChanged = false
-	}
 
 	cpuChanged := desiredCPU.cpus != int(ptr.Deref(slurmNode.Cpus, 0))
 	if desiredCPU.fromDRA {
@@ -305,15 +317,23 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	slurmNode := &api.V0044Node{}
 	err = r.Get(ctx, key, slurmNode, &slurmclient.GetOptions{SkipCache: true})
 	if err == nil {
-		return r.updateExistingNode(ctx, node, slurmNode, gresConfig)
+		return r.updateExistingNode(ctx, node, slurmNode, nodeInfo, gresConfig)
 	}
 	if err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
 		return err
 	}
 
-	cpuConfig := desiredNodeCPUConfig(node, nodeInfo)
+	cpuConfig, err := desiredNodeCPUConfig(node, nodeInfo)
+	if err != nil {
+		return err
+	}
 	memoryBytes := node.Status.Capacity.Memory().Value()
 	memoryMB := memoryBytes / (1024 * 1024)
+
+	gresConfig.extra, err = nodeInfo.EncodeApplied(gresConfig.extra)
+	if err != nil {
+		return err
+	}
 
 	annotations := node.GetAnnotations()
 	features := []string{wellknown.SlurmFeatureGRESCompatible}
@@ -329,8 +349,8 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 
 	// Create node configuration string
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
-	nodeConf := fmt.Sprintf("NodeName=%s Sockets=1 CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
-		slurmNodeName, cpuConfig.coresPerSocket, cpuConfig.threadsPerCore, cpuConfig.cpus, memoryMB)
+	nodeConf := fmt.Sprintf("NodeName=%s Sockets=%d CoresPerSocket=%d ThreadsPerCore=%d CPUs=%d RealMemory=%d State=External",
+		slurmNodeName, cpuConfig.sockets, cpuConfig.coresPerSocket, cpuConfig.threadsPerCore, cpuConfig.cpus, memoryMB)
 	// Avoids NodeAddr defaulting to NodeName, which slurmctld would then
 	// try (and fail) to resolve via DNS on every access.
 	if addr := nodeInternalIP(node); addr != "" {
@@ -356,14 +376,21 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	req := api.V0044OpenapiCreateNodeReq{
 		NodeConf: nodeConf,
 	}
+	slurmNode.Name = ptr.To(slurmNodeName)
 	if err := r.Create(ctx, slurmNode, req); err != nil {
 		logger.Error(err, "Failed to add node to Slurm", "node", klog.KObj(node),
 			"slurmNode", slurmNodeName)
 		return err
 	}
 	if gresConfig.extra != "" {
+		// Node creation and Extra updates are separate operations. A missing
+		// fingerprint makes NodeNeedsRecreate drain and replace the node.
 		createdNode := &api.V0044Node{Name: ptr.To(slurmNodeName)}
 		req := api.V0044UpdateNodeMsg{Extra: ptr.To(gresConfig.extra)}
+		if cpuConfig.fromDRA {
+			req.State = ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN})
+			req.Reason = ptr.To("slurm-bridge: applying CPU topology")
+		}
 		if err := r.Update(ctx, createdNode, req); err != nil {
 			return fmt.Errorf("could not record applied DRA inventory on Slurm node %q: %w", slurmNodeName, err)
 		}
@@ -373,7 +400,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 }
 
 // UpdateHybridNode implements SlurmControlInterface.
-func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.Node, draInventory []dra.GRESInventory) error {
+func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error {
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 	key := slurmobject.ObjectKey(slurmNodeName)
 	gresConfig, err := buildNodeGRESConfig(draInventory)
@@ -391,7 +418,7 @@ func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.No
 	if slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
 		return nil
 	}
-	return r.reconcileHybridNode(ctx, slurmNode, gresConfig)
+	return r.reconcileHybridNode(ctx, slurmNode, nodeInfo, gresConfig)
 }
 
 // DisableNodeGRESCompatibility implements SlurmControlInterface.
@@ -411,12 +438,17 @@ func (r *realSlurmControl) DisableNodeGRESCompatibility(ctx context.Context, nod
 func (r *realSlurmControl) reconcileHybridNode(
 	ctx context.Context,
 	slurmNode *api.V0044Node,
+	nodeInfo *nodeinfo.NodeInfo,
 	gresConfig nodeGRESConfig,
 ) error {
 	if err := validateHybridNodeGRES(string(slurmNode.GetKey()), ptr.Deref(slurmNode.Gres, ""), gresConfig); err != nil {
 		return errors.Join(err, r.updateGRESCompatibilityFeature(ctx, slurmNode, false))
 	}
-	if err := r.updateNodeExtra(ctx, slurmNode, gresConfig.extra); err != nil {
+	extra, err := hybridNodeExtra(slurmNode, nodeInfo, gresConfig.extra)
+	if err != nil {
+		return errors.Join(err, r.updateGRESCompatibilityFeature(ctx, slurmNode, false))
+	}
+	if err := r.updateNodeExtra(ctx, slurmNode, extra); err != nil {
 		return errors.Join(err, r.updateGRESCompatibilityFeature(ctx, slurmNode, false))
 	}
 	return r.updateGRESCompatibilityFeature(ctx, slurmNode, true)
@@ -440,27 +472,16 @@ func nodeInternalIP(node *corev1.Node) string {
 	return ""
 }
 
-func desiredNodeCPUConfig(node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) nodeCPUConfig {
+func desiredNodeCPUConfig(node *corev1.Node, nodeInfo *nodeinfo.NodeInfo) (nodeCPUConfig, error) {
+	if nodeInfo != nil && len(nodeInfo.CpuMap.AbstractToMachine) > 0 {
+		sockets, cores, threads, err := nodeInfo.Geometry()
+		if err != nil {
+			return nodeCPUConfig{}, err
+		}
+		return nodeCPUConfig{sockets: sockets, coresPerSocket: cores, threadsPerCore: threads, cpus: sockets * cores * threads, fromDRA: true}, nil
+	}
 	cpus := int(node.Status.Capacity.Cpu().Value())
-	cores := cpus
-	fromDRA := nodeInfo != nil && len(nodeInfo.CpuMap.AbstractToMachine) > 0
-	if fromDRA {
-		cpus = len(nodeInfo.CpuMap.MachineToAbstract)
-		cores = len(nodeInfo.CpuMap.AbstractToMachine)
-	}
-
-	threadsPerCore := 1
-	if cores > 0 {
-		threadsPerCore = cpus / cores
-	}
-
-	return nodeCPUConfig{
-		sockets:        1,
-		coresPerSocket: cores,
-		threadsPerCore: threadsPerCore,
-		cpus:           cpus,
-		fromDRA:        fromDRA,
-	}
+	return nodeCPUConfig{sockets: 1, coresPerSocket: cpus, threadsPerCore: 1, cpus: cpus}, nil
 }
 
 type nodeGRESConfig struct {
@@ -506,10 +527,11 @@ func (r *realSlurmControl) updateExistingNode(
 	ctx context.Context,
 	node *corev1.Node,
 	slurmNode *api.V0044Node,
+	nodeInfo *nodeinfo.NodeInfo,
 	gresConfig nodeGRESConfig,
 ) error {
 	if !slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
-		if err := r.reconcileHybridNode(ctx, slurmNode, gresConfig); err != nil {
+		if err := r.reconcileHybridNode(ctx, slurmNode, nodeInfo, gresConfig); err != nil {
 			return err
 		}
 		return r.updateNodeTopology(ctx, node, slurmNode)

@@ -31,12 +31,65 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var _ = Describe("nodeRegistrationInventories()", func() {
+	It("passes socket CPU topology into hybrid registration", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "hybrid-cpu"}}
+		slice := &resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "hybrid-cpu"},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver: nodeinfo.DraDriverCpu, NodeName: ptr.To(node.Name),
+				Pool: resourcev1.ResourcePool{Name: node.Name, Generation: 1, ResourceSliceCount: 1},
+				Devices: []resourcev1.Device{{
+					Name: "socket000", AllowMultipleAllocations: ptr.To(true),
+					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+						nodeinfo.DraDriverCpu_SocketID:   {IntValue: ptr.To[int64](0)},
+						nodeinfo.DraDriverCpu_SMTEnabled: {BoolValue: ptr.To(false)},
+						nodeinfo.DraDriverCpu_CPUIDs:     {StringValue: ptr.To("0-3")},
+						nodeinfo.DraDriverCpu_SMTLayout:  {StringValue: ptr.To("0-3")},
+					},
+					Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{nodeinfo.DraDriverCpu_Capacity: {Value: resource.MustParse("4")}},
+				}},
+			},
+		}
+		kubeClient := fake.NewClientBuilder().WithObjects(node, slice).Build()
+		slurmClient := slurmclientfake.NewClientBuilder().WithObjects(&api.V0044Node{
+			Name: ptr.To(node.Name), Cpus: ptr.To[int32](4), Sockets: ptr.To[int32](1), Cores: ptr.To[int32](4), Threads: ptr.To[int32](1),
+			State: ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
+		}).WithUpdateFn(func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			update := req.(api.V0044UpdateNodeMsg)
+			Expect(update.State).To(BeNil())
+			current := obj.(*api.V0044Node)
+			if update.Extra != nil {
+				current.Extra = update.Extra
+			}
+			if update.Features != nil {
+				current.Features = update.Features
+			}
+			if update.FeaturesAct != nil {
+				current.ActiveFeatures = update.FeaturesAct
+			}
+			return nil
+		}).Build()
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent), nil)
+		_, err := r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
+		Expect(err).NotTo(HaveOccurred())
+		registered := &api.V0044Node{}
+		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), registered)).To(Succeed())
+		info, err := nodeinfo.NewNodeInfoFromResourceSlices(node.Name, []resourcev1.ResourceSlice{*slice})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(info.ValidateCPUFingerprint(ptr.Deref(registered.Extra, ""))).To(Succeed())
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+		condition := findNodeCondition(node.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
+		Expect(condition).NotTo(BeNil())
+		Expect(condition.Status).To(Equal(corev1.ConditionTrue))
+	})
+
 	It("reports overlapping DRA profiles on the Node", func() {
 		profiles := []dra.DeviceProfile{
 			{
@@ -131,7 +184,7 @@ var _ = Describe("Sync()", func() {
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}}
 		DeferCleanup(func() { durationStore.Pop(req.String()) })
 
-		Expect(r.Sync(ctx, req)).To(Succeed())
+		Expect(r.Sync(ctx, req)).To(MatchError(ContainSubstring("draining before inventory replacement")))
 		drained, err := r.slurmControl.IsNodeDrain(ctx, node)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(drained).To(BeTrue())
@@ -414,7 +467,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -436,7 +489,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -458,7 +511,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -481,7 +534,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -504,7 +557,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -527,7 +580,7 @@ var _ = Describe("syncState()", func() {
 					Name: nodeName,
 				},
 			}
-			err := controllerReconciler.syncState(ctx, req)
+			err := controllerReconciler.syncState(ctx, req, true)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Check node status")
@@ -683,6 +736,10 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			if update.FeaturesAct != nil {
 				slurmNode.ActiveFeatures = update.FeaturesAct
 			}
+			if update.State != nil {
+				Expect(*update.State).To(Equal([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN}))
+				slurmNode.State = ptr.To(append(*slurmNode.State, api.V0044NodeStateDRAIN))
+			}
 			return nil
 		}
 		state := []api.V0044NodeState{api.V0044NodeStateIDLE}
@@ -718,6 +775,13 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			updates = nil
 			_, err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 			Expect(err).To(MatchError(ContainSubstring("generation 1 is incomplete: found 1 of 2 ResourceSlices")))
+		}
+		if external {
+			Expect(updates).To(HaveLen(3))
+			Expect(updates[0].State).To(Equal(ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN})))
+			Expect(updates[0].Extra).To(BeNil())
+			updates = updates[1:]
+			state = append(state, api.V0044NodeStateDRAIN)
 		}
 		Expect(updates).To(HaveLen(2))
 		Expect(updates[0].FeaturesAct).NotTo(BeNil())

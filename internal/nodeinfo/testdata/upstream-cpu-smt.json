@@ -1,0 +1,70 @@
+{
+  "kind": "ResourceSlice",
+  "apiVersion": "resource.k8s.io/v1",
+  "metadata": {
+    "name": "upstream-cpu"
+  },
+  "spec": {
+    "driver": "dra.cpu",
+    "pool": {
+      "name": "node",
+      "generation": 1,
+      "resourceSliceCount": 1
+    },
+    "nodeName": "node",
+    "devices": [
+      {
+        "name": "cpudevsocket000",
+        "attributes": {
+          "dra.cpu/cpuIDs": {
+            "string": "1-3,9-11"
+          },
+          "dra.cpu/numCPUs": {
+            "int": 6
+          },
+          "dra.cpu/smtEnabled": {
+            "bool": true
+          },
+          "dra.cpu/smtLayout": {
+            "string": "0-15\u003e8"
+          },
+          "dra.cpu/socketID": {
+            "int": 0
+          }
+        },
+        "capacity": {
+          "dra.cpu/cpu": {
+            "value": "6"
+          }
+        },
+        "allowMultipleAllocations": true
+      },
+      {
+        "name": "cpudevsocket001",
+        "attributes": {
+          "dra.cpu/cpuIDs": {
+            "string": "5-7,13-15"
+          },
+          "dra.cpu/numCPUs": {
+            "int": 6
+          },
+          "dra.cpu/smtEnabled": {
+            "bool": true
+          },
+          "dra.cpu/smtLayout": {
+            "string": "0-15\u003e8"
+          },
+          "dra.cpu/socketID": {
+            "int": 1
+          }
+        },
+        "capacity": {
+          "dra.cpu/cpu": {
+            "value": "6"
+          }
+        },
+        "allowMultipleAllocations": true
+      }
+    ]
+  }
+}

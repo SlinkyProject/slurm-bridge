@@ -38,18 +38,6 @@ func init() {
 }
 
 func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
-	coreType := ptr.To(nodeinfo.CoreTypeStandard.String())
-	device := func(name string, cpuID, coreID int64) resourcev1.Device {
-		return resourcev1.Device{
-			Name: name,
-			Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-				nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To(cpuID)},
-				nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To(coreID)},
-				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-				nodeinfo.DraDriverCpu_CoreType: {StringValue: coreType},
-			},
-		}
-	}
 	return &resourcev1.ResourceSlice{
 		ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-dra-cpu"},
 		Spec: resourcev1.ResourceSliceSpec{
@@ -60,12 +48,9 @@ func testNodeCPUResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 				Generation:         1,
 				ResourceSliceCount: 1,
 			},
-			Devices: []resourcev1.Device{
-				device("cpu0", 0, 0),
-				device("cpu1", 1, 0),
-				device("cpu2", 2, 1),
-				device("cpu3", 3, 1),
-			},
+			Devices: []resourcev1.Device{{Name: "cpu-socket0", AllowMultipleAllocations: ptr.To(true), Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)}, nodeinfo.DraDriverCpu_SMTEnabled: {BoolValue: ptr.To(true)}, nodeinfo.DraDriverCpu_CPUIDs: {StringValue: ptr.To("0-3")}, nodeinfo.DraDriverCpu_SMTLayout: {StringValue: ptr.To("0-3>1")},
+			}, Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{nodeinfo.DraDriverCpu_Capacity: {Value: resource.MustParse("4")}}}},
 		},
 	}
 }
@@ -633,6 +618,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			client: fake.NewClientBuilder().WithObjects(
 				&api.V0044Node{
 					Name:       ptr.To("worker-0"),
+					State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 					Cpus:       ptr.To(int32(4)),
 					RealMemory: ptr.To(int64(8192)),
 					Gres:       nil,
@@ -651,6 +637,14 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 					Threads:    ptr.To(int32(2)),
 					Cpus:       ptr.To(int32(4)),
 					RealMemory: ptr.To(int64(8192)),
+					Extra: ptr.To(func() string {
+						n := testNodeInfoFromResourceSlices(t, "worker-0", []resourcev1.ResourceSlice{*testNodeCPUResourceSlice("worker-0")})
+						extra, err := n.EncodeApplied("")
+						if err != nil {
+							t.Fatal(err)
+						}
+						return extra
+					}()),
 				},
 			).Build(),
 			node:     makeNode("worker-0", 12, 8),
@@ -662,6 +656,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			client: fake.NewClientBuilder().WithObjects(
 				&api.V0044Node{
 					Name:       ptr.To("worker-0"),
+					State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 					Sockets:    ptr.To(int32(1)),
 					Cores:      ptr.To(int32(4)),
 					Threads:    ptr.To(int32(1)),
@@ -678,6 +673,7 @@ func Test_realSlurmControl_NodeNeedsRecreate(t *testing.T) {
 			client: fake.NewClientBuilder().WithObjects(
 				&api.V0044Node{
 					Name:       ptr.To("worker-0"),
+					State:      ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 					Cpus:       ptr.To(int32(4)),
 					RealMemory: ptr.To(int64(8192)),
 					Gres:       nil,
@@ -1663,7 +1659,7 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 				Build()}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
 
-			err := r.UpdateHybridNode(context.Background(), node, tt.inventory)
+			err := r.UpdateHybridNode(context.Background(), node, nil, tt.inventory)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("UpdateHybridNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1750,7 +1746,7 @@ func Test_realSlurmControl_UpdateHybridNode_doesNotCreateOrModifyExternalNodes(t
 			r := &realSlurmControl{Client: builder.Build()}
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
 
-			if err := r.UpdateHybridNode(context.Background(), node, tt.inventory); err != nil {
+			if err := r.UpdateHybridNode(context.Background(), node, nil, tt.inventory); err != nil {
 				t.Fatalf("UpdateHybridNode: %v", err)
 			}
 			if mutated {

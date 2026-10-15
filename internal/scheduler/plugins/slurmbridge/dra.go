@@ -14,6 +14,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -29,48 +31,51 @@ import (
 // resolved through an indexed-GRES DeviceProfile or the legacy driver-specific
 // path. Core-bitmap profiles are allocated from Slurm's CPU bitmap.
 func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) error {
-	claim, requestMappings, claimResources, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
+	if resources == nil {
+		return nil
+	}
+	if pod.UID == "" {
+		return fmt.Errorf("pod UID is required for allocation recovery")
+	}
+	existing := &resourcev1.ResourceClaim{}
+	err := sb.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: allocationClaimName(pod)}, existing)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	if err == nil {
+		if err := validateClaimIdentity(existing, pod, nodeName, resources); err != nil {
+			return err
+		}
+		if existing.Status.Allocation != nil {
+			mappings, err := createContainerRequestMappings(pod, existing.Spec.Devices.Requests)
+			if err != nil {
+				return err
+			}
+			return sb.patchPodExtendedResourceClaimStatus(ctx, pod, existing, mappings)
+		}
+	}
+	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
 	if err != nil {
 		return err
 	}
-	if claim == nil || requestMappings == nil || claimResources == nil {
+	if claim == nil {
 		return nil
 	}
-
-	if err := sb.Create(ctx, claim); err != nil {
-		var errs []error
-		errs = append(errs, fmt.Errorf("create claim for extended resources %v: %w", klog.KObj(claim), err))
-
-		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
-			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
+	if existing.Name != "" {
+		if !equality.Semantic.DeepEqual(existing.Spec, claim.Spec) {
+			return fmt.Errorf("existing claim %q differs from Slurm allocation", existing.Name)
 		}
-
-		return errors.Join(errs...)
+		claim = existing
+	} else if err := sb.Create(ctx, claim); err != nil {
+		// A concurrent attempt or an ambiguous API response is recovered on retry.
+		return err
 	}
-
-	if err := sb.bindClaim(ctx, claim, pod, nodeName, claimResources); err != nil {
-		var errs []error
-		errs = append(errs, err)
-
-		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
-			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
-		}
-
-		return errors.Join(errs...)
+	// Retain partial claims for retries. The Pod controller deletes them after
+	// completion or cancellation.
+	if err := sb.bindClaim(ctx, claim, pod, nodeName, allocation); err != nil {
+		return err
 	}
-
-	if err := sb.patchPodExtendedResourceClaimStatus(ctx, pod, claim, requestMappings); err != nil {
-		var errs []error
-		errs = append(errs, err)
-
-		if deleteErr := sb.Delete(ctx, claim); deleteErr != nil {
-			errs = append(errs, fmt.Errorf("delete claim for extended resources %v: %w", klog.KObj(claim), deleteErr))
-		}
-
-		return errors.Join(errs...)
-	}
-
-	return nil
+	return sb.patchPodExtendedResourceClaimStatus(ctx, pod, claim, mappings)
 }
 
 func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, *claimAllocation, error) {
@@ -99,20 +104,25 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	var nodeInfo *nodeinfo.NodeInfo
 	var allocatedRequests []resourcev1.DeviceRequest
 	if coreBitmapAllocation != nil {
-		nodeInfo, err = nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
+		current, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		allocatedRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName)
+		if err := current.ValidateCPUFingerprint(resources.NodeExtra); err != nil {
+			return nil, nil, nil, err
+		}
+		cpu, err := current.AllocateCPUs(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName, allocationClaimName(pod))
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if !hasDeviceRequestNamed(allocatedRequests, corev1.ResourceCPU.String()) {
-			return nil, nil, nil, fmt.Errorf("pod requests core-bitmap DeviceClass %q but no CPU device request was generated", coreBitmapAllocation.DeviceClassName)
+		if cpu.CPUCount < coreBitmapAllocation.Count {
+			return nil, nil, nil, fmt.Errorf("not enough CPUs in Slurm allocation: requested %d, allocated %d", coreBitmapAllocation.Count, cpu.CPUCount)
 		}
+		coreBitmapAllocation.CPU = cpu
+		coreBitmapAllocation.AllocatedCount = cpu.CPUCount
+		allocatedRequests = append(allocatedRequests, cpu.Requests...)
 	}
 	legacyRequests, err := legacyGPUDeviceRequests(ctx, sb.Client, remainingResources.Gres)
 	if err != nil {
@@ -133,19 +143,8 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	}
 
 	var deviceRequests []resourcev1.DeviceRequest
-	if nodeInfo != nil {
-		deviceRequests, err = nodeInfo.GetCPUDeviceRequests(ctx, sb.Client, claimResources, coreBitmapAllocation.DeviceClassName)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		cpuRequest := deviceRequestNamed(deviceRequests, coreBitmapAllocation.RequestName)
-		if cpuRequest == nil || cpuRequest.Exactly == nil {
-			return nil, nil, nil, fmt.Errorf("pod requests core-bitmap DeviceClass %q but no exact CPU device request was generated", coreBitmapAllocation.DeviceClassName)
-		}
-		if cpuRequest.Exactly.Count < coreBitmapAllocation.Count {
-			return nil, nil, nil, fmt.Errorf("not enough CPUs in Slurm allocation for DeviceClass %q: requested %d, allocated %d", coreBitmapAllocation.DeviceClassName, coreBitmapAllocation.Count, cpuRequest.Exactly.Count)
-		}
-		coreBitmapAllocation.AllocatedCount = cpuRequest.Exactly.Count
+	if coreBitmapAllocation != nil {
+		deviceRequests = append(deviceRequests, coreBitmapAllocation.CPU.Requests...)
 	}
 	legacyRequests, err = legacyGPUDeviceRequests(ctx, sb.Client, claimResources.Gres)
 	if err != nil {
@@ -165,8 +164,10 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 
 	claim := &resourcev1.ResourceClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace:    pod.Namespace,
-			GenerateName: pod.Name + "-extended-resources-",
+			Namespace:  pod.Namespace,
+			Name:       allocationClaimName(pod),
+			Finalizers: []string{resourcev1.Finalizer},
+			Labels:     map[string]string{allocationPodUIDLabel: string(pod.UID)},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         "v1",
@@ -179,6 +180,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 			},
 			Annotations: map[string]string{
 				resourcev1.ExtendedResourceClaimAnnotation: "true",
+				allocationIdentityAnnotation:               allocationIdentity(pod, nodeName, resources),
 			},
 		},
 		Spec: resourcev1.ResourceClaimSpec{
@@ -186,6 +188,10 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 				Requests: deviceRequests,
 			},
 		},
+	}
+
+	if coreBitmapAllocation != nil {
+		claim.Spec.Devices.Config = coreBitmapAllocation.CPU.Config
 	}
 
 	return claim, mappings, &claimAllocation{
@@ -213,14 +219,7 @@ func (sb *SlurmBridge) bindClaim(
 		if err := sb.verifyCoreBitmapRequest(ctx, claim, resources.CoreBitmapAllocation); err != nil {
 			return err
 		}
-		nodeInfo, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
-		if err != nil {
-			return err
-		}
-		devices, err = nodeInfo.GetCPUDeviceRequestAllocationResults(ctx, sb.Client, resources.NodeResources, resources.CoreBitmapAllocation.DeviceClassName)
-		if err != nil {
-			return err
-		}
+		devices = append(devices, resources.CoreBitmapAllocation.CPU.Results...)
 	}
 	legacyDevices, err := legacyGPUAllocationResults(ctx, sb.Client, nodeName, resources.NodeResources.Gres)
 	if err != nil {
@@ -260,6 +259,9 @@ func (sb *SlurmBridge) bindClaim(
 		},
 	}
 
+	for _, config := range claim.Spec.Devices.Config {
+		toUpdate.Status.Allocation.Devices.Config = append(toUpdate.Status.Allocation.Devices.Config, resourcev1.DeviceAllocationConfiguration{Source: resourcev1.AllocationConfigSourceClaim, Requests: config.Requests, DeviceConfiguration: config.DeviceConfiguration})
+	}
 	toUpdate.Status.ReservedFor = []resourcev1.ResourceClaimConsumerReference{
 		{Resource: "pods", Name: pod.Name, UID: pod.UID},
 	}
@@ -278,7 +280,15 @@ func (sb *SlurmBridge) bindClaim(
 func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {
 	expected := make(map[string]int64)
 	if allocation.CoreBitmapAllocation != nil {
-		expected[allocation.CoreBitmapAllocation.RequestName] = allocation.CoreBitmapAllocation.AllocatedCount
+		if allocation.CoreBitmapAllocation.CPU == nil {
+			return fmt.Errorf("missing CPU allocation")
+		}
+		for _, request := range allocation.CoreBitmapAllocation.CPU.Requests {
+			expected[request.Name] = 1
+		}
+		if err := validateCPUResults(allocation.CoreBitmapAllocation.CPU, results); err != nil {
+			return err
+		}
 	}
 	for _, indexed := range allocation.IndexedGRESAllocations {
 		expected[indexed.RequestName] = indexed.Count
@@ -322,7 +332,8 @@ func (sb *SlurmBridge) validateDeviceClassRequestsForPods(ctx context.Context, p
 		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
-		if _, err := allocateCoreBitmapProfile(profileRequests); err != nil {
+		_, err = allocateCoreBitmapProfile(profileRequests)
+		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
 		if err := validateDeviceClassRequests(pod); err != nil {
@@ -383,16 +394,13 @@ func deviceClassNames(requests []resourcev1.DeviceRequest) map[string]struct{} {
 func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1.DeviceRequest) ([]corev1.ContainerExtendedResourceRequest, error) {
 	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
 
-	requestNames := make(map[string]string, len(deviceRequests))
+	requestNames := make(map[string][]string, len(deviceRequests))
 	for _, request := range deviceRequests {
 		if request.Exactly == nil {
 			continue
 		}
 		className := request.Exactly.DeviceClassName
-		if existing, ok := requestNames[className]; ok && existing != request.Name {
-			return nil, fmt.Errorf("multiple DRA requests for DeviceClass %q are not supported", className)
-		}
-		requestNames[className] = request.Name
+		requestNames[className] = append(requestNames[className], request.Name)
 	}
 
 	var mappings []corev1.ContainerExtendedResourceRequest
@@ -413,36 +421,24 @@ func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1
 				continue
 			}
 
-			requestName, ok := requestNames[className]
+			names, ok := requestNames[className]
 			if !ok {
 				continue
 			}
-			mappings = append(mappings, corev1.ContainerExtendedResourceRequest{
-				ContainerName: container.Name,
-				RequestName:   requestName,
-				ResourceName:  resourceName,
-			})
+			for _, requestName := range names {
+				mappings = append(mappings, corev1.ContainerExtendedResourceRequest{
+					ContainerName: container.Name,
+					RequestName:   requestName,
+					ResourceName:  resourceName,
+				})
+			}
 		}
 	}
 
 	return mappings, nil
 }
 
-func hasDeviceRequestNamed(requests []resourcev1.DeviceRequest, name string) bool {
-	return deviceRequestNamed(requests, name) != nil
-}
-
-func deviceRequestNamed(requests []resourcev1.DeviceRequest, name string) *resourcev1.DeviceRequest {
-	for i := range requests {
-		if requests[i].Name == name {
-			return &requests[i]
-		}
-	}
-	return nil
-}
-
-// patchPodExtendedResourceClaimStatus updates the pod's status with information about
-// the extended resource claim.
+// patchPodExtendedResourceClaimStatus links allocated requests to their containers.
 func (sb *SlurmBridge) patchPodExtendedResourceClaimStatus(
 	ctx context.Context,
 	pod *corev1.Pod,

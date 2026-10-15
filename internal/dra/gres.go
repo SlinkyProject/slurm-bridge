@@ -180,7 +180,8 @@ type appliedInventoryWire struct {
 	Version int `json:"v"`
 	// The profile name is also the Slurm GRES type. The GRES name is omitted
 	// because the DeviceProfile registry supplies it.
-	Profiles map[string]appliedProfileInventoryWire `json:"profiles"`
+	Profiles       map[string]appliedProfileInventoryWire `json:"profiles"`
+	CPUFingerprint string                                 `json:"cpuFingerprint,omitempty"`
 }
 
 // EncodeAppliedInventory encodes indexed GRES inventory for a Slurm node Extra
@@ -256,6 +257,39 @@ func DecodeAppliedInventory(extra string) (AppliedInventory, error) {
 		}
 	}
 	return inventory, nil
+}
+
+// WithAppliedCPUFingerprint adds the CPU topology fingerprint to the GRES inventory.
+func WithAppliedCPUFingerprint(extra, fingerprint string) (string, error) {
+	if extra == "" {
+		var err error
+		extra, err = EncodeAppliedInventory(nil)
+		if err != nil {
+			return "", err
+		}
+	}
+	if _, err := DecodeAppliedInventory(extra); err != nil {
+		return "", err
+	}
+	var wire appliedInventoryWire
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(extra, AppliedInventoryExtraPrefix)), &wire); err != nil {
+		return "", err
+	}
+	wire.CPUFingerprint = fingerprint
+	data, err := json.Marshal(wire)
+	return AppliedInventoryExtraPrefix + string(data), err
+}
+
+// AppliedCPUFingerprint returns the CPU fingerprint, or an empty string for GRES-only inventory.
+func AppliedCPUFingerprint(extra string) (string, error) {
+	if _, err := DecodeAppliedInventory(extra); err != nil {
+		return "", err
+	}
+	var wire appliedInventoryWire
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(extra, AppliedInventoryExtraPrefix)), &wire); err != nil {
+		return "", err
+	}
+	return wire.CPUFingerprint, nil
 }
 
 func encodeDevicePath(device DeviceIdentity) (string, error) {
