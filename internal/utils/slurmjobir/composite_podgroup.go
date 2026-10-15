@@ -33,21 +33,19 @@ func (t *translator) PreFilterCompositePodGroup(pod *corev1.Pod, slurmJobIR *Slu
 	namespace := pod.Namespace
 	schedulingGroup := pod.Spec.SchedulingGroup
 
-	podGroup, err := snapshot.PodGroups().Get(namespace, *schedulingGroup.PodGroupName)
-	if err != nil {
+	if _, err := snapshot.PodGroups().Get(namespace, *schedulingGroup.PodGroupName); err != nil {
 		// The pod is unschedulable until its PodGroup object is created.
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("waiting for pods's pod group %q to appear in scheduling queue", *schedulingGroup.PodGroupName))
 	}
 
-	return t.checkCPGHierarchyReadiness(snapshot, namespace, *podGroup.Spec.ParentCompositePodGroupName, func(s fwk.PodGroupState) int { return s.AllPodsCount() })
+	return t.checkCPGHierarchyReadiness(snapshot, namespace, slurmJobIR.RootPOM.Name, func(s fwk.PodGroupState) int { return s.AllPodsCount() })
 }
 
-// checkCPGHierarchyReadiness checks if the Composite Pod Group hierarchy is ready for scheduling.
-// It first retrieves the root composite pod group and then recursively traverses the entire Composite Pod Group hierarchy
-// to determine if the hierarchy is ready for scheduling.
+// checkCPGHierarchyReadiness checks the selected allocation's subtree, without
+// requiring independent siblings above a basic boundary to be ready.
 func (t *translator) checkCPGHierarchyReadiness(snapshot fwk.PodGroupManager, namespace, startCPGName string, readinessCountFn func(fwk.PodGroupState) int) *fwk.Status {
 	cpgKey := fwk.CompositePodGroupKey(namespace, startCPGName)
-	rootKey, ok, err := snapshot.GetRootKeyForGroup(cpgKey)
+	_, ok, err := snapshot.GetRootKeyForGroup(cpgKey)
 	if err != nil {
 		return fwk.AsStatus(err)
 	}
@@ -55,8 +53,8 @@ func (t *translator) checkCPGHierarchyReadiness(snapshot fwk.PodGroupManager, na
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("failed to build hierarchy snapshot: composite pod group object not found in state for %s", cpgKey.String()))
 	}
 
-	if !t.isCPGTreeReady(snapshot, rootKey.Namespace, rootKey.Name, readinessCountFn) {
-		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("waiting for composite pod group %q tree to meet quorum", rootKey.Name))
+	if !t.isCPGTreeReady(snapshot, namespace, startCPGName, readinessCountFn) {
+		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("waiting for composite pod group %q tree to meet quorum", startCPGName))
 	}
 	return nil
 }
@@ -169,8 +167,8 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 	return slurmJobIR, nil
 }
 
-// traverseParentChain follows each CompositePodGroup's parent up until it reaches the root
-// object, then returns the name of that object
+// traverseParentChain checks membership in an allocation without crossing a
+// basic CompositePodGroup boundary.
 func (t *translator) traverseParentChain(namespace string, parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
 	if depth == len(compositePodGroups) {
 		return false
@@ -178,6 +176,9 @@ func (t *translator) traverseParentChain(namespace string, parentName string, ta
 	for _, compositePodGroup := range compositePodGroups {
 		if compositePodGroup.name != parentName {
 			continue
+		}
+		if compositePodGroup.schedulingPolicy.Basic != nil {
+			return false
 		}
 		if compositePodGroup.parentName == targetName {
 			return true

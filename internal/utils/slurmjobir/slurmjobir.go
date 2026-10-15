@@ -167,14 +167,10 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	if err := ValidatePodGroupSupport(workloadAPI, pod); err != nil {
 		return nil, err
 	}
-	rootPOM, err := getRootOwnerMetadata(c, ctx, pod)
-	if err != nil {
-		return nil, err
-	}
-
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
+	var rootPOM *metav1.PartialObjectMetadata
 
-	// CompositePodGroup members use the root of their runtime group hierarchy.
+	// CompositePodGroup members share an allocation up to the first basic parent.
 	// Otherwise, only Gang PodGroups replace the normal workload root. Basic
 	// PodGroups still supply annotations, but leave allocation membership to the owner.
 	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
@@ -187,29 +183,35 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 		if err := validatePodGroupSpec(pg); err != nil {
 			return nil, err
 		}
+		if pg.Spec.ParentCompositePodGroupName != nil || pg.Spec.SchedulingPolicy.Gang != nil {
+			rootPOM = &metav1.PartialObjectMetadata{
+				TypeMeta:   workloadAPI.PodGroupTypeMeta,
+				ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: pgName},
+			}
+		}
 		if pg.Spec.ParentCompositePodGroupName != nil {
 			rootName, err := t.compositePodGroupRootName(pod.Namespace, *pg.Spec.ParentCompositePodGroupName)
 			if err != nil {
 				return nil, err
 			}
-			rootPOM.TypeMeta = compositePodGroupV1Alpha3
-			rootPOM.Name = rootName
-			obj, err := t.getUnstructuredObject(compositePodGroupV1Alpha3, client.ObjectKey{Namespace: rootPOM.Namespace, Name: rootPOM.Name})
-			if err != nil {
-				return nil, err
+			if rootName != "" {
+				rootPOM.TypeMeta = compositePodGroupV1Alpha3
+				rootPOM.Name = rootName
 			}
-			if err := validateCompositePodGroup(obj); err != nil {
-				return nil, err
-			}
-		} else if pg.Spec.SchedulingPolicy.Gang != nil {
-			rootPOM.TypeMeta = workloadAPI.PodGroupTypeMeta
-			rootPOM.Name = pgName
 		}
 	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
 		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
 		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
-		rootPOM.TypeMeta = podgroup_coscheduling_v1alpha1
-		rootPOM.Name = podGroup.Name
+		rootPOM = &metav1.PartialObjectMetadata{
+			TypeMeta:   podgroup_coscheduling_v1alpha1,
+			ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: podGroup.Name},
+		}
+	}
+	if rootPOM == nil {
+		rootPOM, err = getRootOwnerMetadata(c, ctx, pod)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), rootPOM); err != nil {

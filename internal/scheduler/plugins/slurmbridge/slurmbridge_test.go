@@ -960,8 +960,8 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 	if len(group.members) != 1 || group.members[0].state != state || group.members[0].pod.Name != podA.Name {
 		t.Fatalf("PreFilter() native group members = %#v, want %s", group.members, podA.Name)
 	}
-	if group.pending || !group.status.IsSuccess() {
-		t.Fatalf("PreFilter() native group decision = pending %t, status %v; want ready Success", group.pending, group.status)
+	if group.members[0].result == nil || !group.members[0].status.IsSuccess() {
+		t.Fatalf("PreFilter() native group member = %#v; want ready Success", group.members[0])
 	}
 	if _, err := rootGroupState.Read(nativeGroupCycleKey); err != nil {
 		t.Fatalf("PreFilter() did not write root composite group cycle state: %v", err)

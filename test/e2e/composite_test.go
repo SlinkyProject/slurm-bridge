@@ -21,10 +21,18 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 )
 
-// TestCompositePodGroupScheduling specifies the behavior still to implement:
-// two native leaf PodGroups schedule as two components of one Slurm hetjob.
-// Included in the default make test-e2e suite.
+// TestCompositePodGroupScheduling checks that gang children share one Slurm hetjob.
 func TestCompositePodGroupScheduling(t *testing.T) {
+	testCompositePodGroupScheduling(t, false)
+}
+
+// TestBasicCompositePodGroupScheduling checks that basic children run independently.
+func TestBasicCompositePodGroupScheduling(t *testing.T) {
+	testCompositePodGroupScheduling(t, true)
+}
+
+func testCompositePodGroupScheduling(t *testing.T, basic bool) {
+	t.Helper()
 	testEnv, err := newTestEnvironment()
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +47,9 @@ func TestCompositePodGroupScheduling(t *testing.T) {
 	}
 	leafPolicy := map[string]any{"gang": map[string]any{"minCount": int64(1)}}
 	rootPolicy := map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}}
+	if basic {
+		rootPolicy = map[string]any{"basic": map[string]any{}}
+	}
 	workload := native("Workload", name, map[string]any{
 		"compositePodGroupTemplates": []any{map[string]any{
 			"name": "all", "schedulingPolicy": rootPolicy,
@@ -95,10 +106,35 @@ func TestCompositePodGroupScheduling(t *testing.T) {
 					t.Fatalf("create %s %s: %v", object.GetObjectKind().GroupVersionKind().Kind, object.GetName(), err)
 				}
 			}
-			for _, pod := range pods {
+			for i, pod := range pods {
+				if basic && i > 0 {
+					break
+				}
 				if err := crClient.Create(ctx, pod); err != nil {
 					t.Fatalf("create Pod %s: %v", pod.Name, err)
 				}
+			}
+			return ctx
+		}).
+		Assess("a basic child runs before its sibling exists", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if !basic {
+				return ctx
+			}
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			allocationCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			observed, err := waitForPod(allocationCtx, crClient, client.ObjectKeyFromObject(pods[0]), func(p *corev1.Pod) bool {
+				return podHasSlurmAllocation(p) && p.Status.Phase == corev1.PodRunning
+			})
+			if err != nil {
+				t.Fatalf("basic CompositePodGroup %s waited for its missing sibling: %v; status: %s", name, err, statusJSON(observed.Status))
+			}
+			pods[0] = observed
+			if err := crClient.Create(ctx, pods[1]); err != nil {
+				t.Fatalf("create sibling Pod %s: %v", pods[1].Name, err)
 			}
 			return ctx
 		}).
@@ -121,10 +157,30 @@ func TestCompositePodGroupScheduling(t *testing.T) {
 			}
 			return ctx
 		}).
-		Assess("Slurm has one hetjob with one component per leaf PodGroup", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("Slurm allocations match the composite scheduling policy", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if basic {
+				if pods[0].Labels[slurmJobIDLabel] == pods[1].Labels[slurmJobIDLabel] {
+					t.Fatalf("basic children share Slurm job %s, want independent jobs", pods[0].Labels[slurmJobIDLabel])
+				}
+				for _, pod := range pods {
+					output, err := querySlurmJob(ctx, config, crClient, pod.Labels[slurmJobIDLabel])
+					if err != nil {
+						t.Fatal(err)
+					}
+					if leader, err := slurmJobField(output, "HetJobId"); err == nil && leader != "0" {
+						t.Errorf("basic child %s belongs to hetjob %s, want an independent job", pod.Name, leader)
+					}
+					for field, want := range map[string]string{"JobId": pod.Labels[slurmJobIDLabel], "NodeList": pod.Spec.NodeName} {
+						if got, err := slurmJobField(output, field); err != nil || got != want {
+							t.Errorf("Pod %s: Slurm %s=%q, want %q (error: %v)", pod.Name, field, got, want, err)
+						}
+					}
+				}
+				return ctx
 			}
 			// Inspect Slurm itself: two independent jobs must not satisfy this test.
 			if pods[0].Labels[slurmJobIDLabel] == "" {
