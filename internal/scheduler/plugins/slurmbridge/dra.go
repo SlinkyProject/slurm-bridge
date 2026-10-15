@@ -23,6 +23,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
@@ -325,16 +326,19 @@ func validateDeviceClassRequests(pod *corev1.Pod) error {
 	return nil
 }
 
-func (sb *SlurmBridge) validateDeviceClassRequestsForPods(ctx context.Context, pods []corev1.Pod) error {
+func (sb *SlurmBridge) validateDeviceClassRequestsForPods(ctx context.Context, pods []corev1.Pod, exclusive bool) error {
 	for i := range pods {
 		pod := &pods[i]
 		profileRequests, err := sb.deviceProfileRequests(ctx, pod)
 		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
-		_, err = allocateCoreBitmapProfile(profileRequests)
+		cpu, err := allocateCoreBitmapProfile(profileRequests)
 		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
+		}
+		if cpu != nil && exclusive {
+			return fmt.Errorf("pod %s, DeviceClass %q: %w", klog.KObj(pod), cpu.DeviceClassName, dra.ErrExclusiveCPUAllocation)
 		}
 		if err := validateDeviceClassRequests(pod); err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)

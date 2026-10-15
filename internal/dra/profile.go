@@ -3,7 +3,13 @@
 
 package dra
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrExclusiveCPUAllocation reports unsupported exclusive CPU requests.
+var ErrExclusiveCPUAllocation = errors.New("CPU DRA does not support exclusive Slurm allocations; set slurmjob.slinky.slurm.net/exclusive: \"false\" on the workload annotation source")
 
 // Backend describes how Slurm represents and enforces devices in a
 // DeviceProfile.
