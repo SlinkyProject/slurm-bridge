@@ -11,9 +11,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
-	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
-	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -22,88 +21,94 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-func TestMetadataRepairVerifiesOnlyChanges(t *testing.T) {
-	job := func(id int32, nodes, owner string) *api.V0044JobInfo {
-		return &api.V0044JobInfo{
-			JobId: ptr.To(id), Nodes: ptr.To(nodes),
-			AdminComment: ptr.To(`{"pods":["` + owner + `"]}`),
-			JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-		}
-	}
-	readErr := errors.New("live Slurm read failed")
+type submissionGuardControl struct {
+	slurmcontrol.SlurmControlInterface
+	submits int
+}
+
+func (c *submissionGuardControl) SubmitJob(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) ([]int32, error) {
+	c.submits++
+	return nil, errors.New("submission reached")
+}
+
+func TestSubmissionWaitsForControllerMetadataRepair(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
-		cached    *api.V0044JobInfo
-		live      []object.Object
-		label     string
-		readError bool
-		wantReads int
-		wantNode  string
+		name                                         string
+		missing, finished, moved, liveErr, unlabeled bool
+		correctlyLabeled, hetComponent               bool
+		wantSubmits                                  int
+		wantCode                                     fwk.Code
 	}{
-		{name: "matching metadata needs no live read", cached: job(1, "node1", "ns/pod"), readError: true, wantNode: "node1"},
-		{name: "cache miss preserves metadata without a live read", live: []object.Object{job(1, "node1", "ns/pod")}, wantNode: "node1"},
-		{name: "stale pending state cannot erase a live node", cached: job(1, "", "ns/pod"), live: []object.Object{job(1, "node1", "ns/pod")}, wantReads: 1, wantNode: "node1"},
-		{name: "deleted candidate cannot repair metadata", cached: job(1, "", "ns/pod"), wantReads: 1, wantNode: "node1"},
-		{name: "changed ownership cannot repair metadata", cached: job(1, "", "ns/pod"), live: []object.Object{job(1, "", "ns/other")}, wantReads: 1, wantNode: "node1"},
-		{name: "live labeled allocation is protected", cached: job(1, "node1", "ns/pod"), label: "2", live: []object.Object{job(1, "node1", "ns/pod"), job(2, "node1", "ns/pod")}, wantReads: 1, wantNode: "node1"},
-		{name: "verified node mismatch is repaired", cached: job(1, "", "ns/pod"), live: []object.Object{job(1, "node2", "ns/pod")}, wantReads: 1},
-		{name: "verification error preserves metadata", cached: job(1, "", "ns/pod"), readError: true, wantReads: 1, wantNode: "node1"},
+		{name: "existing allocation awaits repair", wantCode: fwk.Unschedulable},
+		{name: "deleted candidate allows submission", missing: true, wantSubmits: 1, wantCode: fwk.Error},
+		{name: "completed candidate allows submission", finished: true, wantSubmits: 1, wantCode: fwk.Error},
+		{name: "changed ownership allows submission", moved: true, wantSubmits: 1, wantCode: fwk.Error},
+		{name: "failed verification prevents submission", liveErr: true, wantCode: fwk.Error},
+		{name: "unlabeled Pods retain submission behavior", unlabeled: true, wantSubmits: 1, wantCode: fwk.Error},
+		{name: "correctly labeled siblings do not await repair", correctlyLabeled: true, wantSubmits: 1, wantCode: fwk.Error},
+		{name: "correctly labeled hetjob component does not await repair", correctlyLabeled: true, hetComponent: true, wantSubmits: 1, wantCode: fwk.Error},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			label := tt.label
-			if label == "" {
-				label = "1"
+			// An unlabeled triggering Pod must still wait for a labeled sibling.
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "new-pod"}}
+			member := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "member", UID: "member-uid"}}
+			if !tt.unlabeled {
+				member.Labels = map[string]string{wellknown.LabelExternalJobId: "99"}
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Namespace: "ns", Name: "pod",
-				Labels:      map[string]string{wellknown.LabelExternalJobId: label},
-				Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "node1"},
-				Finalizers:  []string{wellknown.FinalizerScheduler},
-			}}
-			want := pod.DeepCopy()
-			want.Annotations[wellknown.AnnotationExternalJobNode] = tt.wantNode
-			kube := kubefake.NewClientBuilder().WithObjects(pod.DeepCopy()).Build()
-			cache := fake.NewClientBuilder()
-			if tt.cached != nil {
-				cache.WithObjects(tt.cached)
+			if tt.correctlyLabeled {
+				member.Labels[wellknown.LabelExternalJobId] = "2"
 			}
-			base := fake.NewClientBuilder().WithObjects(tt.live...).Build()
-			reads := 0
-			live := interceptor.NewClient(base, interceptor.Funcs{
-				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
-					reads++
-					if !(new(slurmclient.GetOptions).ApplyOptions(opts)).SkipCache {
-						t.Error("metadata verification did not bypass the cache")
-					}
-					if tt.readError {
-						return readErr
-					}
-					return base.Get(ctx, key, obj, opts...)
-				},
-			})
-			control, err := slurmcontrol.NewControl(live, cache.Build().GetInformer(api.ObjectTypeV0044JobInfo), "", "")
+			if tt.hetComponent {
+				member.Labels[wellknown.LabelExternalHetJobId] = "1"
+			}
+			before := member.DeepCopy()
+			job := &api.V0044JobInfo{JobId: ptr.To(int32(2)), AdminComment: ptr.To(`{"pods":["ns/member/member-uid"]}`), JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING}}
+			if tt.hetComponent {
+				job.HetJobId = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))}
+				job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(1))}
+			}
+			cache := fake.NewClientBuilder().WithObjects(job).Build()
+			liveJob := job.DeepCopyObject().(*api.V0044JobInfo)
+			if tt.finished {
+				liveJob.JobState = &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED}
+			}
+			if tt.moved {
+				liveJob.AdminComment = ptr.To(`{"pods":["ns/other"]}`)
+			}
+			builder := fake.NewClientBuilder()
+			if !tt.missing {
+				builder.WithObjects(liveJob)
+			}
+			base := builder.Build()
+			live := interceptor.NewClient(base, interceptor.Funcs{Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+				if !(new(slurmclient.GetOptions).ApplyOptions(opts)).SkipCache {
+					t.Error("submission verification did not bypass cache")
+				}
+				if tt.liveErr {
+					return errors.New("Slurm unavailable")
+				}
+				return base.Get(ctx, key, obj, opts...)
+			}})
+			control, err := slurmcontrol.NewControl(live, cache.GetInformer(api.ObjectTypeV0044JobInfo), "", "")
 			if err != nil {
 				t.Fatal(err)
 			}
-			sb := &SlurmBridge{Client: kube, slurmControl: control}
-			_, err = sb.validatePodToJob(t.Context(), pod)
-			if wantError := tt.readError && tt.wantReads > 0; (err != nil) != wantError {
-				t.Fatalf("metadata validation error = %v, want error %t", err, wantError)
+			guard := &submissionGuardControl{SlurmControlInterface: control}
+			sb := &SlurmBridge{slurmControl: guard}
+			state := &stateData{slurmJobIR: &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{
+				{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}},
+				{Pods: corev1.PodList{Items: []corev1.Pod{*member}}},
+			}}}
+			status := sb.submitExternalJob(t.Context(), state, pod)
+			if status.Code() != tt.wantCode || guard.submits != tt.wantSubmits {
+				t.Fatalf("status = %v, submissions = %d; want %v, %d", status, guard.submits, tt.wantCode, tt.wantSubmits)
 			}
-			if reads != tt.wantReads {
-				t.Errorf("live reads = %d, want %d", reads, tt.wantReads)
-			}
-			stored := &corev1.Pod{}
-			if err := kube.Get(t.Context(), kubeclient.ObjectKeyFromObject(pod), stored); err != nil {
-				t.Fatal(err)
-			}
-			for _, got := range []*corev1.Pod{pod, stored} {
-				if !reflect.DeepEqual(got.Labels, want.Labels) || !reflect.DeepEqual(got.Annotations, want.Annotations) || !reflect.DeepEqual(got.Finalizers, want.Finalizers) {
-					t.Errorf("metadata = labels %v, annotations %v, finalizers %v; want %v, %v, %v", got.Labels, got.Annotations, got.Finalizers, want.Labels, want.Annotations, want.Finalizers)
-				}
+			if !reflect.DeepEqual(member, before) {
+				t.Fatal("submission guard repaired metadata in the scheduler")
 			}
 		})
 	}

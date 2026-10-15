@@ -27,6 +27,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/token"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -92,6 +93,8 @@ type orderedJobIndex struct {
 	jobs []api.V0044JobInfo
 }
 
+func (i orderedJobIndex) AddIndex(string, client.IndexFunc) error { return nil }
+
 func (i orderedJobIndex) ByIndex(_ context.Context, _, _ string, list object.ObjectList) error {
 	list.(*api.V0044JobInfoObjectList).Items = append(list.(*api.V0044JobInfoObjectList).Items, i.jobs...)
 	return nil
@@ -100,9 +103,12 @@ func (i orderedJobIndex) ByIndex(_ context.Context, _, _ string, list object.Obj
 func TestIndexedJobsIgnoreCandidateOrder(t *testing.T) {
 	for _, ids := range [][2]int32{{1, 2}, {2, 1}} {
 		t.Run(fmt.Sprint(ids), func(t *testing.T) {
-			control := &realSlurmControl{jobInformer: orderedJobIndex{jobs: []api.V0044JobInfo{
+			control, err := NewControl(nil, orderedJobIndex{jobs: []api.V0044JobInfo{
 				*indexedJob(ids[0], `"ns/pod"`), *indexedJob(ids[1], `"ns/pod"`),
-			}}}
+			}}, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, id := range []int32{0, 1, 2} {
 				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pod", Labels: map[string]string{}}}
 				if id != 0 {
@@ -328,14 +334,14 @@ func TestJobIndexAvoidsSchedulingLists(t *testing.T) {
 		response.Store(body)
 		refresh()
 		old := &api.V0044JobInfoObjectList{}
-		if err := informer.ByIndex(ctx, podJobIndex, "ns/pod", old); err != nil {
+		if err := informer.ByIndex(ctx, slurmjob.PodJobIndex, "ns/pod", old); err != nil {
 			t.Fatal(err)
 		}
 		if len(old.Items) != 0 {
 			t.Fatal("old ownership survived refresh")
 		}
 		renamed := &api.V0044JobInfoObjectList{}
-		if err := informer.ByIndex(ctx, podJobIndex, "ns/renamed", renamed); err != nil {
+		if err := informer.ByIndex(ctx, slurmjob.PodJobIndex, "ns/renamed", renamed); err != nil {
 			t.Fatal(err)
 		}
 		want := 1

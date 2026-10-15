@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package slurmbridge
+package pod
 
 import (
 	"testing"
@@ -11,25 +11,31 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-func TestValidatePodToJobIgnoresReplacedPod(t *testing.T) {
+func TestMetadataRepairIgnoresReplacedPod(t *testing.T) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Namespace: "default", Name: "work", UID: "new-uid",
 		Labels: map[string]string{wellknown.LabelExternalJobId: "8"},
-	}}
+	}, Spec: corev1.PodSpec{SchedulerName: schedulerName}}
 	kubeClient := kubefake.NewClientBuilder().WithObjects(pod).Build()
 	slurmClient := fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
 		JobId:        ptr.To(int32(7)),
 		AdminComment: ptr.To(`{"pods":"default/work/old-uid"}`),
 	}).Build()
-	sb := &SlurmBridge{Client: kubeClient, slurmControl: newTestSlurmControl(t, slurmClient, "", "")}
-	if _, err := sb.validatePodToJob(t.Context(), pod); err != nil {
+	index, err := slurmjob.NewPodIndex(slurmClient, slurmClient.GetInformer(api.ObjectTypeV0044JobInfo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &PodReconciler{Client: kubeClient, jobIndex: index, SchedulerName: schedulerName}
+	if _, err := r.reconcilePodMetadata(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)}); err != nil {
 		t.Fatal(err)
 	}
 	if got := pod.Labels[wellknown.LabelExternalJobId]; got != "8" {

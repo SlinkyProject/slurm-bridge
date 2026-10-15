@@ -46,6 +46,8 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -444,13 +446,6 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 
 	s := &stateData{}
 	state.Write(stateKey, s)
-
-	// Validate this Pod's labels and annotation using the Slurm job index.
-	_, err = sb.validatePodToJob(ctx, pod)
-	if err != nil {
-		logger.Error(err, "error validating pod against podToJob")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
-	}
 
 	// Construct an intermediate representation of the Slurm external job
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
@@ -902,6 +897,41 @@ func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s
 
 func (sb *SlurmBridge) submitExternalJob(ctx context.Context, s *stateData, pod *corev1.Pod) *fwk.Status {
 	logger := klog.FromContext(ctx)
+	// Metadata repair is asynchronous. Do not replace an existing allocation
+	// while the controller is correcting a labeled member of this workload.
+	var labeledPods []*corev1.Pod
+	for i := range s.slurmJobIR.Components {
+		for j := range s.slurmJobIR.Components[i].Pods.Items {
+			member := &s.slurmJobIR.Components[i].Pods.Items[j]
+			if member.Labels[wellknown.LabelExternalJobId] != "" {
+				labeledPods = append(labeledPods, member)
+			}
+		}
+	}
+	if len(labeledPods) > 0 {
+		candidates, err := sb.slurmControl.GetJobsForPods(ctx, labeledPods...)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		for _, member := range labeledPods {
+			key := externaljobinfo.PodKey(member)
+			if job, ok := slurmjob.JobForPod(*candidates, member); ok && job.JobId == slurmjobir.ParseSlurmJobId(member.Labels[wellknown.LabelExternalJobId]) {
+				delete(*candidates, key)
+				delete(*candidates, member.Namespace+"/"+member.Name)
+			}
+		}
+		if len(*candidates) > 0 {
+			verified, err := sb.slurmControl.VerifyJobsForPods(ctx, *candidates, labeledPods...)
+			if err != nil {
+				return fwk.AsStatus(err)
+			}
+			for _, job := range *verified {
+				if !job.Finished {
+					return fwk.NewStatus(fwk.Unschedulable, "waiting for Slurm job metadata reconciliation")
+				}
+			}
+		}
+	}
 
 	jobIDs, err := sb.slurmControl.SubmitJob(ctx, pod, s.slurmJobIR)
 	if err != nil {
@@ -1161,77 +1191,9 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
 }
 
-func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (map[string]slurmcontrol.ExternalJob, error) {
-	logger := klog.FromContext(ctx)
-	logger.V(5).Info("validatePodToJob func", "pod", klog.KObj(pod))
-	podToJob, err := sb.slurmControl.GetJobsForPods(ctx, pod)
-	if err != nil {
-		logger.Error(err, "error populating podToJob")
-		return nil, err
-	}
-	if val, ok := slurmcontrol.JobForPod(*podToJob, pod); ok {
-		proposed := podWithSlurmMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false)
-		if reflect.DeepEqual(pod, proposed) {
-			return *podToJob, nil
-		}
-		// Verify ownership and allocation state before changing Pod metadata.
-		podToJob, err = sb.slurmControl.VerifyJobsForPods(ctx, *podToJob, pod)
-		if err != nil {
-			return nil, err
-		}
-		val, ok = slurmcontrol.JobForPod(*podToJob, pod)
-		if !ok {
-			return *podToJob, nil
-		}
-		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false); err != nil {
-			return nil, err
-		}
-	}
-	return *podToJob, nil
-}
-
-func podWithSlurmMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) *corev1.Pod {
-	logger := klog.FromContext(ctx)
-
-	toUpdate := pod.DeepCopy()
-
-	hasJobID := pod.Labels[wellknown.LabelExternalJobId] != ""
-	if hasJobID || adopt {
-		if toUpdate.Labels == nil {
-			toUpdate.Labels = make(map[string]string)
-		}
-		validateIDLabel(ctx, jobid, wellknown.LabelExternalJobId, pod, toUpdate)
-		validateIDLabel(ctx, hetjobid, wellknown.LabelExternalHetJobId, pod, toUpdate)
-		if hetjobid > 0 && hetJobOffset >= 0 {
-			toUpdate.Labels[wellknown.LabelExternalHetJobOffset] = strconv.FormatInt(int64(hetJobOffset), 10)
-		} else {
-			delete(toUpdate.Labels, wellknown.LabelExternalHetJobOffset)
-		}
-
-		if pod.DeletionTimestamp == nil &&
-			!slices.Contains(toUpdate.Finalizers, wellknown.FinalizerScheduler) {
-			toUpdate.Finalizers = append(
-				toUpdate.Finalizers,
-				wellknown.FinalizerScheduler,
-			)
-		}
-	}
-
-	// If the pod has a Node set, validate it against podToJob
-	nodes, _ := hostlist.Expand(nodesIn)
-	if pod.Annotations[wellknown.AnnotationExternalJobNode] != "" &&
-		!slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode]) {
-		logger.V(3).Info("Pod node annotation does not match Slurm nodes", "pod", klog.KObj(pod),
-			"node annotation", pod.Annotations[wellknown.AnnotationExternalJobNode],
-			"slurm job id", jobid)
-		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = ""
-	}
-	return toUpdate
-}
-
 func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) error {
 	logger := klog.FromContext(ctx)
-	toUpdate := podWithSlurmMeta(ctx, pod, jobid, hetjobid, hetJobOffset, nodesIn, adopt)
+	toUpdate := slurmjob.PodWithMetadata(ctx, pod, slurmjob.ExternalJob{JobId: jobid, HetJobId: hetjobid, HetJobOffset: hetJobOffset, Nodes: nodesIn}, adopt)
 	if !reflect.DeepEqual(pod, toUpdate) {
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")
@@ -1246,27 +1208,4 @@ func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid i
 	}
 
 	return nil
-}
-
-func validateIDLabel(ctx context.Context, id int32, label string, pod *corev1.Pod, newPod *corev1.Pod) {
-	logger := klog.FromContext(ctx)
-
-	currentLabel, labelPresent := pod.Labels[label]
-	currentID := slurmjobir.ParseSlurmJobId(currentLabel)
-
-	if id > 0 {
-		if currentID != id {
-			logger.V(3).Info("Updating pod label to match Slurm job info", "pod", klog.KObj(pod),
-				"label", label,
-				"label contents", pod.Labels[label],
-				"slurm job id", id)
-			newPod.Labels[label] = strconv.Itoa(int(id))
-		}
-	} else if labelPresent {
-		logger.V(3).Info("Deleting invalid label from pod",
-			"label", label,
-			"label contents", currentLabel,
-		)
-		delete(newPod.Labels, label)
-	}
 }

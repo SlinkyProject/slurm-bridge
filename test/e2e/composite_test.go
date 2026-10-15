@@ -25,6 +25,8 @@ import (
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/token"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 // TestCompositePodGroupScheduling checks that gang children share one Slurm hetjob.
@@ -277,6 +279,35 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 				}
 				if got := ptr.Deref(job.Nodes, ""); got != pod.Spec.NodeName {
 					t.Errorf("live client Get(%s) returned nodes %q, want %q", jobID, got, pod.Spec.NodeName)
+				}
+			}
+			return ctx
+		}).
+		Assess("controller repairs Slurm metadata on running Pods", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repairCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+			defer cancel()
+			for _, pod := range pods {
+				offset := pod.Labels[wellknown.LabelExternalHetJobOffset]
+				if !basic && offset == "" {
+					t.Fatalf("Pod %s has no component offset", pod.Name)
+				}
+				damaged := pod.DeepCopy()
+				damaged.Labels[wellknown.LabelExternalHetJobOffset] = "99"
+				if err := crClient.Patch(repairCtx, damaged, client.MergeFrom(pod)); err != nil {
+					t.Fatal(err)
+				}
+				repaired, err := waitForPod(repairCtx, crClient, client.ObjectKeyFromObject(pod), func(p *corev1.Pod) bool {
+					return p.Labels[wellknown.LabelExternalHetJobOffset] == offset
+				})
+				if err != nil {
+					t.Fatalf("Pod %s component offset was not repaired: %v", pod.Name, err)
+				}
+				if repaired.UID != pod.UID || repaired.Spec.NodeName != pod.Spec.NodeName || repaired.Labels[slurmJobIDLabel] != pod.Labels[slurmJobIDLabel] || repaired.Status.Phase != corev1.PodRunning {
+					t.Fatalf("metadata repair changed Pod %s allocation or execution", pod.Name)
 				}
 			}
 			return ctx

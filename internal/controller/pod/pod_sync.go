@@ -23,6 +23,15 @@ import (
 )
 
 func (r *PodReconciler) Sync(ctx context.Context, req reconcile.Request) error {
+	updated, err := r.reconcilePodMetadata(ctx, req)
+	if err != nil {
+		return err
+	}
+	if updated {
+		// Wait for the Pod watch to observe the patch before making cleanup
+		// decisions from the controller's cache.
+		return nil
+	}
 	var errs []error
 
 	if err := r.syncKubernetes(ctx, req); err != nil {
@@ -85,7 +94,7 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 	if !exists {
 		logger.Info("Deleting Pod for corresponding Slurm Job",
 			"pod", podKey, "jobId", jobId)
-		if err := r.Delete(ctx, pod); err != nil {
+		if err := r.Delete(ctx, pod, client.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion}); err != nil {
 			logger.Error(err, "failed to terminate Pod without corresponding Slurm Job",
 				"pod", podKey, "jobId", jobId)
 			return err
@@ -207,7 +216,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 	}
 	toUpdate := pod.DeepCopy()
 	toUpdate.Finalizers = finalizers
-	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
+	if err := r.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod, client.MergeFromWithOptimisticLock{})); err != nil {
 		logger.Error(err, "failed to remove finalizer", "pod", podKey)
 		return err
 	}

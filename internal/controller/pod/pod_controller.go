@@ -22,11 +22,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/durationstore"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/ratelimiter"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 )
 
 const (
@@ -60,6 +62,7 @@ type PodReconciler struct {
 	EventCh     chan event.GenericEvent
 
 	slurmControl  slurmcontrol.SlurmControlInterface
+	jobIndex      *slurmjob.PodIndex
 	eventRecorder record.EventRecorderLogger
 }
 
@@ -102,6 +105,11 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ct
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	var err error
+	r.jobIndex, err = slurmjob.NewPodIndex(r.SlurmClient, r.SlurmClient.GetInformer(api.ObjectTypeV0044JobInfo))
+	if err != nil {
+		return err
+	}
 	podEventHandler := &podEventHandler{
 		SchedulerName: r.SchedulerName,
 		Reader:        mgr.GetCache(),
