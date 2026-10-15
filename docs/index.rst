@@ -169,6 +169,11 @@ Limitations
   allocations may overlap their effective CPU sets; use CPU DRA for
   aligned CPU isolation.
 
+CPU DRA requires Kubernetes 1.36 or newer and uses one shared device per
+socket. Native CPU scheduling and GPU/NIC DRA remain supported on
+Kubernetes 1.35. See `Workload <workload.html>`__ for CPU DRA
+configuration and migration requirements.
+
 Installation
 ------------
 
