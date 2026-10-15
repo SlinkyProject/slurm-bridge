@@ -15,7 +15,6 @@ import (
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -29,7 +28,7 @@ func TestValidatePodToJobIgnoresReplacedPod(t *testing.T) {
 		JobId:        ptr.To(int32(7)),
 		AdminComment: ptr.To(`{"pods":"default/work/old-uid"}`),
 	}).Build()
-	sb := &SlurmBridge{Client: kubeClient, slurmControl: slurmcontrol.NewControl(slurmClient, "", "")}
+	sb := &SlurmBridge{Client: kubeClient, slurmControl: newTestSlurmControl(t, slurmClient, "", "")}
 	if _, err := sb.validatePodToJob(t.Context(), pod); err != nil {
 		t.Fatal(err)
 	}

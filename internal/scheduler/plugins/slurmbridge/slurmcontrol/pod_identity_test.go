@@ -61,7 +61,7 @@ func TestJobsForPodIdentity(t *testing.T) {
 			AdminComment: ptr.To(`{"pods":["default/work"],"podUIDs":{"default/work":"map-uid"}}`),
 		},
 	).Build()}
-	jobs, err := r.GetJobsForPods(t.Context())
+	control, err := NewControl(r.Client, r.GetInformer(api.ObjectTypeV0044JobInfo), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +75,10 @@ func TestJobsForPodIdentity(t *testing.T) {
 		{uid: "map-uid", want: 9},
 	} {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: tt.uid}}
+		jobs, err := control.GetJobsForPods(t.Context(), pod)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if job, found := JobForPod(*jobs, pod); !found || job.JobId != tt.want {
 			t.Errorf("job for UID %s = (%d, %t), want %d", tt.uid, job.JobId, found, tt.want)
 		}

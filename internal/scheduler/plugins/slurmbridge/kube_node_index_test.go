@@ -7,10 +7,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +32,7 @@ import (
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
+	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -47,16 +51,35 @@ func (h *nodeIndexTestHandle) KubeConfig() *rest.Config {
 	})}
 }
 
-func TestNewRegistersKubeNodeIndex(t *testing.T) {
+func TestNewInitializesIndexes(t *testing.T) {
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, false)
+	var lists atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/slurm/v0.0.44/jobs/" {
+			t.Errorf("unexpected Slurm request: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		lists.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jobs":[{"job_id":7,"admin_comment":"{\"pods\":\"ns/pod/pod-uid\"}","job_state":["RUNNING"]}]}`)
+	}))
+	t.Cleanup(server.Close)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("test-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLURM_JWT_FILE", tokenFile)
 	originalConfigFile := ConfigFile
 	t.Cleanup(func() { ConfigFile = originalConfigFile })
 	ConfigFile = filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(ConfigFile, []byte("schedulerName: slurm-bridge\nslurmRestApi: http://slurm.test\nmcsLabel: test\n"), 0o600); err != nil {
+	if err := os.WriteFile(ConfigFile, []byte("schedulerName: slurm-bridge\nslurmRestApi: "+server.URL+"\nmcsLabel: test\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	factory := informers.NewSharedInformerFactory(fake.NewClientset(), 0)
-	plugin, err := New(t.Context(), nil, &nodeIndexTestHandle{factory: factory})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	plugin, err := New(ctx, nil, &nodeIndexTestHandle{factory: factory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +88,17 @@ func TestNewRegistersKubeNodeIndex(t *testing.T) {
 	}
 	if _, registered := factory.Core().V1().Nodes().Informer().GetIndexer().GetIndexers()[nodeutils.IndexFieldSlurmNodeName]; !registered {
 		t.Fatal("Node index is not registered")
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pod", UID: "pod-uid"}}
+	jobs, err := plugin.(*SlurmBridge).slurmControl.GetJobsForPods(ctx, pod)
+	if err != nil {
+		t.Fatalf("initial job lookup: %v", err)
+	}
+	if job, ok := slurmcontrol.JobForPod(*jobs, pod); !ok || job.JobId != 7 {
+		t.Fatalf("initial job lookup = %v, want job 7", jobs)
+	}
+	if got := lists.Load(); got != 1 {
+		t.Fatalf("initial Slurm lists = %d, want 1", got)
 	}
 }
 

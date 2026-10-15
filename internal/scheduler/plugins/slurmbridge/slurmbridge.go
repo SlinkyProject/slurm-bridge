@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -34,6 +35,7 @@ import (
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
@@ -219,7 +221,6 @@ func (sb *SlurmBridge) Name() string {
 
 type stateData struct {
 	slurmJobIR *slurmjobir.SlurmJobIR
-	podToJob   map[string]slurmcontrol.ExternalJob
 }
 
 func (d *stateData) Clone() fwk.StateData {
@@ -329,7 +330,11 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		logger.Error(err, "unable to create slurm client")
 		return nil, err
 	}
-	sc := slurmcontrol.NewControl(slurmClient, cfg.MCSLabel, cfg.Partition)
+	jobInformer := slurmClient.GetInformer(api.ObjectTypeV0044JobInfo)
+	sc, err := slurmcontrol.NewControl(slurmClient, jobInformer, cfg.MCSLabel, cfg.Partition)
+	if err != nil {
+		return nil, err
+	}
 	plugin := &SlurmBridge{
 		Client:        kubeClient,
 		schedulerName: cfg.SchedulerName,
@@ -342,6 +347,18 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, err
 	}
+	go jobInformer.Run(ctx.Done())
+	if err := wait.PollUntilContextCancel(ctx, time.Millisecond, true, func(context.Context) (bool, error) {
+		return jobInformer.HasStarted(), nil
+	}); err != nil {
+		return nil, err
+	}
+	// Prime the index without waiting for the informer's first periodic refresh.
+	go func() {
+		if err := jobInformer.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true}); err != nil && ctx.Err() == nil {
+			logger.Error(err, "unable to initialize Slurm job index")
+		}
+	}()
 	return plugin, nil
 }
 
@@ -428,8 +445,8 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	s := &stateData{}
 	state.Write(stateKey, s)
 
-	// Populate podToJob representation to validate pod label and annotation
-	s.podToJob, err = sb.validatePodToJob(ctx, pod)
+	// Validate this Pod's labels and annotation using the Slurm job index.
+	_, err = sb.validatePodToJob(ctx, pod)
 	if err != nil {
 		logger.Error(err, "error validating pod against podToJob")
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
@@ -1147,12 +1164,25 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (map[string]slurmcontrol.ExternalJob, error) {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("validatePodToJob func", "pod", klog.KObj(pod))
-	podToJob, err := sb.slurmControl.GetJobsForPods(ctx)
+	podToJob, err := sb.slurmControl.GetJobsForPods(ctx, pod)
 	if err != nil {
 		logger.Error(err, "error populating podToJob")
 		return nil, err
 	}
 	if val, ok := slurmcontrol.JobForPod(*podToJob, pod); ok {
+		proposed := podWithSlurmMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false)
+		if reflect.DeepEqual(pod, proposed) {
+			return *podToJob, nil
+		}
+		// Verify ownership and allocation state before changing Pod metadata.
+		podToJob, err = sb.slurmControl.VerifyJobsForPods(ctx, *podToJob, pod)
+		if err != nil {
+			return nil, err
+		}
+		val, ok = slurmcontrol.JobForPod(*podToJob, pod)
+		if !ok {
+			return *podToJob, nil
+		}
 		if err := sb.syncPodMeta(ctx, pod, val.JobId, val.HetJobId, val.HetJobOffset, val.Nodes, false); err != nil {
 			return nil, err
 		}
@@ -1160,7 +1190,7 @@ func (sb *SlurmBridge) validatePodToJob(ctx context.Context, pod *corev1.Pod) (m
 	return *podToJob, nil
 }
 
-func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) error {
+func podWithSlurmMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) *corev1.Pod {
 	logger := klog.FromContext(ctx)
 
 	toUpdate := pod.DeepCopy()
@@ -1196,6 +1226,12 @@ func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid i
 			"slurm job id", jobid)
 		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = ""
 	}
+	return toUpdate
+}
+
+func (sb *SlurmBridge) syncPodMeta(ctx context.Context, pod *corev1.Pod, jobid int32, hetjobid int32, hetJobOffset int32, nodesIn string, adopt bool) error {
+	logger := klog.FromContext(ctx)
+	toUpdate := podWithSlurmMeta(ctx, pod, jobid, hetjobid, hetJobOffset, nodesIn, adopt)
 	if !reflect.DeepEqual(pod, toUpdate) {
 		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
 			logger.Error(err, "failed to update pod with slurm job id")

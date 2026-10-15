@@ -44,7 +44,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -283,7 +282,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 			sb := &SlurmBridge{
 				Client:        kubefake.NewClientBuilder().WithObjects(objects...).Build(),
 				schedulerName: schedulerName,
-				slurmControl:  slurmcontrol.NewControl(slurm, "kubernetes", schedulerName),
+				slurmControl:  newTestSlurmControl(t, slurm, "kubernetes", schedulerName),
 				handle:        f,
 			}
 			if _, status := sb.PostFilter(ctx, state, pending, m); !status.IsSuccess() {
@@ -347,9 +346,16 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 		jobNamespace  string
 		occupantCount int
 		wantDelete    bool
+		lookupError   bool
+		liveState     api.V0044JobInfoJobState
+		changedOwner  bool
 	}{
 		{name: "wait for cleanup of a completed Bridge allocation"},
-		{name: "many completed allocations use the same job list", occupantCount: 10},
+		{name: "failed live verification preserves the allocation", lookupError: true},
+		{name: "cached completion cannot release a live occupant", liveState: api.V0044JobInfoJobStateRUNNING, wantDelete: true},
+		{name: "cached running state cannot cancel a handoff", jobState: api.V0044JobInfoJobStateRUNNING, liveState: api.V0044JobInfoJobStateCOMPLETED},
+		{name: "changed live ownership is still a rejection", changedOwner: true, wantDelete: true},
+		{name: "many completed allocations use bounded indexed lookups", occupantCount: 10},
 		{name: "live allocation is still a rejection", jobState: api.V0044JobInfoJobStateRUNNING, wantDelete: true},
 		{name: "pending allocation is still a rejection", jobState: api.V0044JobInfoJobStatePENDING, wantDelete: true},
 		{name: "unknown job state is still a rejection", jobState: "UNKNOWN", wantDelete: true},
@@ -508,34 +514,57 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 			}
 			baseSlurm := fake.NewClientBuilder().WithObjects(slurmObjects...).Build()
 			deletes, gets, lists := 0, 0, 0
-			slurm := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+			slurm := interceptor.NewClient(baseSlurm, interceptor.Funcs{
 				List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
 					lists++
 					return baseSlurm.List(ctx, list, opts...)
 				},
 				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
 					gets++
-					if key != object.ObjectKey("42") {
-						t.Fatalf("unexpected occupant job lookup: %v", key)
+					if tt.lookupError && key != object.ObjectKey("42") {
+						return fmt.Errorf("Slurm job verification failed")
 					}
-					return baseSlurm.Get(ctx, key, obj, opts...)
+					if err := baseSlurm.Get(ctx, key, obj, opts...); err != nil {
+						return err
+					}
+					if key != object.ObjectKey("42") {
+						if !(new(slurmclient.GetOptions).ApplyOptions(opts)).SkipCache {
+							t.Error("handoff verification did not bypass the cache")
+						}
+						job := obj.(*api.V0044JobInfo)
+						if tt.liveState != "" {
+							job.JobState = &[]api.V0044JobInfoJobState{tt.liveState}
+						}
+						if tt.changedOwner {
+							job.AdminComment = ptr.To(`{"pods":["other/pod"]}`)
+						}
+					}
+					return nil
 				},
 				Delete: func(context.Context, object.Object, ...slurmclient.DeleteOption) error {
 					deletes++
 					return nil
 				},
-			}).Build()
+			})
 			sb := &SlurmBridge{
 				Client: kubeClient, schedulerName: schedulerName,
-				slurmControl: slurmcontrol.NewControl(slurm, "kubernetes", schedulerName), handle: f,
+				slurmControl: newTestSlurmControl(t, slurm, "kubernetes", schedulerName), handle: f,
 			}
 			if _, status := sb.PreFilter(ctx, state, pending, nil); !status.IsSuccess() {
 				t.Fatalf("SlurmBridge PreFilter: %v", status)
 			}
 			m := framework.NewNodeToStatus(map[string]*fwk.Status{node.Name: filterStatus}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable))
 			_, status := sb.PostFilter(ctx, state, pending, m)
-			if lists != 1 || gets != 1 {
-				t.Errorf("Slurm reads: %d lists, %d gets; want one PreFilter list and one PostFilter get", lists, gets)
+			// Fake ByIndex scans its store; production lookup request counts are
+			// checked with a real informer in slurmcontrol/index_test.go.
+			if lists != 0 || gets > 1+2*len(occupants) {
+				t.Errorf("lookups exceeded relevant Pods: %d lists, %d gets for %d occupants", lists, gets, len(occupants))
+			}
+			if tt.lookupError {
+				if deletes != 0 || status.Code() != fwk.Error {
+					t.Fatalf("PostFilter: deletes=%d, status=%v; want an error without cancellation", deletes, status)
+				}
+				return
 			}
 			if tt.wantDelete {
 				if deletes != 1 || !status.IsSuccess() {
@@ -652,7 +681,7 @@ func TestPostFilterSharedGangsDoNotWaitForEachOther(t *testing.T) {
 		Delete: func(context.Context, object.Object, ...slurmclient.DeleteOption) error { deletes++; return nil },
 	}).Build()
 	sb := &SlurmBridge{Client: kubeClient, schedulerName: schedulerName,
-		slurmControl: slurmcontrol.NewControl(slurm, "kubernetes", schedulerName), handle: f,
+		slurmControl: newTestSlurmControl(t, slurm, "kubernetes", schedulerName), handle: f,
 	}
 	for _, pending := range []*corev1.Pod{a1, b0} {
 		state := framework.NewCycleState()
