@@ -30,6 +30,7 @@ func TestScheduling(t *testing.T) {
 
 	testFeatures := []types.Feature{
 		testAdmissionRoutingBoundaries(),
+		testExclusiveCPUDRARejected(),
 		testSlurmBridgeJobScheduling(),
 		testSlurmBridgeParallelJobScheduling(),
 		testSlurmBridgeSequentialJobScheduling(),
@@ -51,9 +52,7 @@ func TestScheduling(t *testing.T) {
 			testLeaderWorkerSetPodGroupScheduling(api),
 		)
 	}
-	if nodeMode == slurmNodeModeExternal {
-		testFeatures = append(testFeatures, testSlurmBridgeDRAResourceScheduling(true))
-	} else {
+	if nodeMode == slurmNodeModeHybrid {
 		testFeatures = append(testFeatures, testHybridSlurmBatchScheduling())
 	}
 
@@ -65,4 +64,17 @@ func TestScheduling(t *testing.T) {
 		// Changing GRES compatibility would disrupt the scheduling features above.
 		_ = testEnv.Test(t, testHybridGRESCompatibilityCondition())
 	}
+}
+
+// TestSocketCPUAllocation runs the focused CPU/GPU runtime and reuse checks.
+func TestSocketCPUAllocation(t *testing.T) {
+	testEnv, err := newTestEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseE2ECleanupFromEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	_ = testEnv.Test(t, testExclusiveCPUDRARejected())
+	_ = testEnv.Test(t, testSlurmBridgeDRAResourceScheduling(true))
 }

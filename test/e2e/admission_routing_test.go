@@ -5,15 +5,51 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+func testExclusiveCPUDRARejected() types.Feature {
+	return features.New("Exclusive CPU DRA rejected at admission").
+		Assess("default and explicit exclusive CPU requests are rejected", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			requireCPUDRA(t, config)
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, exclusive := range []string{"", "true"} {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: envconf.RandomName("exclusive-cpu", 32), Namespace: slurmBridgeNamespace},
+					Spec: corev1.PodSpec{
+						SchedulerName: slurmBridgeScheduler,
+						Containers: []corev1.Container{{Name: "work", Image: "busybox:stable", Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{draCPUResource: resource.MustParse("1")},
+						}}},
+					},
+				}
+				if exclusive != "" {
+					pod.Annotations = map[string]string{wellknown.AnnotationExclusive: exclusive}
+				}
+				// Exercise defaulting and admission without persisting a Pod.
+				err := crClient.Create(ctx, pod, client.DryRunAll)
+				if err == nil || !strings.Contains(err.Error(), dra.ErrExclusiveCPUAllocation.Error()) {
+					t.Fatalf("exclusive=%q: Create() = %v, want exclusive CPU admission rejection", exclusive, err)
+				}
+			}
+			return ctx
+		}).Feature()
+}
 
 func testAdmissionRoutingBoundaries() types.Feature {
 	namespaceName := envconf.RandomName("e2e-routing", 40)

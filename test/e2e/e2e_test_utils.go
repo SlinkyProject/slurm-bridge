@@ -695,14 +695,10 @@ func testSlurmBridgePodScheduling() types.Feature {
 		Feature()
 }
 
-func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
+func testSlurmBridgeDRAResourceScheduling(checkReuse bool) types.Feature {
 	podName := envconf.RandomName("pod-dra-e2e", 32)
 	exclusiveValue := "false"
 	featureName := "Non-exclusive DRA resources allocated to container"
-	if exclusive {
-		exclusiveValue = "true"
-		featureName = "Exclusive DRA resources allocated to container"
-	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        podName,
@@ -736,6 +732,7 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 
 	return features.New(featureName).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			requireCPUDRA(t, config)
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
@@ -771,30 +768,16 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 			}
 			return ctx
 		}).
-		Assess("container CPU set matches DRA allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-			environment, err := execInPod(ctx, config, pod, "env")
+		Assess("container CPU set matches the applied Slurm bitmap", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
-				t.Fatalf("failed to read container environment: %v", err)
+				t.Fatal(err)
 			}
-			allocated, err := draCPUSetFromEnvironment(environment)
+			cpus, err := verifySlurmCPUSet(ctx, config, crClient, pod)
 			if err != nil {
-				t.Fatalf("failed to find DRA CPU allocation: %v", err)
+				t.Fatal(err)
 			}
-			if allocated.Size() == 0 {
-				t.Fatal("container received an empty DRA CPU allocation")
-			}
-
-			effectiveOutput, err := execInPod(ctx, config, pod, "cat", "/sys/fs/cgroup/cpuset.cpus.effective")
-			if err != nil {
-				t.Fatalf("failed to read container effective CPU set: %v", err)
-			}
-			effective, err := cpuset.Parse(strings.TrimSpace(effectiveOutput))
-			if err != nil {
-				t.Fatalf("failed to parse container effective CPU set %q: %v", strings.TrimSpace(effectiveOutput), err)
-			}
-			if !effective.Equals(allocated) {
-				t.Fatalf("container effective CPU set %s does not match DRA allocation %s", effective.String(), allocated.String())
-			}
+			t.Logf("Slurm, DRA and effective CPU sets agree: %s", cpus.String())
 			return ctx
 		}).
 		Assess("container has example GPU allocation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -806,6 +789,51 @@ func testSlurmBridgeDRAResourceScheduling(exclusive bool) types.Feature {
 			if len(matches) != 1 {
 				t.Fatalf("container has %d example GPU allocations, want 1", len(matches))
 			}
+			return ctx
+		}).
+		Assess("CPU capacity can be reused after coordinated cleanup", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if !checkReuse || !e2eCleanupEnabled(t) {
+				return ctx
+			}
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous, err := verifySlurmCPUSet(ctx, config, crClient, pod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := &corev1.Node{}
+			if err := crClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
+				t.Fatal(err)
+			}
+			reused := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName + "-reuse", Namespace: slurmBridgeNamespace, Annotations: map[string]string{wellknown.AnnotationExclusive: exclusiveValue}}, Spec: *pod.Spec.DeepCopy()}
+			reused.Spec.NodeName = ""
+			reused.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": node.Labels["kubernetes.io/hostname"]}
+			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
+			if t.Failed() {
+				t.FailNow()
+			}
+			if err := crClient.Create(ctx, reused); err != nil {
+				t.Fatal(err)
+			}
+			pod = reused
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+					return false, err
+				}
+				return pod.Status.Phase == corev1.PodRunning, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(2*time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			current, err := verifySlurmCPUSet(ctx, config, crClient, pod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.Size() != previous.Size() {
+				t.Fatalf("reused CPU count %d, want %d", current.Size(), previous.Size())
+			}
+			t.Logf("Reused CPU set after cleanup: %s", current.String())
 			return ctx
 		}).
 		Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
