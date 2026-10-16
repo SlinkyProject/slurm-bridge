@@ -42,6 +42,57 @@ func (c *patchCountingClient) Patch(ctx context.Context, obj client.Object, patc
 	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
+var _ = Describe("Sync()", func() {
+	It("cancels a registration drain when the external-node label is restored", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "external-0"}}
+		kubeClient := fake.NewFakeClient(node)
+
+		updateFn := func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			slurmNode := obj.(*slurmtypes.V0044Node)
+			update := req.(api.V0044UpdateNodeMsg)
+			state := set.New(ptr.Deref(slurmNode.State, []api.V0044NodeState{})...)
+			for _, requested := range ptr.Deref(update.State, []api.V0044UpdateNodeMsgState{}) {
+				switch requested {
+				case api.V0044UpdateNodeMsgStateUNDRAIN:
+					state.Delete(api.V0044NodeStateDRAIN)
+				default:
+					state.Insert(api.V0044NodeState(requested))
+				}
+			}
+			slurmNode.State = ptr.To(state.UnsortedList())
+			if update.Reason != nil {
+				slurmNode.Reason = update.Reason
+			}
+			return nil
+		}
+		slurmClient := slurmclientfake.NewClientBuilder().
+			WithObjects(&slurmtypes.V0044Node{V0044Node: api.V0044Node{
+				Name:   ptr.To(node.Name),
+				State:  ptr.To([]api.V0044NodeState{api.V0044NodeStateALLOCATED, api.V0044NodeStateDRAIN, api.V0044NodeStateEXTERNAL}),
+				Reason: ptr.To("slurm-bridge: removing external node " + node.Name),
+			}}).
+			WithUpdateFn(updateFn).
+			Build()
+		r := NewReconciler(kubeClient, slurmClient, schedulerName, make(chan event.GenericEvent))
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}}
+		DeferCleanup(func() { durationStore.Pop(req.String()) })
+
+		Expect(r.Sync(ctx, req)).To(Succeed())
+		drained, err := r.slurmControl.IsNodeDrain(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drained).To(BeTrue())
+
+		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), node)).To(Succeed())
+		node.Labels = map[string]string{wellknown.LabelExternalNode: "true"}
+		Expect(kubeClient.Update(ctx, node)).To(Succeed())
+
+		Expect(r.Sync(ctx, req)).To(Succeed())
+		drained, err = r.slurmControl.IsNodeDrain(ctx, node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drained).To(BeFalse())
+	})
+})
+
 var _ = Describe("syncTaint()", func() {
 	var controllerReconciler *NodeReconciler
 	var k8sClient *patchCountingClient
