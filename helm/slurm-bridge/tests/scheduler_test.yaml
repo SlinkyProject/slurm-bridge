@@ -20,6 +20,15 @@ capabilities:
   majorVersion: 1
   minorVersion: 37
 tests:
+  - it: prioritizes ready Slurm allocations
+    template: scheduler/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?s)queueSort:.*SlurmBridge.*preEnqueue:"
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: PrioritySort
   - it: honors registration gates before gang enqueue
     template: scheduler/configmap.yaml
     asserts:

@@ -1282,7 +1282,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			},
 			want:         nil,
 			want1:        fwk.NewStatus(fwk.Success, ""),
-			wantActivate: true,
+			wantActivate: false,
 		},
 		{
 			name: "Updating an external job succeeds",
@@ -1349,7 +1349,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			},
 			want:         nil,
 			want1:        fwk.NewStatus(fwk.Success, ""),
-			wantActivate: true,
+			wantActivate: false,
 		},
 		{
 			name: "Updating an external job fails",
@@ -1509,7 +1509,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			},
 			want:         nil,
 			want1:        fwk.NewStatus(fwk.Success, ""),
-			wantActivate: true,
+			wantActivate: false,
 		},
 	}
 	for _, tt := range tests {
