@@ -25,6 +25,10 @@ manifests should match snapshot:
       scheduler-config.yaml: |
         apiVersion: kubescheduler.config.k8s.io/v1
         kind: KubeSchedulerConfiguration
+        # Slurm needs all eligible partition nodes before allocation. With scoring
+        # disabled, Kubernetes overrides this target to one feasible node; full scans
+        # still depend on SlurmBridge.Filter rejecting every node until allocation.
+        percentageOfNodesToScore: 100
         leaderElection:
           leaderElect: false
           resourceNamespace: test-namespace
@@ -98,7 +102,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
-            checksum/scheduler-config: f4b19fca5e7f63f9b0ffb785310a5652832a32ccc6d8f88bf50585d7a865b6a2
+            checksum/scheduler-config: 3b071fe7e4712a30b541c11be0252017074a4f4748d76a507a92efaad47b2468
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release
