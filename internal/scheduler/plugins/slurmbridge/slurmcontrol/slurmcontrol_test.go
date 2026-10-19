@@ -1068,10 +1068,13 @@ func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
 	updates := 0
 	failUpdate := false
 	r := &realSlurmControl{lastUpdate: lru.New(10), Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-		Update: func(context.Context, object.Object, any, ...client.UpdateOption) error {
+		Update: func(_ context.Context, _ object.Object, _ any, opts ...client.UpdateOption) error {
 			updates++
+			if !(&client.UpdateOptions{}).ApplyOptions(opts).SkipReadAfterUpdate {
+				t.Fatal("eligibility update must not wait for readback")
+			}
 			if failUpdate {
-				return errors.New("update applied but read back failed")
+				return errors.New("update applied but response lost")
 			}
 			return nil
 		},
@@ -1104,5 +1107,61 @@ func Test_realSlurmControl_UpdateJobSkipsUnchanged(t *testing.T) {
 		if updates != step.want {
 			t.Fatalf("step %d: updates = %d, want %d", i, updates, step.want)
 		}
+	}
+}
+
+func Test_realSlurmControl_ReleaseJob(t *testing.T) {
+	writeErr := errors.New("update failed")
+	for _, tt := range []struct {
+		name       string
+		priority   *int32
+		failAt     int
+		wantWrites int
+	}{
+		{name: "Slurm priority", wantWrites: 1},
+		{name: "explicit priority", priority: ptr.To(int32(500)), wantWrites: 2},
+		{name: "zero priority", priority: ptr.To(int32(0)), wantWrites: 2},
+		{name: "release fails", priority: ptr.To(int32(500)), failAt: 1, wantWrites: 1},
+		{name: "priority fails", priority: ptr.To(int32(500)), failAt: 2, wantWrites: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			writes := 0
+			r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+				Update: func(_ context.Context, obj object.Object, req any, opts ...client.UpdateOption) error {
+					writes++
+					if obj.GetKey() != "42" {
+						t.Fatalf("updated job = %s, want 42", obj.GetKey())
+					}
+					if !(&client.UpdateOptions{}).ApplyOptions(opts).SkipReadAfterUpdate {
+						t.Fatal("hold release and priority updates must not wait for readback")
+					}
+					want := api.V0044JobDescMsg{Hold: ptr.To(false)}
+					if writes == 2 {
+						want = api.V0044JobDescMsg{Priority: &api.V0044Uint32NoValStruct{
+							Set: ptr.To(true), Number: tt.priority, Infinite: ptr.To(false),
+						}}
+					}
+					if !apiequality.Semantic.DeepEqual(req, want) {
+						t.Errorf("write %d = %#v, want %#v", writes, req, want)
+					}
+					if writes == tt.failAt {
+						return writeErr
+					}
+					// Leave obj unchanged, as SkipReadAfterUpdate does.
+					return nil
+				},
+				Get: func(context.Context, object.ObjectKey, object.Object, ...client.GetOption) error {
+					t.Fatal("release must not read the job back")
+					return nil
+				},
+			}).Build()}
+			err := r.ReleaseJob(t.Context(), 42, tt.priority)
+			if tt.failAt == 0 && err != nil || tt.failAt != 0 && !errors.Is(err, writeErr) {
+				t.Fatalf("ReleaseJob() = %v, failure expected: %t", err, tt.failAt != 0)
+			}
+			if writes != tt.wantWrites {
+				t.Errorf("writes = %d, want %d", writes, tt.wantWrites)
+			}
+		})
 	}
 }

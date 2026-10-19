@@ -118,7 +118,7 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	}
 	job.JobId = &jobId
 	r.lastUpdate.Remove(jobId)
-	if err := r.Delete(ctx, job); err != nil {
+	if err := r.Delete(ctx, job, &client.DeleteOptions{SkipReadAfterDelete: true}); err != nil {
 		// Cancellation may have succeeded on an earlier attempt whose pod
 		// metadata cleanup failed. Confirm the allocation is gone before
 		// allowing cleanup to continue despite a cancellation error.
@@ -243,7 +243,9 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	}
 
 	job.JobId = ptr.To(jobID)
-	if err := r.Update(ctx, job, *jobSubmit.Job); err != nil {
+	// PostFilter ends this scheduling attempt after updating eligibility. The
+	// allocation observer retries when Slurm assigns nodes; no readback is needed.
+	if err := r.Update(ctx, job, *jobSubmit.Job, &client.UpdateOptions{SkipReadAfterUpdate: true}); err != nil {
 		// Slurm may have applied the update before the error; don't trust the old entry.
 		r.lastUpdate.Remove(jobID)
 		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
@@ -288,13 +290,15 @@ func (r *realSlurmControl) RegisterJob(ctx context.Context, ir *slurmjobir.Slurm
 
 // ReleaseJob is called after every component's eligibility has been updated.
 // Slurm maps hold and priority to the same field: they must be separate requests.
+// Wait for each write's acknowledgement, but leave observing the allocation to
+// the allocation observer and the next scheduling attempt.
 func (r *realSlurmControl) ReleaseJob(ctx context.Context, id int32, priority *int32) error {
 	job := &api.V0044JobInfo{JobId: ptr.To(id)}
-	if err := r.Update(ctx, job, api.V0044JobDescMsg{Hold: ptr.To(false)}); err != nil {
+	if err := r.Update(ctx, job, api.V0044JobDescMsg{Hold: ptr.To(false)}, &client.UpdateOptions{SkipReadAfterUpdate: true}); err != nil {
 		return err
 	}
 	if priority != nil {
-		return r.Update(ctx, job, api.V0044JobDescMsg{Priority: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: priority, Infinite: ptr.To(false)}})
+		return r.Update(ctx, job, api.V0044JobDescMsg{Priority: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: priority, Infinite: ptr.To(false)}}, &client.UpdateOptions{SkipReadAfterUpdate: true})
 	}
 	return nil
 }

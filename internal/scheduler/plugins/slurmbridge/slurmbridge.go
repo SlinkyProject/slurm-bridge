@@ -721,7 +721,9 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	delete(sb.pending, groupAllocation{uid: s.slurmJobIR.RootPOM.UID, jobID: s.allocation[0].AllocationID()})
 	sb.mu.Unlock()
 
-	// Eligibility is updated, but the job may still be pending in Slurm.
+	// Successful PostFilter ends this attempt; it does not proceed to binding.
+	// Writes have been acknowledged without reading back the updated jobs, and
+	// eligibility is updated, but the job may still be pending in Slurm.
 	// The allocation observer activates the workload when its allocation arrives.
 	// Otherwise retain normal backoff, including for an unchanged ready allocation.
 	return nil, fwk.NewStatus(fwk.Success, "")
