@@ -29,7 +29,7 @@ Kubernetes: `>= 1.34.0-0`
 | admission.certManager.enabled | bool | `true` | Enables cert-manager for certificate management. |
 | admission.certManager.renewBefore | string | `"8760h0m0s"` | Certificate renewal time. Should be before the expiration. |
 | admission.enabled | bool | `true` | Enables admission controller. |
-| admission.featureGates | object | `{"EnableLegacyLWSGangs":true,"EnableLegacyv1alpha1PodGroups":true}` | Admission feature gates. Keep legacy workload support enabled to warn; disable either gate to reject new usage on create/update while allowing updates to Pods already using that feature. |
+| admission.featureGates | object | `{"LegacyLWSGangs":true,"Legacyv1alpha1PodGroups":true}` | Admission feature gates. Keep legacy workload support enabled to warn; disable either gate to reject new usage on create/update while allowing updates to Pods already using that feature. |
 | admission.image | object | `{"pullPolicy":"IfNotPresent","repository":"ghcr.io/slinkyproject/slurm-bridge-admission","tag":""}` | The image to use, `${repository}:${tag}`. Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names |
 | admission.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | admission.managedNamespaceSelector | object | `{}` | A label selector to select namespaces to be monitored by the pod admission controller. If this is set, managedNamespaces will be ignored. Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors |

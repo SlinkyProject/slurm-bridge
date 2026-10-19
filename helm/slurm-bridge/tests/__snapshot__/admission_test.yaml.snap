@@ -32,7 +32,7 @@ manifests should match snapshot:
         spec:
           containers:
             - args:
-                - --feature-gates=EnableLegacyLWSGangs=true,EnableLegacyv1alpha1PodGroups=true
+                - --feature-gates=LegacyLWSGangs=true,Legacyv1alpha1PodGroups=true
               image: ghcr.io/slinkyproject/slurm-bridge-admission:1.2.3
               imagePullPolicy: IfNotPresent
               livenessProbe:

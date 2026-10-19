@@ -32,15 +32,15 @@ func TestPodAdmission_LegacyFeatureGates(t *testing.T) {
 	}{
 		{name: "LWS warns by default", label: lwsv1.SetNameLabelKey, wantWarnings: 1},
 		{name: "reject legacy PodGroup", label: sched.PodGroupLabel,
-			disable: features.EnableLegacyv1alpha1PodGroups, wantError: true},
+			disable: features.Legacyv1alpha1PodGroups, wantError: true},
 		{name: "reject legacy LWS", label: lwsv1.SetNameLabelKey,
-			disable: features.EnableLegacyLWSGangs, wantError: true},
+			disable: features.LegacyLWSGangs, wantError: true},
 		{name: "PodGroup gate leaves LWS warning", label: lwsv1.SetNameLabelKey,
-			disable: features.EnableLegacyv1alpha1PodGroups, wantWarnings: 1},
+			disable: features.Legacyv1alpha1PodGroups, wantWarnings: 1},
 		{name: "LWS gate leaves PodGroup warning", label: sched.PodGroupLabel,
-			disable: features.EnableLegacyLWSGangs, wantWarnings: 1},
+			disable: features.LegacyLWSGangs, wantWarnings: 1},
 		{name: "native LWS remains allowed", label: lwsv1.SetNameLabelKey,
-			disable: features.EnableLegacyLWSGangs, native: true},
+			disable: features.LegacyLWSGangs, native: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.disable != "" {
@@ -82,8 +82,8 @@ func TestPodAdmission_LegacyFeatureGates(t *testing.T) {
 }
 
 func TestPodAdmission_LegacyFeatureGateUpdates(t *testing.T) {
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.EnableLegacyv1alpha1PodGroups, false)
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.EnableLegacyLWSGangs, false)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.Legacyv1alpha1PodGroups, false)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.LegacyLWSGangs, false)
 	r := &PodAdmission{SchedulerName: SchedulerName}
 	ctx := contextWithAdmissionSubresource("")
 
@@ -93,8 +93,8 @@ func TestPodAdmission_LegacyFeatureGateUpdates(t *testing.T) {
 		otherLabel string
 		otherGate  featuregate.Feature
 	}{
-		{"PodGroup", sched.PodGroupLabel, lwsv1.SetNameLabelKey, features.EnableLegacyLWSGangs},
-		{"LWS", lwsv1.SetNameLabelKey, sched.PodGroupLabel, features.EnableLegacyv1alpha1PodGroups},
+		{"PodGroup", sched.PodGroupLabel, lwsv1.SetNameLabelKey, features.LegacyLWSGangs},
+		{"LWS", lwsv1.SetNameLabelKey, sched.PodGroupLabel, features.Legacyv1alpha1PodGroups},
 	} {
 		t.Run(legacy.name, func(t *testing.T) {
 			for _, tt := range []struct {
@@ -153,7 +153,7 @@ func TestPodAdmission_LegacyFeatureGateUpdates(t *testing.T) {
 		newPod := oldPod.DeepCopy()
 		newPod.Spec.SchedulingGroup = nil
 		_, err := r.ValidateUpdate(ctx, oldPod, newPod)
-		if err == nil || !strings.Contains(err.Error(), string(features.EnableLegacyLWSGangs)+"=false") {
+		if err == nil || !strings.Contains(err.Error(), string(features.LegacyLWSGangs)+"=false") {
 			t.Fatalf("error = %v, want rejection of newly introduced legacy LWS", err)
 		}
 	})

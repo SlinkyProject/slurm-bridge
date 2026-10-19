@@ -196,7 +196,7 @@ func validateDeprecatedWorkloads(oldPod, pod *corev1.Pod) (admission.Warnings, e
 			used: func(pod *corev1.Pod) bool {
 				return pod.Labels[sched.PodGroupLabel] != ""
 			},
-			gate:    features.EnableLegacyv1alpha1PodGroups,
+			gate:    features.Legacyv1alpha1PodGroups,
 			message: "scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
 		},
 		{
@@ -205,7 +205,7 @@ func validateDeprecatedWorkloads(oldPod, pod *corev1.Pod) (admission.Warnings, e
 					pod.Spec.SchedulingGroup.PodGroupName != nil && *pod.Spec.SchedulingGroup.PodGroupName != ""
 				return pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup
 			},
-			gate:    features.EnableLegacyLWSGangs,
+			gate:    features.LegacyLWSGangs,
 			message: "Implicit LeaderWorkerSet gang scheduling is deprecated and will be removed in a future release in slurm-bridge; set LeaderWorkerSet spec.scheduling to use Kubernetes native PodGroups (Pod spec.schedulingGroup.podGroupName)",
 		},
 	} {

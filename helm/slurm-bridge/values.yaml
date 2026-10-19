@@ -92,8 +92,8 @@ admission:
   # disable either gate to reject new usage on create/update while allowing
   # updates to Pods already using that feature.
   featureGates:
-    EnableLegacyv1alpha1PodGroups: true
-    EnableLegacyLWSGangs: true
+    Legacyv1alpha1PodGroups: true
+    LegacyLWSGangs: true
   # -- The image to use, `${repository}:${tag}`.
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:

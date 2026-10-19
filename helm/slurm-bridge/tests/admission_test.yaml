@@ -33,12 +33,12 @@ tests:
   - it: can reject both legacy workload types
     template: admission/deployment.yaml
     set:
-      admission.featureGates.EnableLegacyv1alpha1PodGroups: false
-      admission.featureGates.EnableLegacyLWSGangs: false
+      admission.featureGates.Legacyv1alpha1PodGroups: false
+      admission.featureGates.LegacyLWSGangs: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=EnableLegacyLWSGangs=false,EnableLegacyv1alpha1PodGroups=false
+          content: --feature-gates=LegacyLWSGangs=false,Legacyv1alpha1PodGroups=false
   - it: deployment carries a config checksum annotation so configmap changes trigger a rolling restart
     template: admission/deployment.yaml
     set:
