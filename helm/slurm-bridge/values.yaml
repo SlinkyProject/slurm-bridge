@@ -88,6 +88,12 @@ schedulerConfig:
 admission:
   # -- Enables admission controller.
   enabled: true
+  # -- Admission feature gates. Keep legacy workload support enabled to warn;
+  # disable either gate to reject new usage on create/update while allowing
+  # updates to Pods already using that feature.
+  featureGates:
+    Legacyv1alpha1PodGroups: true
+    LegacyLWSGangs: true
   # -- The image to use, `${repository}:${tag}`.
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:

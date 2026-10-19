@@ -14,11 +14,23 @@ import (
 // PodGroup APIs. It does not enable the embedded scheduler's GenericWorkload gate.
 const SlurmBridgeGenericWorkload featuregate.Feature = "SlurmBridgeGenericWorkload"
 
+// Legacyv1alpha1PodGroups allows deprecated scheduler-plugins PodGroups
+// through admission with a warning. Disabling it rejects new usage while
+// preserving updates to Pods already using the feature.
+const Legacyv1alpha1PodGroups featuregate.Feature = "Legacyv1alpha1PodGroups"
+
+// LegacyLWSGangs allows implicit LeaderWorkerSet gangs through admission
+// with a warning. Disabling it rejects new usage while preserving updates to
+// Pods already using the feature.
+const LegacyLWSGangs featuregate.Feature = "LegacyLWSGangs"
+
 func init() {
 	// Kubernetes 1.37 enables this informer by default, but its v1 API is not
 	// served by older supported clusters. Preserve the 1.36 scheduler default.
 	utilruntime.Must(utilfeature.DefaultMutableFeatureGate.OverrideDefault(kubefeatures.DRADeviceTaintRules, false))
 	utilruntime.Must(utilfeature.DefaultMutableFeatureGate.Add(map[featuregate.Feature]featuregate.FeatureSpec{
 		SlurmBridgeGenericWorkload: {Default: true, PreRelease: featuregate.Beta},
+		Legacyv1alpha1PodGroups:    {Default: true, PreRelease: featuregate.Deprecated},
+		LegacyLWSGangs:             {Default: true, PreRelease: featuregate.Deprecated},
 	}))
 }

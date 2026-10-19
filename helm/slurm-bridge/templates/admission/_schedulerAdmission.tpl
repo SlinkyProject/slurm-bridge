@@ -11,6 +11,17 @@ Name of the schedulerAdmission
 {{- end }}
 
 {{/*
+List admission feature gates
+*/}}
+{{- define "slurm-bridge.admission.featureGates" -}}
+{{- $featureGates := list }}
+{{- range $name, $enabled := .Values.admission.featureGates }}
+{{- $featureGates = append $featureGates (printf "%s=%t" $name $enabled) }}
+{{- end }}
+{{- join "," $featureGates }}
+{{- end }}
+
+{{/*
 Name of the schedulerAdmission for cluster-scoped objects, which two releases
 of the chart would otherwise collide on.
 */}}

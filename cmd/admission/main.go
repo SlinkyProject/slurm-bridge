@@ -10,6 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -43,6 +44,8 @@ type Flags struct {
 }
 
 func parseFlags(flags *Flags) {
+	flag.Func("feature-gates", "A set of key=value pairs that enable or disable feature gates.",
+		utilfeature.DefaultMutableFeatureGate.Set)
 	flag.StringVar(&flags.configFile, "config", config.ConfigFile,
 		"The path to the configuration file.")
 

@@ -584,6 +584,11 @@ marked as completed.
 > Pod creation and update when the `scheduling.x-k8s.io/pod-group` label is
 > non-empty. This deprecation does not remove scheduling support.
 
+To reject new legacy PodGroup Pods and updates that introduce legacy PodGroup
+usage, set `admission.featureGates.Legacyv1alpha1PodGroups: false` (default:
+`true`). Pods already using legacy PodGroups can still be updated, with a
+deprecation warning, so metadata changes and finalizer removal remain possible.
+
 For compatibility on clusters where the supported built-in PodGroup API is
 unavailable, legacy workloads still require the
 [PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
@@ -624,6 +629,19 @@ schemas. Changing only `apiVersion` is not sufficient.
 
 ## LeaderWorkerSet
 
+> [!WARNING]
+> Implicit LeaderWorkerSet gang scheduling is deprecated in `slurm-bridge` and
+> will be removed in a future release. Admission warns for LWS Pods without
+> `spec.schedulingGroup.podGroupName`. Enable
+> [native LWS gang scheduling][lws-gang-scheduling] with `spec.scheduling: {}`
+> on the LeaderWorkerSet to migrate.
+
+To reject new legacy LWS Pods and updates that introduce implicit LWS gang
+scheduling, set `admission.featureGates.LegacyLWSGangs: false` (default:
+`true`). Pods already using implicit LWS gang scheduling can still be updated,
+with a deprecation warning, so metadata changes and finalizer removal remain
+possible.
+
 This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 
 LeaderWorkerSet groups will be co-scheduled so pods of each group will be
@@ -655,6 +673,7 @@ upgrading the controller, following the
 [jobs]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
 [jobsets]: https://jobset.sigs.k8s.io/
 [leaderworkersets]: https://lws.sigs.k8s.io/
+[lws-gang-scheduling]: https://lws.sigs.k8s.io/docs/concepts/leaderworkerset/gang-scheduling/
 [podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [pods]: https://kubernetes.io/docs/concepts/workloads/pods/
 [workload-api]: https://kubernetes.io/docs/concepts/workloads/workload-api/
