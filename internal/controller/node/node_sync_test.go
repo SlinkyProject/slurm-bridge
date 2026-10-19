@@ -776,13 +776,6 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 			_, err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 			Expect(err).To(MatchError(ContainSubstring("generation 1 is incomplete: found 1 of 2 ResourceSlices")))
 		}
-		if external {
-			Expect(updates).To(HaveLen(3))
-			Expect(updates[0].State).To(Equal(ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN})))
-			Expect(updates[0].Extra).To(BeNil())
-			updates = updates[1:]
-			state = append(state, api.V0044NodeStateDRAIN)
-		}
 		Expect(updates).To(HaveLen(2))
 		Expect(updates[0].FeaturesAct).NotTo(BeNil())
 		Expect(*updates[0].FeaturesAct).To(Equal(api.V0044CsvString{"admin-feature"}))

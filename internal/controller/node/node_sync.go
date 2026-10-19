@@ -282,15 +282,10 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 	}
 }
 
-// recordNodeRegistrationError revokes bridge eligibility and drains external nodes.
+// recordNodeRegistrationError revokes bridge eligibility for the node.
 func (r *NodeReconciler) recordNodeRegistrationError(ctx context.Context, node *corev1.Node, registrationErr error) error {
-	isExternal, lookupErr := r.slurmControl.IsNodeExternal(ctx, node)
-	var drainErr error
-	if isExternal {
-		drainErr = r.slurmControl.MakeNodeDrain(ctx, node, "invalid DRA registration")
-	}
 	disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
-	return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, registrationErr), lookupErr, drainErr, disableErr)
+	return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, registrationErr), disableErr)
 }
 
 func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *corev1.Node) (*nodeinfo.NodeInfo, []dra.GRESInventory, error) {

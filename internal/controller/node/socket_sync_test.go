@@ -27,6 +27,7 @@ type drainingSocketControl struct {
 	external                              bool
 	registrationErr                       error
 	drainErr                              error
+	disableErr                            error
 }
 
 func (c *drainingSocketControl) NodeExists(context.Context, *corev1.Node) (bool, error) {
@@ -43,7 +44,7 @@ func (c *drainingSocketControl) IsNodeExternal(context.Context, *corev1.Node) (b
 }
 func (c *drainingSocketControl) DisableNodeGRESCompatibility(context.Context, *corev1.Node) error {
 	c.disabled++
-	return nil
+	return c.disableErr
 }
 func (c *drainingSocketControl) MakeNodeDrain(context.Context, *corev1.Node, string) error {
 	c.drains++
@@ -128,7 +129,7 @@ func TestSocketTopologyDrainCannotBeUndoneBySyncState(t *testing.T) {
 	}
 }
 
-func TestRegistrationFailureDrainsOnlyExternalNodes(t *testing.T) {
+func TestRegistrationFailureRevokesEligibilityWithoutDraining(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		for _, missingRegistry := range []bool{false, true} {
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker", Labels: map[string]string{wellknown.LabelExternalNode: "true"}}}
@@ -146,13 +147,28 @@ func TestRegistrationFailureDrainsOnlyExternalNodes(t *testing.T) {
 			if err == nil || !missingRegistry && !errors.Is(err, registrationErr) {
 				t.Fatalf("expected registration failure, got %v", err)
 			}
-			wantDrains := 0
-			if external {
-				wantDrains = 1
-			}
-			if control.drains != wantDrains || control.disabled != 1 || control.undrains != 0 || control.additions != 0 {
+			if control.drains != 0 || control.disabled != 1 || control.undrains != 0 || control.additions != 0 {
 				t.Fatalf("external=%v missingRegistry=%v: drain=%d disabled=%d undrain=%d add=%d", external, missingRegistry, control.drains, control.disabled, control.undrains, control.additions)
 			}
 		}
+	}
+}
+
+func TestRegistrationFailurePreservesRevocationError(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker", Labels: map[string]string{wellknown.LabelExternalNode: "true"}}}
+	registrationErr := errors.New("applied CPU inventory disappeared")
+	disableErr := errors.New("feature update failed")
+	control := &drainingSocketControl{external: true, registrationErr: registrationErr, disableErr: disableErr}
+	registry, err := dra.NewRegistry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &NodeReconciler{Client: fake.NewFakeClient(node), slurmControl: control, draRegistry: registry}
+	err = r.Sync(context.Background(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
+	if !errors.Is(err, registrationErr) || !errors.Is(err, disableErr) {
+		t.Fatalf("expected registration and feature update errors, got %v", err)
+	}
+	if control.drains != 0 || control.disabled != 1 || control.undrains != 0 || control.additions != 0 {
+		t.Fatalf("drain=%d disabled=%d undrain=%d add=%d", control.drains, control.disabled, control.undrains, control.additions)
 	}
 }
