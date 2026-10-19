@@ -213,7 +213,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 
 	// Find partial claims even if the Pod status update failed.
 	claims := &resourcev1.ResourceClaimList{}
-	if err := r.List(ctx, claims, client.InNamespace(pod.Namespace), client.MatchingLabels{"slinky.slurm.net/allocation-pod-uid": string(pod.UID)}); err != nil {
+	if err := r.List(ctx, claims, client.InNamespace(pod.Namespace), client.MatchingLabels{wellknown.LabelAllocationPodUID: string(pod.UID)}); err != nil {
 		return err
 	}
 	for i := range claims.Items {

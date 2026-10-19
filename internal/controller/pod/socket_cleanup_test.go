@@ -32,7 +32,7 @@ func TestPartialCPUClaimCleanup(t *testing.T) {
 			if terminal {
 				pod.Status.Phase = corev1.PodFailed
 			}
-			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Name: "partial-claim", Namespace: pod.Namespace, Labels: map[string]string{"slinky.slurm.net/allocation-pod-uid": string(pod.UID)}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID}}}}
+			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Name: "partial-claim", Namespace: pod.Namespace, Labels: map[string]string{wellknown.LabelAllocationPodUID: string(pod.UID)}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: pod.Name, UID: pod.UID}}}}
 			foreign := claim.DeepCopy()
 			foreign.Name = "different-owner"
 			foreign.OwnerReferences[0].UID = "someone-else"
@@ -86,7 +86,7 @@ func TestSocketCleanupRetainsOwnershipUntilSlurmAcceptsCancellation(t *testing.T
 			} else {
 				pod.Status.Phase = corev1.PodFailed
 			}
-			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: pod.Namespace, Labels: map[string]string{"slinky.slurm.net/allocation-pod-uid": string(pod.UID)}, OwnerReferences: []metav1.OwnerReference{{Kind: "Pod", Name: pod.Name, UID: pod.UID}}}}
+			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Name: "partial", Namespace: pod.Namespace, Labels: map[string]string{wellknown.LabelAllocationPodUID: string(pod.UID)}, OwnerReferences: []metav1.OwnerReference{{Kind: "Pod", Name: pod.Name, UID: pod.UID}}}}
 			c := fake.NewFakeClient(pod, claim)
 			control := &failingSocketCleanup{fail: true}
 			r := &PodReconciler{Client: c, slurmControl: control}

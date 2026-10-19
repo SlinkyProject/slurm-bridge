@@ -26,6 +26,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 // manageResourceClaim creates DRA ResourceClaims for Slurm GRES allocations
@@ -168,7 +169,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 			Namespace:  pod.Namespace,
 			Name:       allocationClaimName(pod),
 			Finalizers: []string{resourcev1.Finalizer},
-			Labels:     map[string]string{allocationPodUIDLabel: string(pod.UID)},
+			Labels:     map[string]string{wellknown.LabelAllocationPodUID: string(pod.UID)},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         "v1",

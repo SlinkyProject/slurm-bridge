@@ -21,10 +21,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-const (
-	allocationPodUIDLabel        = "slinky.slurm.net/allocation-pod-uid"
-	allocationIdentityAnnotation = "slinky.slurm.net/allocation-identity"
-)
+const allocationIdentityAnnotation = "slinky.slurm.net/allocation-identity"
 
 func allocationClaimName(pod *corev1.Pod) string {
 	hash := sha256.Sum256([]byte(string(pod.UID) + "/" + pod.Labels[wellknown.LabelExternalJobId]))
