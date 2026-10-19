@@ -152,7 +152,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if err := validateConstraintsAnnotation(pod); err != nil {
 		return nil, err
 	}
-	return validateDeprecatedWorkloads(pod)
+	return validateDeprecatedWorkloads(nil, pod)
 }
 
 func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, newPod *corev1.Pod) (admission.Warnings, error) {
@@ -181,34 +181,40 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if err := validateConstraintsAnnotation(newPod); err != nil {
 		return nil, err
 	}
-	return validateDeprecatedWorkloads(newPod)
+	return validateDeprecatedWorkloads(oldPod, newPod)
 }
 
-func validateDeprecatedWorkloads(pod *corev1.Pod) (admission.Warnings, error) {
-	hasPodGroup := pod.Spec.SchedulingGroup != nil &&
-		pod.Spec.SchedulingGroup.PodGroupName != nil && *pod.Spec.SchedulingGroup.PodGroupName != ""
+func validateDeprecatedWorkloads(oldPod, pod *corev1.Pod) (admission.Warnings, error) {
 	var warnings admission.Warnings
 	var rejected []string
 	for _, legacy := range []struct {
-		used    bool
+		used    func(*corev1.Pod) bool
 		gate    featuregate.Feature
 		message string
 	}{
 		{
-			used:    pod.Labels[sched.PodGroupLabel] != "",
+			used: func(pod *corev1.Pod) bool {
+				return pod.Labels[sched.PodGroupLabel] != ""
+			},
 			gate:    features.EnableLegacyv1alpha1PodGroups,
 			message: "scheduling.x-k8s.io/v1alpha1 PodGroups support is deprecated and will be removed in a future release in slurm-bridge; use Kubernetes native PodGroups with Pod spec.schedulingGroup.podGroupName",
 		},
 		{
-			used:    pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup,
+			used: func(pod *corev1.Pod) bool {
+				hasPodGroup := pod.Spec.SchedulingGroup != nil &&
+					pod.Spec.SchedulingGroup.PodGroupName != nil && *pod.Spec.SchedulingGroup.PodGroupName != ""
+				return pod.Labels[lwsv1.SetNameLabelKey] != "" && !hasPodGroup
+			},
 			gate:    features.EnableLegacyLWSGangs,
 			message: "Implicit LeaderWorkerSet gang scheduling is deprecated and will be removed in a future release in slurm-bridge; set LeaderWorkerSet spec.scheduling to use Kubernetes native PodGroups (Pod spec.schedulingGroup.podGroupName)",
 		},
 	} {
-		if !legacy.used {
+		if !legacy.used(pod) {
 			continue
 		}
-		if utilfeature.DefaultFeatureGate.Enabled(legacy.gate) {
+		// Existing legacy Pods still need metadata and finalizer updates after a
+		// gate is disabled. Check each feature separately to reject new usage.
+		if utilfeature.DefaultFeatureGate.Enabled(legacy.gate) || (oldPod != nil && legacy.used(oldPod)) {
 			warnings = append(warnings, legacy.message)
 		} else {
 			rejected = append(rejected, fmt.Sprintf("%s=false: %s", legacy.gate, legacy.message))

@@ -584,8 +584,11 @@ marked as completed.
 > Pod creation and update when the `scheduling.x-k8s.io/pod-group` label is
 > non-empty. This deprecation does not remove scheduling support.
 
-To reject legacy PodGroup Pods instead of warning, set
-`admission.featureGates.EnableLegacyv1alpha1PodGroups: false` (default: `true`).
+To reject new legacy PodGroup Pods and updates that introduce legacy PodGroup
+usage, set `admission.featureGates.EnableLegacyv1alpha1PodGroups: false`
+(default: `true`). Pods already using legacy PodGroups can still be updated,
+with a deprecation warning, so metadata changes and finalizer removal remain
+possible.
 
 For compatibility on clusters where the supported built-in PodGroup API is
 unavailable, legacy workloads still require the
@@ -634,8 +637,11 @@ schemas. Changing only `apiVersion` is not sufficient.
 > [native LWS gang scheduling][lws-gang-scheduling] with `spec.scheduling: {}`
 > on the LeaderWorkerSet to migrate.
 
-To reject legacy LWS Pods instead of warning, set
-`admission.featureGates.EnableLegacyLWSGangs: false` (default: `true`).
+To reject new legacy LWS Pods and updates that introduce implicit LWS gang
+scheduling, set `admission.featureGates.EnableLegacyLWSGangs: false` (default:
+`true`). Pods already using implicit LWS gang scheduling can still be updated,
+with a deprecation warning, so metadata changes and finalizer removal remain
+possible.
 
 This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
 

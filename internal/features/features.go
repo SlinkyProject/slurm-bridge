@@ -15,11 +15,13 @@ import (
 const SlurmBridgeGenericWorkload featuregate.Feature = "SlurmBridgeGenericWorkload"
 
 // EnableLegacyv1alpha1PodGroups allows deprecated scheduler-plugins PodGroups
-// through admission with a warning instead of rejecting them.
+// through admission with a warning. Disabling it rejects new usage while
+// preserving updates to Pods already using the feature.
 const EnableLegacyv1alpha1PodGroups featuregate.Feature = "EnableLegacyv1alpha1PodGroups"
 
 // EnableLegacyLWSGangs allows implicit LeaderWorkerSet gangs through admission
-// with a warning instead of rejecting them.
+// with a warning. Disabling it rejects new usage while preserving updates to
+// Pods already using the feature.
 const EnableLegacyLWSGangs featuregate.Feature = "EnableLegacyLWSGangs"
 
 func init() {
