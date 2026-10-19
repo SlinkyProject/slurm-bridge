@@ -231,7 +231,8 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			}
 			if needsRecreate {
 				registrationOwnsDrain = true
-				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+				removed, err := r.removeNodeFromSlurmAfterDrain(ctx, req, node)
+				if err != nil || !removed {
 					return registrationOwnsDrain, err
 				}
 			}
@@ -256,10 +257,8 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			if err := r.clearSlurmGRESCompatibilityCondition(ctx, node); err != nil {
 				return true, err
 			}
-			if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
-				return true, err
-			}
-			return true, nil
+			_, err := r.removeNodeFromSlurmAfterDrain(ctx, req, node)
+			return true, err
 		}
 
 		// Hybrid registration updates bridge metadata; slurmd owns the node lifecycle.
@@ -313,28 +312,33 @@ func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *
 	return nodeInfo, gresInventory, nil
 }
 
-func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) error {
+// removeNodeFromSlurmAfterDrain reports whether removal completed. A node still
+// draining is requeued without an error so the requested delay is preserved.
+func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) (bool, error) {
 	logger := log.FromContext(ctx)
 
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 
 	reason := fmt.Sprintf("slurm-bridge: removing external node %s", slurmNodeName)
 	if err := r.slurmControl.MakeNodeDrain(ctx, node, reason); err != nil {
-		return err
+		return false, err
 	}
 
 	drained, err := r.slurmControl.IsNodeDrained(ctx, node)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !drained {
 		logger.V(2).Info("Slurm node is draining, waiting before removal",
 			"node", klog.KObj(node), "slurmNode", slurmNodeName)
 		durationStore.Push(req.String(), 30*time.Second)
-		return fmt.Errorf("node %q is draining before inventory replacement", node.Name)
+		return false, nil
 	}
 
 	logger.Info("Slurm node drained, removing from Slurm",
 		"node", klog.KObj(node), "slurmNode", slurmNodeName)
-	return r.slurmControl.RemoveNode(ctx, node)
+	if err := r.slurmControl.RemoveNode(ctx, node); err != nil {
+		return false, err
+	}
+	return true, nil
 }

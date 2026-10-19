@@ -6,8 +6,8 @@ package node
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,11 +23,14 @@ import (
 
 type drainingSocketControl struct {
 	slurmcontrol.SlurmControlInterface
-	drains, additions, undrains, disabled int
-	external                              bool
-	registrationErr                       error
-	drainErr                              error
-	disableErr                            error
+	drains, additions, undrains, disabled, removals int
+	external                                        bool
+	registrationErr                                 error
+	drainErr                                        error
+	disableErr                                      error
+	drained                                         bool
+	drainedErr                                      error
+	removeErr                                       error
 }
 
 func (c *drainingSocketControl) NodeExists(context.Context, *corev1.Node) (bool, error) {
@@ -51,7 +54,11 @@ func (c *drainingSocketControl) MakeNodeDrain(context.Context, *corev1.Node, str
 	return c.drainErr
 }
 func (c *drainingSocketControl) IsNodeDrained(context.Context, *corev1.Node) (bool, error) {
-	return false, nil
+	return c.drained, c.drainedErr
+}
+func (c *drainingSocketControl) RemoveNode(context.Context, *corev1.Node) error {
+	c.removals++
+	return c.removeErr
 }
 func (c *drainingSocketControl) MakeNodeUndrain(context.Context, *corev1.Node, string) error {
 	c.undrains++
@@ -113,19 +120,76 @@ func TestSyncStateAfterRegistration(t *testing.T) {
 	}
 }
 
-func TestSocketTopologyDrainCannotBeUndoneBySyncState(t *testing.T) {
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker", Labels: map[string]string{wellknown.LabelExternalNode: "true"}}}
-	control := &drainingSocketControl{}
-	registry, err := dra.NewRegistry(nil)
-	if err != nil {
-		t.Fatal(err)
+func TestDrainWaitRequeuesWithoutError(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		labeled       bool
+		wantAdditions int
+	}{
+		{name: "inventory replacement", labeled: true, wantAdditions: 1},
+		{name: "external node removal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker"}}
+			if tc.labeled {
+				node.Labels = map[string]string{wellknown.LabelExternalNode: "true"}
+			}
+			control := &drainingSocketControl{external: true}
+			registry, err := dra.NewRegistry(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &NodeReconciler{Client: fake.NewFakeClient(node), slurmControl: control, draRegistry: registry, SchedulerName: "slurm-bridge-scheduler"}
+			req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)}
+			result, err := r.Reconcile(ctx, req)
+			if err != nil || result.RequeueAfter != 30*time.Second {
+				t.Fatalf("expected a 30-second retry without error, got %+v, %v", result, err)
+			}
+			if control.drains != 1 || control.undrains != 0 || control.additions != 0 || control.removals != 0 {
+				t.Fatalf("while draining: drain=%d undrain=%d add=%d remove=%d", control.drains, control.undrains, control.additions, control.removals)
+			}
+
+			control.drained = true
+			if _, err := r.Reconcile(ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			if control.removals != 1 || control.additions != tc.wantAdditions || control.undrains != 0 {
+				t.Fatalf("after draining: remove=%d add=%d undrain=%d", control.removals, control.additions, control.undrains)
+			}
+		})
 	}
-	r := &NodeReconciler{Client: fake.NewFakeClient(node), slurmControl: control, draRegistry: registry, SchedulerName: "slurm-bridge-scheduler"}
-	if err := r.Sync(context.Background(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)}); err == nil || !strings.Contains(err.Error(), "draining before inventory replacement") {
-		t.Fatalf("expected retry while existing jobs drain, got %v", err)
-	}
-	if control.drains != 1 || control.undrains != 0 || control.additions != 0 {
-		t.Fatalf("drain=%d undrain=%d add=%d", control.drains, control.undrains, control.additions)
+}
+
+func TestDrainRemovalErrorsPropagate(t *testing.T) {
+	failure := errors.New("Slurm unavailable")
+	for _, tc := range []struct {
+		name                            string
+		drainErr, drainedErr, removeErr error
+	}{
+		{name: "drain", drainErr: failure},
+		{name: "drain status", drainedErr: failure},
+		{name: "removal", removeErr: failure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker", Labels: map[string]string{wellknown.LabelExternalNode: "true"}}}
+			control := &drainingSocketControl{drained: true, drainErr: tc.drainErr, drainedErr: tc.drainedErr, removeErr: tc.removeErr}
+			registry, err := dra.NewRegistry(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &NodeReconciler{Client: fake.NewFakeClient(node), slurmControl: control, draRegistry: registry}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(node)})
+			if !errors.Is(err, failure) {
+				t.Fatalf("expected Slurm error, got %v", err)
+			}
+			if control.additions != 0 || control.undrains != 0 {
+				t.Fatalf("add=%d undrain=%d after Slurm failure", control.additions, control.undrains)
+			}
+		})
 	}
 }
 

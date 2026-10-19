@@ -184,7 +184,7 @@ var _ = Describe("Sync()", func() {
 		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}}
 		DeferCleanup(func() { durationStore.Pop(req.String()) })
 
-		Expect(r.Sync(ctx, req)).To(MatchError(ContainSubstring("draining before inventory replacement")))
+		Expect(r.Sync(ctx, req)).To(Succeed())
 		drained, err := r.slurmControl.IsNodeDrain(ctx, node)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(drained).To(BeTrue())
