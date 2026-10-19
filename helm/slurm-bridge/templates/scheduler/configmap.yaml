@@ -12,6 +12,10 @@ data:
   scheduler-config.yaml: |
     apiVersion: kubescheduler.config.k8s.io/v1
     kind: KubeSchedulerConfiguration
+    # Slurm needs all eligible partition nodes before allocation. With scoring
+    # disabled, Kubernetes overrides this target to one feasible node; full scans
+    # still depend on SlurmBridge.Filter rejecting every node until allocation.
+    percentageOfNodesToScore: 100
     leaderElection:
       leaderElect: {{ .Values.scheduler.leaderElect }}
       resourceNamespace: {{ include "slurm-bridge.namespace" . }}
