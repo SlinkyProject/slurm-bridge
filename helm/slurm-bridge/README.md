@@ -86,4 +86,12 @@ Kubernetes: `>= 1.34.0-0`
 | sharedConfig.deviceProfiles | string | `nil` | DRA DeviceProfiles recognized by Slurm Bridge. A DeviceClass resolves to a profile when its single CEL selector exactly matches `selector`. `name` becomes the Slurm GRES type and must remain stable while allocations using the profile exist. `driver` must be a Kubernetes DRA driver name and `backend.type` must be `core-bitmap` or `indexed-gres`; indexed GRES names must be DNS-1123 labels of at most 60 characters. Leave this `null` to use the built-in profiles shown below, or set it to `[]` to disable all DeviceProfiles explicitly. |
 | sharedConfig.slurmJwtSecret | corev1.SecretKeySelector | `{"key":"SLURM_JWT","name":"slurm-bridge-token"}` | The Secret and key containing the Slurm JWT. The token is mounted and read before each Slurm REST API request to support rotation. |
 | sharedConfig.slurmRestApi | string | `"http://slurm-restapi.slurm:6820"` | The Slurm REST API URL in the form of: `[protocol]://[host]:[port]` |
+| upgradeHook.activeDeadlineSeconds | int | `300` | Maximum hook runtime in seconds, including pod scheduling and shutdown. Set the Helm timeout higher than this. |
+| upgradeHook.enabled | bool | `true` | Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading. |
+| upgradeHook.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the upgrade hook. |
+| upgradeHook.image.repository | string | `"registry.k8s.io/kubectl"` | Kubectl image for the upgrade hook. |
+| upgradeHook.image.tag | string | `"v1.36.0"` | Kubectl image tag. Use a version compatible with the Kubernetes API server. |
+| upgradeHook.nodeSelector | object | `{}` | Node selector for the upgrade hook. |
+| upgradeHook.resources | object | `{}` | Resource requests and limits for the upgrade hook. |
+| upgradeHook.tolerations | list | `[]` | Tolerations for the upgrade hook. |
 

@@ -1,0 +1,80 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- if .Values.upgradeHook.enabled }}
+{{- $name := printf "%s-pre-upgrade" (include "slurm-bridge.fullname" . | trunc 51 | trimSuffix "-") }}
+{{- $args := list
+      (printf "--namespace=%s" (include "slurm-bridge.namespace" .))
+      (printf "--selector=app.kubernetes.io/instance=%s,app.kubernetes.io/component in (scheduler,controllers,admission)" .Release.Name)
+      (printf "--timeout=%vs" .Values.upgradeHook.activeDeadlineSeconds)
+      "--cache-dir=/tmp/kubectl-cache"
+}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "slurm-bridge.namespace" . }}
+  labels:
+    {{- include "slurm-bridge.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  activeDeadlineSeconds: {{ .Values.upgradeHook.activeDeadlineSeconds }}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "slurm-bridge.labels" . | nindent 8 }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: pre-upgrade
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      schedulerName: default-scheduler
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: scale-down
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - scale
+            - deployments
+            - --replicas=0
+            {{- toYaml $args | nindent 12 }}
+        # At zero replicas a Deployment is Available once its controller has
+        # observed the scale-down. kubectl wait checks observedGeneration too.
+        - name: wait-for-deployments
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - wait
+            - deployments
+            - --for=condition=Available
+            - --for=jsonpath={.spec.replicas}=0
+            {{- toYaml $args | nindent 12 }}
+      containers:
+        - name: wait-for-pods
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - wait
+            - pods
+            - --for=delete
+            - --field-selector=status.phase!=Failed,status.phase!=Succeeded
+            {{- toYaml $args | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.upgradeHook.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.upgradeHook.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

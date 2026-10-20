@@ -199,6 +199,10 @@ For additional instructions, see the
 Documentation
 -------------
 
+Follow the `upgrade policy <upgrades.html>`__ when updating an
+existing installation. Upgrades stop all bridge components before
+applying changes.
+
 Project documentation is located in the
 `docs <https://github.com/SlinkyProject/slurm-bridge/tree/main/docs>`__
 directory of this repository.
@@ -249,5 +253,6 @@ limitations under the License.
     quickstart.md
     scheduler.md
     testing.md
+    upgrades.md
     usermanagement.md
     workload.md
