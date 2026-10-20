@@ -351,8 +351,12 @@ func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponen
 	// Set sharing only at submission. Slurm treats nonzero shared updates as
 	// oversubscribe and clears whole_node, including the MCS isolation flag.
 	// Omitting shared preserves the existing allocation's sharing mode.
+	// Set the account only at submission too. Without slurmdbd, Slurm's account
+	// lookup on update finds no association and fails with a stale errno.
 	if !update {
 		jobDesc.Shared = sharedFromExclusiveAnnotation(&jobComponent)
+	} else {
+		jobDesc.Account = nil
 	}
 
 	if len(excludedNodes) == 0 && !update {

@@ -915,6 +915,7 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 					Pods: corev1.PodList{Items: []corev1.Pod{*pod}},
 					JobInfo: slurmjobir.SlurmJobIRJobInfo{
 						Exclusive:  tt.exclusive,
+						Account:    ptr.To("research"),
 						CpuPerTask: ptr.To(int32(2)),
 						MemPerNode: ptr.To(int64(200)),
 						ExcNodes:   []string{"node2"},
@@ -944,6 +945,9 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 						// including MCS. Omit the field to preserve the submitted mode.
 						if shared, present := fields["shared"]; present {
 							t.Errorf("pending-job update sends shared=%s; want the field omitted to preserve isolation", shared)
+						}
+						if account, present := fields["account"]; present {
+							t.Errorf("pending-job update sends account=%s; want it set only at submission", account)
 						}
 						if ptr.Deref(desc.McsLabel, "") != "kubernetes" {
 							t.Errorf("update lost the MCS label: %v", desc.McsLabel)
