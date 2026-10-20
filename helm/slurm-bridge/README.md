@@ -65,4 +65,12 @@ Kubernetes: `>= 1.34.0-0`
 | schedulerConfig.schedulerName | string | `"slurm-bridge-scheduler"` | Set the name of the scheduler. |
 | sharedConfig.slurmJwtSecret | string | `"slurm-bridge-token"` | The secret containing a SLURM_JWT token for authentication. |
 | sharedConfig.slurmRestApi | string | `"http://slurm-restapi.slurm:6820"` | The Slurm REST API URL in the form of: `[protocol]://[host]:[port]` |
+| upgradeHook.activeDeadlineSeconds | int | `300` | Maximum hook runtime in seconds, including pod scheduling and shutdown. Set the Helm timeout higher than this. |
+| upgradeHook.enabled | bool | `true` | Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading. |
+| upgradeHook.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the upgrade hook. |
+| upgradeHook.image.repository | string | `"registry.k8s.io/kubectl"` | Kubectl image for the upgrade hook. |
+| upgradeHook.image.tag | string | `"v1.36.0"` | Kubectl image tag. Use a version compatible with the Kubernetes API server. |
+| upgradeHook.nodeSelector | object | `{}` | Node selector for the upgrade hook. |
+| upgradeHook.resources | object | `{}` | Resource requests and limits for the upgrade hook. |
+| upgradeHook.tolerations | list | `[]` | Tolerations for the upgrade hook. |
 
