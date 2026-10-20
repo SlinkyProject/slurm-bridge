@@ -191,11 +191,32 @@ resources:
 The extended resource quantity is used as the Slurm CPU count. A Pod that
 requests this resource cannot also specify native `cpu` requests or limits.
 
+Set `slurmjob.slinky.slurm.net/exclusive: "false"` on the workload's
+[annotation source](#pod-grouping). Exclusive allocation is the default and is
+unsupported for CPU DRA because the driver needs unallocated CPUs for shared
+containers. Non-exclusive claims can also exhaust that pool; the driver rejects
+allocations that would leave shared containers without CPUs.
+
 CPU DRA constrains the container to Slurm's allocated CPU set. The CPU driver
 also removes DRA-allocated CPUs from the shared CPU sets of running native
 containers. Native CPU requests still reserve capacity in Slurm, but native
 containers share all CPUs not claimed through DRA; Slurm's native CPU IDs do not
 define their container CPU sets.
+
+CPU DRA requires Kubernetes 1.36 or newer with `DRAExtendedResource` and
+`DRAConsumableCapacity` enabled, plus containerd with CDI and NRI enabled. Use
+the [pinned CPU driver](../hack/dra-driver-cpu/build.sh) with
+`cpuDeviceMode: grouped`, `groupBy: socket`, and `allocator: external`. After
+reserved CPUs are excluded, sockets must have equal core counts and cores must
+have equal thread counts. Slurm must be the sole allocator for these devices;
+kubelet's CPU Manager must not assign the same CPUs independently.
+
+To migrate from individual CPU devices, drain Slurm nodes and wait for all
+claims to be unprepared before replacing the driver and bridge. Use the same
+procedure before changing CPU reservations or topology. Resume work after Slurm
+registration matches the new inventory. Hybrid nodes also require matching
+slurmd geometry; geometry checks do not verify Linux CPU ordering on physical
+hardware.
 
 ## Annotations
 

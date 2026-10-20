@@ -30,19 +30,17 @@ const eventReasonOverlappingDRADeviceProfiles = "OverlappingDRADeviceProfiles"
 func (r *NodeReconciler) Sync(ctx context.Context, req reconcile.Request) error {
 	var errs []error
 
-	registrationOwnsDrain, err := r.syncNodeRegistration(ctx, req)
-	if err != nil {
-		errs = append(errs, err)
+	registrationOwnsDrain, registrationErr := r.syncNodeRegistration(ctx, req)
+	if registrationErr != nil {
+		errs = append(errs, registrationErr)
 	}
 
 	if err := r.syncTaint(ctx, req); err != nil {
 		errs = append(errs, err)
 	}
 
-	if !registrationOwnsDrain {
-		if err := r.syncState(ctx, req); err != nil {
-			errs = append(errs, err)
-		}
+	if err := r.syncState(ctx, req, registrationErr == nil && !registrationOwnsDrain); err != nil {
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)
@@ -158,11 +156,9 @@ func (r *NodeReconciler) untaintNode(ctx context.Context, node *corev1.Node) err
 	return nil
 }
 
-// syncState will handle synchronizing Kubernetes node state and Slurm node state.
-// Because Slurm is the source of scheduling truth, we only care about unidirectional
-// propagation (e.g. Kubernetes => Slurm) and only states that inhibit scheduling in
-// some way (e.g. Cordon, Drain).
-func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request) error {
+// syncState propagates Kubernetes cordons to Slurm. Undraining is allowed
+// only after node registration succeeds and no longer owns the Slurm drain.
+func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request, allowUndrain bool) error {
 	logger := log.FromContext(ctx)
 
 	node := &corev1.Node{}
@@ -182,7 +178,7 @@ func (r *NodeReconciler) syncState(ctx context.Context, req reconcile.Request) e
 		if err := r.slurmControl.MakeNodeDrain(ctx, node, reason); err != nil {
 			return err
 		}
-	} else {
+	} else if allowUndrain {
 		reason := fmt.Sprintf("Corresponding Kubernetes node (%s) is schedulable", klog.KObj(node))
 		logger.V(1).Info("undraining Slurm node, Kubernetes node is schedulable",
 			"node", klog.KObj(node))
@@ -222,10 +218,7 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		registrationOwnsDrain := false
 		nodeInfo, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
-			// An existing external or labeled hybrid node must stop advertising
-			// compatibility until its inventory can be verified again.
-			disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
-			return false, errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
+			return false, r.recordNodeRegistrationError(ctx, node, err)
 		}
 		exists, err := r.slurmControl.NodeExists(ctx, node)
 		if err != nil {
@@ -234,11 +227,12 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 		if exists {
 			needsRecreate, err := r.slurmControl.NodeNeedsRecreate(ctx, node, nodeInfo, draInventory)
 			if err != nil {
-				return false, r.recordIncompatibleSlurmGRESError(ctx, node, err)
+				return false, r.recordNodeRegistrationError(ctx, node, err)
 			}
 			if needsRecreate {
 				registrationOwnsDrain = true
-				if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
+				removed, err := r.removeNodeFromSlurmAfterDrain(ctx, req, node)
+				if err != nil || !removed {
 					return registrationOwnsDrain, err
 				}
 			}
@@ -263,21 +257,17 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			if err := r.clearSlurmGRESCompatibilityCondition(ctx, node); err != nil {
 				return true, err
 			}
-			if err := r.removeNodeFromSlurmAfterDrain(ctx, req, node); err != nil {
-				return true, err
-			}
-			return true, nil
+			_, err := r.removeNodeFromSlurmAfterDrain(ctx, req, node)
+			return true, err
 		}
 
-		// An existing non-external Slurm node which overlaps a Kubernetes node
-		// is hybrid. Do not create, drain, or remove it; only reconcile the
-		// Extra inventory that slurm-bridge owns on the existing node.
-		_, draInventory, err := r.nodeRegistrationInventories(ctx, node)
+		// Hybrid registration updates bridge metadata; slurmd owns the node lifecycle.
+		nodeInfo, draInventory, err := r.nodeRegistrationInventories(ctx, node)
 		if err != nil {
 			disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
 			return false, errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, err), disableErr)
 		}
-		if err := r.slurmControl.UpdateHybridNode(ctx, node, draInventory); err != nil {
+		if err := r.slurmControl.UpdateHybridNode(ctx, node, nodeInfo, draInventory); err != nil {
 			return false, r.recordSlurmGRESCompatibilityError(ctx, node, err)
 		}
 		err = r.setSlurmGRESCompatibilityCondition(
@@ -285,10 +275,16 @@ func (r *NodeReconciler) syncNodeRegistration(ctx context.Context, req reconcile
 			node,
 			corev1.ConditionTrue,
 			reasonSlurmGRESCompatible,
-			"Slurm GRES configuration is compatible with the Kubernetes DRA inventory.",
+			"Slurm GRES and CPU configuration are compatible with the Kubernetes DRA inventory.",
 		)
 		return false, err
 	}
+}
+
+// recordNodeRegistrationError revokes bridge eligibility for the node.
+func (r *NodeReconciler) recordNodeRegistrationError(ctx context.Context, node *corev1.Node, registrationErr error) error {
+	disableErr := r.slurmControl.DisableNodeGRESCompatibility(ctx, node)
+	return errors.Join(r.recordSlurmGRESCompatibilityError(ctx, node, registrationErr), disableErr)
 }
 
 func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *corev1.Node) (*nodeinfo.NodeInfo, []dra.GRESInventory, error) {
@@ -316,28 +312,33 @@ func (r *NodeReconciler) nodeRegistrationInventories(ctx context.Context, node *
 	return nodeInfo, gresInventory, nil
 }
 
-func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) error {
+// removeNodeFromSlurmAfterDrain reports whether removal completed. A node still
+// draining is requeued without an error so the requested delay is preserved.
+func (r *NodeReconciler) removeNodeFromSlurmAfterDrain(ctx context.Context, req reconcile.Request, node *corev1.Node) (bool, error) {
 	logger := log.FromContext(ctx)
 
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 
 	reason := fmt.Sprintf("slurm-bridge: removing external node %s", slurmNodeName)
 	if err := r.slurmControl.MakeNodeDrain(ctx, node, reason); err != nil {
-		return err
+		return false, err
 	}
 
 	drained, err := r.slurmControl.IsNodeDrained(ctx, node)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !drained {
 		logger.V(2).Info("Slurm node is draining, waiting before removal",
 			"node", klog.KObj(node), "slurmNode", slurmNodeName)
 		durationStore.Push(req.String(), 30*time.Second)
-		return nil
+		return false, nil
 	}
 
 	logger.Info("Slurm node drained, removing from Slurm",
 		"node", klog.KObj(node), "slurmNode", slurmNodeName)
-	return r.slurmControl.RemoveNode(ctx, node)
+	if err := r.slurmControl.RemoveNode(ctx, node); err != nil {
+		return false, err
+	}
+	return true, nil
 }

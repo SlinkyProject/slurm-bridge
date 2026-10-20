@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 )
@@ -135,67 +136,30 @@ func TestVerifyIndexedGRESDeviceProfileRequestRejectsChangedCount(t *testing.T) 
 	}
 }
 
-func TestVerifyCoreBitmapRequestUsesAllocatedThreadCount(t *testing.T) {
-	profile, ok := dra.DefaultRegistry().LookupByName("cpu")
-	if !ok {
-		t.Fatal("default registry does not contain cpu")
-	}
-	sb := &SlurmBridge{
-		Client: fake.NewClientBuilder().WithObjects(&resourcev1.DeviceClass{
-			ObjectMeta: metav1.ObjectMeta{Name: "my-cpus"},
-			Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
-				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
-			}}},
-		}).Build(),
-		draRegistry: testutils.DRARegistryWithExampleGPU(),
-	}
-	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
-		Requests: []resourcev1.DeviceRequest{{
-			Name: "cpu",
-			Exactly: &resourcev1.ExactDeviceRequest{
-				DeviceClassName: "my-cpus",
-				Count:           4,
-			},
-		}},
-	}}}
-	allocation := &coreBitmapAllocation{
-		deviceProfileRequest: deviceProfileRequest{
-			DeviceClassName: "my-cpus",
-			Profile:         profile,
-			Count:           3,
-		},
-		RequestName:    "cpu",
-		AllocatedCount: 4,
-	}
+func TestVerifyCoreBitmapRequestUsesSocketCount(t *testing.T) {
+	profile, _ := dra.DefaultRegistry().LookupByName("cpu")
+	class := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: "my-cpus"}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`}}}}}
+	sb := &SlurmBridge{Client: fake.NewClientBuilder().WithObjects(class).Build(), draRegistry: dra.DefaultRegistry()}
+	requests := []resourcev1.DeviceRequest{{Name: "cpu-socket-0", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "my-cpus", Count: 1}}}
+	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: requests}}}
+	allocation := &coreBitmapAllocation{deviceProfileRequest: deviceProfileRequest{DeviceClassName: "my-cpus", Profile: profile, Count: 3}, AllocatedCount: 4, CPU: &nodeinfo.CPUAllocation{Requests: requests, CPUCount: 4}}
 	if err := sb.verifyCoreBitmapRequest(context.Background(), claim, allocation); err != nil {
-		t.Fatalf("verifyCoreBitmapRequest() error = %v", err)
+		t.Fatal(err)
 	}
 }
 
 func TestValidateDeviceProfileAllocationCounts(t *testing.T) {
-	allocation := &claimAllocation{
-		CoreBitmapAllocation: &coreBitmapAllocation{
-			deviceProfileRequest: deviceProfileRequest{Count: 1},
-			RequestName:          "cpu",
-			AllocatedCount:       2,
-		},
-		IndexedGRESAllocations: []indexedGRESAllocation{{
-			deviceProfileRequest: deviceProfileRequest{Count: 2},
-			RequestName:          "gpu",
-		}},
-	}
-	results := []resourcev1.DeviceRequestAllocationResult{
-		{Request: "cpu"},
-		{Request: "cpu"},
-		{Request: "gpu"},
-		{Request: "gpu"},
-	}
+	cpuResult := resourcev1.DeviceRequestAllocationResult{Request: "cpu-socket-0", Driver: nodeinfo.DraDriverCpu}
+	allocation := &claimAllocation{CoreBitmapAllocation: &coreBitmapAllocation{AllocatedCount: 128, CPU: &nodeinfo.CPUAllocation{Requests: []resourcev1.DeviceRequest{{Name: "cpu-socket-0"}}, Results: []resourcev1.DeviceRequestAllocationResult{cpuResult}, CPUCount: 128}}, IndexedGRESAllocations: []indexedGRESAllocation{{deviceProfileRequest: deviceProfileRequest{Count: 2}, RequestName: "gpu"}}}
+	results := []resourcev1.DeviceRequestAllocationResult{cpuResult, {Request: "gpu"}, {Request: "gpu"}}
 	if err := validateDeviceProfileAllocationCounts(allocation, results); err != nil {
-		t.Fatalf("validateDeviceProfileAllocationCounts() error = %v", err)
+		t.Fatal(err)
 	}
-	results = append(results, resourcev1.DeviceRequestAllocationResult{Request: "gpu"})
-	if err := validateDeviceProfileAllocationCounts(allocation, results); err == nil || !strings.Contains(err.Error(), `request "gpu" allocated 3 devices, expected exactly 2`) {
-		t.Fatalf("validateDeviceProfileAllocationCounts() error = %v, want excess allocation error", err)
+	if err := validateDeviceProfileAllocationCounts(allocation, append(results, resourcev1.DeviceRequestAllocationResult{Request: "gpu"})); err == nil {
+		t.Fatal("accepted excess GPU result")
+	}
+	if err := validateDeviceProfileAllocationCounts(allocation, results[1:]); err == nil {
+		t.Fatal("accepted missing CPU result")
 	}
 }
 

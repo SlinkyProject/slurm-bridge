@@ -5,6 +5,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,7 +22,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -1157,6 +1160,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			},
 		}
 		pod := newPod()
+		pod.Annotations = map[string]string{wellknown.AnnotationExclusive: "false"}
 		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
 			corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + nodeinfo.DraDriverCpu): resource.MustParse("1"),
 		}
@@ -1180,6 +1184,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			},
 		}
 		pod := newPod()
+		pod.Annotations = map[string]string{wellknown.AnnotationExclusive: "false"}
 		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
 			corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + alias): resource.MustParse("1"),
 		}
@@ -1285,6 +1290,87 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want none", warnings)
 		}
 	})
+}
+
+func TestPodAdmission_ExclusiveCPU(t *testing.T) {
+	const alias = "my-cpus"
+	classes := []*resourcev1.DeviceClass{
+		{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}},
+		{ObjectMeta: metav1.ObjectMeta{Name: alias}},
+	}
+	for _, class := range classes {
+		class.Spec.Selectors = []resourcev1.DeviceSelector{{
+			CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+		}}
+	}
+	r := &PodAdmission{
+		Client:        fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(classes[0], classes[1]).Build(),
+		SchedulerName: SchedulerName, ManagedNamespaces: []string{namespace},
+	}
+	for _, tt := range []struct {
+		name, exclusive, class, source string
+		wantErr                        bool
+	}{
+		{name: "default is exclusive", class: nodeinfo.DraDriverCpu, wantErr: true},
+		{name: "explicit exclusive", exclusive: "true", class: nodeinfo.DraDriverCpu, wantErr: true},
+		{name: "alias", class: alias, wantErr: true},
+		{name: "init limit", class: alias, source: "init", wantErr: true},
+		{name: "unknown value stays exclusive", exclusive: "no", class: alias, wantErr: true},
+		{name: "non-exclusive", exclusive: "false", class: nodeinfo.DraDriverCpu},
+		{name: "normalized false", exclusive: " FALSE ", class: alias},
+		{name: "native CPU", source: "native"},
+		{name: "no CPU request"},
+		{name: "unmanaged pod", class: alias, source: "unmanaged"},
+		{name: "explicit scheduler outside managed namespace", class: alias, source: "explicit", wantErr: true},
+		{name: "controller policy is checked by scheduler", class: alias, source: "controller"},
+		{name: "PodGroup policy is checked by scheduler", class: alias, source: "podgroup"},
+		{name: "coscheduling policy is checked by scheduler", class: alias, source: "coscheduling"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Annotations: map[string]string{}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "work"}}},
+			}
+			if tt.exclusive != "" {
+				pod.Annotations[wellknown.AnnotationExclusive] = tt.exclusive
+			}
+			if tt.class != "" {
+				pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+					corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + tt.class): resource.MustParse("1"),
+				}
+			}
+			switch tt.source {
+			case "init":
+				pod.Spec.InitContainers = pod.Spec.Containers
+				pod.Spec.Containers = nil
+				pod.Spec.InitContainers[0].Resources.Limits = pod.Spec.InitContainers[0].Resources.Requests
+				pod.Spec.InitContainers[0].Resources.Requests = nil
+			case "native":
+				pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")}
+			case "unmanaged", "explicit":
+				pod.Namespace = "unmanaged"
+				if tt.source == "explicit" {
+					pod.Spec.SchedulerName = SchedulerName
+				}
+			case "controller":
+				pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: "job", Controller: ptr.To(true)}}
+			case "podgroup":
+				pod.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To("group")}
+			case "coscheduling":
+				pod.Labels = map[string]string{sched.PodGroupLabel: "group"}
+			}
+			_, err := r.ValidateCreate(context.Background(), pod)
+			if (err != nil) != tt.wantErr || (tt.wantErr && !errors.Is(err, dra.ErrExclusiveCPUAllocation)) {
+				t.Fatalf("ValidateCreate() = %v, want exclusive CPU rejection: %v", err, tt.wantErr)
+			}
+			oldPod := pod.DeepCopy()
+			oldPod.Annotations[wellknown.AnnotationExclusive] = "false"
+			_, err = r.ValidateUpdate(contextWithAdmissionOperation("UPDATE"), oldPod, pod)
+			if (err != nil) != tt.wantErr || (tt.wantErr && !errors.Is(err, dra.ErrExclusiveCPUAllocation)) {
+				t.Fatalf("ValidateUpdate() = %v, want exclusive CPU rejection: %v", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestPodAdmission_ValidateUpdate(t *testing.T) {

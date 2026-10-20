@@ -8,6 +8,9 @@ const (
 	// labeled Kubernetes node.
 	LabelSlurmNodeName = SlinkyPrefix + "slurm-nodename"
 
+	// LabelAllocationPodUID identifies the Pod that owns an allocation claim.
+	LabelAllocationPodUID = SlinkyPrefix + "allocation-pod-uid"
+
 	// LabelExternalJobId indicates the Slurm JobId which corresponds to the
 	// the pod's external job.
 	LabelExternalJobId = SchedulerPrefix + "slurm-jobid"

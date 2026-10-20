@@ -63,6 +63,20 @@ After the serial readiness check, independent workload features run in parallel.
 Slurm may queue jobs when the suite temporarily asks for more nodes than are
 available, so each feature allows up to ten minutes for an allocation.
 
+CPU DRA installation and tests require Kubernetes 1.36 or newer. On 1.35, both
+node modes still test native CPU scheduling and GPU/NIC DRA.
+
+Run the focused CPU/GPU allocation, exclusive-request rejection, and CPU reuse
+checks on an existing development cluster with:
+
+```sh
+E2E_RUN=TestSocketCPUAllocation make test-e2e
+```
+
+These checks compare Slurm's CPU bitmap with the driver's allocation and the
+container's effective CPU set. They do not cover driver restarts or host
+reboots.
+
 Use `E2E_RUN` with a Go test regular expression to select one feature. Set
 `E2E_CLEANUP=false` to leave the successful workload in place for debugging:
 
@@ -104,11 +118,19 @@ Install all optional Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This installs the CPU, example GPU, NVIDIA GPU, and DRANET DRA drivers. Each
-driver can still be installed individually with `--dra-driver-cpu`,
-`--dra-example-driver`, `--dra-driver-nvidia-gpu`, or `--dranet`. The `--dranet`
-fixture creates a `dranet0` dummy interface on each managed Kind worker before
-installing the driver.
+This installs the CPU (Kubernetes 1.36+), example GPU, NVIDIA GPU, and DRANET
+DRA drivers. Each driver can still be installed individually with
+`--dra-driver-cpu`, `--dra-example-driver`, `--dra-driver-nvidia-gpu`, or
+`--dranet`. The `--dranet` fixture creates a `dranet0` dummy interface on each
+managed Kind worker before installing the driver.
+
+The CPU fixture builds the unmodified upstream revision pinned in
+[`hack/dra-driver-cpu/build.sh`](../hack/dra-driver-cpu/build.sh), loads it into
+Kind, and installs its matching chart with
+[`values.yaml`](../hack/dra-driver-cpu/values.yaml). For `--existing-cluster`,
+set `DRA_CPU_IMAGE` to a tagged build of that revision that every node can pull.
+Hosts without usable NUMA sysfs need the driver's `sysfsOverlay` test fixture;
+synthetic topology does not validate physical socket or SMT discovery.
 
 The `--dra-example-driver` and `--dranet` flags also configure Slurm Bridge with
 the [e2e device profiles](../hack/e2e-device-profiles.yaml). This explicitly

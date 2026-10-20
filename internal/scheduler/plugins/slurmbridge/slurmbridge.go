@@ -29,6 +29,7 @@ import (
 	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/utils/ptr"
 	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -465,9 +466,11 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		"apiVersion", root.APIVersion,
 		"kind", root.Kind,
 		"root", rootName)
-	if err := sb.validateDeviceClassRequestsForPods(ctx, s.slurmJobIR.AllPods()); err != nil {
-		logger.Error(err, "unsupported DRA extended resource request")
-		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	for _, component := range s.slurmJobIR.Components {
+		if err := sb.validateDeviceClassRequestsForPods(ctx, component.Pods.Items, ptr.Deref(component.JobInfo.Exclusive, true)); err != nil {
+			logger.Error(err, "unsupported DRA extended resource request")
+			return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+		}
 	}
 
 	// If an externalJob exists and a node has been allocated, return immediately

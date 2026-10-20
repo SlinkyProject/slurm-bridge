@@ -641,17 +641,48 @@ EOF
 }
 
 function dra-driver-cpu::install() {
-	local version="0.2.0"
-	local chart="https://github.com/kubernetes-sigs/dra-driver-cpu/releases/download/v${version}/dra-driver-cpu-${version}.tgz"
+	local server_version
+	server_version=$(kubectl version -o yaml | awk '$1 == "serverVersion:" {server=1} server && $1 == "gitVersion:" {print $2}')
+	if [[ -z $server_version ]]; then
+		echo "Could not determine the Kubernetes server version for CPU DRA." >&2
+		return 1
+	fi
+	if ! tool::version_ge "${server_version#v}" "1.36.0"; then
+		echo "Skipping CPU DRA: Kubernetes 1.36 or newer is required (server: $server_version)."
+		return
+	fi
 	local config_dir="$SCRIPT_DIR/dra-driver-cpu"
-
-	helm upgrade --install dra-driver-cpu "$chart" \
+	local source_dir image image_repository image_tag
+	source_dir=$("$config_dir/build.sh" --prepare)
+	if $OPT_EXISTING_CLUSTER; then
+		if [[ -z ${DRA_CPU_IMAGE:-} ]]; then
+			echo "Set DRA_CPU_IMAGE to an image built with hack/dra-driver-cpu/build.sh and made available to this cluster." >&2
+			return 1
+		fi
+		image="$DRA_CPU_IMAGE"
+	else
+		"$config_dir/build.sh" --build
+		image=$("$config_dir/build.sh" --image)
+		local context cluster
+		context=$(kubectl config current-context)
+		cluster="${context#kind-}"
+		if [[ $context == "$cluster" ]]; then
+			echo "CPU driver image loading requires an explicitly selected Kind context." >&2
+			return 1
+		fi
+		kind load docker-image --name "$cluster" "$image"
+	fi
+	if [[ $image == *@* || ${image##*/} != *:* ]]; then
+		echo "DRA_CPU_IMAGE must use an explicit repository:tag for the pinned CPU chart." >&2
+		return 1
+	fi
+	image_repository="${image%:*}"
+	image_tag="${image##*:}"
+	helm upgrade --install dra-driver-cpu "$source_dir/deployment/helm/dra-driver-cpu" \
 		--namespace kube-system \
-		--values "$config_dir/values.yaml"
-
-	# The upstream v0.2.0 chart does not expose a nodeSelector value.
-	kubectl -n kube-system patch daemonset dracpu --type merge \
-		-p '{"spec":{"template":{"spec":{"nodeSelector":{"scheduler.slinky.slurm.net/slurm-bridge":"worker"}}}}}'
+		--values "$config_dir/values.yaml" \
+		--set-string "image.repository=$image_repository" \
+		--set-string "image.tag=$image_tag"
 	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
@@ -751,7 +782,7 @@ HELM OPTIONS:
 	--extras            Install all DRA driver fixtures below.
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
-	--dra-driver-cpu    Install DRA driver: dra-driver-cpu
+	--dra-driver-cpu    Install dra-driver-cpu on Kubernetes 1.36 or newer.
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.

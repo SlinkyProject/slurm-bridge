@@ -5,283 +5,209 @@ package nodeinfo_test
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
 )
 
-func cpuResourceSlice(nodeName string) *resourcev1.ResourceSlice {
-	device := func(name string, cpuID, coreID int64) resourcev1.Device {
-		return resourcev1.Device{
-			Name: name,
-			Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-				nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To(cpuID)},
-				nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To(coreID)},
-				nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-				nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-			},
-		}
-	}
-	return &resourcev1.ResourceSlice{
-		ObjectMeta: metav1.ObjectMeta{Name: nodeName + "-cpus"},
-		Spec: resourcev1.ResourceSliceSpec{
-			NodeName: ptr.To(nodeName),
-			Pool: resourcev1.ResourcePool{
-				Name:               nodeName,
-				Generation:         1,
-				ResourceSliceCount: 1,
-			},
-			Driver: nodeinfo.DraDriverCpu,
-			Devices: []resourcev1.Device{
-				device("cpu0", 0, 0),
-				device("cpu1", 1, 0),
-				device("cpu2", 2, 1),
-				device("cpu3", 3, 1),
-			},
-		},
-	}
-}
-
-func cpuClient(objects ...client.Object) client.Client {
-	return fake.NewClientBuilder().WithObjects(objects...).Build()
-}
-
-func TestNodeInfoGetCPUDeviceRequests(t *testing.T) {
-	const deviceClassName = "my-cpus"
+func TestSocketAllocation(t *testing.T) {
 	ctx := context.Background()
-	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	want := []resourcev1.DeviceRequest{{
-		Name: corev1.ResourceCPU.String(),
-		Exactly: &resourcev1.ExactDeviceRequest{
-			DeviceClassName: deviceClassName,
-			AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
-			Count:           2,
-			Selectors: []resourcev1.DeviceSelector{{
-				CEL: &resourcev1.CELDeviceSelector{
-					Expression: "device.attributes['dra.cpu'].cpuID in [0,1]",
-				},
-			}},
-		},
-	}}
-
-	kubeClient := cpuClient(
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: deviceClassName}},
-		cpuResourceSlice("node"),
-	)
-	node, err := nodeinfo.NewNodeInfo(ctx, kubeClient, "node")
+	class := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: "cpus"}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: "device.driver == 'dra.cpu'"}}}}}
+	client := fake.NewClientBuilder().WithObjects(class).Build()
+	inventory := cpuSlice("node", socketDevice(3, "64-127", "0-127>32", true), socketDevice(0, "0-63", "0-127>32", true))
+	n, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{inventory})
 	if err != nil {
-		t.Fatalf("NewNodeInfo() error = %v", err)
+		t.Fatal(err)
 	}
-	got, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, deviceClassName)
-	if err != nil {
-		t.Fatalf("GetCPUDeviceRequests() error = %v", err)
-	}
-	if !equality.Semantic.DeepEqual(got, want) {
-		t.Fatalf("GetCPUDeviceRequests() = %#v, want %#v", got, want)
-	}
-}
-
-func TestNodeInfoGetCPUDeviceRequestsErrors(t *testing.T) {
-	ctx := context.Background()
-	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	tests := []struct {
+	cases := []struct {
 		name       string
-		kubeClient client.Client
-		want       string
+		cores      []int
+		capacities []int64
+		cpus       []string
 	}{
-		{
-			name:       "missing DeviceClass",
-			kubeClient: cpuClient(cpuResourceSlice("node")),
-			want:       "was not found",
-		},
-		{
-			name: "DeviceClass lookup failure",
-			kubeClient: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
-					return errors.New("injected lookup failure")
-				},
-			}).Build(),
-			want: "injected lookup failure",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			node, err := nodeinfo.NewNodeInfo(ctx, tt.kubeClient, "node")
-			if err != nil {
-				t.Fatalf("NewNodeInfo() error = %v", err)
+		{"single socket", []int{0, 1, 2}, []int64{6}, []string{"0-2,32-34"}},
+		{"uneven sockets", []int{0, 1, 2, 32, 33, 34, 35, 36}, []int64{6, 10}, []string{"0-2,32-34", "64-68,96-100"}},
+		{"128 threads", func() []int {
+			v := make([]int, 64)
+			for i := range v {
+				v[i] = i
 			}
-			_, err = node.GetCPUDeviceRequests(ctx, tt.kubeClient, resources, nodeinfo.DraDriverCpu)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("GetCPUDeviceRequests() error = %v, want containing %q", err, tt.want)
+			return v
+		}(), []int64{64, 64}, []string{"0-63", "64-127"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(tt.cores...)), SocketsPerNode: 2, CoresPerSocket: 32}
+			got, err := n.AllocateCPUs(ctx, client, resources, "cpus", "pod-uid/job-17")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Requests) != len(tt.capacities) || len(got.Results) != len(tt.capacities) {
+				t.Fatalf("wrong request/result counts: %+v", got)
+			}
+			total := int64(0)
+			for i, capacity := range tt.capacities {
+				req, result := got.Requests[i], got.Results[i]
+				requested := req.Exactly.Capacity.Requests[nodeinfo.DraDriverCpu_Capacity]
+				if req.Exactly.Count != 1 || requested.CmpInt64(capacity) != 0 {
+					t.Fatalf("bad request %+v", req)
+				}
+				consumed := result.ConsumedCapacity[nodeinfo.DraDriverCpu_Capacity]
+				if result.Request != req.Name || result.ShareID == nil || consumed.CmpInt64(capacity) != 0 {
+					t.Fatalf("bad result %+v", result)
+				}
+				var config struct {
+					CPUConfig struct {
+						CPUSet string `json:"cpuset"`
+					} `json:"cpuConfig"`
+				}
+				if err := json.Unmarshal(got.Config[i].Opaque.Parameters.Raw, &config); err != nil {
+					t.Fatal(err)
+				}
+				if config.CPUConfig.CPUSet != tt.cpus[i] || !slices.Equal(got.Config[i].Requests, []string{req.Name}) {
+					t.Fatalf("wrong scoped config %+v", got.Config[i])
+				}
+				total += capacity
+			}
+			if got.CPUCount != total {
+				t.Fatalf("CPU capacity %d != %d", got.CPUCount, total)
+			}
+			retry, err := n.AllocateCPUs(ctx, client, resources, "cpus", "pod-uid/job-17")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range got.Results {
+				if *retry.Results[i].ShareID != *got.Results[i].ShareID {
+					t.Fatal("share ID changed on retry")
+				}
 			}
 		})
 	}
-}
-
-func TestNodeInfoGetCPUDeviceRequestAllocationResults(t *testing.T) {
-	ctx := context.Background()
-	kubeClient := cpuClient(
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}},
-		cpuResourceSlice("node"),
-	)
-	node, err := nodeinfo.NewNodeInfo(ctx, kubeClient, "node")
-	if err != nil {
-		t.Fatalf("NewNodeInfo() error = %v", err)
+	for _, resources := range []*slurmcontrol.NodeResources{{CoreBitmap: bitmaputil.String(bitmaputil.New(0, 64))}, {CoreBitmap: ""}, {CoreBitmap: bitmaputil.String(bitmaputil.New(0)), SocketsPerNode: 1}} {
+		if _, err := n.AllocateCPUs(ctx, client, resources, "cpus", "key"); err == nil {
+			t.Fatalf("accepted invalid allocation %+v", resources)
+		}
 	}
-	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}
-	got, err := node.GetCPUDeviceRequestAllocationResults(ctx, kubeClient, resources, nodeinfo.DraDriverCpu)
-	if err != nil {
-		t.Fatalf("GetCPUDeviceRequestAllocationResults() error = %v", err)
+	class.Spec.Selectors[0].CEL.Expression = "device.driver == 'dra.cpu' && device.attributes['dra.cpu'].socketID == 3"
+	if err := client.Update(ctx, class); err != nil {
+		t.Fatal(err)
 	}
-	want := []resourcev1.DeviceRequestAllocationResult{
-		{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Pool: "node", Device: "cpu0"},
-		{Request: "cpu", Driver: nodeinfo.DraDriverCpu, Pool: "node", Device: "cpu1"},
-	}
-	if !equality.Semantic.DeepEqual(got, want) {
-		t.Fatalf("GetCPUDeviceRequestAllocationResults() = %#v, want %#v", got, want)
+	if _, err := n.AllocateCPUs(ctx, client, &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0))}, "cpus", "key"); err == nil {
+		t.Fatal("ignored DeviceClass selector")
 	}
 }
 
-func TestNodeInfoGetCPUDeviceRequestsIncludesAllAllocatedCoreThreads(t *testing.T) {
-	ctx := context.Background()
-	kubeClient := cpuClient(
-		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}},
-		cpuResourceSlice("node"),
-	)
-	node, err := nodeinfo.NewNodeInfo(ctx, kubeClient, "node")
+func TestCPUFingerprint(t *testing.T) {
+	slice := cpuSlice("node", socketDevice(0, "0-3", "0-7>2", true), socketDevice(1, "4-7", "0-7>2", true))
+	n, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{slice})
 	if err != nil {
-		t.Fatalf("NewNodeInfo() error = %v", err)
+		t.Fatal(err)
 	}
-	resources := &slurmcontrol.NodeResources{CoreBitmap: bitmaputil.String(bitmaputil.New(0, 1))}
-	requests, err := node.GetCPUDeviceRequests(ctx, kubeClient, resources, nodeinfo.DraDriverCpu)
+	gres := `slurm-bridge.dra-gres-map={"v":1,"profiles":{"nic":{"firstIndex":0,"devices":["/dra/dra.net/node/eth0"]}}}`
+	extra, err := n.EncodeApplied(gres)
 	if err != nil {
-		t.Fatalf("GetCPUDeviceRequests() error = %v", err)
+		t.Fatal(err)
 	}
-	if len(requests) != 1 || requests[0].Exactly == nil {
-		t.Fatalf("GetCPUDeviceRequests() = %#v, want one exact request", requests)
+	fingerprint, err := dra.AppliedCPUFingerprint(extra)
+	if err != nil || !strings.HasPrefix(fingerprint, "v1:") || len(fingerprint) != 67 {
+		t.Fatalf("invalid fingerprint %q: %v", fingerprint, err)
 	}
-	if got := requests[0].Exactly.Count; got != 4 {
-		t.Fatalf("GetCPUDeviceRequests() count = %d, want all 4 threads from two allocated cores", got)
+	// Extra stores the GRES map and a fixed-size CPU fingerprint.
+	if extra != strings.TrimSuffix(gres, "}")+`,"cpuFingerprint":"`+fingerprint+`"}` {
+		t.Fatalf("unexpected persisted CPU data: %s", extra)
 	}
-	wantSelector := "device.attributes['dra.cpu'].cpuID in [0,1,2,3]"
-	if got := requests[0].Exactly.Selectors[0].CEL.Expression; got != wantSelector {
-		t.Fatalf("GetCPUDeviceRequests() selector = %q, want %q", got, wantSelector)
+	for _, tc := range []struct {
+		name      string
+		change    func(*resourcev1.ResourceSlice)
+		wantMatch bool
+	}{
+		{"restart", func(*resourcev1.ResourceSlice) {}, true},
+		{"publication generation", func(s *resourcev1.ResourceSlice) { s.Spec.Pool.Generation++ }, true},
+		{"device ordering", func(s *resourcev1.ResourceSlice) { slices.Reverse(s.Spec.Devices) }, true},
+		{"equivalent CPU and SMT encoding", func(s *resourcev1.ResourceSlice) {
+			s.Spec.Devices[0].Attributes[nodeinfo.DraDriverCpu_CPUIDs] = resourcev1.DeviceAttribute{StringValue: ptr.To("3,1,0,2")}
+			s.Spec.Devices[0].Attributes[nodeinfo.DraDriverCpu_SMTLayout] = resourcev1.DeviceAttribute{StringValue: ptr.To("0-3>2;4-7>2")}
+		}, true},
+		{"same geometry different CPUs", func(s *resourcev1.ResourceSlice) {
+			s.Spec.Devices[0] = socketDevice(0, "8-11", "8-15>2", true)
+			s.Spec.Devices[1] = socketDevice(1, "12-15", "8-15>2", true)
+		}, false},
+		{"different siblings", func(s *resourcev1.ResourceSlice) {
+			for i := range s.Spec.Devices {
+				s.Spec.Devices[i].Attributes[nodeinfo.DraDriverCpu_SMTLayout] = resourcev1.DeviceAttribute{StringValue: ptr.To("0-7>1")}
+			}
+		}, false},
+		{"pool identity", func(s *resourcev1.ResourceSlice) { s.Spec.Pool.Name = "replacement" }, false},
+		{"device identity", func(s *resourcev1.ResourceSlice) { s.Spec.Devices[0].Name = "replacement" }, false},
+		{"selection attributes", func(s *resourcev1.ResourceSlice) {
+			s.Spec.Devices[0].Attributes["dra.cpu/model"] = resourcev1.DeviceAttribute{StringValue: ptr.To("replacement")}
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := slice.DeepCopy()
+			tc.change(current)
+			rebuilt, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*current})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rebuilt.ValidateCPUFingerprint(extra); (err == nil) != tc.wantMatch {
+				t.Fatalf("want match=%v, got %v", tc.wantMatch, err)
+			}
+		})
+	}
+	for _, invalid := range []string{"", gres, "corrupt", strings.Replace(extra, "v1:", "v99:", 1), strings.Replace(extra, fingerprint, "invalid", 1), `slurm-bridge.dra-gres-map={"v":2,"profiles":{},"cpu":{"v":1}}`} {
+		if err := n.ValidateCPUFingerprint(invalid); err == nil {
+			t.Fatalf("accepted missing/invalid fingerprint: %s", invalid)
+		}
+	}
+	slices.Reverse(n.CpuMap.AbstractToMachine)
+	if err := n.ValidateCPUFingerprint(extra); err == nil {
+		t.Fatal("changed abstract core order matched registration")
+	}
+	if err := (&nodeinfo.NodeInfo{}).ValidateCPUFingerprint(extra); err == nil {
+		t.Fatal("missing live inventory matched registration")
 	}
 }
 
-func TestNewNodeInfoIgnoresGPUResourceSlices(t *testing.T) {
-	resourceSlices := []resourcev1.ResourceSlice{
-		*cpuResourceSlice("node"),
-		{
-			ObjectMeta: metav1.ObjectMeta{Name: "node-gpus"},
-			Spec: resourcev1.ResourceSliceSpec{
-				NodeName: ptr.To("node"),
-				Driver:   "gpu.nvidia.com",
-				Devices:  []resourcev1.Device{{Name: "gpu-0"}},
-			},
-		},
+func TestCompleteCPUPool(t *testing.T) {
+	a := cpuSlice("node", socketDevice(0, "0-1", "0-1", false))
+	a.Spec.Pool.ResourceSliceCount = 2
+	b := *a.DeepCopy()
+	b.Name = "node-cpu-b"
+	b.Spec.Devices = []resourcev1.Device{socketDevice(1, "2-3", "2-3", false)}
+	if _, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{b, a}); err != nil {
+		t.Fatal(err)
 	}
-
-	node, err := nodeinfo.NewNodeInfoFromResourceSlices("node", resourceSlices)
-	if err != nil {
-		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v", err)
+	for i, slices := range [][]resourcev1.ResourceSlice{
+		{a}, {a, a}, {a, func() resourcev1.ResourceSlice { x := *b.DeepCopy(); x.Spec.Pool.Generation++; return x }()},
+		{a, func() resourcev1.ResourceSlice { x := *b.DeepCopy(); x.Spec.Pool.ResourceSliceCount = 1; return x }()},
+	} {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			if _, err := nodeinfo.NewNodeInfoFromResourceSlices("node", slices); err == nil {
+				t.Fatal("accepted incomplete/inconsistent pool")
+			}
+		})
 	}
-	if len(node.CpuMap.CPUInfoMap) != 4 {
-		t.Fatalf("NewNodeInfoFromResourceSlices() CPU count = %d, want 4", len(node.CpuMap.CPUInfoMap))
-	}
-}
-
-func TestNewNodeInfoFromResourceSlicesMergesLatestCompleteCPUPool(t *testing.T) {
-	old := cpuResourceSlice("node")
+	old := *a.DeepCopy()
+	old.Spec.Pool.Generation--
 	old.Name = "old"
-	old.Spec.Devices = old.Spec.Devices[:1]
-
-	currentA := cpuResourceSlice("node")
-	currentA.Name = "00000-current"
-	currentA.Spec.Pool.Generation = 2
-	currentA.Spec.Pool.ResourceSliceCount = 2
-	currentA.Spec.Devices = currentA.Spec.Devices[:2]
-
-	currentB := cpuResourceSlice("node")
-	currentB.Name = "00001-current"
-	currentB.Spec.Pool.Generation = 2
-	currentB.Spec.Pool.ResourceSliceCount = 2
-	currentB.Spec.Devices = currentB.Spec.Devices[2:]
-
-	node, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*currentB, *old, *currentA})
-	if err != nil {
-		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v", err)
+	if _, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{old, b, a}); err != nil {
+		t.Fatal(err)
 	}
-	if got := len(node.CpuMap.CPUInfoMap); got != 4 {
-		t.Fatalf("NewNodeInfoFromResourceSlices() CPU count = %d, want 4", got)
-	}
-	if got := len(node.CpuMap.AbstractToMachine); got != 2 {
-		t.Fatalf("NewNodeInfoFromResourceSlices() core count = %d, want 2", got)
-	}
-	if node.CpuMap.Pool != "node" {
-		t.Fatalf("NewNodeInfoFromResourceSlices() pool = %q, want node", node.CpuMap.Pool)
-	}
-}
-
-func TestNewNodeInfoFromResourceSlicesRejectsIncompleteLatestCPUPool(t *testing.T) {
-	old := cpuResourceSlice("node")
-	old.Name = "old"
-
-	current := cpuResourceSlice("node")
-	current.Name = "00000-current"
-	current.Spec.Pool.Generation = 2
-	current.Spec.Pool.ResourceSliceCount = 2
-	current.Spec.Devices = current.Spec.Devices[:2]
-
-	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*old, *current})
-	if err == nil || !strings.Contains(err.Error(), "generation 2 is incomplete: found 1 of 2 ResourceSlices") {
-		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want incomplete pool error", err)
-	}
-}
-
-func TestNewNodeInfoFromResourceSlicesRejectsGroupedCPUDevices(t *testing.T) {
-	resourceSlice := cpuResourceSlice("node")
-	resourceSlice.Spec.Devices = []resourcev1.Device{{
-		Name: "socket-0",
-		Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-			nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-			"dra.cpu/numCPUs":              {IntValue: ptr.To[int64](4)},
-		},
-	}}
-	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*resourceSlice})
-	if err == nil || !strings.Contains(err.Error(), "individual-device schema") {
-		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want grouped-device rejection", err)
-	}
-}
-
-func TestNewNodeInfoFromResourceSlicesRejectsDuplicateCPUIds(t *testing.T) {
-	first := cpuResourceSlice("node")
-	first.Name = "node-cpus-0"
-	first.Spec.Pool.ResourceSliceCount = 2
-	first.Spec.Devices = first.Spec.Devices[:2]
-
-	second := cpuResourceSlice("node")
-	second.Name = "node-cpus-1"
-	second.Spec.Pool.ResourceSliceCount = 2
-	second.Spec.Devices = second.Spec.Devices[2:]
-	second.Spec.Devices[0].Attributes[nodeinfo.DraDriverCpu_CpuID] = resourcev1.DeviceAttribute{IntValue: ptr.To[int64](1)}
-
-	_, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{*first, *second})
-	if err == nil || !strings.Contains(err.Error(), "duplicate CPU ID 1") {
-		t.Fatalf("NewNodeInfoFromResourceSlices() error = %v, want duplicate CPU ID error", err)
+	b.Spec.NodeName = ptr.To("another-node")
+	if _, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{a, b}); err == nil {
+		t.Fatal("used a different node's slice")
 	}
 }

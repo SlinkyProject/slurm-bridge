@@ -33,6 +33,7 @@ func TestSlurmBridge_PreBind_GetResourcesUsesSlurmNodeName(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: metav1.NamespaceDefault,
 			Name:      "pod",
+			UID:       "test-pod",
 			Labels:    map[string]string{wellknown.LabelExternalJobId: "1"},
 		},
 	}

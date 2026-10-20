@@ -328,6 +328,10 @@ func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod
 
 	registry := r.draRegistry()
 	hasNativeCPU := podRequestsNativeCPU(pod)
+	// The scheduler checks controller and PodGroup annotations after resolving
+	// the workload's annotation source.
+	standalone := metav1.GetControllerOf(pod) == nil && pod.Spec.SchedulingGroup == nil && pod.Labels[sched.PodGroupLabel] == ""
+	exclusive := !strings.EqualFold(strings.TrimSpace(pod.Annotations[wellknown.AnnotationExclusive]), "false")
 	for _, className := range slices.Sorted(maps.Keys(classNames)) {
 		deviceClass := &resourcev1.DeviceClass{}
 		if err := r.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
@@ -342,6 +346,9 @@ func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod
 		}
 		if profile.UsesCoreBitmap() && hasNativeCPU {
 			return fmt.Errorf("can't specify both native %q and core-bitmap DeviceClass %q", corev1.ResourceCPU, className)
+		}
+		if profile.UsesCoreBitmap() && standalone && exclusive {
+			return fmt.Errorf("DeviceClass %q: %w", className, dra.ErrExclusiveCPUAllocation)
 		}
 	}
 	return nil

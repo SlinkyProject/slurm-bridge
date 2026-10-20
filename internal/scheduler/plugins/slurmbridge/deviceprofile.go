@@ -13,12 +13,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
@@ -38,6 +40,7 @@ type coreBitmapAllocation struct {
 	deviceProfileRequest
 	RequestName    string
 	AllocatedCount int64
+	CPU            *nodeinfo.CPUAllocation
 }
 
 type claimAllocation struct {
@@ -270,14 +273,34 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 }
 
 func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *coreBitmapAllocation) error {
-	effectiveRequest := allocation.deviceProfileRequest
-	effectiveRequest.Count = allocation.AllocatedCount
-	profile, err := sb.verifyDeviceProfileRequest(ctx, claim, effectiveRequest, allocation.RequestName)
-	if err != nil {
-		return err
+	if allocation.CPU == nil {
+		return fmt.Errorf("missing socket CPU allocation")
 	}
-	if !profile.UsesCoreBitmap() {
-		return fmt.Errorf("DeviceClass %q no longer resolves to the core-bitmap backend", allocation.DeviceClassName)
+	effectiveRequest := allocation.deviceProfileRequest
+	effectiveRequest.Count = 1
+	for _, request := range allocation.CPU.Requests {
+		matches := slices.ContainsFunc(claim.Spec.Devices.Requests, func(actual resourcev1.DeviceRequest) bool {
+			return equality.Semantic.DeepEqual(actual, request)
+		})
+		if !matches {
+			return fmt.Errorf("CPU socket request %q differs from the applied allocation", request.Name)
+		}
+		profile, err := sb.verifyDeviceProfileRequest(ctx, claim, effectiveRequest, request.Name)
+		if err != nil {
+			return err
+		}
+		if !profile.UsesCoreBitmap() {
+			return fmt.Errorf("DeviceClass %q no longer resolves to the core-bitmap backend", allocation.DeviceClassName)
+		}
+	}
+	var cpuConfig []resourcev1.DeviceClaimConfiguration
+	for _, config := range claim.Spec.Devices.Config {
+		if config.Opaque != nil && config.Opaque.Driver == nodeinfo.DraDriverCpu {
+			cpuConfig = append(cpuConfig, config)
+		}
+	}
+	if !equality.Semantic.DeepEqual(cpuConfig, allocation.CPU.Config) {
+		return fmt.Errorf("CPU socket configuration differs from the applied allocation")
 	}
 	return nil
 }

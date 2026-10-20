@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultbinder"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
 	fwkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
@@ -30,11 +32,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	slurmfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
+
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func init() {
@@ -236,44 +242,9 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 									Generation:         1,
 									ResourceSliceCount: 1,
 								},
-								Devices: []resourcev1.Device{
-									{
-										Name: "cpu0",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-										},
-									},
-									{
-										Name: "cpu1",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](1)},
-											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-										},
-									},
-									{
-										Name: "cpu2",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](2)},
-											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
-											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-										},
-									},
-									{
-										Name: "cpu3",
-										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-											nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](3)},
-											nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
-											nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-											nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-										},
-									},
-								},
+								Devices: []resourcev1.Device{{Name: "cpu-socket0", AllowMultipleAllocations: ptr.To(true), Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+									nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)}, nodeinfo.DraDriverCpu_SMTEnabled: {BoolValue: ptr.To(true)}, nodeinfo.DraDriverCpu_CPUIDs: {StringValue: ptr.To("0-3")}, nodeinfo.DraDriverCpu_SMTLayout: {StringValue: ptr.To("0-3>1")},
+								}, Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{nodeinfo.DraDriverCpu_Capacity: {Value: resource.MustParse("4")}}}},
 							},
 						},
 						exampleGPUDeviceClass(legacyDRAExampleDriver),
@@ -368,6 +339,16 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				handle:        tt.fields.handle,
 				draRegistry:   testutils.DRARegistryWithExampleGPU(),
 			}
+			if tt.name == "Core-bitmap DeviceClass alias" {
+				n, err := nodeinfo.NewNodeInfo(tt.args.ctx, sb.Client, tt.args.nodeName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tt.args.resources.NodeExtra, err = n.EncodeApplied("")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			gotClaim, gotMappings, gotResources, err := sb.createRequestsAndMappings(tt.args.ctx, tt.args.pod, tt.args.nodeName, tt.args.resources)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
@@ -398,7 +379,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 			}
 			if tt.wantCPUMapping && !hasContainerExtendedResourceRequest(gotMappings, corev1.ContainerExtendedResourceRequest{
 				ContainerName: "foo",
-				RequestName:   corev1.ResourceCPU.String(),
+				RequestName:   "cpu-socket-0",
 				ResourceName:  resourcev1.ResourceDeviceClassPrefix + "my-cpus",
 			}) {
 				t.Errorf("SlurmBridge.createRequestsAndMappings() mappings = %v, want CPU extended resource mapping", gotMappings)
@@ -409,7 +390,7 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				}
 				var cpuRequest *resourcev1.DeviceRequest
 				for i := range gotClaim.Spec.Devices.Requests {
-					if gotClaim.Spec.Devices.Requests[i].Name == corev1.ResourceCPU.String() {
+					if gotClaim.Spec.Devices.Requests[i].Name == "cpu-socket-0" {
 						cpuRequest = &gotClaim.Spec.Devices.Requests[i]
 						break
 					}
@@ -417,8 +398,8 @@ func TestSlurmBridge_createRequestsAndMappings(t *testing.T) {
 				if cpuRequest == nil || cpuRequest.Exactly == nil || cpuRequest.Exactly.DeviceClassName != "my-cpus" {
 					t.Fatalf("CPU claim request = %#v, want DeviceClass my-cpus", cpuRequest)
 				}
-				if cpuRequest.Exactly.Count != 4 {
-					t.Fatalf("CPU claim request count = %d, want all 4 threads from two allocated cores", cpuRequest.Exactly.Count)
+				if cpuRequest.Exactly.Count != 1 {
+					t.Fatalf("CPU claim request count = %d, want one socket device", cpuRequest.Exactly.Count)
 				}
 				if gotResources.CoreBitmapAllocation.Count != 3 || gotResources.CoreBitmapAllocation.AllocatedCount != 4 {
 					t.Fatalf("core-bitmap counts = (requested %d, allocated %d), want (3, 4)", gotResources.CoreBitmapAllocation.Count, gotResources.CoreBitmapAllocation.AllocatedCount)
@@ -578,7 +559,7 @@ func TestSlurmBridge_createRequestsAndMappingsFailsClosedWhenDeviceClassChanges(
 	}
 }
 
-func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
+func TestSlurmBridge_manageResourceClaim_retainsClaimOnError(t *testing.T) {
 	ctx := context.Background()
 	injectedErr := errors.New("injected client error")
 
@@ -719,8 +700,8 @@ func TestSlurmBridge_manageResourceClaim_deletesClaimOnError(t *testing.T) {
 			if err := kclient.List(ctx, claimList); err != nil {
 				t.Fatalf("Client.List(ResourceClaimList) error = %v, want nil", err)
 			}
-			if len(claimList.Items) != 0 {
-				t.Fatalf("Client.List(ResourceClaimList) got %d claims, want 0", len(claimList.Items))
+			if len(claimList.Items) != 1 {
+				t.Fatalf("Client.List(ResourceClaimList) got %d claims, want one recoverable claim", len(claimList.Items))
 			}
 		})
 	}
@@ -777,9 +758,75 @@ func TestValidateDeviceClassRequestsForPodsRejectsCoreBitmapMultipleContainers(t
 		draRegistry: testutils.DRARegistryWithExampleGPU(),
 	}
 
-	err := sb.validateDeviceClassRequestsForPods(context.Background(), []corev1.Pod{pod})
+	err := sb.validateDeviceClassRequestsForPods(context.Background(), []corev1.Pod{pod}, false)
 	if err == nil || !strings.Contains(err.Error(), "requested by multiple containers") {
 		t.Fatalf("validateDeviceClassRequestsForPods() error = %v, want multiple containers error", err)
+	}
+}
+
+func TestExclusiveCPUUsesWorkloadPolicy(t *testing.T) {
+	ctx := context.Background()
+	testScheme, err := newClientScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadAPI := mustRegisterTestWorkloadAPI(t, testScheme, slurmjobir.WorkloadAPIVersionV1Alpha2)
+	for _, owner := range []string{"Pod", "Job", "PodGroup"} {
+		for _, exclusive := range []string{"", "true", "false"} {
+			t.Run(owner+"/exclusive="+exclusive, func(t *testing.T) {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "cpu-test", Namespace: "default", Annotations: map[string]string{wellknown.AnnotationExclusive: "false"}},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{{
+						Name: "work", Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+							corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "my-cpus"): resource.MustParse("1"),
+						}},
+					}}},
+				}
+				annotations := map[string]string{wellknown.AnnotationExclusive: exclusive}
+				objects := []client.Object{pod, &resourcev1.DeviceClass{
+					ObjectMeta: metav1.ObjectMeta{Name: "my-cpus"},
+					Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{
+						CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`},
+					}}},
+				}}
+				switch owner {
+				case "Pod":
+					pod.Annotations = annotations
+				case "Job":
+					pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: "job", Controller: ptr.To(true)}}
+					objects = append(objects, &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: pod.Namespace, Annotations: annotations}})
+				case "PodGroup":
+					pod.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To("group")}
+					// Unowned PodGroup members also participate in annotation merging.
+					pod.Annotations = nil
+					objects = append(objects, &slurmjobir.PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta, ObjectMeta: metav1.ObjectMeta{Name: "group", Namespace: pod.Namespace, Annotations: annotations}})
+				}
+				sb := &SlurmBridge{
+					Client:       fake.NewClientBuilder().WithScheme(testScheme).WithObjects(objects...).Build(),
+					slurmControl: newTestSlurmControl(t, slurmfake.NewClientBuilder().Build(), "kubernetes", "slurm-bridge"),
+					workloadAPI:  workloadAPI,
+				}
+				job, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), workloadAPI, ctx, pod)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(job.Components) != 1 {
+					t.Fatalf("got %d job components, want 1", len(job.Components))
+				}
+				component := job.Components[0]
+				err = sb.validateDeviceClassRequestsForPods(ctx, component.Pods.Items, ptr.Deref(component.JobInfo.Exclusive, true))
+				wantErr := exclusive != "false"
+				if (err != nil) != wantErr || (wantErr && !errors.Is(err, dra.ErrExclusiveCPUAllocation)) {
+					t.Fatalf("validation = %v, want exclusive CPU rejection: %v", err, wantErr)
+				}
+				if wantErr {
+					_, status := sb.PreFilter(ctx, framework.NewCycleState(), pod, nil)
+					if status.Code() != fwk.UnschedulableAndUnresolvable || !strings.Contains(status.Message(), dra.ErrExclusiveCPUAllocation.Error()) {
+						t.Fatalf("PreFilter() = %v, want exclusive CPU rejection before Slurm submission", status)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -1016,8 +1063,19 @@ func TestSlurmBridge_manageResourceClaimRequiresAppliedGPUInventory(t *testing.T
 				if err := kclient.List(context.Background(), claims); err != nil {
 					t.Fatal(err)
 				}
-				if len(claims.Items) != 0 {
-					t.Fatalf("found %d claims after failed binding, want none", len(claims.Items))
+				// Failed binding retains the partial claim for allocation recovery.
+				if len(claims.Items) != 1 {
+					t.Fatalf("found %d claims after failed binding, want one retained claim", len(claims.Items))
+				}
+				if claims.Items[0].Status.Allocation != nil {
+					t.Fatal("allocated GPU devices without applied inventory")
+				}
+				updatedPod := &corev1.Pod{}
+				if err := kclient.Get(context.Background(), client.ObjectKeyFromObject(pod), updatedPod); err != nil {
+					t.Fatal(err)
+				}
+				if updatedPod.Status.ExtendedResourceClaimStatus != nil {
+					t.Fatal("published a claim mapping after failed binding")
 				}
 			})
 		}
@@ -1069,44 +1127,9 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 								Generation:         1,
 								ResourceSliceCount: 1,
 							},
-							Devices: []resourcev1.Device{
-								{
-									Name: "cpu0",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-									},
-								},
-								{
-									Name: "cpu1",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](1)},
-										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-									},
-								},
-								{
-									Name: "cpu2",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](2)},
-										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
-										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-									},
-								},
-								{
-									Name: "cpu3",
-									Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-										nodeinfo.DraDriverCpu_CpuID:    {IntValue: ptr.To[int64](3)},
-										nodeinfo.DraDriverCpu_CoreID:   {IntValue: ptr.To[int64](1)},
-										nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)},
-										nodeinfo.DraDriverCpu_CoreType: {StringValue: ptr.To(nodeinfo.CoreTypeStandard.String())},
-									},
-								},
-							},
+							Devices: []resourcev1.Device{{Name: "cpu-socket0", AllowMultipleAllocations: ptr.To(true), Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+								nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To[int64](0)}, nodeinfo.DraDriverCpu_SMTEnabled: {BoolValue: ptr.To(true)}, nodeinfo.DraDriverCpu_CPUIDs: {StringValue: ptr.To("0-3")}, nodeinfo.DraDriverCpu_SMTLayout: {StringValue: ptr.To("0-3>1")},
+							}, Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{nodeinfo.DraDriverCpu_Capacity: {Value: resource.MustParse("4")}}}},
 						},
 					},
 					&resourcev1.DeviceClass{
@@ -1358,6 +1381,32 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 			sb := &SlurmBridge{
 				Client:      tt.kclient,
 				draRegistry: testutils.DRARegistryWithExampleGPU(),
+			}
+			if tt.coreBitmapAllocation != nil && !tt.wantErr {
+				n, err := nodeinfo.NewNodeInfo(context.Background(), sb.Client, tt.nodeName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cpu, err := n.AllocateCPUs(context.Background(), sb.Client, tt.resources, tt.coreBitmapAllocation.DeviceClassName, "test-allocation")
+				if err != nil {
+					t.Fatal(err)
+				}
+				tt.coreBitmapAllocation.CPU = cpu
+				if err := sb.Get(context.Background(), client.ObjectKeyFromObject(tt.claim), tt.claim); err != nil {
+					t.Fatal(err)
+				}
+				requests := tt.claim.Spec.Devices.Requests[:0]
+				for _, req := range tt.claim.Spec.Devices.Requests {
+					if req.Name != "cpu" {
+						requests = append(requests, req)
+					}
+				}
+				requests = append(requests, cpu.Requests...)
+				tt.claim.Spec.Devices.Requests = requests
+				tt.claim.Spec.Devices.Config = cpu.Config
+				if err := sb.Update(context.Background(), tt.claim); err != nil {
+					t.Fatal(err)
+				}
 			}
 			gotErr := sb.bindClaim(context.Background(), tt.claim, tt.pod, tt.nodeName, &claimAllocation{
 				NodeResources:        tt.resources,
