@@ -2239,8 +2239,11 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 		name        string
 		annotation  string
 		nodeExists  bool
+		staleCache  bool
+		slurmNode   string
 		unsynced    bool
 		getErr      error
+		listErr     error
 		deleteErr   error
 		patchErr    error
 		wantCode    fwk.Code
@@ -2251,6 +2254,9 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 		{name: "missing previously assigned node", annotation: "node1", wantCode: fwk.Unschedulable, wantDeleted: 1, wantCleared: true},
 		{name: "valid allocation", nodeExists: true, wantCode: fwk.Success},
 		{name: "valid previously assigned node", nodeExists: true, annotation: "node1", wantCode: fwk.Success},
+		{name: "cached miss with live node", nodeExists: true, staleCache: true, wantCode: fwk.Error},
+		{name: "cached miss with live Slurm alias", nodeExists: true, staleCache: true, slurmNode: "slurm-node1", wantCode: fwk.Error},
+		{name: "cached miss with failed live list", staleCache: true, listErr: lookupError, wantCode: fwk.Error},
 		{name: "node informer not synced", unsynced: true, wantCode: fwk.Error},
 		{name: "assigned node lookup unavailable", annotation: "node1", getErr: lookupError, wantCode: fwk.Error},
 		{name: "cancellation fails", deleteErr: deleteError, wantCode: fwk.Error, wantDeleted: 1},
@@ -2267,10 +2273,17 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 				pod.Annotations[wellknown.AnnotationExternalJobNode] = tt.annotation
 			}
 			objects := []kubeclient.Object{pod.DeepCopy()}
+			slurmNode := tt.slurmNode
+			if slurmNode == "" {
+				slurmNode = "node1"
+			}
 			if tt.nodeExists {
-				objects = append(objects, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
+				objects = append(objects, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: "node1", Labels: map[string]string{wellknown.LabelSlurmNodeName: slurmNode},
+				}})
 			}
 			base := kubefake.NewClientBuilder().WithObjects(objects...).Build()
+			listCalls, patchCalls := 0, 0
 			kc := kubeinterceptor.NewClient(base, kubeinterceptor.Funcs{
 				Get: func(ctx context.Context, _ kubeclient.WithWatch, key kubeclient.ObjectKey, obj kubeclient.Object, opts ...kubeclient.GetOption) error {
 					if _, ok := obj.(*corev1.Node); ok && tt.getErr != nil {
@@ -2278,7 +2291,17 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 					}
 					return base.Get(ctx, key, obj, opts...)
 				},
+				List: func(ctx context.Context, _ kubeclient.WithWatch, list kubeclient.ObjectList, opts ...kubeclient.ListOption) error {
+					if _, ok := list.(*corev1.NodeList); ok {
+						listCalls++
+						if tt.listErr != nil {
+							return tt.listErr
+						}
+					}
+					return base.List(ctx, list, opts...)
+				},
 				Patch: func(ctx context.Context, _ kubeclient.WithWatch, obj kubeclient.Object, patch kubeclient.Patch, opts ...kubeclient.PatchOption) error {
+					patchCalls++
 					if tt.patchErr != nil {
 						return tt.patchErr
 					}
@@ -2286,7 +2309,7 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 				},
 			})
 			control := &allocationRecoveryControl{postFilterSlurmControl: postFilterSlurmControl{
-				getJobs: []*slurmcontrol.ExternalJob{{JobId: 1, Nodes: "node1"}},
+				getJobs: []*slurmcontrol.ExternalJob{{JobId: 1, Nodes: slurmNode}},
 			}, deleteErr: tt.deleteErr}
 			activator := &activateRecorder{}
 			handle, err := fwkruntime.NewFramework(ctx, nil, nil,
@@ -2294,7 +2317,11 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sb := &SlurmBridge{Client: kc, kubeNodeIndex: testKubeNodeIndex(t, kc), slurmControl: control, handle: handle}
+			indexClient := base
+			if tt.staleCache {
+				indexClient = kubefake.NewClientBuilder().Build()
+			}
+			sb := &SlurmBridge{Client: kc, kubeNodeIndex: testKubeNodeIndex(t, indexClient), slurmControl: control, handle: handle}
 			sb.kubeNodeIndex.hasSynced = func() bool { return !tt.unsynced }
 			state := framework.NewCycleState()
 			result, status := sb.PreFilter(ctx, state, pod.DeepCopy(), nil)
@@ -2310,6 +2337,17 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 			got := &corev1.Pod{}
 			if err := base.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
 				t.Fatal(err)
+			}
+			if tt.staleCache {
+				if listCalls != 1 || patchCalls != 0 {
+					t.Fatalf("live node lists = %d, patches = %d, want 1, 0", listCalls, patchCalls)
+				}
+				if !reflect.DeepEqual(got.Labels, pod.Labels) || !reflect.DeepEqual(got.Annotations, pod.Annotations) {
+					t.Fatal("allocation metadata changed after an unconfirmed cache miss")
+				}
+				if tt.listErr != nil && status.Message() != tt.listErr.Error() {
+					t.Fatalf("PreFilter() = %v, want live list error %v", status, tt.listErr)
+				}
 			}
 			if cleared := got.Labels[wellknown.LabelExternalJobId] == ""; cleared != tt.wantCleared {
 				t.Fatalf("allocation cleared = %v, want %v", cleared, tt.wantCleared)

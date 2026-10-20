@@ -5,6 +5,7 @@ package slurmbridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -73,5 +74,23 @@ func (c *kubeNodeNameIndex) lookup(ctx context.Context, slurmNodes []string) (se
 }
 
 func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string) (sets.Set[string], error) {
-	return sb.kubeNodeIndex.lookup(ctx, slurmNodes)
+	names, err := sb.kubeNodeIndex.lookup(ctx, slurmNodes)
+	if !errors.Is(err, ErrorNoKubeNodeMatch) {
+		return names, err
+	}
+
+	nodes := &corev1.NodeList{}
+	if err := sb.List(ctx, nodes); err != nil {
+		return nil, err
+	}
+	liveNames := sets.New[string]()
+	for _, node := range nodes.Items {
+		liveNames.Insert(nodeutils.GetSlurmNodeName(&node), node.Name)
+	}
+	for _, name := range slurmNodes {
+		if !liveNames.Has(name) {
+			return nil, fmt.Errorf("%w: %s", ErrorNoKubeNodeMatch, name)
+		}
+	}
+	return nil, fmt.Errorf("allocated nodes exist in Kubernetes but are not yet reflected in the node informer cache")
 }
