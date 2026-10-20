@@ -66,6 +66,7 @@ spec:
             - wait
             - pods
             - --for=delete
+            - --field-selector=status.phase!=Failed,status.phase!=Succeeded
             {{- toYaml $args | nindent 12 }}
       volumes:
         - name: tmp
