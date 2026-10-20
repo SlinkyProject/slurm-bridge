@@ -373,7 +373,7 @@ function lws::install() {
 	chartName="lws"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.11.1"
+		local version="1.0.0"
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			--version "$version" --namespace "${chartName}-system" --create-namespace
 	fi

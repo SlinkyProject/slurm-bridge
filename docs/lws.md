@@ -36,10 +36,10 @@ Use `spec.groupIdentity: Ordinal` (the LWS default) and
 `spec.startupPolicy: LeaderCreated` for this integration. Each replica group
 receives its own Slurm allocation, with a default job name of
 `<set-name>-<group-index>`. Existing manifests that omit `groupIdentity` retain
-ordinal behavior with LWS v0.11.1. The `Hash` identity mode is not currently
+ordinal behavior with LWS v1.0.0. The `Hash` identity mode is not currently
 supported by slurm-bridge.
 
-The development installer uses LWS v0.11.1 with its default feature gates. Keep
+The development installer uses LWS v1.0.0 with its default feature gates. Keep
 the LWS `WorkloadAwareScheduling` gate disabled when using this direct
 LeaderWorkerSet group scheduling. The existing [built-in PodGroup](podgroup.md)
 integration can still group LWS Pods through `spec.schedulingGroup.podGroupName`
