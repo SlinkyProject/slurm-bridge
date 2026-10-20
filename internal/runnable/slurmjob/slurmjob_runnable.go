@@ -31,7 +31,6 @@ type SlurmJobRunnable struct {
 	eventCh chan<- event.GenericEvent
 
 	slurmControl slurmcontrol.SlurmControlInterface
-	slurmClient  slurmclient.Client
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -67,7 +66,6 @@ func NewRunnable(kubeClient client.Client, apiReader client.Reader, slurmClient 
 		apiReader:    apiReader,
 		eventCh:      eventCh,
 		slurmControl: slurmcontrol.NewControl(slurmClient),
-		slurmClient:  slurmClient,
 	}
 	return r
 }

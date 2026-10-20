@@ -11,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 var (
@@ -38,7 +40,90 @@ func (t *translator) PreFilterCompositePodGroup(pod *corev1.Pod, slurmJobIR *Slu
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("waiting for pods's pod group %q to appear in scheduling queue", *schedulingGroup.PodGroupName))
 	}
 
-	return t.checkCPGHierarchyReadiness(snapshot, namespace, slurmJobIR.RootPOM.Name, func(s fwk.PodGroupState) int { return s.AllPodsCount() })
+	status := t.checkCPGHierarchyReadiness(snapshot, namespace, slurmJobIR.RootPOM.Name, func(s fwk.PodGroupState) int { return s.AllPodsCount() })
+	if status.Code() == fwk.UnschedulableAndUnresolvable {
+		for _, leafPod := range slurmJobIR.AllPods() {
+			if ParseSlurmJobId(leafPod.Labels[wellknown.LabelExternalJobId]) != 0 {
+				ready, err := t.liveCPGTreeReady(namespace, slurmJobIR.RootPOM.Name)
+				if err != nil {
+					return fwk.AsStatus(err)
+				}
+				if ready {
+					return status
+				}
+				return fwk.NewStatus(fwk.Unschedulable, ErrorExternalJobInvalid.Error())
+			}
+		}
+	}
+	return status
+}
+
+func (t *translator) liveCPGTreeReady(namespace, rootName string) (bool, error) {
+	groups, err := t.listCompositePodGroup(namespace)
+	if err != nil {
+		return false, err
+	}
+	podGroups := &PodGroupList{TypeMeta: metav1.TypeMeta{
+		APIVersion: t.workloadAPI.PodGroupTypeMeta.APIVersion,
+		Kind:       "PodGroupList",
+	}}
+	if err := t.List(t.ctx, podGroups, client.InNamespace(namespace)); err != nil {
+		return false, err
+	}
+	// Use a new pod list even if this translator has already listed pods.
+	fresh := *t
+	fresh.podsByGroup = nil
+	var ready func(string, int) (bool, error)
+	ready = func(name string, depth int) (bool, error) {
+		minCount := 1
+		found := false
+		for _, group := range groups {
+			if group.name == name {
+				found = true
+				if group.schedulingPolicy.Gang != nil {
+					minCount = int(group.schedulingPolicy.Gang.MinGroupCount)
+				}
+				break
+			}
+		}
+		if !found {
+			return false, fmt.Errorf("composite pod group %s/%s missing from API", namespace, name)
+		}
+		if depth >= len(groups) {
+			return false, fmt.Errorf("cycle in composite pod group hierarchy at %s/%s", namespace, name)
+		}
+		count := 0
+		for _, group := range groups {
+			if group.parentName != name {
+				continue
+			}
+			childReady, err := ready(group.name, depth+1)
+			if err != nil {
+				return false, err
+			}
+			if childReady {
+				count++
+			}
+		}
+		for _, pg := range podGroups.Items {
+			if pg.Spec.ParentCompositePodGroupName == nil || *pg.Spec.ParentCompositePodGroupName != name {
+				continue
+			}
+			pods, err := fresh.podsForPodGroup(namespace, pg.Name)
+			if err != nil {
+				return false, err
+			}
+			minPods := 1
+			if pg.Spec.SchedulingPolicy.Gang != nil {
+				minPods = int(pg.Spec.SchedulingPolicy.Gang.MinCount)
+			}
+			if len(pods.Items) >= minPods {
+				count++
+			}
+		}
+		return count >= minCount, nil
+	}
+	return ready(rootName, 0)
 }
 
 // checkCPGHierarchyReadiness checks the selected allocation's subtree, without
@@ -138,7 +223,7 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 		if pg.Spec.ParentCompositePodGroupName != nil {
 
 			if *pg.Spec.ParentCompositePodGroupName != rootPOM.GetName() {
-				if found := t.traverseParentChain(rootPOM.Namespace, *pg.Spec.ParentCompositePodGroupName, rootPOM.Name, compositePodGroups, 0); !found {
+				if found := t.traverseParentChain(*pg.Spec.ParentCompositePodGroupName, rootPOM.Name, compositePodGroups, 0); !found {
 					continue
 				}
 			}
@@ -167,9 +252,9 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 	return slurmJobIR, nil
 }
 
-// traverseParentChain checks membership in an allocation without crossing a
-// basic CompositePodGroup boundary.
-func (t *translator) traverseParentChain(namespace string, parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
+// traverseParentChain follows each CompositePodGroup's parent up until it reaches the root
+// object, then returns the name of that object
+func (t *translator) traverseParentChain(parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
 	if depth == len(compositePodGroups) {
 		return false
 	}
@@ -186,7 +271,7 @@ func (t *translator) traverseParentChain(namespace string, parentName string, ta
 		if compositePodGroup.parentName == "" {
 			return false
 		}
-		return t.traverseParentChain(namespace, compositePodGroup.parentName, targetName, compositePodGroups, depth+1)
+		return t.traverseParentChain(compositePodGroup.parentName, targetName, compositePodGroups, depth+1)
 	}
 	return false
 }

@@ -30,8 +30,13 @@ type SlurmControlInterface interface {
 	ListPodsFromJobs(ctx context.Context) ([]int32, []kubetypes.NamespacedName, error)
 	// GetPodsFromJob returns the pod identities associated with the Slurm job.
 	GetPodsFromJob(ctx context.Context, jobId int32) ([]corev1.ObjectReference, error)
-	// IsJobPendingOrRunning returns true if the Slurm job with the given jobId is pending or running.
-	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error)
+	// GetHetJobComponent returns the heterogeneous job ID and offset, or isHetJob false for ordinary jobs.
+	// Missing jobs and incomplete heterogeneous job offsets return an error.
+	GetHetJobComponent(ctx context.Context, jobId int32) (hetJobId, hetJobOffset int32, isHetJob bool, err error)
+	// IsJobRunning returns true if the Slurm job is running, false if not.
+	IsJobRunning(ctx context.Context, jobId int32) (bool, error)
+	// IsJobPendingOrRunning reports whether the Slurm job is pending and whether it is running.
+	IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
 	// TerminateHetJobComponent cancels only the component at hetJobOffset, including offset zero.
@@ -55,19 +60,57 @@ func (r *realSlurmControl) RefreshJobCache(ctx context.Context) error {
 	return nil
 }
 
-// IsJobPendingOrRunning implements SlurmControlInterface.
-func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, error) {
+// IsJobRunning implements SlurmControlInterface.
+func (r *realSlurmControl) IsJobRunning(ctx context.Context, jobId int32) (bool, error) {
 	job := &api.V0044JobInfo{}
 	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
+
 	err := r.Get(ctx, key, job)
+	if err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
+		return false, err
+	}
+	if err == nil && slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStateRUNNING) {
+		return true, nil
+	}
+
+	err = r.Get(ctx, key, job, &client.GetOptions{RefreshCache: true})
 	if err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
 	}
+	if slurmutils.GetStateAsSet(job.JobState).Has(api.V0044JobInfoJobStateRUNNING) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// IsJobPendingOrRunning implements SlurmControlInterface.
+func (r *realSlurmControl) IsJobPendingOrRunning(ctx context.Context, jobId int32) (bool, bool, error) {
+	job := &api.V0044JobInfo{}
+	key := object.ObjectKey(fmt.Sprintf("%d", jobId))
+	err := r.Get(ctx, key, job)
+	if err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
 	state := slurmutils.GetStateAsSet(job.JobState)
-	return state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING), nil
+	if !state.HasAny(api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING) {
+		return false, false, nil
+	}
+
+	// Confirm an active job before returning a state that permits cancellation.
+	if err := r.Get(ctx, key, job, &client.GetOptions{RefreshCache: true}); err != nil {
+		if errors.Is(err, slurmerrors.ErrNotFound) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	state = slurmutils.GetStateAsSet(job.JobState)
+	return state.Has(api.V0044JobInfoJobStatePENDING), state.Has(api.V0044JobInfoJobStateRUNNING), nil
 }
 
 // ListPodsFromJobs implements SlurmControlInterface.
@@ -119,6 +162,21 @@ func (r *realSlurmControl) GetPodsFromJob(ctx context.Context, jobId int32) ([]c
 	}
 
 	return pods, nil
+}
+
+// GetHetJobComponent implements SlurmControlInterface.
+func (r *realSlurmControl) GetHetJobComponent(ctx context.Context, jobId int32) (hetJobId, hetJobOffset int32, isHetJob bool, err error) {
+	job := &api.V0044JobInfo{}
+	if err := r.Get(ctx, object.ObjectKey(fmt.Sprintf("%d", jobId)), job); err != nil {
+		return 0, 0, false, err
+	}
+	if job.HetJobId == nil || !ptr.Deref(job.HetJobId.Set, false) || ptr.Deref(job.HetJobId.Number, 0) == 0 {
+		return 0, 0, false, nil
+	}
+	if job.HetJobOffset == nil || !ptr.Deref(job.HetJobOffset.Set, false) || job.HetJobOffset.Number == nil {
+		return 0, 0, false, fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
+	}
+	return *job.HetJobId.Number, *job.HetJobOffset.Number, true, nil
 }
 
 // TerminateJob implements SlurmControlInterface.
