@@ -6,6 +6,7 @@ package slurmjobir
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -472,6 +473,74 @@ func TestTranslateOrdinalLWSReplicaGroups(t *testing.T) {
 						}
 					})
 				}
+			}
+		})
+	}
+}
+
+func TestLWSRevisionGroupSize(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		desiredSize int32
+		groupSize   int32
+		podCount    int
+		wantReady   bool
+	}{
+		{name: "old smaller group during scale up", desiredSize: 3, groupSize: 2, podCount: 2, wantReady: true},
+		{name: "old larger group during scale down", desiredSize: 2, groupSize: 3, podCount: 2},
+		{name: "complete old larger group", desiredSize: 2, groupSize: 3, podCount: 3, wantReady: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			utilruntime.Must(lwsv1.AddToScheme(scheme))
+			lws := newLWS("lws", tt.desiredSize)
+			objects := []client.Object{lws}
+			var leader *corev1.Pod
+			for i := range tt.podCount {
+				pod := newLWSRolePod("lws-0-"+strconv.Itoa(i), "old-revision", strconv.Itoa(i))
+				pod.Annotations = map[string]string{lwsv1.SizeAnnotationKey: strconv.Itoa(int(tt.groupSize))}
+				objects = append(objects, pod)
+				if i == 0 {
+					leader = pod
+				}
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			tr := &translator{Reader: c, ctx: context.Background()}
+			root := &metav1.PartialObjectMetadata{ObjectMeta: lws.ObjectMeta}
+			ir, err := tr.fromLws(leader, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ir.RootPOM = *root
+			info := ir.Components[0].JobInfo
+			if ptr.Deref(info.MinNodes, 0) != tt.groupSize || ptr.Deref(info.MaxNodes, 0) != tt.groupSize {
+				t.Errorf("allocation size = %v/%v, want %d", ptr.Deref(info.MinNodes, 0), ptr.Deref(info.MaxNodes, 0), tt.groupSize)
+			}
+			status := tr.PreFilterLWS(leader, ir)
+			if status.IsSuccess() != tt.wantReady {
+				t.Errorf("PreFilterLWS = %v, wantReady %t", status, tt.wantReady)
+			}
+		})
+	}
+}
+
+func TestLWSInvalidGroupSize(t *testing.T) {
+	for _, value := range []string{"", "0", "-1", "invalid", "2147483648"} {
+		t.Run(value, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(lwsv1.AddToScheme(scheme))
+			lws := newLWS("lws", 2)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(lws).Build()
+			tr := &translator{Reader: c, ctx: context.Background()}
+			pod := newLWSPod("leader", "group")
+			pod.Annotations = map[string]string{lwsv1.SizeAnnotationKey: value}
+			root := &metav1.PartialObjectMetadata{ObjectMeta: lws.ObjectMeta}
+			if _, err := tr.fromLws(pod, root); err == nil {
+				t.Error("translation accepted an invalid group size")
+			}
+			if status := tr.PreFilterLWS(pod, &SlurmJobIR{RootPOM: *root}); status.Code() != fwk.Error {
+				t.Errorf("PreFilterLWS = %v, want Error", status)
 			}
 		})
 	}
