@@ -40,7 +40,7 @@ go-version: ## Show the Go toolchain version declared in go.mod.
 .PHONY: version-match
 version-match: version ## Sync chart versions with VERSION.
 	@if [ -z "$$(echo $(VERSION) | grep -Eo "^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]](-[[:alpha:]][[:alnum:]]*(\.[[:digit:]]+)?)?$$")" ]; then \
-		echo "VERSION is not semver: $(VERSION)" ;\
+		echo "Invalid release version format: $(VERSION)" ;\
 		exit 1 ;\
 	fi
 	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), \

@@ -51,14 +51,14 @@ func TestUpgradeTestVersions(t *testing.T) {
 	for _, tc := range []struct {
 		name, from, to, wantError string
 	}{
-		{name: "patch", from: "1.2.2", to: "1.2.3"},
-		{name: "next minor", from: "1.2.3", to: "1.3.0"},
+		{name: "update within series", from: "1.2.2", to: "1.2.3"},
+		{name: "next series", from: "1.2.3", to: "1.3.0"},
 		{name: "release candidate", from: "1.2.3", to: "1.3.0-rc1"},
 		{name: "candidate to release", from: "1.3.0-rc1", to: "1.3.0"},
-		{name: "skipped minor", from: "1.1.9", to: "1.3.0-rc1", wantError: "skipping minor releases"},
+		{name: "skipped series", from: "1.1.9", to: "1.3.0-rc1", wantError: "skipping release series"},
 		{name: "same version", from: "1.3.0", to: "1.3.0", wantError: "must be newer"},
 		{name: "downgrade", from: "1.3.0", to: "1.2.3", wantError: "must be newer"},
-		{name: "major change", from: "1.3.0", to: "2.0.0", wantError: "within one major version"},
+		{name: "different first version number", from: "1.3.0", to: "2.0.0", wantError: "same first version number"},
 		{name: "invalid baseline", from: "latest", to: "1.3.0", wantError: "parse baseline version"},
 		{name: "invalid target", from: "1.2.3", to: "latest", wantError: "parse target version"},
 	} {

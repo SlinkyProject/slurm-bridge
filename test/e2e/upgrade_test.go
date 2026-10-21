@@ -232,10 +232,10 @@ func validateUpgradeTestVersions(fromVersion, toVersion string) error {
 		return fmt.Errorf("target version %s must be newer than baseline %s", toVersion, fromVersion)
 	}
 	if from.Major() != to.Major() {
-		return fmt.Errorf("this upgrade spec only covers upgrades within one major version: %s to %s", fromVersion, toVersion)
+		return fmt.Errorf("this upgrade spec only covers releases with the same first version number: %s to %s", fromVersion, toVersion)
 	}
 	if to.Minor() > from.Minor()+1 {
-		return fmt.Errorf("unsupported upgrade from %s to %s: skipping minor releases is not supported; upgrade one minor at a time", fromVersion, toVersion)
+		return fmt.Errorf("unsupported upgrade from %s to %s: skipping release series is not supported; upgrade one series at a time", fromVersion, toVersion)
 	}
 	return nil
 }
