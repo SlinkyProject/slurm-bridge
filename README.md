@@ -75,7 +75,7 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 Each Slurm Bridge release series supports all Kubernetes minor versions that are
 [supported upstream](https://kubernetes.io/releases/) when it is released,
 starting with Kubernetes 1.35. That set is recorded for each release series.
-Support for newer Kubernetes minors may be backported in an update release after
+Support for newer Kubernetes minors may be backported in a patch release after
 end-to-end validation; these backports are optional.
 
 | Release | Kubernetes 1.35 | Kubernetes 1.36 | Kubernetes 1.37 |
@@ -85,7 +85,7 @@ end-to-end validation; these backports are optional.
 | `1.1.X` |        ✓        |        ✓        |        —        |
 | `1.0.X` |        ✓        |        ✓        |        —        |
 
-✓ means supported; — means unsupported. `X` denotes the update number within a
+✓ means supported; — means unsupported. `X` denotes the patch number within a
 release series. Use the latest release in each series. Backported support is
 marked with the first release that supports it.
 
@@ -98,7 +98,7 @@ marked with the first release that supports it.
 
 ### Upgrade support
 
-Within a release series, intermediate updates may be skipped: `1.2.0` can
+Within a release series, intermediate patches may be skipped: `1.2.0` can
 upgrade directly to any newer `1.2.X`. Between series sharing the same first
 version number, upgrade one series at a time: `1.1` → `1.2` → `1.3`. See the
 [upgrade guide](./docs/upgrading.md) for preparation and checks.
