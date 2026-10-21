@@ -4,17 +4,79 @@
 package registration
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/controllercheck"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
+
+func TestDuplicateCleanupWithEmptyPodGroup(t *testing.T) {
+	for _, failCancellation := range []bool{false, true} {
+		name := "success"
+		if failCancellation {
+			name = "cancellation failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			w, err := newRegistrationWorld(ctx, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			group := &slurmjobir.PodGroup{TypeMeta: w.workloadAPI.PodGroupTypeMeta,
+				ObjectMeta: metav1.ObjectMeta{Namespace: "world", Name: "empty", UID: "empty"}}
+			key := objectRequest(group)
+			if err := w.kube.Create(ctx, group); err != nil {
+				t.Fatal(err)
+			}
+			identity := key.groupIdentity()
+			info := externaljobinfo.ExternalJobInfo{PodGroup: &identity, Pods: []string{"world/deleted/deleted-uid"}}
+			for _, id := range []int32{100, 102} {
+				job := &api.V0044JobInfo{JobId: ptr.To(id), AdminComment: ptr.To(info.ToString()),
+					JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING}}
+				if err := w.live.Create(ctx, job, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := w.advanceCache(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if failCancellation {
+				w.faults.Arm("slurm.cancel", "before-commit")
+			}
+			result, err := w.reconciler.Reconcile(ctx, key)
+			if failCancellation {
+				if !errors.Is(err, controllercheck.ErrInjected) {
+					t.Fatalf("cleanup error=%v, want cancellation failure", err)
+				}
+			} else if err != nil {
+				t.Fatalf("empty PodGroup should requeue without error: %v", err)
+			}
+			if errors.Is(err, slurmjobir.ErrorPodGroupNoPods) {
+				t.Fatalf("expected membership condition leaked: %v", err)
+			}
+			if result.RequeueAfter != registrationRetry {
+				t.Fatalf("requeue=%v, want %v", result.RequeueAfter, registrationRetry)
+			}
+			jobs, err := worldJobs(ctx, w.live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) != 2 || !worldUnfinished(jobs[0]) || worldUnfinished(jobs[1]) != failCancellation {
+				t.Fatalf("unexpected allocations after cleanup: %+v", jobs)
+			}
+		})
+	}
+}
 
 func TestGroupAllocations(t *testing.T) {
 	job := func(id, leader int32, group, pod string) api.V0044JobInfo {
