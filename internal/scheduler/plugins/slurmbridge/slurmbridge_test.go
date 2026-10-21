@@ -14,6 +14,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1alpha2 "k8s.io/api/scheduling/v1alpha2"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	kubeinterceptor "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -219,7 +221,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		ctx,
 		registeredPlugins,
 		"slurm-bridge",
-		fwkruntime.WithInformerFactory(informerFactory))
+		fwkruntime.WithInformerFactory(informerFactory), fwkruntime.WithPodActivator(&activateRecorder{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +248,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		{
 			name: "JobId and Node assignment exist in annotations",
 			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
+				client: kubefake.NewFakeClient(pod.DeepCopy(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
 					list := &types.V0044JobInfoList{
 						Items: []types.V0044JobInfo{
@@ -378,7 +380,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				pod:   pod.DeepCopy(),
 			},
 			want:  nil,
-			want1: fwk.NewStatus(fwk.Error, ErrorNoKubeNodeMatch.Error()),
+			want1: fwk.NewStatus(fwk.Unschedulable, ErrorNoKubeNodeMatch.Error()),
 		},
 		{
 			name: "External job exists",
@@ -583,7 +585,9 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 
 	kubeClient := kubefake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy()).
+		WithObjects(podA.DeepCopy(), podB.DeepCopy(), podGroup.DeepCopy(),
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}}).
 		WithStatusSubresource(&schedulingv1alpha2.PodGroup{}).
 		Build()
 	slurmControl := func() slurmcontrol.SlurmControlInterface {
@@ -736,13 +740,21 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			WithLists(nodes).
 			Build()
 		jobGets := 0
+		deleted := false
 		f := interceptor.Funcs{
+			Delete: func(context.Context, object.Object, ...slurmclient.DeleteOption) error {
+				deleted = true
+				return nil
+			},
 			Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
 				job, ok := obj.(*types.V0044JobInfo)
 				if !ok {
 					return base.Get(ctx, key, obj, opts...)
 				}
 
+				if deleted {
+					return errors.New("Not Found")
+				}
 				jobGets++
 				state := api.V0044JobInfoJobStatePENDING
 				nodes := ""
@@ -1169,6 +1181,31 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			wantActivate: true,
 		},
 		{
+			name: "Update race allocates a missing node",
+			fields: fields{
+				Client: kubefake.NewFakeClient(
+					pod.DeepCopy(),
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+					&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+				),
+				slurmControl: newUpdateRaceSlurmControl("deleted-node"),
+				handle:       f,
+			},
+			args: args{
+				ctx:   ctx,
+				state: framework.NewCycleState(),
+				pod:   pod.DeepCopy(),
+				m: framework.NewNodeToStatus(map[string]*fwk.Status{
+					"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+					"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
+				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
+			},
+			want:         nil,
+			want1:        fwk.NewStatus(fwk.Unschedulable, ErrorNoKubeNodeMatch.Error()),
+			wantPodJobID: ptr.To(""),
+			wantActivate: true,
+		},
+		{
 			name: "Updating an external job races but Slurm has no allocated nodes",
 			fields: fields{
 				Client: kubefake.NewFakeClient(
@@ -1432,7 +1469,7 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "Delete fails on job that does not exist",
+			name: "Delete succeeds on job that does not exist",
 			fields: fields{
 				Client: kubefake.NewFakeClient(pod.DeepCopy()),
 				slurmControl: slurmcontrol.NewControl(
@@ -1443,7 +1480,7 @@ func TestSlurmBridge_deleteExternalJob(t *testing.T) {
 				ctx: context.Background(),
 				pod: pod.DeepCopy(),
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "External job is deleted",
@@ -1689,5 +1726,152 @@ func TestSlurmBridge_annotatePodsWithNodes_doesNotReshuffleAlreadyAssignedPod(t 
 	}
 	if got2.Annotations[wellknown.AnnotationExternalJobNode] != "node2" {
 		t.Errorf("pod2 node annotation = %q, want %q", got2.Annotations[wellknown.AnnotationExternalJobNode], "node2")
+	}
+}
+
+func TestPreFilterMissingAllocatedNode(t *testing.T) {
+	lookupErr := apierrors.NewServiceUnavailable("node lookup unavailable")
+	for _, tt := range []struct {
+		name           string
+		annotation     string
+		nodeExists     bool
+		alias          string
+		getErr         error
+		listErr        error
+		deleteErr      error
+		patchErr       error
+		retainCanceled bool
+		wantCode       fwk.Code
+		wantDelete     int
+		wantClear      bool
+	}{
+		{name: "missing allocated node", wantCode: fwk.Unschedulable, wantDelete: 1, wantClear: true},
+		{name: "missing assigned node", annotation: "node1", wantCode: fwk.Unschedulable, wantDelete: 1, wantClear: true},
+		{name: "live node", nodeExists: true, wantCode: fwk.Success},
+		{name: "live Slurm alias", nodeExists: true, alias: "slurm-node1", wantCode: fwk.Success},
+		{name: "valid assigned node", nodeExists: true, annotation: "node1", wantCode: fwk.Success},
+		{name: "live list fails", listErr: lookupErr, wantCode: fwk.Error},
+		{name: "assigned lookup fails", annotation: "node1", getErr: lookupErr, wantCode: fwk.Error},
+		{name: "exact name lookup fails", getErr: lookupErr, wantCode: fwk.Error},
+		{name: "cancellation fails", deleteErr: errors.New("cancellation failed"), wantCode: fwk.Error, wantDelete: 1},
+		{name: "metadata cleanup retry after job removal", annotation: "node1", patchErr: errors.New("cleanup failed"), wantCode: fwk.Error, wantDelete: 1},
+		{name: "metadata cleanup retry after cancellation", annotation: "node1", retainCanceled: true, patchErr: errors.New("cleanup failed"), wantCode: fwk.Error, wantDelete: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name: "pod1", Namespace: "default", UID: "pod1",
+				Labels:      map[string]string{wellknown.LabelExternalJobId: "1", "keep": "label"},
+				Annotations: map[string]string{"keep": "annotation"},
+			}}
+			if tt.annotation != "" {
+				pod.Annotations[wellknown.AnnotationExternalJobNode] = tt.annotation
+			}
+			nodeName := "node1"
+			if tt.alias != "" {
+				nodeName = tt.alias
+			}
+			objects := []kubeclient.Object{pod.DeepCopy()}
+			if tt.nodeExists {
+				objects = append(objects, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: "node1", Labels: map[string]string{wellknown.LabelSlurmNodeName: nodeName},
+				}})
+			}
+			base := kubefake.NewClientBuilder().WithObjects(objects...).Build()
+			patchCalls := 0
+			kc := kubeinterceptor.NewClient(base, kubeinterceptor.Funcs{
+				Get: func(ctx context.Context, _ kubeclient.WithWatch, key kubeclient.ObjectKey, obj kubeclient.Object, opts ...kubeclient.GetOption) error {
+					if _, ok := obj.(*corev1.Node); ok && tt.getErr != nil {
+						return tt.getErr
+					}
+					return base.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, _ kubeclient.WithWatch, list kubeclient.ObjectList, opts ...kubeclient.ListOption) error {
+					if _, ok := list.(*corev1.NodeList); ok && tt.listErr != nil {
+						return tt.listErr
+					}
+					return base.List(ctx, list, opts...)
+				},
+				Patch: func(ctx context.Context, _ kubeclient.WithWatch, obj kubeclient.Object, patch kubeclient.Patch, opts ...kubeclient.PatchOption) error {
+					patchCalls++
+					if tt.patchErr != nil && patchCalls == 1 {
+						return tt.patchErr
+					}
+					return base.Patch(ctx, obj, patch, opts...)
+				},
+			})
+			job := types.V0044JobInfo{V0044JobInfo: api.V0044JobInfo{
+				JobId: ptr.To(int32(1)), Nodes: ptr.To(nodeName),
+				JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+				AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"default/pod1"}}).ToString()),
+			}}
+			slurmBase := fake.NewClientBuilder().WithLists(&types.V0044JobInfoList{Items: []types.V0044JobInfo{job}}).Build()
+			deleteCalls := 0
+			slurmClient := interceptor.NewClient(slurmBase, interceptor.Funcs{
+				Delete: func(ctx context.Context, obj object.Object, opts ...slurmclient.DeleteOption) error {
+					deleteCalls++
+					if tt.deleteErr != nil {
+						return tt.deleteErr
+					}
+					if tt.retainCanceled {
+						if deleteCalls > 1 {
+							return errors.New("job already completed")
+						}
+						job.JobState = &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED}
+						return slurmBase.Update(ctx, &job, nil)
+					}
+					return slurmBase.Delete(ctx, obj, opts...)
+				},
+			})
+			activator := &activateRecorder{}
+			handle, err := fwkruntime.NewFramework(ctx, nil, nil, fwkruntime.WithPodActivator(activator))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sb := &SlurmBridge{Client: kc, slurmControl: slurmcontrol.NewControl(slurmClient, "kubernetes", "slurm-bridge"), handle: handle}
+			state := framework.NewCycleState()
+			result, status := sb.PreFilter(ctx, state, pod.DeepCopy(), nil)
+			if status.Code() != tt.wantCode || deleteCalls != tt.wantDelete {
+				t.Fatalf("PreFilter() = %v, cancellations = %d; want %v, %d", status, deleteCalls, tt.wantCode, tt.wantDelete)
+			}
+			if tt.wantCode == fwk.Success && (result == nil || !result.NodeNames.Equal(sets.New("node1"))) {
+				t.Fatalf("allocated nodes = %v, want node1", result)
+			}
+			got := &corev1.Pod{}
+			if err := base.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+				t.Fatal(err)
+			}
+			if (got.Labels[wellknown.LabelExternalJobId] == "") != tt.wantClear {
+				t.Fatalf("job label = %q, want cleared = %v", got.Labels[wellknown.LabelExternalJobId], tt.wantClear)
+			}
+			if got.Labels["keep"] != "label" || got.Annotations["keep"] != "annotation" {
+				t.Fatal("unrelated metadata changed")
+			}
+			if tt.wantClear {
+				if got.Annotations[wellknown.AnnotationExternalJobNode] != "" || activator.pods[string(pod.UID)] == nil {
+					t.Fatal("allocation was not cleared and requeued")
+				}
+				_, status := sb.PostFilter(ctx, state, pod, nil)
+				if status.Code() != fwk.Unschedulable {
+					t.Fatalf("invalidated PostFilter() = %v", status)
+				}
+			} else if tt.wantCode == fwk.Error && tt.wantDelete == 0 {
+				if patchCalls != 0 || !reflect.DeepEqual(got.Labels, pod.Labels) || !reflect.DeepEqual(got.Annotations, pod.Annotations) {
+					t.Fatal("unconfirmed node absence changed allocation metadata")
+				}
+			}
+			if tt.patchErr != nil {
+				_, status = sb.PreFilter(ctx, framework.NewCycleState(), got, nil)
+				if status.Code() != fwk.Unschedulable || deleteCalls != 2 || patchCalls != 2 {
+					t.Fatalf("cleanup retry = %v, cancellations = %d, patches = %d", status, deleteCalls, patchCalls)
+				}
+				if err := base.Get(ctx, kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+					t.Fatal(err)
+				}
+				if got.Labels[wellknown.LabelExternalJobId] != "" || got.Annotations[wellknown.AnnotationExternalJobNode] != "" {
+					t.Fatal("cleanup retry left stale allocation metadata")
+				}
+			}
+		})
 	}
 }

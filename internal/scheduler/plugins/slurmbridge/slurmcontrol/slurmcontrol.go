@@ -5,6 +5,8 @@ package slurmcontrol
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -75,7 +77,7 @@ func sharedFromExclusiveAnnotation(slurmJobIR *slurmjobir.SlurmJobIR) *[]api.V00
 	return &[]api.V0044JobDescMsgShared{api.V0044JobDescMsgSharedMcs}
 }
 
-// DeleteSlurmJob will delete an external job
+// DeleteJob releases an external job, including one already canceled or gone.
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	job := &slurmtypes.V0044JobInfo{}
@@ -85,6 +87,13 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	}
 	job.JobId = &jobId
 	if err := r.Delete(ctx, job); err != nil {
+		externalJob, lookupErr := r.GetJob(ctx, pod)
+		if lookupErr == nil && externalJob.JobId == 0 {
+			return nil
+		}
+		if lookupErr != nil {
+			err = errors.Join(err, fmt.Errorf("confirm Slurm job release: %w", lookupErr))
+		}
 		logger.Error(err, "failed to delete Slurm job", "jobId", jobId)
 		return err
 	}
