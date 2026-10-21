@@ -95,7 +95,7 @@ see the [annotations.go] source.
 
 | Annotation                             | Description                       | Example      |
 | -------------------------------------- | --------------------------------- | ------------ |
-| slurmjob.slinky.slurm.net/account      | Overrides the default account.    | "schedmd"    |
+| slurmjob.slinky.slurm.net/account      | Sets the account at submission.   | "schedmd"    |
 | slurmjob.slinky.slurm.net/gres         | Overrides the default gres.       | "GPU:V100:2" |
 | slurmjob.slinky.slurm.net/job-name     | Sets the job name.                | "research"   |
 | slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes. | "3"          |

@@ -319,7 +319,9 @@ these with a single level of grouping, for example `[a&b|c&d]`.
 
 Annotations can update a Slurm job while it is pending. Slurm validates each
 change. If it rejects an update, the previous Slurm job value remains in effect.
-Once Slurm allocates the job, treat its annotations and Pod membership as fixed.
+The `account` and `exclusive` annotations apply only at submission, so later
+edits to them do not change the Slurm job. Once Slurm allocates the job, treat
+its annotations and Pod membership as fixed.
 
 ### Scheduler-managed Pod metadata
 
