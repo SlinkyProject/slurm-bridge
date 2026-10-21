@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,7 +53,7 @@ func (h compositePostFilterHandle) RunFilterPluginsWithNominatedPods(ctx context
 	return h.RunFilterPlugins(ctx, state, pod, node)
 }
 
-type compositeSubmissionRecorder struct {
+type compositeUpdateRecorder struct {
 	slurmcontrol.SlurmControlInterface
 	roots      []string
 	components []int
@@ -60,25 +61,31 @@ type compositeSubmissionRecorder struct {
 	failErr    error
 }
 
-func (r *compositeSubmissionRecorder) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
-	return &slurmcontrol.ExternalJob{}, nil
+func (r *compositeUpdateRecorder) GetJob(_ context.Context, pod *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
+	return &slurmcontrol.ExternalJob{JobId: slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]), Pending: true, Held: true}, nil
 }
 
-func (r *compositeSubmissionRecorder) GetNodeNames(context.Context, *string) ([]string, error) {
+func (r *compositeUpdateRecorder) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+	return testAllocation(ir), nil
+}
+
+func (r *compositeUpdateRecorder) ReleaseJob(context.Context, int32, *int32) error {
+	return nil
+}
+
+func (r *compositeUpdateRecorder) GetNodeNames(context.Context, *string) ([]string, error) {
 	return []string{"node"}, nil
 }
 
-func (r *compositeSubmissionRecorder) SubmitJob(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]int32, error) {
+func (r *compositeUpdateRecorder) UpdateJob(_ context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) (int32, error) {
 	if ir.RootPOM.Name == r.failRoot {
-		return nil, r.failErr
+		return 0, r.failErr
 	}
-	r.roots = append(r.roots, ir.RootPOM.Name)
-	r.components = append(r.components, len(ir.Components))
-	ids := make([]int32, len(ir.Components))
-	for i := range ids {
-		ids[i] = int32(10*len(r.roots) + i) //nolint:gosec // G115 exception for test
+	if ir.ComponentOf(pod.Namespace, pod.Name) == len(ir.Components)-1 {
+		r.roots = append(r.roots, ir.RootPOM.Name)
+		r.components = append(r.components, len(ir.Components))
 	}
-	return ids, nil
+	return slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]), nil
 }
 
 func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
@@ -87,25 +94,25 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 		name                                                                    string
 		rootGang, nestedGang, nestedBasic, unevaluated, filterError, firstReady bool
 		preFilterStatus                                                         *fwk.Status
-		submitErr                                                               error
+		updateErr                                                               error
 		wantRoots                                                               []string
 		wantComponents                                                          []int
 		wantCode                                                                fwk.Code
 	}{
-		{name: "independent children both submit", wantRoots: []string{"a0", "b"}, wantComponents: []int{1, 1}},
+		{name: "independent children both update", wantRoots: []string{"a0", "b"}, wantComponents: []int{1, 1}},
 		{name: "rejected child does not block sibling", preFilterStatus: fwk.NewStatus(fwk.Unschedulable), wantRoots: []string{"b"}, wantComponents: []int{1}},
 		{name: "unevaluated rejected child does not block sibling", unevaluated: true, preFilterStatus: fwk.NewStatus(fwk.UnschedulableAndUnresolvable), wantRoots: []string{"b"}, wantComponents: []int{1}},
-		{name: "unschedulable submission does not block sibling", submitErr: ErrorNodeConfigInvalid, wantRoots: []string{"b"}, wantComponents: []int{1}},
-		{name: "nested gang submits once with all components", nestedGang: true, wantRoots: []string{"gang", "b"}, wantComponents: []int{2, 1}},
+		{name: "unschedulable update does not block sibling", updateErr: errors.New("ESLURM_JOB_NOT_PENDING"), wantRoots: []string{"b"}, wantComponents: []int{1}},
+		{name: "nested gang updates once with all components", nestedGang: true, wantRoots: []string{"gang", "b"}, wantComponents: []int{2, 1}},
 		{name: "gang pending applies only to its allocation", nestedGang: true, firstReady: true, wantRoots: []string{"gang", "b"}, wantComponents: []int{2, 1}},
-		{name: "pending sibling does not resubmit ready allocation", firstReady: true, wantRoots: []string{"b"}, wantComponents: []int{1}},
+		{name: "pending sibling does not update ready allocation", firstReady: true, wantRoots: []string{"b"}, wantComponents: []int{1}},
 		{name: "rejected gang component blocks only its allocation", nestedGang: true, preFilterStatus: fwk.NewStatus(fwk.Unschedulable), wantRoots: []string{"b"}, wantComponents: []int{1}},
 		{name: "gang root retains one allocation", rootGang: true, wantRoots: []string{"root"}, wantComponents: []int{2}},
-		{name: "gang root cannot submit rejected component", rootGang: true, preFilterStatus: fwk.NewStatus(fwk.Unschedulable), wantCode: fwk.Unschedulable},
+		{name: "gang root cannot update rejected component", rootGang: true, preFilterStatus: fwk.NewStatus(fwk.Unschedulable), wantCode: fwk.Unschedulable},
 		{name: "basic child separates allocations below gang", rootGang: true, nestedBasic: true, wantRoots: []string{"a0", "a1", "root"}, wantComponents: []int{1, 1, 1}},
 		{name: "prefilter error propagates", preFilterStatus: fwk.NewStatus(fwk.Error, "prefilter failed"), wantCode: fwk.Error},
 		{name: "filter error propagates", filterError: true, wantCode: fwk.Error},
-		{name: "submission error propagates", submitErr: errors.New("Slurm unavailable"), wantCode: fwk.Error},
+		{name: "update error propagates", updateErr: errors.New("Slurm unavailable"), wantCode: fwk.Error},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -145,7 +152,7 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 			if tt.nestedGang || tt.nestedBasic {
 				names = []string{"a0", "a1", "b"}
 			}
-			for _, name := range names {
+			for i, name := range names {
 				pgParent := parent
 				if name == "b" {
 					pgParent = info
@@ -155,7 +162,7 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "test", UID: types.UID(name)},
 					Spec:       slurmjobir.PodGroupSpec{ParentCompositePodGroupName: ptr.To(pgParent.Name), SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 1}}},
 				}
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "test", UID: types.UID(name)}, Spec: corev1.PodSpec{SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(name)}}}
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "test", UID: types.UID(name), Labels: map[string]string{wellknown.LabelExternalJobId: strconv.Itoa(10 * (i + 1))}}, Spec: corev1.PodSpec{SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(name)}}}
 				if tt.firstReady && name == "a0" {
 					pod.Annotations = map[string]string{wellknown.AnnotationExternalJobNode: "node"}
 				}
@@ -188,8 +195,8 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 				}
 				return nil, nil, nil
 			}
-			control := &compositeSubmissionRecorder{failRoot: "a0", failErr: tt.submitErr}
-			if tt.submitErr == nil {
+			control := &compositeUpdateRecorder{failRoot: "a0", failErr: tt.updateErr}
+			if tt.updateErr == nil {
 				control.failRoot = ""
 			}
 			sb := &SlurmBridge{Client: cl, workloadAPI: api, slurmControl: control, handle: compositePostFilterHandle{Framework: f, preFilter: prepare, filterError: tt.filterError}}
@@ -211,15 +218,15 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 				t.Fatal("successful PodGroupPostFilter returned nil result")
 			}
 			if !reflect.DeepEqual(control.roots, tt.wantRoots) || !reflect.DeepEqual(control.components, tt.wantComponents) {
-				t.Fatalf("Slurm submissions = %v with components %v, want %v with components %v", control.roots, control.components, tt.wantRoots, tt.wantComponents)
+				t.Fatalf("Slurm updates = %v with components %v, want %v with components %v", control.roots, control.components, tt.wantRoots, tt.wantComponents)
 			}
 			for _, pod := range info.GetUnscheduledPods() {
 				stored := &corev1.Pod{}
 				if err := cl.Get(ctx, kubeclient.ObjectKeyFromObject(pod), stored); err != nil {
 					t.Fatal(err)
 				}
-				if len(tt.wantRoots) == 0 && stored.Labels[wellknown.LabelExternalJobId] != "" {
-					t.Errorf("failed allocation labeled pod %s", pod.Name)
+				if stored.Labels[wellknown.LabelExternalJobId] != pod.Labels[wellknown.LabelExternalJobId] {
+					t.Errorf("scheduler changed registration metadata for pod %s", pod.Name)
 				}
 			}
 			if status.IsSuccess() {
@@ -227,7 +234,7 @@ func TestPodGroupPostFilterCompositeAllocations(t *testing.T) {
 					t.Fatal(retryStatus)
 				}
 				if !reflect.DeepEqual(control.roots, tt.wantRoots) {
-					t.Errorf("repeated PostFilter submitted duplicate allocations: %v", control.roots)
+					t.Errorf("repeated PostFilter repeated allocation updates: %v", control.roots)
 				}
 			}
 		})

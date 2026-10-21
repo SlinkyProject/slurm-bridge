@@ -41,7 +41,7 @@ manifests should match snapshot:
               - name: 'PrioritySort'
             preEnqueue:
               enabled:
-              - name: 'SlurmBridge'
+              - name: 'SchedulingGates'
               - name: 'GangScheduling'
             preFilter:
               enabled:
@@ -102,7 +102,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
-            checksum/scheduler-config: 3b071fe7e4712a30b541c11be0252017074a4f4748d76a507a92efaad47b2468
+            checksum/scheduler-config: 48d3159b938354d8b2a22588b175b4545b066fb88bd730551b4b5d798d250679
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release

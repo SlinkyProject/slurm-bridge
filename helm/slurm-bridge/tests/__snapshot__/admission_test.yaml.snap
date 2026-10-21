@@ -270,6 +270,7 @@ manifests should match snapshot:
               values:
                 - kube-system
                 - test-namespace
+        reinvocationPolicy: IfNeeded
         rules:
           - apiGroups:
               - ""
@@ -304,6 +305,7 @@ manifests should match snapshot:
               values:
                 - kube-system
                 - test-namespace
+        reinvocationPolicy: IfNeeded
         rules:
           - apiGroups:
               - ""

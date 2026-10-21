@@ -80,3 +80,6 @@ const (
 	// for the Slurm external job.
 	AnnotationWckey = SlurmJobPrefix + "wckey"
 )
+
+// SchedulingGateRegistration holds Pods until the controller persists their allocation.
+const SchedulingGateRegistration = "slurm.slinky.slurm.net/registration"

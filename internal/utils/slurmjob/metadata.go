@@ -47,9 +47,10 @@ func PodWithMetadata(ctx context.Context, pod *corev1.Pod, job ExternalJob, adop
 	}
 
 	// Only unbound Pods use the node annotation for placement.
+	// A pending cache record may predate the scheduler's placement decision.
 	nodes, _ := hostlist.Expand(job.Nodes)
 	if pod.Spec.NodeName == "" && pod.Annotations[wellknown.AnnotationExternalJobNode] != "" &&
-		(job.Finished || !slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode])) {
+		(job.Finished || !job.Pending && !slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode])) {
 		logger.V(3).Info("Pod node annotation does not match Slurm nodes", "pod", klog.KObj(pod),
 			"node annotation", pod.Annotations[wellknown.AnnotationExternalJobNode],
 			"slurm job id", job.JobId)

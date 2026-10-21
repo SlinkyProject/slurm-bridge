@@ -28,7 +28,7 @@ data:
           - name: 'PrioritySort'
         preEnqueue:
           enabled:
-          - name: 'SlurmBridge'
+          - name: 'SchedulingGates'
           {{- if and .Values.scheduler.featureGates.GenericWorkload (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
           - name: 'GangScheduling'
           {{- end }}

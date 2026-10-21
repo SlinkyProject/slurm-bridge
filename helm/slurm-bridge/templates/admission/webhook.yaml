@@ -167,6 +167,7 @@ webhooks:
         namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}
         path: /mutate--v1-pod
+    reinvocationPolicy: IfNeeded
     admissionReviewVersions: ["v1"]
     sideEffects: None
   {{- if or .Values.admission.managedNamespaceSelector .Values.admission.managedNamespaces }}
@@ -211,6 +212,7 @@ webhooks:
         namespace: {{ include "slurm-bridge.namespace" . }}
         name: {{ include "slurm-bridge.admission.name" . }}
         path: /mutate--v1-pod
+    reinvocationPolicy: IfNeeded
     admissionReviewVersions: ["v1"]
     sideEffects: None
   {{- end }}

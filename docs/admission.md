@@ -35,7 +35,9 @@ and rejects unsupported scheduling and resource configurations.
 ## Design
 
 Any pods created in the specified namespaces will have their
-`.spec.schedulerName` changed to the slurm-bridge [scheduler].
+`.spec.schedulerName` changed to the slurm-bridge [scheduler]. Admission also
+adds its managed-node toleration and a registration scheduling gate. New Pods
+remain `SchedulingGated` until the controller registers their Slurm allocation.
 
 Managed namespaces are defined as a list of namespaces as configured in the
 admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a

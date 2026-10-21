@@ -116,9 +116,9 @@ func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool)
 	return job, ok
 }
 
-// GetJobsForPods returns cached candidates for the requested Pods.
-// Ambiguous matches are omitted unless the Pod's job-ID label selects one.
-// Verify candidates before repairing metadata or deciding a handoff.
+// GetJobsForPods returns cached candidates for the requested Pods. Active matches
+// must be unique; neither the Pod label nor index order resolves a conflict.
+// Callers must verify candidates before repairing metadata or deciding a handoff.
 func (r *PodIndex) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
 	podToJob := make(map[string]ExternalJob, len(pods))
 	for _, pod := range pods {
@@ -134,21 +134,28 @@ func (r *PodIndex) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*ma
 		}
 		jobID := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
 		var candidate ExternalJob
+		var finished ExternalJob
+		finishedMatches := 0
 		matches := 0
 		for i := range jobs.Items {
 			job, err := FromJobInfo(&jobs.Items[i])
 			if err != nil {
 				continue
 			}
+			if job.Finished {
+				finishedMatches++
+				if finished.JobId == 0 || job.JobId == jobID {
+					finished = job
+				}
+				continue
+			}
 			candidate = job
 			matches++
-			if job.JobId == jobID {
-				matches = 1
-				break
-			}
 		}
 		if matches == 1 {
 			podToJob[key] = candidate
+		} else if matches == 0 && (finishedMatches == 1 || finished.JobId == jobID && jobID > 0) {
+			podToJob[key] = finished
 		}
 	}
 	return &podToJob, nil

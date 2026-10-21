@@ -9,6 +9,7 @@
   - [Overview](#overview)
   - [Node Controller](#node-controller)
     - [Node Registration and Partition Assignment](#node-registration-and-partition-assignment)
+  - [Registration Controller](#registration-controller)
   - [Workload Controller](#workload-controller)
 
 <!-- mdformat-toc end -->
@@ -27,6 +28,8 @@ different bridge components:
 
 - **Node Controller** - Responsible for tainting the Kubernetes nodes that are
   managed by `slurm-bridge`
+- **Registration Controller** - Prepares held Slurm allocations and publishes
+  registration metadata to their Pods
 - **Workload Controller** - Responsible for synchronizing Slurm and Kubernetes
   workloads on the nodes that are managed by `slurm-bridge`
 
@@ -111,6 +114,14 @@ sequenceDiagram
 
   end %% loop Reconcile Loop
 ```
+
+## Registration Controller
+
+The registration controller creates held Slurm allocations, publishes job
+metadata, and removes registration gates once the allocation is indexed. It
+serializes work by allocation identity and recovers duplicate allocations.
+Configure concurrency with `controllers.registrationWorkers` in Helm or
+`--registration-workers` on the controllers binary. The default is one worker.
 
 ## Workload Controller
 

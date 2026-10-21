@@ -29,6 +29,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/timelimit"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -58,7 +59,7 @@ func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
-// +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,reinvocationPolicy=IfNeeded,groups="",resources=pods,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
 
 var _ admission.Defaulter[*corev1.Pod] = &PodAdmission{}
 
@@ -83,6 +84,14 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
 		pod.Spec.SchedulerName = r.SchedulerName
+	}
+	if pod.Spec.SchedulerName == r.SchedulerName {
+		pod.Spec.Tolerations = utils.MergeTolerations(pod.Spec.Tolerations, *utils.NewTolerationNodeBridged(r.SchedulerName))
+		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
+			if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration }) {
+				pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
+			}
+		}
 	}
 	return nil
 }

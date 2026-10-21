@@ -317,3 +317,15 @@ tests:
       - equal:
           path: spec.template.spec.volumes[1].secret.items[0].key
           value: SLURM_JWT
+  - it: configures registration concurrency independently of Pod lifecycle workers
+    template: controllers/deployment.yaml
+    set:
+      controllers.registrationWorkers: 4
+      controllers.podWorkers: 2
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -registration-workers=4
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -pod-workers=2

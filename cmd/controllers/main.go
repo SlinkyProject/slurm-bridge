@@ -36,6 +36,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -97,14 +98,6 @@ func parseFlags(flags *Flags) {
 	flag.Parse()
 }
 
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=apps,resources=replicasets;deployments;statefulsets;daemonsets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=get;list;watch
-// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups;workloads;compositepodgroups,verbs=get;list;watch
-// +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
-
 func main() {
 	var flags Flags
 	opts := zap.Options{}
@@ -132,7 +125,7 @@ func main() {
 	// The common Workload API adapter uses JSON across supported API versions.
 	kubeConfig.ContentType = runtime.ContentTypeJSON
 	kubeConfig.AcceptContentTypes = runtime.ContentTypeJSON
-	_, err := slurmjobir.NewWorkloadAPI(kubeConfig, scheme)
+	workloadAPI, err := slurmjobir.NewWorkloadAPI(kubeConfig, scheme)
 	if err != nil {
 		setupLog.Error(err, "register Workload API")
 		os.Exit(1)
@@ -199,6 +192,11 @@ func main() {
 	podController := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh)
 	if err := podController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
+		os.Exit(1)
+	}
+	registrationController := registration.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, draRegistry, workloadAPI, cfg.MCSLabel, cfg.Partition)
+	if err := registrationController.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Registration")
 		os.Exit(1)
 	}
 	jobRunnable := slurmjob.NewRunnable(mgr.GetClient(), mgr.GetAPIReader(), slurmClient, podEventCh)
