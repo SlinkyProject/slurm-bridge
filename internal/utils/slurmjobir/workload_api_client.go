@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package slurmbridge
+package slurmjobir
 
 import (
 	"fmt"
@@ -12,10 +12,11 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
-func newWorkloadAPI(config *rest.Config, scheme *runtime.Scheme) (*slurmjobir.WorkloadAPI, error) {
+// NewWorkloadAPI configures native workload support for a controller or scheduler.
+// When enabled, discovery or API availability failures must prevent startup.
+func NewWorkloadAPI(config *rest.Config, scheme *runtime.Scheme) (*WorkloadAPI, error) {
 	if !utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
 		return nil, nil //nolint:nilnil // An explicitly disabled gate needs no discovery or API registration.
 	}
@@ -23,7 +24,7 @@ func newWorkloadAPI(config *rest.Config, scheme *runtime.Scheme) (*slurmjobir.Wo
 	if err != nil {
 		return nil, fmt.Errorf("create Kubernetes discovery client: %w", err)
 	}
-	api, err := slurmjobir.RegisterWorkloadAPI(discoveryClient, scheme)
+	api, err := RegisterWorkloadAPI(discoveryClient, scheme)
 	if err != nil {
 		return nil, fmt.Errorf("%s=true requires a supported Workload and PodGroup API: %w", features.SlurmBridgeGenericWorkload, err)
 	}

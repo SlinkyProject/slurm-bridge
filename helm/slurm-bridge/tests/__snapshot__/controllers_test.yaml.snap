@@ -55,6 +55,7 @@ manifests should match snapshot:
                 - -zap-log-level
                 - info
                 - --leader-elect=false
+                - --feature-gates=SlurmBridgeGenericWorkload=true
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token
@@ -154,6 +155,25 @@ manifests should match snapshot:
           - patch
           - update
       - apiGroups:
+          - apps
+        resources:
+          - daemonsets
+          - deployments
+          - replicasets
+          - statefulsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - batch
+        resources:
+          - jobs
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
           - coordination.k8s.io
         resources:
           - leases
@@ -162,6 +182,31 @@ manifests should match snapshot:
           - get
           - list
           - update
+      - apiGroups:
+          - jobset.x-k8s.io
+        resources:
+          - jobsets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - leaderworkerset.x-k8s.io
+        resources:
+          - leaderworkersets
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - resource.k8s.io
+        resources:
+          - deviceclasses
+          - resourceslices
+        verbs:
+          - get
+          - list
+          - watch
       - apiGroups:
           - resource.k8s.io
         resources:
@@ -172,9 +217,19 @@ manifests should match snapshot:
           - list
           - watch
       - apiGroups:
-          - resource.k8s.io
+          - scheduling.k8s.io
         resources:
-          - resourceslices
+          - compositepodgroups
+          - podgroups
+          - workloads
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - scheduling.x-k8s.io
+        resources:
+          - podgroups
         verbs:
           - get
           - list

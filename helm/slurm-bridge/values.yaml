@@ -51,8 +51,9 @@ scheduler:
     maxUnavailable:
   # -- Enables leader election.
   leaderElect: false
-  # -- Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported
-  # built-in Workload and PodGroup API at startup. The upstream GenericWorkload,
+  # -- Scheduler feature gates. SlurmBridgeGenericWorkload also controls Workload
+  # API discovery in the controllers and requires a supported built-in Workload
+  # and PodGroup API at startup. The upstream GenericWorkload,
   # TopologyAwareWorkloadScheduling, and CompositePodGroup gates populate the
   # hierarchy cache and require Kubernetes 1.37; disable them on older clusters.
   featureGates:

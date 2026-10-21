@@ -39,6 +39,25 @@ rules:
       - patch
       - update
   - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - coordination.k8s.io
     resources:
       - leases
@@ -47,6 +66,31 @@ rules:
       - get
       - list
       - update
+  - apiGroups:
+      - jobset.x-k8s.io
+    resources:
+      - jobsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - leaderworkerset.x-k8s.io
+    resources:
+      - leaderworkersets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - resource.k8s.io
+    resources:
+      - deviceclasses
+      - resourceslices
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - resource.k8s.io
     resources:
@@ -57,9 +101,19 @@ rules:
       - list
       - watch
   - apiGroups:
-      - resource.k8s.io
+      - scheduling.k8s.io
     resources:
-      - resourceslices
+      - compositepodgroups
+      - podgroups
+      - workloads
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - scheduling.x-k8s.io
+    resources:
+      - podgroups
     verbs:
       - get
       - list

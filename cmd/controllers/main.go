@@ -4,21 +4,30 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
 	"net/http"
 	"os"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
+	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmtoken "github.com/SlinkyProject/slurm-client/pkg/client/token"
@@ -29,6 +38,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
 var (
@@ -37,7 +47,17 @@ var (
 )
 
 func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	// Register only the APIs used here; the Workload API wire types are selected
+	// after discovery and must not collide with client-go's built-in types.
+	utilruntime.Must(metav1.AddMetaToScheme(scheme))
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(coordinationv1.AddToScheme(scheme))
+	utilruntime.Must(resourcev1.AddToScheme(scheme))
+	utilruntime.Must(jobset.AddToScheme(scheme))
+	utilruntime.Must(lws.AddToScheme(scheme))
+	utilruntime.Must(sched.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
@@ -56,6 +76,8 @@ type Flags struct {
 }
 
 func parseFlags(flags *Flags) {
+	flag.Func("feature-gates", "A set of key=value pairs that enable or disable feature gates.",
+		utilfeature.DefaultMutableFeatureGate.Set)
 	flag.StringVar(&flags.configFile, "config", config.ConfigFile,
 		"The path to the configuration file.")
 
@@ -74,6 +96,14 @@ func parseFlags(flags *Flags) {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.Parse()
 }
+
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=apps,resources=replicasets;deployments;statefulsets;daemonsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=leaderworkerset.x-k8s.io,resources=leaderworkersets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=scheduling.x-k8s.io,resources=podgroups,verbs=get;list;watch
+// +kubebuilder:rbac:groups=scheduling.k8s.io,resources=podgroups;workloads;compositepodgroups,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 
 func main() {
 	var flags Flags
@@ -98,7 +128,16 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	kubeConfig := rest.CopyConfig(ctrl.GetConfigOrDie())
+	// The common Workload API adapter uses JSON across supported API versions.
+	kubeConfig.ContentType = runtime.ContentTypeJSON
+	kubeConfig.AcceptContentTypes = runtime.ContentTypeJSON
+	_, err := slurmjobir.NewWorkloadAPI(kubeConfig, scheme)
+	if err != nil {
+		setupLog.Error(err, "register Workload API")
+		os.Exit(1)
+	}
+	mgr, err := ctrl.NewManager(kubeConfig, ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   flags.metricsAddr,
@@ -141,12 +180,11 @@ func main() {
 		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
 		HTTPClient:    &http.Client{Timeout: config.SlurmClientTimeout},
 	}
-	slurmClient, err := slurmclient.NewClient(clientConfig)
+	slurmClient, err := slurmclient.NewClient(clientConfig, &slurmclient.ClientOptions{CacheSyncPeriod: config.SlurmCacheSyncPeriod})
 	if err != nil {
 		setupLog.Error(err, "unable to create slurm client")
 		os.Exit(1)
 	}
-	go slurmClient.Start(context.Background())
 
 	nodeEventCh := make(chan event.GenericEvent, 100)
 	if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh, draRegistry).SetupWithManager(mgr); err != nil {
@@ -158,11 +196,13 @@ func main() {
 		os.Exit(1)
 	}
 	podEventCh := make(chan event.GenericEvent, 100)
-	if err := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh).SetupWithManager(mgr); err != nil {
+	podController := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh)
+	if err := podController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pod")
 		os.Exit(1)
 	}
-	if err := slurmjob.NewRunnable(mgr.GetClient(), mgr.GetAPIReader(), slurmClient, podEventCh).SetupWithManager(mgr); err != nil {
+	jobRunnable := slurmjob.NewRunnable(mgr.GetClient(), mgr.GetAPIReader(), slurmClient, podEventCh)
+	if err := jobRunnable.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmJob")
 		os.Exit(1)
 	}
@@ -177,8 +217,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx := ctrl.SetupSignalHandler()
+	go slurmClient.Start(ctx)
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

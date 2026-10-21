@@ -306,7 +306,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	// this plugin's own client needs its own (user-configurable) tuning.
 	restConfig := rest.CopyConfig(handle.KubeConfig())
 	restConfig.QPS, restConfig.Burst = cfg.EffectiveClientQPSBurst()
-	workloadAPI, err := newWorkloadAPI(restConfig, clientScheme)
+	workloadAPI, err := slurmjobir.NewWorkloadAPI(restConfig, clientScheme)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +328,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
 		HTTPClient:    &http.Client{Timeout: config.SlurmClientTimeout},
 	}
-	slurmClient, err := slurmclient.NewClient(clientConfig)
+	slurmClient, err := slurmclient.NewClient(clientConfig, &slurmclient.ClientOptions{CacheSyncPeriod: config.SlurmCacheSyncPeriod})
 	if err != nil {
 		logger.Error(err, "unable to create slurm client")
 		return nil, err
