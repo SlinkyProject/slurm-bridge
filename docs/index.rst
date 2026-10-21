@@ -21,6 +21,9 @@ Table of Contents
     - `Slurm <#slurm>`__
 
   - `Compatibility <#compatibility>`__
+
+    - `Upgrade support <#upgrade-support>`__
+
   - `Limitations <#limitations>`__
   - `Installation <#installation>`__
   - `Documentation <#documentation>`__
@@ -99,12 +102,12 @@ features:
 Compatibility
 -------------
 
-Each minor release supports all Kubernetes minor versions that are
-`supported upstream <https://kubernetes.io/releases/>`__ when it is
-released, starting with Kubernetes 1.35. That set is recorded for each
-minor release. Support for newer Kubernetes minors may be backported in
-a patch release after end-to-end validation; these backports are
-optional.
+Each Slurm Bridge release series supports all Kubernetes minor versions
+that are `supported upstream <https://kubernetes.io/releases/>`__ when
+it is released, starting with Kubernetes 1.35. That set is recorded for
+each release series. Support for newer Kubernetes minors may be
+backported in a patch release after end-to-end validation; these
+backports are optional.
 
 ========= =============== =============== ===============
 Release   Kubernetes 1.35 Kubernetes 1.36 Kubernetes 1.37
@@ -115,9 +118,9 @@ Release   Kubernetes 1.35 Kubernetes 1.36 Kubernetes 1.37
 ``1.0.X`` ✓               ✓               —
 ========= =============== =============== ===============
 
-✓ means supported; — means unsupported. ``X`` denotes the patch version.
-Use the latest patch release in each minor release series. Backported
-support is marked with the first supporting patch version.
+✓ means supported; — means unsupported. ``X`` denotes the patch number
+within a release series. Use the latest release in each series.
+Backported support is marked with the first release that supports it.
 
 +-----------+-----------------------------------------------------------------------------------+
 | Release   | Minimum Slurm (Data Parser)                                                       |
@@ -134,6 +137,15 @@ support is marked with the first supporting patch version.
 | ``1.0.X`` | `25.11 <https://www.schedmd.com/slurm-version-25-11-0-is-now-available/>`__       |
 |           | (`v0.0.44 <https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle>`__) |
 +-----------+-----------------------------------------------------------------------------------+
+
+Upgrade support
+~~~~~~~~~~~~~~~
+
+Within a release series, intermediate patches may be skipped: ``1.2.0``
+can upgrade directly to any newer ``1.2.X``. Between series sharing the
+same first version number, upgrade one series at a time: ``1.1`` →
+``1.2`` → ``1.3``. See the `upgrade guide <upgrading.html>`__ for
+preparation and checks.
 
 Limitations
 -----------
@@ -254,5 +266,6 @@ limitations under the License.
     scheduler.md
     testing.md
     upgrades.md
+    upgrading.md
     usermanagement.md
     workload.md

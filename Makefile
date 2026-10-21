@@ -40,7 +40,7 @@ go-version: ## Show the Go toolchain version declared in go.mod.
 .PHONY: version-match
 version-match: version ## Sync chart versions with VERSION.
 	@if [ -z "$$(echo $(VERSION) | grep -Eo "^[[:digit:]]+\.[[:digit:]]+\.[[:digit:]](-[[:alpha:]][[:alnum:]]*(\.[[:digit:]]+)?)?$$")" ]; then \
-		echo "VERSION is not semver: $(VERSION)" ;\
+		echo "Invalid release version format: $(VERSION)" ;\
 		exit 1 ;\
 	fi
 	$(foreach chart, $(wildcard ./helm/**/Chart.yaml), \
@@ -159,7 +159,9 @@ LOCALBIN ?= $(shell pwd)/bin
 E2E_ARTIFACTS_DIR ?= $(shell pwd)/e2e-artifacts
 E2E_CLEANUP ?= true
 E2E_RUN ?=
+E2E_LABELS ?=
 E2E_KUBE_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
+export E2E_UPGRADE_FROM_VERSION
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -542,7 +544,7 @@ test: fmt vet envtest ## Run tests.
 .PHONY: test-e2e
 test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the E2E_KUBE_CONTEXT Kubernetes context.
 	mkdir -p "$(E2E_ARTIFACTS_DIR)"
-	E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" E2E_KUBE_CONTEXT="$(E2E_KUBE_CONTEXT)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
+	E2E_LABELS="$(E2E_LABELS)" E2E_ARTIFACTS_DIR="$(E2E_ARTIFACTS_DIR)" E2E_CLEANUP="$(E2E_CLEANUP)" E2E_KUBE_CONTEXT="$(E2E_KUBE_CONTEXT)" SLURM_NODE_MODE="$(SLURM_NODE_MODE)" $(GOTESTSUM) \
 		--format testname \
 		--junitfile "$(E2E_ARTIFACTS_DIR)/junit.xml" \
 		--jsonfile "$(E2E_ARTIFACTS_DIR)/test-output.json" \

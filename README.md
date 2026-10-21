@@ -12,6 +12,7 @@ Run [Slurm] as a [Kubernetes] scheduler. A [Slinky] project.
   - [Features](#features)
     - [Slurm](#slurm)
   - [Compatibility](#compatibility)
+    - [Upgrade support](#upgrade-support)
   - [Limitations](#limitations)
   - [Installation](#installation)
   - [Documentation](#documentation)
@@ -71,9 +72,9 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Compatibility
 
-Each minor release supports all Kubernetes minor versions that are
+Each Slurm Bridge release series supports all Kubernetes minor versions that are
 [supported upstream](https://kubernetes.io/releases/) when it is released,
-starting with Kubernetes 1.35. That set is recorded for each minor release.
+starting with Kubernetes 1.35. That set is recorded for each release series.
 Support for newer Kubernetes minors may be backported in a patch release after
 end-to-end validation; these backports are optional.
 
@@ -84,9 +85,9 @@ end-to-end validation; these backports are optional.
 | `1.1.X` |        ✓        |        ✓        |        —        |
 | `1.0.X` |        ✓        |        ✓        |        —        |
 
-✓ means supported; — means unsupported. `X` denotes the patch version. Use the
-latest patch release in each minor release series. Backported support is marked
-with the first supporting patch version.
+✓ means supported; — means unsupported. `X` denotes the patch number within a
+release series. Use the latest release in each series. Backported support is
+marked with the first release that supports it.
 
 | Release |             Minimum Slurm (Data Parser)             |
 | :------ | :-------------------------------------------------: |
@@ -94,6 +95,13 @@ with the first supporting patch version.
 | `1.2.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 | `1.1.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
 | `1.0.X` | [25.11][slurm-25.11] ([v0.0.44][slurm-data_parser]) |
+
+### Upgrade support
+
+Within a release series, intermediate patches may be skipped: `1.2.0` can
+upgrade directly to any newer `1.2.X`. Between series sharing the same first
+version number, upgrade one series at a time: `1.1` → `1.2` → `1.3`. See the
+[upgrade guide](./docs/upgrading.md) for preparation and checks.
 
 ## Limitations
 
