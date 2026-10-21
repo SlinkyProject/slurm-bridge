@@ -716,6 +716,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Version: v0.0.0-20260707023825-cf1189d6abe3
 - License: Apache-2.0
 
+### pgregory.net/rapid
+- Name: pgregory.net/rapid
+- Version: v1.3.0
+- License: MPL-2.0
+
 ### sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Name: sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Version: v0.36.0
