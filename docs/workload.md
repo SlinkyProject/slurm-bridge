@@ -710,16 +710,14 @@ upgrading the controller, following the
 
 ## Scaling and failure behavior
 
-Slurm-bridge does not provide an autoscaler. Workload controllers or external
-autoscalers create and remove Pods; the bridge submits, updates, and cancels
-their Slurm external jobs. An accepted Kubernetes update does not guarantee that
-Slurm can allocate the requested resources.
+Workload controllers or external autoscalers create and remove Pods; the bridge
+submits, updates, and cancels their Slurm external jobs. An accepted Kubernetes
+update does not guarantee that Slurm can allocate the requested resources.
 
-The allocation boundary matters: a JobSet normally has one Slurm job per Pod,
-while direct LeaderWorkerSet scheduling has one per replica group. A Gang
-PodGroup takes precedence over those defaults. A Basic PodGroup retains the
-normal owner-based allocation boundary. The behavior below applies to each
-allocation independently.
+A JobSet normally has one Slurm job per Pod, while direct LeaderWorkerSet
+scheduling has one per replica group. A Gang PodGroup takes precedence over
+those defaults. A Basic PodGroup retains the normal owner-based allocation
+boundary. The behavior below applies to each allocation independently.
 
 ### CPU and memory changes
 
@@ -768,8 +766,7 @@ full allocation while other members remain active.
 
 Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
 mean Slurm resources are already free. The bridge also removes its Pod finalizer
-and generated DRA ResourceClaim during terminal Pod cleanup. Controller or API
-errors can delay resource release.
+and generated DRA ResourceClaim during terminal Pod cleanup.
 
 ### Failures and recovery
 
