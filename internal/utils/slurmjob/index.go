@@ -24,6 +24,8 @@ import (
 )
 
 const PodJobIndex = "bridge.pod"
+const GroupJobIndex = "bridge.group"
+const LegacyPodJobIndex = "bridge.legacy-pod"
 
 // PodIndex provides cached Pod ownership lookups and explicit live verification.
 type PodIndex struct {
@@ -35,7 +37,61 @@ func NewPodIndex(slurmClient client.Client, jobInformer client.InformerCache) (*
 	if err := jobInformer.AddIndex(PodJobIndex, jobPodKeys); err != nil {
 		return nil, fmt.Errorf("register Slurm job index: %w", err)
 	}
+	if err := jobInformer.AddIndex(GroupJobIndex, jobGroupKeys); err != nil {
+		return nil, fmt.Errorf("register Slurm group index: %w", err)
+	}
+	if err := jobInformer.AddIndex(LegacyPodJobIndex, jobLegacyPodKeys); err != nil {
+		return nil, fmt.Errorf("register legacy Slurm Pod index: %w", err)
+	}
 	return &PodIndex{Client: slurmClient, jobInformer: jobInformer}, nil
+}
+
+// jobLegacyPodKeys isolates allocations without group metadata, so compatibility
+// checks do not repeatedly copy a modern gang's allocation for every member.
+func jobLegacyPodKeys(obj object.Object) []string {
+	info := externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(obj.(*api.V0044JobInfo).AdminComment, &info); err != nil {
+		return nil
+	}
+	if info.PodGroup != nil || info.CompositePodGroup != nil {
+		return nil
+	}
+	return info.Pods
+}
+
+func jobGroupKeys(obj object.Object) []string {
+	info := externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(obj.(*api.V0044JobInfo).AdminComment, &info); err != nil {
+		return nil
+	}
+	var keys []string
+	for _, group := range []*externaljobinfo.GroupIdentity{info.PodGroup, info.CompositePodGroup} {
+		if group != nil {
+			keys = append(keys, group.Key())
+		}
+	}
+	return keys
+}
+
+// GetAllocation resolves every component of a single active Kubernetes allocation.
+// Pod labels never select between conflicting allocations.
+func (r *PodIndex) GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]ExternalJob, error) {
+	identity, err := IdentityForAllocation(pod, ir)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := IndexedAllocation(ctx, r.jobInformer, identity)
+	if err != nil {
+		return nil, err
+	}
+	components, complete, err := MatchAllocationComponents(ir, jobs)
+	if err != nil {
+		return nil, err
+	}
+	if !complete {
+		return nil, ErrAllocationMissing
+	}
+	return components, nil
 }
 
 func jobPodKeys(obj object.Object) []string {

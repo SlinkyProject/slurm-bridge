@@ -25,7 +25,7 @@ func TestBuildJobDescPodIdentity(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "member", UID: "member-uid"}},
 	}}}
 	for _, update := range []bool{false, true} {
-		desc, err := (&realSlurmControl{}).buildJobDesc(component, update)
+		desc, err := (&realSlurmControl{}).buildJobDesc(metav1.PartialObjectMetadata{}, component, update)
 		if err != nil {
 			t.Fatal(err)
 		}

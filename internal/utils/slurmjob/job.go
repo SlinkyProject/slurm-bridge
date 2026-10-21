@@ -22,6 +22,13 @@ type ExternalJob struct {
 	Finished     bool
 }
 
+func (j ExternalJob) AllocationID() int32 {
+	if j.HetJobId > 0 {
+		return j.HetJobId
+	}
+	return j.JobId
+}
+
 func FromJobInfo(job *api.V0044JobInfo) (ExternalJob, error) {
 	if job == nil {
 		return ExternalJob{}, errors.New("cannot convert nil Slurm job")

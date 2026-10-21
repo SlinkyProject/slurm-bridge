@@ -14,6 +14,16 @@ import (
 	"k8s.io/utils/ptr"
 )
 
+func TestGroupIdentityAcrossAPIVersions(t *testing.T) {
+	meta := metav1.PartialObjectMetadata{TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1alpha2", Kind: "PodGroup"}, ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "group", UID: "group-uid"}}
+	alpha := NewGroupIdentity(meta)
+	meta.APIVersion = "scheduling.k8s.io/v1beta1"
+	beta := NewGroupIdentity(meta)
+	if alpha == nil || beta == nil || *alpha != *beta || alpha.Key() != beta.Key() {
+		t.Fatalf("API version changed group identity: alpha=%+v, beta=%+v", alpha, beta)
+	}
+}
+
 func TestExternalJobInfo_Equal(t *testing.T) {
 	type fields struct {
 		Pods []string

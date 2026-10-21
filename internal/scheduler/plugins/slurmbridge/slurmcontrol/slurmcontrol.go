@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/cpuset"
 	"k8s.io/utils/lru"
@@ -47,6 +48,7 @@ type SlurmControlInterface interface {
 	GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
+	GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]ExternalJob, error)
 	GetNodeNames(ctx context.Context, partition *string) ([]string, error)
 	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error)
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
@@ -225,7 +227,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	jobID := int32(jobIDValue)
 
 	job := new(api.V0044JobInfo)
-	jobDesc, err := r.buildJobDesc(component, true)
+	jobDesc, err := r.buildJobDesc(slurmJobIR.RootPOM, component, true)
 	if err != nil {
 		return 0, err
 	}
@@ -258,7 +260,7 @@ func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurm
 
 	var jobDescList []api.V0044JobDescMsg
 	for _, component := range slurmJobIR.Components {
-		jobDesc, err := r.buildJobDesc(component, false)
+		jobDesc, err := r.buildJobDesc(slurmJobIR.RootPOM, component, false)
 		if err != nil {
 			return []int32{}, err
 		}
@@ -320,8 +322,16 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 	return nodeNames, nil
 }
 
-func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
+func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
 	extInfo := externaljobinfo.ExternalJobInfo{}
+	if group := externaljobinfo.NewGroupIdentity(root); group != nil {
+		if group.Kind == "CompositePodGroup" {
+			extInfo.CompositePodGroup = group
+			extInfo.PodGroup = externaljobinfo.NewGroupIdentity(jobComponent.ObjectMeta)
+		} else {
+			extInfo.PodGroup = group
+		}
+	}
 	for _, p := range jobComponent.Pods.Items {
 		extInfo.Pods = append(extInfo.Pods, externaljobinfo.PodKey(&p))
 	}

@@ -200,6 +200,18 @@ func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcon
 	return &slurmcontrol.ExternalJob{}, nil
 }
 
+func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+	return testAllocation(ir), nil
+}
+
+func testAllocation(ir *slurmjobir.SlurmJobIR) []slurmcontrol.ExternalJob {
+	jobs := make([]slurmcontrol.ExternalJob, len(ir.Components))
+	for i, component := range ir.Components {
+		jobs[i].JobId = slurmjobir.ParseSlurmJobId(component.Pods.Items[0].Labels[wellknown.LabelExternalJobId])
+	}
+	return jobs
+}
+
 func (c *postFilterSlurmControl) SubmitJob(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]int32, error) {
 	c.submitCalls++
 	c.submittedIR = ir
