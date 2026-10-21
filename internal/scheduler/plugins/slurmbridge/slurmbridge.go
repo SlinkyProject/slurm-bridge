@@ -479,6 +479,12 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	node := pod.Annotations[wellknown.AnnotationExternalJobNode]
 	jobID := pod.Labels[wellknown.LabelExternalJobId]
 	if jobID != "" && node != "" {
+		if err := sb.Get(ctx, client.ObjectKey{Name: node}, &corev1.Node{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, sb.handleAllocatedNodeError(ctx, s, pod, ErrorNoKubeNodeMatch)
+			}
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
 		component, status := s.componentForPod(pod)
 		if status != nil {
 			return nil, status
@@ -532,7 +538,7 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 		if err != nil {
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
+			return nil, sb.handleAllocatedNodeError(ctx, s, pod, err)
 		}
 
 		component, status := s.componentForPod(pod)
@@ -555,6 +561,28 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		// PreFilter step that must occur before pods are allowed to run.
 		return &fwk.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
 	}
+}
+
+// handleAllocatedNodeError releases an allocation only after a node lookup
+// confirms that an allocated node has no Kubernetes counterpart.
+func (sb *SlurmBridge) handleAllocatedNodeError(ctx context.Context, s *stateData, pod *corev1.Pod, err error) *fwk.Status {
+	if !errors.Is(err, ErrorNoKubeNodeMatch) {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	logger := klog.FromContext(ctx)
+	logger.Info("Slurm allocation includes a missing Kubernetes node, deleting external job for retry",
+		"pod", klog.KObj(pod), "jobId", pod.Labels[wellknown.LabelExternalJobId])
+	if err := sb.deleteExternalJob(ctx, pod); err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	// PostFilter may run after a failed PreFilter. It must wait for a new
+	// scheduling cycle to compute feasible nodes without the old allocation.
+	s.slurmJobIR = nil
+	toActivate := pod.DeepCopy()
+	delete(toActivate.Labels, wellknown.LabelExternalJobId)
+	delete(toActivate.Annotations, wellknown.AnnotationExternalJobNode)
+	sb.activatePod(logger, toActivate)
+	return fwk.NewStatus(fwk.Unschedulable, ErrorNoKubeNodeMatch.Error())
 }
 
 // allocatedNodeRejectedByKubernetes returns true only when PreFilter observed a
@@ -991,7 +1019,7 @@ func (sb *SlurmBridge) updateExternalJob(ctx context.Context, s *stateData, pod 
 				slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 				kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 				if err != nil {
-					return fwk.NewStatus(fwk.Error, err.Error())
+					return sb.handleAllocatedNodeError(ctx, s, pod, err)
 				}
 
 				component, status := s.componentForPod(pod)

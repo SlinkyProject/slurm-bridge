@@ -141,9 +141,7 @@ func TestIndexedSlurmToKubeNodes(t *testing.T) {
 	if _, err := newKubeNodeNameIndex(informer); err != nil {
 		t.Fatal(err)
 	}
-	// No Kubernetes client is supplied: any accidental live fallback fails the test.
-	sb := &SlurmBridge{kubeNodeIndex: index}
-	if _, err := sb.slurmToKubeNodes(ctx, []string{"cn1"}); err == nil {
+	if _, err := index.lookup(ctx, []string{"cn1"}); err == nil {
 		t.Fatal("unsynced lookup succeeded")
 	}
 	factory.Start(ctx.Done())
@@ -151,21 +149,21 @@ func TestIndexedSlurmToKubeNodes(t *testing.T) {
 		t.Fatal("node informer did not sync")
 	}
 	cs.ClearActions()
-	got, err := sb.slurmToKubeNodes(ctx, []string{"cn1", "worker-b", "cn1"})
+	got, err := index.lookup(ctx, []string{"cn1", "worker-b", "cn1"})
 	if err != nil || !got.Equal(sets.New("worker-a", "worker-b")) {
 		t.Fatalf("lookup = %v, %v", got, err)
 	}
 	// Exact Kubernetes names remain valid even when the Node has a Slurm alias.
-	got, err = sb.slurmToKubeNodes(ctx, []string{"worker-a"})
+	got, err = index.lookup(ctx, []string{"worker-a"})
 	if err != nil || !got.Equal(sets.New("worker-a")) {
 		t.Fatalf("name fallback = %v, %v", got, err)
 	}
-	if _, err := sb.slurmToKubeNodes(ctx, []string{"missing"}); !errors.Is(err, ErrorNoKubeNodeMatch) {
+	if _, err := index.lookup(ctx, []string{"missing"}); !errors.Is(err, ErrorNoKubeNodeMatch) {
 		t.Fatalf("missing node error = %v", err)
 	}
 	canceled, stop := context.WithCancel(ctx)
 	stop()
-	if _, err := sb.slurmToKubeNodes(canceled, []string{"cn1"}); !errors.Is(err, context.Canceled) {
+	if _, err := index.lookup(canceled, []string{"cn1"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled lookup error = %v", err)
 	}
 
@@ -182,8 +180,8 @@ func TestIndexedSlurmToKubeNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(func() bool {
-		_, oldErr := sb.slurmToKubeNodes(ctx, []string{"cn1"})
-		got, err := sb.slurmToKubeNodes(ctx, []string{"cn2"})
+		_, oldErr := index.lookup(ctx, []string{"cn1"})
+		got, err := index.lookup(ctx, []string{"cn2"})
 		return errors.Is(oldErr, ErrorNoKubeNodeMatch) && err == nil && got.Has("worker-a")
 	})
 
@@ -193,15 +191,15 @@ func TestIndexedSlurmToKubeNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(func() bool {
-		_, err := sb.slurmToKubeNodes(ctx, []string{"cn2"})
+		_, err := index.lookup(ctx, []string{"cn2"})
 		return err != nil && strings.Contains(err.Error(), "multiple Kubernetes nodes")
 	})
 	if err := cs.CoreV1().Nodes().Delete(ctx, "worker-a", metav1.DeleteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	eventually(func() bool {
-		got, err := sb.slurmToKubeNodes(ctx, []string{"cn2"})
-		_, deletedErr := sb.slurmToKubeNodes(ctx, []string{"worker-a"})
+		got, err := index.lookup(ctx, []string{"cn2"})
+		_, deletedErr := index.lookup(ctx, []string{"worker-a"})
 		return err == nil && got.Equal(sets.New("worker-c")) && errors.Is(deletedErr, ErrorNoKubeNodeMatch)
 	})
 	// Removing an alias restores the Node's own name as its indexed Slurm name.
@@ -211,8 +209,8 @@ func TestIndexedSlurmToKubeNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(func() bool {
-		_, aliasErr := sb.slurmToKubeNodes(ctx, []string{"cn2"})
-		got, err := sb.slurmToKubeNodes(ctx, []string{"worker-c"})
+		_, aliasErr := index.lookup(ctx, []string{"cn2"})
+		got, err := index.lookup(ctx, []string{"worker-c"})
 		return errors.Is(aliasErr, ErrorNoKubeNodeMatch) && err == nil && got.Equal(sets.New("worker-c"))
 	})
 	for _, action := range cs.Actions() {

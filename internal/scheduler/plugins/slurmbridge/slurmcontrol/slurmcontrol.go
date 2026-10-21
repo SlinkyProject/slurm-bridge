@@ -103,7 +103,7 @@ func gresCompatibilityConstraint(constraints *string) (*string, error) {
 	return ptr.To(composed), nil
 }
 
-// DeleteSlurmJob will delete an external job
+// DeleteJob releases an external job, including one already canceled or gone.
 func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error {
 	logger := klog.FromContext(ctx)
 	job := &api.V0044JobInfo{}
@@ -118,6 +118,16 @@ func (r *realSlurmControl) DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	job.JobId = &jobId
 	r.lastUpdate.Remove(jobId)
 	if err := r.Delete(ctx, job); err != nil {
+		// Cancellation may have succeeded on an earlier attempt whose pod
+		// metadata cleanup failed. Confirm the allocation is gone before
+		// allowing cleanup to continue despite a cancellation error.
+		externalJob, lookupErr := r.GetJob(ctx, pod)
+		if lookupErr == nil && externalJob.JobId == 0 {
+			return nil
+		}
+		if lookupErr != nil {
+			err = errors.Join(err, fmt.Errorf("confirm Slurm job release: %w", lookupErr))
+		}
 		logger.Error(err, "failed to delete Slurm job", "jobId", jobId)
 		return err
 	}
