@@ -24,6 +24,11 @@
   - [PodGroup coscheduling](#podgroup-coscheduling)
     - [Migrating from v1alpha1 PodGroups](#migrating-from-v1alpha1-podgroups)
   - [LeaderWorkerSet](#leaderworkerset)
+  - [Scaling and failure behavior](#scaling-and-failure-behavior)
+    - [CPU and memory changes](#cpu-and-memory-changes)
+    - [Changing the number of Pods](#changing-the-number-of-pods)
+    - [Scale-down and resource release](#scale-down-and-resource-release)
+    - [Failures and recovery](#failures-and-recovery)
 
 <!-- mdformat-toc end -->
 
@@ -592,9 +597,21 @@ again.
 
 This section assumes [JobSets] is installed.
 
-JobSet pods are scheduled on a per-pod basis. The JobSet controller is
-responsible for managing the JobSet status and other Pod interactions once
-marked as completed.
+JobSet pods are scheduled on a per-pod basis unless a Gang PodGroup groups them
+into a shared Slurm allocation. The Job and JobSet controllers manage retries,
+failure policies, and completion; slurm-bridge manages the corresponding Slurm
+jobs.
+
+JobSet API validation also limits scaling. In JobSet v0.13.0, changing
+`spec.replicatedJobs[].replicas` or the Pod resource template is rejected and
+requires recreating the JobSet. The upstream `ElasticJobSet` feature gate
+(disabled by default) permits changing `parallelism` and `completions` together
+for non-terminal Indexed Jobs, with equal values. Without gang grouping, each
+additional Pod gets an independent Slurm job. With gang grouping, the allocation
+limitations below still apply, even if the JobSet API accepts the update.
+
+See [Scaling and failure behavior](#scaling-and-failure-behavior) before
+changing an existing workload.
 
 ## PodGroup coscheduling
 
@@ -690,6 +707,97 @@ upgrading the controller, following the
 > [!NOTE]
 > Topology-aware placement is not supported yet, so some features of
 > LeaderWorkerSet may not behave as expected.
+
+## Scaling and failure behavior
+
+Slurm-bridge does not provide an autoscaler. Workload controllers or external
+autoscalers create and remove Pods; the bridge submits, updates, and cancels
+their Slurm external jobs. An accepted Kubernetes update does not guarantee that
+Slurm can allocate the requested resources.
+
+The allocation boundary matters: a JobSet normally has one Slurm job per Pod,
+while direct LeaderWorkerSet scheduling has one per replica group. A Gang
+PodGroup takes precedence over those defaults. A Basic PodGroup retains the
+normal owner-based allocation boundary. The behavior below applies to each
+allocation independently.
+
+### CPU and memory changes
+
+In-place changes to an existing Pod's CPU or memory requests/limits are
+unsupported both before and after Slurm allocation. The admission webhook
+rejects updates through `pods/resize` with
+`can't resize a Slurm Bridge-managed pod`. A Pod still in Kubernetes `Pending`
+phase may already have a Slurm allocation, so its phase does not indicate that
+resizing is allowed.
+
+Use replacement Pods with the desired resource template. For a JobSet, recreate
+the workload as described above. For a LeaderWorkerSet, updating the leader or
+worker resource template triggers the LWS controller's rollout, replacing groups
+according to its rollout strategy. Replacement groups request new Slurm
+allocations; the bridge does not resize the old allocations. This replacement
+behavior also applies when the old Pods have not started running yet.
+
+### Changing the number of Pods
+
+| Change                                                                                         | Before Slurm allocates the job                                                                                                                                                | After Slurm allocates the job                                                                                                    |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Change membership of an existing gang                                                          | The scheduler can update the pending Slurm job from the current group on a scheduling retry, subject to workload API validation, gang quorum, and Slurm accepting the update. | Live expansion or shrinking is unsupported. Recreate the group for a new allocation.                                             |
+| Change LWS `spec.leaderWorkerTemplate.size`                                                    | LWS rolls out replacement groups; this is not an in-place resize of a queued group.                                                                                           | LWS rolls out replacement groups, each requiring a new allocation.                                                               |
+| Add or remove independent Pods, including ungrouped JobSet Pods when the JobSet API permits it | Each added Pod submits its own job; removed Pods have their pending jobs canceled during cleanup.                                                                             | New Pods queue for separate allocations; removed Pods release their own allocations during cleanup. Other allocations continue.  |
+| Change LWS `spec.replicas`                                                                     | Supported: add or remove whole independent groups, each with its own Slurm job.                                                                                               | Supported: new groups queue independently; removed groups release their allocations during cleanup. Retained groups keep theirs. |
+
+Gang quorum is `spec.schedulingPolicy.gang.minCount` for built-in PodGroups,
+`spec.minMember` for legacy PodGroups, or the configured LWS group size for
+implicit LWS gangs. If membership falls below quorum before allocation, the
+scheduler waits for enough Pods and cancels an existing job it detects as
+invalid. Pending updates are not an atomic scaling operation and can race with
+Slurm allocation. Once allocated, treat group membership as fixed: additional
+Pods cannot expand that allocation and may remain Pending. For LWS, scale whole
+replica groups instead. If templates put multiple LWS replica groups into one
+Gang PodGroup, those groups share an allocation and cannot scale independently.
+
+### Scale-down and resource release
+
+Deleting Pods does not partially shrink a running Slurm allocation. The Pod
+controller cancels the Slurm job once all Pods associated with that job are
+terminal (`Succeeded` or `Failed`). Periodic cleanup also cancels pending or
+running jobs whose referenced Pods no longer exist. Removing one independent Pod
+therefore releases its allocation, while removing a whole LWS group releases
+that group's allocation. Removing only some Pods from a shared job retains its
+full allocation while other members remain active.
+
+Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
+mean Slurm resources are already free. The bridge also removes its Pod finalizer
+and generated DRA ResourceClaim during terminal Pod cleanup. Controller or API
+errors can delay resource release.
+
+### Failures and recovery
+
+If a scale-up cannot obtain resources, new Pods and their jobs wait for
+scheduling; existing independent allocations continue. Admission rejection
+leaves the Kubernetes object unchanged. If Slurm rejects a pending job update,
+the previous Slurm request remains in effect. Submission or update errors are
+reported through scheduling failures and scheduler logs and can be retried. The
+bridge does not roll back the workload's desired replica count or templates, and
+an API error is not evidence that a job was canceled or resources were released.
+
+A container restart within the same Pod does not by itself release the Slurm
+job. Terminal Pods trigger the cleanup described above. If a Slurm job stops
+running, for example because it is canceled or reaches its time limit, the Pod
+controller deletes its non-terminal, bound Pods. Job retries and JobSet failure
+policies determine whether batch Pods are replaced or the JobSet fails. LWS's
+`spec.leaderWorkerTemplate.restartPolicy` controls group recovery; the default
+`RecreateGroupOnPodRestart` recreates the group on Pod recreation or container
+restart. Replacement Pods need scheduling again. Do not rely on individual Pod
+replacement to extend or repair an allocated gang; recreate the whole group for
+a fresh allocation.
+
+When scaling stalls, inspect Pod scheduling events, JobSet or LWS status, bridge
+scheduler and controller logs, and the Slurm job in `squeue` or
+`scontrol show job`. The Pod label `scheduler.slinky.slurm.net/slurm-jobid`
+identifies its Slurm job. Correct rejected settings or recreate the affected
+group, and verify that the old job is no longer pending or running before
+assuming its resources have been released.
 
 <!-- Links -->
 
