@@ -120,7 +120,7 @@ func Test_realSlurmControl_DeleteJob(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "Delete job",

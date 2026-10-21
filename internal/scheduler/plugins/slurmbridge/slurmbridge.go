@@ -17,7 +17,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -239,6 +238,12 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	node := pod.Annotations[wellknown.AnnotationExternalJobNode]
 	if pod.Labels[wellknown.LabelExternalJobId] != "" &&
 		node != "" {
+		if err := sb.Get(ctx, client.ObjectKey{Name: node}, &corev1.Node{}); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, sb.handleAllocatedNodeError(ctx, s, pod, ErrorNoKubeNodeMatch)
+			}
+			return nil, fwk.NewStatus(fwk.Error, err.Error())
+		}
 		phNode := make(sets.Set[string])
 		phNode.Insert(node)
 		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
@@ -254,6 +259,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	// Perform resource specific PreFilter
 	fs := slurmjobir.PreFilter(sb.Client, ctx, pod, s.slurmJobIR)
 	if fs.Code() != fwk.Success {
+		s.slurmJobIR = nil
 		// If the external job is determined to no longer be valid
 		// delete the external job and remove the associated annotations
 		for _, r := range fs.Reasons() {
@@ -285,7 +291,7 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 		if err != nil {
-			return nil, fwk.NewStatus(fwk.Error, err.Error())
+			return nil, sb.handleAllocatedNodeError(ctx, s, pod, err)
 		}
 		err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
 		if err != nil {
@@ -301,6 +307,25 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 		// PreFilter step that must occur before pods are allowed to run.
 		return &fwk.PreFilterResult{NodeNames: kubeNodes}, fwk.NewStatus(fwk.Success, "")
 	}
+}
+
+// handleAllocatedNodeError releases allocations whose nodes are confirmed missing.
+func (sb *SlurmBridge) handleAllocatedNodeError(ctx context.Context, s *stateData, pod *corev1.Pod, err error) *fwk.Status {
+	if !errors.Is(err, ErrorNoKubeNodeMatch) {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	logger := klog.FromContext(ctx)
+	logger.Info("Slurm allocation includes a missing Kubernetes node, deleting external job for retry",
+		"pod", klog.KObj(pod), "jobId", pod.Labels[wellknown.LabelExternalJobId])
+	if err := sb.deleteExternalJob(ctx, pod); err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+	s.slurmJobIR = nil
+	toActivate := pod.DeepCopy()
+	delete(toActivate.Labels, wellknown.LabelExternalJobId)
+	delete(toActivate.Annotations, wellknown.AnnotationExternalJobNode)
+	sb.activatePod(logger, toActivate)
+	return fwk.NewStatus(fwk.Unschedulable, ErrorNoKubeNodeMatch.Error())
 }
 
 // allocatedNodeRejectedByKubernetes returns true only when PreFilter observed a
@@ -329,6 +354,10 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	s, err := getStateData(state)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+
+	if s.slurmJobIR == nil {
+		return nil, fwk.NewStatus(fwk.Unschedulable, "waiting for a new feasibility check")
 	}
 
 	// Determine if an external job for the pod exists in Slurm
@@ -438,7 +467,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 					slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 					kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 					if err != nil {
-						return nil, fwk.NewStatus(fwk.Error, err.Error())
+						return nil, sb.handleAllocatedNodeError(ctx, s, pod, err)
 					}
 					err = sb.annotatePodsWithNodes(ctx, externalJob.JobId, kubeNodes.Clone(), &s.slurmJobIR.Pods)
 					if err != nil {
@@ -596,16 +625,13 @@ func (sb *SlurmBridge) slurmToKubeNodes(ctx context.Context, slurmNodes []string
 			// If the slurmNode exists as a kube node, they are
 			// assumed to be the same node. If not, return an error
 			// that the slurm job included an unknown node.
-			if sb.handle.ClientSet() != nil {
-				if _, err := sb.handle.ClientSet().CoreV1().Nodes().Get(ctx, slurmNode, metav1.GetOptions{}); apierrors.IsNotFound(err) {
-					out := fmt.Sprintf("no matching kube nodes for Slurm node: %s", slurmNode)
-					logger.Error(ErrorNoKubeNodeMatch, out)
-					return nil, ErrorNoKubeNodeMatch
+			if err := sb.Get(ctx, client.ObjectKey{Name: slurmNode}, &corev1.Node{}); err != nil {
+				if apierrors.IsNotFound(err) {
+					return nil, fmt.Errorf("%w: %s", ErrorNoKubeNodeMatch, slurmNode)
 				}
-				kubeNode = slurmNode
-			} else {
-				return nil, ErrorNoKubeNodeMatch
+				return nil, err
 			}
+			kubeNode = slurmNode
 
 		}
 		kubeNodes.Insert(kubeNode)
