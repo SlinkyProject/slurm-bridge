@@ -72,10 +72,10 @@ Slurm is a full featured HPC workload manager. To highlight a few features:
 
 ## Compatibility
 
-Each minor release supports all Kubernetes minor versions that are
+Each Slurm Bridge release series supports all Kubernetes minor versions that are
 [supported upstream](https://kubernetes.io/releases/) when it is released,
-starting with Kubernetes 1.35. That set is recorded for each minor release.
-Support for newer Kubernetes minors may be backported in a patch release after
+starting with Kubernetes 1.35. That set is recorded for each release series.
+Support for newer Kubernetes minors may be backported in an update release after
 end-to-end validation; these backports are optional.
 
 | Release | Kubernetes 1.35 | Kubernetes 1.36 | Kubernetes 1.37 |
@@ -85,9 +85,9 @@ end-to-end validation; these backports are optional.
 | `1.1.X` |        ✓        |        ✓        |        —        |
 | `1.0.X` |        ✓        |        ✓        |        —        |
 
-✓ means supported; — means unsupported. `X` denotes the patch version. Use the
-latest patch release in each minor release series. Backported support is marked
-with the first supporting patch version.
+✓ means supported; — means unsupported. `X` denotes the update number within a
+release series. Use the latest release in each series. Backported support is
+marked with the first release that supports it.
 
 | Release |             Minimum Slurm (Data Parser)             |
 | :------ | :-------------------------------------------------: |
@@ -98,13 +98,22 @@ with the first supporting patch version.
 
 ### Upgrade support
 
-Within a major version, Slurm Bridge supports patch upgrades within the same
-minor release and upgrades to the next consecutive minor release. **Skipping
-minor releases is not supported.** For example, upgrade from `1.1` to `1.2`
-before upgrading to `1.3`; a direct `1.1` to `1.3` upgrade is unsupported.
+Slurm Bridge does not follow Semantic Versioning. The first two version numbers
+identify a **release series**, such as `1.2`; `1.2.3` is an update release
+within that series.
 
-Use the latest patch release in each minor series and verify that each upgrade
-has completed successfully before proceeding to the next minor. See the
+Upgrades to any newer release within the same series are supported.
+**Intermediate updates may be skipped:** `1.2.0` can upgrade directly to
+`1.2.X`, where `X` is a newer update number. For example, `1.2.0` can upgrade
+directly to `1.2.3` without installing `1.2.1` or `1.2.2`.
+
+Upgrades to the next consecutive release series sharing the same first version
+number are also supported. **Skipping release series is not supported.** For
+example, upgrade from `1.1` to `1.2` before upgrading to `1.3`; a direct `1.1`
+to `1.3` upgrade is unsupported.
+
+Use the latest release in each series and verify that each upgrade has completed
+successfully before proceeding to the next series. See the
 [upgrade guide](./docs/upgrading.md) for version checks and preparation.
 
 ## Limitations
