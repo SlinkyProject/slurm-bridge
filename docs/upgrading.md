@@ -3,23 +3,14 @@
 ## Supported upgrade paths
 
 Slurm Bridge does not follow Semantic Versioning. The first two version numbers
-identify a **release series**, such as `1.2`; `1.2.3` is an update release
-within that series.
+identify a release series, such as `1.2`. Within the same first version number,
+the supported upgrade paths are:
 
-Upgrades to any newer release within the same series are supported.
-**Intermediate updates may be skipped:** `1.2.0` can upgrade directly to
-`1.2.X`, where `X` is a newer update number. For example, `1.2.0` can upgrade
-directly to `1.2.3` without installing `1.2.1` or `1.2.2`.
-
-Upgrades to the next consecutive release series sharing the same first version
-number are also supported. **Skipping release series is not supported.**
-
-| Upgrade            | Supported path                                      |
-| :----------------- | :-------------------------------------------------- |
-| `1.2.0` to `1.2.X` | Upgrade directly to any newer update in the series. |
-| `1.2.0` to `1.2.3` | Upgrade directly; skip `1.2.1` and `1.2.2`.         |
-| `1.2` to `1.3`     | Upgrade directly to the next series.                |
-| `1.1` to `1.3`     | Upgrade to `1.2` first, then to `1.3`.              |
+| Upgrade            | Supported path                                                             |
+| :----------------- | :------------------------------------------------------------------------- |
+| `1.2.0` to `1.2.X` | Upgrade directly to any newer update; intermediate updates may be skipped. |
+| `1.2` to `1.3`     | Upgrade directly to the next series.                                       |
+| `1.1` to `1.3`     | Upgrade through `1.2`; skipping series is unsupported.                     |
 
 Use the latest release in each series. Complete and verify each step before
 proceeding to the next release series.

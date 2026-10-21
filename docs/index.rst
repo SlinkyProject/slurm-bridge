@@ -141,26 +141,11 @@ Backported support is marked with the first release that supports it.
 Upgrade support
 ~~~~~~~~~~~~~~~
 
-Slurm Bridge does not follow Semantic Versioning. The first two version
-numbers identify a **release series**, such as ``1.2``; ``1.2.3`` is an
-update release within that series.
-
-Upgrades to any newer release within the same series are supported.
-**Intermediate updates may be skipped:** ``1.2.0`` can upgrade directly
-to ``1.2.X``, where ``X`` is a newer update number. For example,
-``1.2.0`` can upgrade directly to ``1.2.3`` without installing ``1.2.1``
-or ``1.2.2``.
-
-Upgrades to the next consecutive release series sharing the same first
-version number are also supported. **Skipping release series is not
-supported.** For example, upgrade from ``1.1`` to ``1.2`` before
-upgrading to ``1.3``; a direct ``1.1`` to ``1.3`` upgrade is
-unsupported.
-
-Use the latest release in each series and verify that each upgrade has
-completed successfully before proceeding to the next series. See the
-`upgrade guide <upgrading.html>`__ for version checks and
-preparation.
+Within a release series, intermediate updates may be skipped: ``1.2.0``
+can upgrade directly to any newer ``1.2.X``. Between series sharing the
+same first version number, upgrade one series at a time: ``1.1`` →
+``1.2`` → ``1.3``. See the `upgrade guide <upgrading.html>`__ for
+preparation and checks.
 
 Limitations
 -----------
