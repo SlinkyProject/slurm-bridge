@@ -127,7 +127,9 @@ function kind::start() {
 	sys::check
 	local cluster_name="${1:-"kind"}"
 	local kind_config="${2:-"$SCRIPT_DIR/kind.yaml"}"
-	if ! kind get clusters 2>/dev/null | grep -Fxq "$cluster_name"; then
+	local clusters
+	clusters="$(kind get clusters)" || return $?
+	if ! grep -Fxq -- "$cluster_name" <<<"$clusters"; then
 		kind create cluster --name "$cluster_name" --config "$kind_config"
 	fi
 	kubectl config use-context kind-"$cluster_name"
