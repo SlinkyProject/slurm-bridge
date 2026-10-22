@@ -10,7 +10,6 @@
   - [Node Controller](#node-controller)
     - [Node Registration and Partition Assignment](#node-registration-and-partition-assignment)
   - [Registration Controller](#registration-controller)
-  - [Workload Controller](#workload-controller)
 
 <!-- mdformat-toc end -->
 
@@ -117,37 +116,27 @@ sequenceDiagram
 
 ## Registration Controller
 
-The registration controller creates held Slurm allocations, publishes job
-metadata, and removes registration gates once the allocation is indexed. It
-serializes work by allocation identity and recovers duplicate allocations.
+The registration controller owns allocation registration, metadata repair,
+cleanup, and Pod finalization on one queue keyed by allocation identity. It
+creates held Slurm allocations and removes registration gates once allocation
+metadata is published.
+
+Cleanup uses current Kubernetes group membership, including late members, as
+well as the Pod identities recorded in Slurm. Before cancellation it confirms
+membership through the Kubernetes API and ownership through Slurm. A deleting,
+bound Pod retains its allocation until it becomes terminal. Running
+heterogeneous jobs can release individual components; pending heterogeneous jobs
+are retained while any member needs the allocation.
+
+Bound Pods whose jobs stop running are deleted after a live Slurm check. Claims
+and scheduler finalizers are removed only after Slurm reports the allocation
+finished or absent; a cancellation acknowledgement alone does not release them.
+The Slurm informer reconstructs cleanup work after restarts. The separate Pod
+controller and dangling-job sweep are no longer used.
+
 Configure concurrency with `controllers.registrationWorkers` in Helm or
 `--registration-workers` on the controllers binary. The default is one worker.
-
-## Workload Controller
-
-The workload controller reconciles Kubernetes Pods and Slurm Jobs. Slurm is the
-source of truth for what workload is allowed to run on which managed nodes.
-
-```mermaid
-sequenceDiagram
-  autonumber
-
-  participant KAPI as Kubernetes API
-  participant SWC as Slurm Workload Controller
-  participant SAPI as Slurm REST API
-
-  loop Reconcile Loop
-
-  critical Map Slurm Job to Pod
-    KAPI-->>SWC: Watch Kubernetes Pods
-    SAPI-->>SWC: Watch Slurm Jobs
-  option Pod is Terminated
-    SWC->>SAPI: Terminate Slurm Job
-    SAPI-->>SWC: Return Status
-  option Job is Terminated
-    SWC->>KAPI: Evict Pod
-    KAPI-->>SWC: Return Status
-  end %% critical Map Slurm Job to Pod
-
-  end %% loop Reconcile Loop
-```
+`controllers.podWorkers` and `--pod-workers` remain accepted for compatibility
+but have no effect. Cache reads retain the existing Slurm client refresh waits.
+This ownership change does not alter allocation formation for late composite
+components.

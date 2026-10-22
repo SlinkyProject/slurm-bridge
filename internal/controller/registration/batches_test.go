@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,9 @@ func TestRegisterPodGroupNextBatch(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/pending-%d", version, pending), func(t *testing.T) {
 				scheme := runtime.NewScheme()
 				if err := corev1.AddToScheme(scheme); err != nil {
+					t.Fatal(err)
+				}
+				if err := resourcev1.AddToScheme(scheme); err != nil {
 					t.Fatal(err)
 				}
 				workloadAPI, err := slurmjobir.RegisterWorkloadAPIVersion(scheme, version)

@@ -1,18 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package pod
+package registration
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,35 +26,19 @@ func podReadyForCleanup(pod *corev1.Pod) bool {
 	return podv1.IsPodTerminal(pod) || (pod.DeletionTimestamp != nil && pod.Spec.NodeName == "")
 }
 
-func (r *PodReconciler) Sync(ctx context.Context, req reconcile.Request) error {
-	updated, err := r.reconcilePodMetadata(ctx, req)
-	if err != nil {
-		return err
+// syncPod repairs linkage before checking whether a bound Pod can still run.
+// A successful patch must be observed by the cache before cleanup proceeds.
+func (r *Reconciler) syncPod(ctx context.Context, req reconcile.Request) (bool, error) {
+	changed, err := r.reconcilePodMetadata(ctx, req)
+	if err != nil || changed {
+		return changed, err
 	}
-	if updated {
-		// Wait for the Pod watch to observe the patch before making cleanup
-		// decisions from the controller's cache.
-		return nil
-	}
-	var errs []error
-
-	if err := r.syncKubernetes(ctx, req); err != nil {
-		errs = append(errs, err)
-	}
-
-	// Preserve the Pod identity and its claims until Slurm cleanup succeeds.
-	if err := r.syncSlurm(ctx, req); err != nil {
-		errs = append(errs, err)
-	} else if err := r.prepareTerminalPod(ctx, req); err != nil {
-		errs = append(errs, err)
-	}
-
-	return errors.Join(errs...)
+	return false, r.syncKubernetes(ctx, req)
 }
 
 // syncKubernetes reconciles the Kubernetes Pod with Slurm Jobs.
 // It will terminate the pod without a corresponding job.
-func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Request) error {
+func (r *Reconciler) syncKubernetes(ctx context.Context, req reconcile.Request) error {
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
@@ -69,9 +50,9 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		return err
 	}
 
-	if pod.Spec.SchedulerName != r.SchedulerName {
+	if pod.Spec.SchedulerName != r.schedulerName {
 		logger.V(2).Info("Pod is not scheduled by the slurm-bridge, skipping",
-			"pod", klog.KObj(pod), "scheduler", r.SchedulerName)
+			"pod", klog.KObj(pod), "scheduler", r.schedulerName)
 		return nil
 	}
 
@@ -80,9 +61,6 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 		logger.V(2).Info("Pod is terminal, skipping", "pod", klog.KObj(pod))
 		return nil
 	}
-
-	// Requeue Pod request until terminal
-	durationStore.Push(podKey, 30*time.Second)
 
 	// Unbound pods must be scheduled before checking if the Slurm job is running
 	if pod.Spec.NodeName == "" {
@@ -110,108 +88,18 @@ func (r *PodReconciler) syncKubernetes(ctx context.Context, req reconcile.Reques
 	return nil
 }
 
-// syncSlurm reconciles the Slurm Job with Kubernetes Pods.
-// It will terminate the job corresponding to a terminated pod.
-func (r *PodReconciler) syncSlurm(ctx context.Context, req reconcile.Request) error {
-	logger := log.FromContext(ctx)
-	podKey := req.String()
-
-	pod := &corev1.Pod{}
-	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.V(2).Info("Pod not found, no Job ID", "pod", podKey)
-			return nil
-		}
-		return err
-	}
-
-	if !podReadyForCleanup(pod) {
-		logger.V(2).Info("Pod is not terminated, skipping", "pod", podKey)
-		return nil
-	}
-
-	podList := &corev1.PodList{}
-	listOpts := &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(labels.Set{
-			wellknown.LabelExternalJobId: pod.Labels[wellknown.LabelExternalJobId],
-		}),
-	}
-	if err := r.List(ctx, podList, listOpts); err != nil {
-		logger.Error(err, "failed to fetch pods associated with Slurm job")
-		return err
-	}
-
-	// If there are no non-terminated pods labeled with this jobId the Slurm Job may
-	// be terminated.
-	nonTerminalPods := 0
-	terminatingPods := 0
-	for _, p := range podList.Items {
-		if podReadyForCleanup(&p) {
-			continue
-		}
-		nonTerminalPods++
-		if p.DeletionTimestamp != nil {
-			terminatingPods++
-		}
-	}
-	jobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
-	if nonTerminalPods > 0 {
-		if terminatingPods > 0 {
-			logger.V(4).Info("Retaining Slurm Job until non-terminating Pods complete",
-				"jobId", jobId, "nonTerminalPods", nonTerminalPods, "terminatingPods", terminatingPods)
-		}
-		return nil
-	}
-
-	jobIsPending, jobIsRunning, err := r.slurmControl.IsJobPendingOrRunning(ctx, jobId)
-	if err != nil {
-		return err
-	}
-
-	if !jobIsPending && !jobIsRunning {
-		logger.V(4).Info("Skipping termination of Slurm Job for Pod", "jobId", jobId, "pod", podKey)
-		return nil
-	}
-
-	hetJobId := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobId])
-	switch {
-	case hetJobId != 0:
-		if pod.Labels[wellknown.LabelExternalHetJobOffset] == "" {
-			return fmt.Errorf("missing heterogeneous job offset for job %d", jobId)
-		}
-		hetJobOffset := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalHetJobOffset])
-		logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
-
-		if jobIsRunning {
-			if err := r.slurmControl.TerminateHetJobComponent(ctx, hetJobId, hetJobOffset); err != nil {
-				logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-					"jobId", jobId, "pod", podKey)
-				return err
-			}
-			return nil
-		}
-		jobId = hetJobId
-		fallthrough
-	default:
-		logger.Info("Terminate Slurm Job for Pod", "pod", klog.KObj(pod), "jobId", jobId)
-		if err := r.slurmControl.TerminateJob(ctx, jobId); err != nil {
-			logger.Error(err, "failed to terminate Slurm Job without corresponding Pod",
-				"jobId", jobId, "pod", podKey)
-			return err
-		}
-	}
-
-	return nil
-}
-
 // prepareTerminalPod deletes the Pod's claims before removing its scheduler
-// finalizer. Call it only after syncSlurm succeeds.
-func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Request) error {
+// finalizer. Call it only after allocation release is confirmed.
+func (r *Reconciler) prepareTerminalPod(ctx context.Context, req reconcile.Request, expected ...*corev1.Pod) error {
 	logger := log.FromContext(ctx)
 	podKey := req.String()
 
 	pod := &corev1.Pod{}
-	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
+	reader := client.Reader(r.Client)
+	if r.apiReader != nil {
+		reader = r.apiReader
+	}
+	if err := reader.Get(ctx, req.NamespacedName, pod); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.V(2).Info("Pod not found, no finalizer to remove", "pod", podKey)
 			return nil
@@ -219,6 +107,9 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 		return err
 	}
 
+	if len(expected) > 0 && (pod.UID != expected[0].UID || pod.ResourceVersion != expected[0].ResourceVersion) {
+		return fmt.Errorf("Pod changed before finalization: %s", req)
+	}
 	if !podReadyForCleanup(pod) {
 		logger.V(2).Info("Pod is not terminated, skipping", "pod", podKey)
 		return nil
@@ -238,7 +129,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 			}
 		}
 		if owned {
-			if err := r.Delete(ctx, claim); err != nil && !apierrors.IsNotFound(err) {
+			if err := r.Delete(ctx, claim, client.Preconditions{UID: &claim.UID, ResourceVersion: &claim.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
 		}
@@ -257,7 +148,7 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 				return err
 			}
 		} else {
-			if err := r.Delete(ctx, &claim); err != nil && !apierrors.IsNotFound(err) {
+			if err := r.Delete(ctx, &claim, client.Preconditions{UID: &claim.UID, ResourceVersion: &claim.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
 				logger.Error(err, "failed to delete resource claim", "claim", claim)
 				return err
 			}
@@ -269,6 +160,9 @@ func (r *PodReconciler) prepareTerminalPod(ctx context.Context, req reconcile.Re
 		if f != wellknown.FinalizerScheduler {
 			finalizers = append(finalizers, f)
 		}
+	}
+	if len(finalizers) == len(pod.Finalizers) {
+		return nil
 	}
 	toUpdate := pod.DeepCopy()
 	toUpdate.Finalizers = finalizers

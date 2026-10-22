@@ -22,6 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	slurmfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
+
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
@@ -53,6 +55,10 @@ func TestRegistrationAPI(t *testing.T) {
 	}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme, Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	setup := NewReconciler(mgr.GetClient(), slurmfake.NewFakeClient(), "slurm-bridge", nil, workloadAPI, "", "")
+	if err := setup.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	writer, err := client.New(cfg, client.Options{Scheme: scheme})

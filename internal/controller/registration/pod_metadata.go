@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package pod
+package registration
 
 import (
 	"context"
@@ -17,12 +17,12 @@ import (
 )
 
 // reconcilePodMetadata repairs existing job linkage before cleanup can act on it.
-func (r *PodReconciler) reconcilePodMetadata(ctx context.Context, req reconcile.Request) (bool, error) {
+func (r *Reconciler) reconcilePodMetadata(ctx context.Context, req reconcile.Request) (bool, error) {
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, req.NamespacedName, pod); err != nil {
 		return false, client.IgnoreNotFound(err)
 	}
-	if pod.Spec.SchedulerName != r.SchedulerName || pod.DeletionTimestamp != nil || podv1.IsPodTerminal(pod) {
+	if pod.Spec.SchedulerName != r.schedulerName || pod.DeletionTimestamp != nil || podv1.IsPodTerminal(pod) {
 		return false, nil
 	}
 	candidates, err := r.jobIndex.GetJobsForPods(ctx, pod)

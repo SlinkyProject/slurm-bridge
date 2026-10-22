@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -95,11 +96,15 @@ func (r *Reconciler) typeMeta(key Request) (metav1.TypeMeta, error) {
 // Kubernetes object no longer exists. Legacy LWS lookup needs its current leader.
 // Grouped Pod requests redirect before any Slurm lookup or duplicate cleanup.
 func (r *Reconciler) members(ctx context.Context, key Request) ([]corev1.Pod, slurmjob.AllocationIdentity, error) {
+	return r.membersFrom(ctx, r.cachedMembers(), key)
+}
+
+func (r *Reconciler) membersFrom(ctx context.Context, reader client.Reader, key Request) ([]corev1.Pod, slurmjob.AllocationIdentity, error) {
 	identity := slurmjob.AllocationIdentity{Index: slurmjob.GroupJobIndex, Key: key.groupIdentity().Key()}
 	if key.Kind == "Pod" {
 		identity.Index, identity.Key = slurmjob.PodJobIndex, key.podKey()
 		pod := &corev1.Pod{}
-		err := r.Get(ctx, key.objectKey(), pod)
+		err := reader.Get(ctx, key.objectKey(), pod)
 		if err != nil {
 			return nil, identity, client.IgnoreNotFound(err)
 		}
@@ -107,7 +112,10 @@ func (r *Reconciler) members(ctx context.Context, key Request) ([]corev1.Pod, sl
 			return nil, identity, nil
 		}
 		if pod.Spec.SchedulerName == r.schedulerName {
-			root, err := slurmjobir.WorkloadRootForPod(r.Client, r.workloadAPI, ctx, pod)
+			root, err := slurmjobir.WorkloadRootForPod(membershipClient{Client: r.Client, reader: reader}, r.workloadAPI, ctx, pod)
+			if apierrors.IsNotFound(err) && !r.eligible(pod) {
+				return []corev1.Pod{*pod}, identity, err
+			}
 			if err != nil {
 				return nil, slurmjob.AllocationIdentity{}, err
 			}
@@ -130,7 +138,7 @@ func (r *Reconciler) members(ctx context.Context, key Request) ([]corev1.Pod, sl
 		identity.Index = "" // Without a current leader there is no Pod index key.
 	}
 	uid := root.UID
-	if err := r.Get(ctx, client.ObjectKeyFromObject(root), root); err != nil {
+	if err := reader.Get(ctx, client.ObjectKeyFromObject(root), root); err != nil {
 		return nil, identity, client.IgnoreNotFound(err)
 	}
 	if root.UID != uid {
@@ -139,7 +147,7 @@ func (r *Reconciler) members(ctx context.Context, key Request) ([]corev1.Pod, sl
 		r.enqueue(current)
 		return nil, identity, nil
 	}
-	pods, err := slurmjobir.RegistrationMembers(r.Client, r.workloadAPI, ctx, root, key.ReplicaHash)
+	pods, err := slurmjobir.RegistrationMembers(reader, r.workloadAPI, ctx, root, key.ReplicaHash)
 	if err != nil {
 		return nil, identity, err
 	}

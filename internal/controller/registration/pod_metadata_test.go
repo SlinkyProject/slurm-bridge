@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package pod
+package registration
 
 import (
 	"context"
@@ -26,7 +26,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -99,7 +99,7 @@ func TestMetadataRepairVerifiesOnlyChanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := &PodReconciler{Client: kube, jobIndex: control, SchedulerName: schedulerName}
+			r := &Reconciler{Client: kube, jobIndex: control, schedulerName: schedulerName}
 			_, err = r.reconcilePodMetadata(t.Context(), reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)})
 			if wantError := tt.readError && tt.wantReads > 0; (err != nil) != wantError {
 				t.Fatalf("metadata validation error = %v, want error %t", err, wantError)
@@ -203,7 +203,7 @@ func TestMetadataRepairIdentityAndLifecycle(t *testing.T) {
 					return c.Patch(ctx, obj, patch, opts...)
 				},
 			}).Build()
-			r := &PodReconciler{Client: kube, jobIndex: index, SchedulerName: schedulerName}
+			r := &Reconciler{Client: kube, jobIndex: index, schedulerName: schedulerName}
 			req := reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)}
 			changed, err := r.reconcilePodMetadata(t.Context(), req)
 			if err != nil || changed != tt.wantRepair {
@@ -278,7 +278,7 @@ func TestMetadataRepairConflictsWithConcurrentPodChanges(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := &PodReconciler{Client: kube, jobIndex: index, SchedulerName: schedulerName}
+			r := &Reconciler{Client: kube, jobIndex: index, schedulerName: schedulerName}
 			req := reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)}
 			changed, err := r.reconcilePodMetadata(t.Context(), req)
 			if changed || !apierrors.IsConflict(err) {
@@ -331,8 +331,8 @@ func TestSyncWaitsForMetadataPatchBeforeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup := &cleanupRecorder{}
-	r := &PodReconciler{Client: kube, jobIndex: index, slurmControl: cleanup, SchedulerName: schedulerName}
-	if err := r.Sync(t.Context(), reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)}); err != nil {
+	r := &Reconciler{Client: kube, jobIndex: index, slurmControl: cleanup, schedulerName: schedulerName}
+	if _, err := r.syncPod(t.Context(), reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)}); err != nil {
 		t.Fatal(err)
 	}
 	if cleanup.calls != 0 {
@@ -360,7 +360,7 @@ func TestPodCleanupPreservesConcurrentAllocation(t *testing.T) {
 		current.Labels[wellknown.LabelExternalJobId] = "2"
 		return kube.Update(ctx, current)
 	}}
-	r := &PodReconciler{Client: kube, slurmControl: cleanup, SchedulerName: schedulerName}
+	r := &Reconciler{Client: kube, slurmControl: cleanup, schedulerName: schedulerName}
 	err := r.syncKubernetes(t.Context(), reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)})
 	if !apierrors.IsConflict(err) {
 		t.Fatalf("cleanup error = %v, want conflict", err)

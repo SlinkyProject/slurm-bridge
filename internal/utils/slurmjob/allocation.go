@@ -26,6 +26,22 @@ type RegisteredJob struct {
 	info externaljobinfo.ExternalJobInfo
 }
 
+// Ownership returns the Kubernetes identities recorded by the allocation.
+func (j RegisteredJob) Ownership() externaljobinfo.ExternalJobInfo { return j.info }
+
+// RegisteredJobFromInfo decodes both allocation state and Kubernetes ownership.
+func RegisteredJobFromInfo(raw *api.V0044JobInfo) (RegisteredJob, error) {
+	job, err := FromJobInfo(raw)
+	if err != nil {
+		return RegisteredJob{}, err
+	}
+	info := externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(raw.AdminComment, &info); err != nil {
+		return RegisteredJob{}, err
+	}
+	return RegisteredJob{ExternalJob: job, info: info}, nil
+}
+
 // IndexedAllocation reads the allocation from the informer, without a live list.
 // Always include legacy PodGroup candidates, even when the group index matches:
 // otherwise an allocation in the newer format could hide an older duplicate.

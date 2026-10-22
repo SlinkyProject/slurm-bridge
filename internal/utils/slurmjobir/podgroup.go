@@ -4,6 +4,7 @@
 package slurmjobir
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -177,6 +178,13 @@ func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObject
 }
 
 func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodList, error) {
+	// Registration supplies an indexed reader; uncached safety checks and other
+	// callers retain the namespace-list fallback.
+	if indexed, ok := t.Reader.(interface {
+		ListPodGroupMembers(context.Context, string, string) (corev1.PodList, error)
+	}); ok {
+		return indexed.ListPodGroupMembers(t.ctx, namespace, groupName)
+	}
 	if t.podsByGroup == nil {
 		var allPods corev1.PodList
 		if err := t.List(t.ctx, &allPods, client.InNamespace(namespace)); err != nil {

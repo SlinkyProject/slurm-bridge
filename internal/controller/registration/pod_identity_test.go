@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package pod
+package registration
 
 import (
 	"testing"
@@ -34,7 +34,7 @@ func TestMetadataRepairIgnoresReplacedPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &PodReconciler{Client: kubeClient, jobIndex: index, SchedulerName: schedulerName}
+	r := &Reconciler{Client: kubeClient, jobIndex: index, schedulerName: schedulerName}
 	if _, err := r.reconcilePodMetadata(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(pod)}); err != nil {
 		t.Fatal(err)
 	}

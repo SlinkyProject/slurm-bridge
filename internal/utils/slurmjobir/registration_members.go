@@ -18,7 +18,7 @@ import (
 // RegistrationMembers uses the same membership traversal as translation, without
 // resolving device resources or building submission descriptions. The caller has
 // already checked the root UID; replicaHash distinguishes legacy LWS replicas.
-func RegistrationMembers(c client.Client, workloadAPI *WorkloadAPI, ctx context.Context, root *metav1.PartialObjectMetadata, replicaHash string) ([]corev1.Pod, error) {
+func RegistrationMembers(c client.Reader, workloadAPI *WorkloadAPI, ctx context.Context, root *metav1.PartialObjectMetadata, replicaHash string) ([]corev1.Pod, error) {
 	// Keep terminal members available for allocation identity and duplicate cleanup.
 	// TranslateToSlurmJobIR separately selects the Pods that still need resources.
 	t := translator{Reader: c, ctx: ctx, workloadAPI: workloadAPI, includeTerminalPods: true}
