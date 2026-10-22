@@ -262,6 +262,10 @@ limitations under the License.
     architecture.md
     config.md
     controllers.md
+    jobset.md
+    lws.md
+    podgroup-coscheduling.md
+    podgroup.md
     quickstart.md
     scheduler.md
     testing.md
