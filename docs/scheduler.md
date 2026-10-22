@@ -37,6 +37,19 @@ represented Pods. This scheduler defers scheduling decisions to Slurm, hence
 certain assumptions about the environment must be met for this to function
 correctly.
 
+Allocation discovery uses the same Slurm job informer as ready-allocation
+prioritization. Partition node inventory is indexed by a separate node informer.
+Routine scheduling reads these caches; live job reads confirm placement before
+cancellation and during concurrent binding, where resource layouts are also
+retrieved. Eligibility updates and hold release still wait for Slurm's write
+acknowledgement.
+
+The job informer refreshes every second and the node informer every 30 seconds.
+Cached reads can wait for an in-progress refresh for up to twice the refresh
+period (two seconds for jobs and 60 seconds for node inventory). Refresh errors
+defer scheduling rather than falling back to live discovery requests.
+Nonblocking snapshot reads are deferred to a future slurm-client improvement.
+
 ### Sequence Diagram
 
 ```mermaid

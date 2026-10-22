@@ -334,15 +334,9 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		logger.Error(err, "unable to create slurm client")
 		return nil, err
 	}
-	jobInformer := slurmClient.GetInformer(api.ObjectTypeV0044JobInfo)
-	sc, err := slurmcontrol.NewControl(slurmClient, jobInformer, cfg.MCSLabel, cfg.Partition)
-	if err != nil {
-		return nil, err
-	}
 	plugin := &SlurmBridge{
 		Client:        kubeClient,
 		schedulerName: cfg.SchedulerName,
-		slurmControl:  sc,
 		handle:        handle,
 		draRegistry:   draRegistry,
 		workloadAPI:   workloadAPI,
@@ -360,16 +354,23 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, err
 	}
-	go jobInformer.Run(ctx.Done())
+	// Read the same job cache that promotes ready allocations. A separate,
+	// slower job informer could otherwise reject a freshly promoted workload.
+	plugin.slurmControl, err = slurmcontrol.NewControl(slurmClient, plugin.allocationObserver.jobs, cfg.MCSLabel, cfg.Partition)
+	if err != nil {
+		return nil, err
+	}
+	nodeInformer := slurmClient.GetInformer(api.ObjectTypeV0044Node)
+	go nodeInformer.Run(ctx.Done())
 	if err := wait.PollUntilContextCancel(ctx, time.Millisecond, true, func(context.Context) (bool, error) {
-		return jobInformer.HasStarted(), nil
+		return nodeInformer.HasStarted(), nil
 	}); err != nil {
 		return nil, err
 	}
 	// Prime the index without waiting for the informer's first periodic refresh.
 	go func() {
-		if err := jobInformer.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true}); err != nil && ctx.Err() == nil {
-			logger.Error(err, "unable to initialize Slurm job index")
+		if err := nodeInformer.List(ctx, &api.V0044NodeObjectList{}, &slurmclient.ListOptions{RefreshCache: true}); err != nil && ctx.Err() == nil {
+			logger.Error(err, "unable to initialize Slurm node index")
 		}
 	}()
 	return plugin, nil
@@ -502,12 +503,8 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
 	}
 
-	// Determine if an external job for the pod exists in Slurm
-	externalJob, err := sb.slurmControl.GetJob(ctx, pod)
-	if err != nil {
-		logger.Error(err, "error checking for Slurm job")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
-	}
+	// Allocation identity and membership were checked above using the index.
+	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
 
 	// Perform resource specific PreFilter
 	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.handle, sb.workloadAPI, ctx, pod, s.slurmJobIR)
@@ -545,6 +542,11 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		slurmNodes, _ := hostlist.Expand(externalJob.Nodes)
 		kubeNodes, err := sb.slurmToKubeNodes(ctx, slurmNodes)
 		if err != nil {
+			if errors.Is(err, ErrorNoKubeNodeMatch) {
+				if status := sb.confirmPlacement(ctx, pod, externalJob); !status.IsSuccess() {
+					return nil, status
+				}
+			}
 			return nil, sb.handleAllocatedNodeError(ctx, s, pod, err)
 		}
 
@@ -621,17 +623,23 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	if s.slurmJobIR == nil {
 		return nil, fwk.NewStatus(fwk.Unschedulable)
 	}
-	if status := sb.checkAllocation(ctx, s, pod); !status.IsSuccess() {
+	jobs, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
+	if status := s.checkAllocation(pod, jobs, allocationErr); !status.IsSuccess() {
 		return nil, status
 	}
 
-	// Determine if an external job for the pod exists in Slurm
-	externalJob, err := sb.slurmControl.GetJob(ctx, pod)
-	if err != nil {
-		logger.Error(err, "error checking for Slurm job")
-		return nil, fwk.NewStatus(fwk.Error, err.Error())
-	}
-	if allocatedNodeRejectedByKubernetes(pod, externalJob, m) {
+	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
+	if allocatedNodeRejectedByKubernetes(pod, &externalJob, m) {
+		// A cached rejection may be stale. Confirm the same placement before
+		// deciding to cancel it; ordinary scheduling does not need this read.
+		// TODO: For Slurm versions supporting external-job requeue, tie this
+		// confirmation to the placement Kubernetes actually rejected. Requeue
+		// can retain the job ID while changing nodes; a cache refresh can make
+		// this check confirm the new placement while the Pod annotation and
+		// Filter result still refer to the old node.
+		if status := sb.confirmPlacement(ctx, pod, externalJob); !status.IsSuccess() {
+			return nil, status
+		}
 		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, m)
 		if !status.IsSuccess() {
 			return nil, status
@@ -998,7 +1006,23 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
-	resources, err := sb.slurmControl.GetResources(ctx, pod, nodecontrollerutils.GetSlurmNodeName(node))
+	// Discovery uses cached state, so validate the selected placement here in
+	// concurrent binding before creating claims or binding a Pod.
+	liveJob, err := sb.slurmControl.GetJob(ctx, pod)
+	if err != nil {
+		return fwk.AsStatus(err)
+	}
+	expected := s.allocation[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
+	slurmNodes, err := hostlist.Expand(liveJob.Nodes)
+	if err != nil {
+		return fwk.AsStatus(err)
+	}
+	slurmNode := nodecontrollerutils.GetSlurmNodeName(node)
+	if liveJob.JobId != expected.JobId || liveJob.HetJobId != expected.HetJobId ||
+		liveJob.Pending || liveJob.Finished || !slices.Contains(slurmNodes, slurmNode) {
+		return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
+	}
+	resources, err := sb.slurmControl.GetResources(ctx, pod, slurmNode)
 	if err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}

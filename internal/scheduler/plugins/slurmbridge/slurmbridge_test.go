@@ -155,8 +155,10 @@ type postFilterSlurmControl struct {
 	deleteCalls          int
 	deletedPod           *corev1.Pod
 	getJobCalls          int
+	allocationErr        error
 	getJobs              []*slurmcontrol.ExternalJob
 	nodeNamesByPartition map[string][]string
+	nodeNamesError       error
 	podToJobs            map[string]slurmcontrol.ExternalJob
 	podToJobsError       error
 	verifyCalls          int
@@ -200,7 +202,19 @@ func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcon
 func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error { return nil }
 
 func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return testAllocation(ir), nil
+	if c.allocationErr != nil {
+		return nil, c.allocationErr
+	}
+	jobs := testAllocation(ir)
+	for i := range jobs {
+		for _, job := range c.getJobs {
+			if job.JobId == jobs[i].JobId {
+				jobs[i] = *job
+				break
+			}
+		}
+	}
+	return jobs, nil
 }
 
 func testJobComment(ir *slurmjobir.SlurmJobIR, component int) string {
@@ -231,6 +245,9 @@ func (c *postFilterSlurmControl) UpdateJob(_ context.Context, _ *corev1.Pod, ir 
 }
 
 func (c *postFilterSlurmControl) GetNodeNames(_ context.Context, partition *string) ([]string, error) {
+	if c.nodeNamesError != nil {
+		return nil, c.nodeNamesError
+	}
 	if c.nodeNamesByPartition != nil {
 		partitionName := ""
 		if partition != nil {
@@ -492,22 +509,11 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
-			name: "Error checking for Slurm job",
+			name: "Error reading cached allocation",
 			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					f := interceptor.Funcs{
-						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
-							return ErrorNodeConfigInvalid
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithObjects(&api.V0044JobInfo{JobId: ptr.To(int32(1)), AdminComment: ptr.To(`{"pods":["/pod1"]}`)}).
-						WithInterceptorFuncs(f).
-						Build()
-					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: f,
+				client:       kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: &postFilterSlurmControl{allocationErr: ErrorNodeConfigInvalid},
+				handle:       f,
 			},
 			args: args{
 				ctx:   ctx,
@@ -1108,22 +1114,11 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		wantActivate bool
 	}{
 		{
-			name: "Error checking for Slurm job",
+			name: "Error reading cached allocation",
 			fields: fields{
-				Client: kubefake.NewFakeClient(pod.DeepCopy()),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					f := interceptor.Funcs{
-						Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
-							return ErrorNodeConfigInvalid
-						},
-					}
-					c := fake.NewClientBuilder().
-						WithObjects(&api.V0044JobInfo{JobId: ptr.To(int32(1)), AdminComment: ptr.To(`{"pods":["/pod1"]}`)}).
-						WithInterceptorFuncs(f).
-						Build()
-					return newTestSlurmControl(t, c, "kubernetes", "slurm-bridge")
-				}(),
-				handle: f,
+				Client:       kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: &postFilterSlurmControl{allocationErr: ErrorNodeConfigInvalid},
+				handle:       f,
 			},
 			args: args{
 				ctx:   ctx,
@@ -1175,16 +1170,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 		{
 			name: "Error listing Slurm nodes",
 			fields: fields{
-				Client: kubefake.NewFakeClient(pod.DeepCopy()),
-				slurmControl: func() slurmcontrol.SlurmControlInterface {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
-							return ErrorNodeConfigInvalid
-						},
-					}
-					return newTestSlurmControl(t, interceptor.NewClient(fake.NewClientBuilder().WithObjects(&api.V0044JobInfo{JobId: ptr.To(int32(1)), AdminComment: ptr.To(`{"pods":["/pod1"]}`), JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING}}).Build(), f), "kubernetes", "slurm-bridge")
-				}(),
-				handle: f,
+				Client:       kubefake.NewFakeClient(pod.DeepCopy()),
+				slurmControl: &postFilterSlurmControl{nodeNamesError: ErrorNodeConfigInvalid},
+				handle:       f,
 			},
 			args: args{
 				ctx:   ctx,

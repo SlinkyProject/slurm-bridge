@@ -23,6 +23,19 @@ func (sb *SlurmBridge) checkAllocation(ctx context.Context, s *stateData, pod *c
 	return s.checkAllocation(pod, jobs, err)
 }
 
+// Confirm a cached placement before a scheduling failure can cancel it.
+func (sb *SlurmBridge) confirmPlacement(ctx context.Context, pod *corev1.Pod, expected slurmcontrol.ExternalJob) *fwk.Status {
+	job, err := sb.slurmControl.GetJob(ctx, pod)
+	if err != nil {
+		return fwk.AsStatus(err)
+	}
+	if job.JobId != expected.JobId || job.HetJobId != expected.HetJobId ||
+		job.Nodes != expected.Nodes || job.Pending || job.Finished {
+		return fwk.NewStatus(fwk.Unschedulable, "allocation changed before placement rejection was confirmed")
+	}
+	return nil
+}
+
 func (s *stateData) checkAllocation(pod *corev1.Pod, jobs []slurmcontrol.ExternalJob, err error) *fwk.Status {
 	if err != nil {
 		if errors.Is(err, slurmjob.ErrAmbiguousAllocation) || errors.Is(err, slurmjob.ErrAllocationMissing) {

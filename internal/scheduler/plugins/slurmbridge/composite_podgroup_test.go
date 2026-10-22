@@ -66,7 +66,11 @@ func (r *compositeUpdateRecorder) GetJob(_ context.Context, pod *corev1.Pod) (*s
 }
 
 func (r *compositeUpdateRecorder) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return testAllocation(ir), nil
+	jobs := testAllocation(ir)
+	for i := range jobs {
+		jobs[i].Pending, jobs[i].Held = true, true
+	}
+	return jobs, nil
 }
 
 func (r *compositeUpdateRecorder) ReleaseJob(context.Context, int32, *int32) error {

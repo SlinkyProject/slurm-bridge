@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"slices"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,6 +57,7 @@ type realSlurmControl struct {
 	*slurmjob.PodIndex
 	mcsLabel  string
 	partition string
+	nodes     client.InformerCache
 	// lastUpdate holds the last job description sent per pending job ID, so an
 	// unchanged UpdateJob skips its REST round trip. Size-capped so jobs that are
 	// never looked up again can't grow it without bound.
@@ -303,28 +302,6 @@ func (r *realSlurmControl) ReleaseJob(ctx context.Context, id int32, priority *i
 	return nil
 }
 
-func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
-	list := &api.V0044NodeObjectList{}
-	if err := r.List(ctx, list, &client.ListOptions{SkipCache: true}); err != nil {
-		return nil, err
-	}
-	partitionNames := strings.Split(ptr.Deref(partition, r.partition), ",")
-	for i := range partitionNames {
-		partitionNames[i] = strings.TrimSpace(partitionNames[i])
-	}
-	nodeNames := make([]string, 0, len(list.Items))
-	for _, node := range list.Items {
-		partitions := ptr.Deref(node.Partitions, api.V0044CsvString{})
-		for _, partitionName := range partitionNames {
-			if slices.Contains(partitions, partitionName) {
-				nodeNames = append(nodeNames, ptr.Deref(node.Name, ""))
-				break
-			}
-		}
-	}
-	return nodeNames, nil
-}
-
 // ExternalJobInfoFor records the allocation identity Slurm stores for one component.
 func ExternalJobInfoFor(root metav1.PartialObjectMetadata, component slurmjobir.SlurmJobComponent) externaljobinfo.ExternalJobInfo {
 	extInfo := externaljobinfo.ExternalJobInfo{}
@@ -494,11 +471,16 @@ func NewControl(slurmClient client.Client, jobInformer client.InformerCache, mcs
 	if err != nil {
 		return nil, err
 	}
+	nodes := slurmClient.GetInformer(api.ObjectTypeV0044Node)
+	if err := nodes.AddIndex(nodePartitionIndex, nodePartitionKeys); err != nil {
+		return nil, err
+	}
 	return &realSlurmControl{
 		Client:    slurmClient,
 		PodIndex:  index,
 		mcsLabel:  mcsLabel,
 		partition: partition,
+		nodes:     nodes,
 		// Fixed cap; make it configurable if pending-job counts outgrow it.
 		lastUpdate: lru.New(10000),
 	}, nil
