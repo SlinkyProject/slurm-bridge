@@ -55,6 +55,7 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 		if err != nil || !complete {
 			return waiting, err
 		}
+		r.clearRegistrationEvent(key)
 		return reconcile.Result{}, r.publish(ctx, ir, components)
 	}
 	var cooldown *int32
@@ -65,11 +66,12 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 	if !submissionAllowed(jobs, cooldown, ir.AllPods(), r.eligible) {
 		return waiting, nil
 	}
-	ready, err := slurmjobir.RegistrationReady(r.Client, r.registry, r.workloadAPI, ctx, pod, ir)
+	ready, message, err := slurmjobir.RegistrationReady(r.Client, r.registry, r.workloadAPI, ctx, pod, ir)
 	if err != nil {
-		return registrationReadResult(err)
+		return r.registrationReadEvent(key, err)
 	}
 	if !ready {
+		r.registrationEvent(key, corev1.EventTypeNormal, "WaitingForMembers", message)
 		return waiting, nil
 	}
 	id, err := r.submit.RegisterJob(ctx, ir)
@@ -77,6 +79,11 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 		r.recent.Delete(key)
 	} else {
 		r.recent.Set(key, id, registrationCooldown)
+	}
+	if err != nil {
+		r.registrationEvent(key, corev1.EventTypeWarning, "SlurmRegistrationFailed", err.Error())
+	} else {
+		r.clearRegistrationEvent(key)
 	}
 	return waiting, err
 }

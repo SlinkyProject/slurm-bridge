@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/cache"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,6 +51,8 @@ type Reconciler struct {
 	registry      *dra.Registry
 	workloadAPI   *slurmjobir.WorkloadAPI
 	recent        *cache.Expiring
+	eventRecorder record.EventRecorder
+	eventHistory  *cache.Expiring
 	enqueue       func(Request) // Installed by the source before controller workers start.
 }
 
@@ -69,6 +72,8 @@ func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName s
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.eventRecorder = mgr.GetEventRecorderFor(ControllerName) //nolint:staticcheck // Record core/v1 Events, matching the other controllers.
+	r.eventHistory = cache.NewExpiring()
 	jobs := &jobSource{reconciler: r}
 	bldr := builder.TypedControllerManagedBy[Request](mgr).Named(ControllerName).
 		Watches(&corev1.Pod{}, handler.TypedEnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []Request {
@@ -101,7 +106,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Result, error) {
 	pods, identity, membershipErr := r.members(ctx, key)
 	if identity.Index == "" {
-		return registrationReadResult(membershipErr)
+		return r.registrationReadEvent(key, membershipErr)
 	}
 	if synced, err := r.informer.HasSynced(); err != nil || !synced {
 		return reconcile.Result{RequeueAfter: registrationRetry}, err
@@ -119,7 +124,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 	if membershipErr != nil {
-		return registrationReadResult(membershipErr)
+		return r.registrationReadEvent(key, membershipErr)
 	}
 	slices.SortFunc(pods, func(a, b corev1.Pod) int { return strings.Compare(a.Name, b.Name) })
 	for i := range pods {
@@ -129,7 +134,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 		}
 		ir, err := slurmjobir.TranslateToSlurmJobIR(r.Client, r.registry, r.workloadAPI, ctx, pod)
 		if err != nil {
-			return registrationReadResult(err)
+			return r.registrationReadEvent(key, err)
 		}
 		if current := allocationKey(pod, ir.RootPOM); current != key {
 			// Only submit under the current allocation key.
@@ -138,7 +143,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 		}
 		current, err := slurmjob.IdentityForAllocation(pod, ir)
 		if err != nil {
-			return registrationReadResult(err)
+			return r.registrationReadEvent(key, err)
 		}
 		if current.Index != identity.Index || current.Key != identity.Key {
 			// The legacy LWS leader changed while membership was read.

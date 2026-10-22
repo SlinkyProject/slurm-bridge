@@ -15,30 +15,32 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 )
 
-// RegistrationReady applies workload quorum checks without a scheduler handle.
-func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI, ctx context.Context, pod *corev1.Pod, ir *SlurmJobIR) (bool, error) {
+// RegistrationReady applies workload quorum checks without a scheduler handle,
+// retaining the explanation for a workload that is not ready.
+func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI, ctx context.Context, pod *corev1.Pod, ir *SlurmJobIR) (bool, string, error) {
 	if err := ir.Validate(); err != nil {
-		return false, err
+		return false, "", err
 	}
 	if ir.RootPOM.TypeMeta != compositePodGroupV1Alpha3 {
 		status := PreFilter(c, registry, nil, api, ctx, pod, ir)
 		if status.IsSuccess() {
-			return true, nil
+			return true, "", nil
 		}
 		if status.IsError() {
-			return false, status.AsError()
+			return false, "", status.AsError()
 		}
-		return false, nil
+		return false, status.Message(), nil
 	}
 	t := translator{Reader: c, ctx: ctx, workloadAPI: api}
 	groups, err := t.listCompositePodGroup(pod.Namespace)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	leaves := &PodGroupList{TypeMeta: metav1.TypeMeta{APIVersion: api.PodGroupTypeMeta.APIVersion, Kind: "PodGroupList"}}
 	if err := c.List(ctx, leaves, client.InNamespace(pod.Namespace)); err != nil {
-		return false, err
+		return false, "", err
 	}
+	var message string
 	var ready func(string, int) (bool, error)
 	ready = func(name string, depth int) (bool, error) {
 		if depth > maxCompositePodGroupTreeDepth {
@@ -87,7 +89,11 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 		if group.schedulingPolicy.Gang != nil {
 			minGroupCount = int64(group.schedulingPolicy.Gang.MinGroupCount)
 		}
+		if depth == 1 && children < minGroupCount {
+			message = fmt.Sprintf("CompositePodGroup %s/%s has %d ready child groups; requires %d", pod.Namespace, name, children, minGroupCount)
+		}
 		return children >= minGroupCount, nil
 	}
-	return ready(ir.RootPOM.Name, 1)
+	ok, err := ready(ir.RootPOM.Name, 1)
+	return ok, message, err
 }
