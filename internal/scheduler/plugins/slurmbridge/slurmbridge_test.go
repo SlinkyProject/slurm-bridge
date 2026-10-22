@@ -165,6 +165,14 @@ type postFilterSlurmControl struct {
 	updateJob            func(*slurmjobir.SlurmJobIR) (int32, error)
 }
 
+func (c *postFilterSlurmControl) GetResourcesForNodes(_ context.Context, _ *corev1.Pod, nodes []string) (map[string]*slurmcontrol.NodeResources, error) {
+	resources := make(map[string]*slurmcontrol.NodeResources)
+	for _, node := range nodes {
+		resources[node] = &slurmcontrol.NodeResources{Node: node}
+	}
+	return resources, nil
+}
+
 func (c *postFilterSlurmControl) GetResources(context.Context, *corev1.Pod, string) (*slurmcontrol.NodeResources, error) {
 	return &slurmcontrol.NodeResources{}, nil
 }
@@ -891,6 +899,8 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		workloadAPI:   workloadAPI,
 	}
 
+	sb.kubeNodeIndex = testKubeNodeIndex(t, kubeClient)
+
 	rootGroupState := framework.NewCycleState()
 	rootPlacementState := framework.NewCycleState()
 	rootPlacementState.SetPodGroupSchedulingCycle(rootGroupState)
@@ -1616,7 +1626,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			},
 			args: args{
 				ctx:      ctx,
-				state:    nil,
+				state:    framework.NewCycleState(),
 				pod:      podWithAnnotation.DeepCopy(),
 				nodeInfo: nodeInfo,
 			},
@@ -1630,7 +1640,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			},
 			args: args{
 				ctx:      ctx,
-				state:    nil,
+				state:    framework.NewCycleState(),
 				pod:      podWithoutAnnotation.DeepCopy(),
 				nodeInfo: nodeInfo,
 			},
@@ -1643,7 +1653,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 			},
 			args: args{
 				ctx:   ctx,
-				state: nil,
+				state: framework.NewCycleState(),
 				pod:   podWithAnnotation.DeepCopy(),
 				nodeInfo: nodeInfoFor(&corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{Name: "node1"},

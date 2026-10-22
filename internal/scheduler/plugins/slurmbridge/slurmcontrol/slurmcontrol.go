@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +42,7 @@ func isActiveJob(job *api.V0044JobInfo) bool {
 
 type SlurmControlInterface interface {
 	GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error)
+	GetResourcesForNodes(ctx context.Context, pod *corev1.Pod, nodeNames []string) (map[string]*NodeResources, error)
 	DeleteJob(ctx context.Context, pod *corev1.Pod) error
 	GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
@@ -411,12 +413,32 @@ func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobCo
 
 // GetResources will return the resources used by a node for a given JobId
 func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*NodeResources, error) {
+	resources, err := r.GetResourcesForNodes(ctx, pod, []string{nodeName})
+	if err != nil {
+		return nil, err
+	}
+	if node := resources[nodeName]; node != nil {
+		return node, nil
+	}
+	return &NodeResources{}, nil
+}
+
+var resourceNodeReads = make(chan struct{}, 8)
+
+// GetResourcesForNodes reads a component's resource layout once. Native gang
+// binding retains the returned snapshot for all members in this attempt.
+func (r *realSlurmControl) GetResourcesForNodes(ctx context.Context, pod *corev1.Pod, nodeNames []string) (map[string]*NodeResources, error) {
+	out := make(map[string]*NodeResources, len(nodeNames))
+	requested := make(map[string]bool, len(nodeNames))
+	for _, node := range nodeNames {
+		requested[node] = true
+	}
 	logger := klog.FromContext(ctx)
 
 	nodes := &api.V0044NodeResourceLayoutListObject{}
 	jobId := object.ObjectKey(pod.Labels[wellknown.LabelExternalJobId])
 	if jobId == "" {
-		return &NodeResources{}, nil
+		return out, nil
 	}
 
 	err := r.Get(ctx, jobId, nodes, &client.GetOptions{SkipCache: true})
@@ -425,17 +447,11 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 		return nil, err
 	}
 	for _, n := range *nodes {
-		if n.Node != nodeName {
+		if !requested[n.Node] {
 			continue
-		}
-		nodeExtra, err := r.getNodeExtra(ctx, nodeName)
-		if err != nil {
-			logger.Error(err, "could not get Slurm node Extra", "node", nodeName)
-			return nil, err
 		}
 		nodeOut := NodeResources{
 			Node:           n.Node,
-			NodeExtra:      nodeExtra,
 			SocketsPerNode: ptr.Deref(n.SocketsPerNode, 0),
 			CoresPerSocket: ptr.Deref(n.CoresPerSocket, 0),
 			MemAlloc:       ptr.Deref(n.MemAlloc, 0),
@@ -451,9 +467,39 @@ func (r *realSlurmControl) GetResources(ctx context.Context, pod *corev1.Pod, no
 				Index: ptr.Deref(g.Index, ""),
 			}
 		}
-		return &nodeOut, nil
+		out[n.Node] = &nodeOut
 	}
-	return &NodeResources{}, nil
+	// Fetch node metadata concurrently, with a process-wide bound so multiple
+	// independently binding components cannot multiply remote request concurrency.
+	var workers sync.WaitGroup
+	failures := make(chan error, len(out))
+	for name, resources := range out {
+		workers.Go(func() {
+			select {
+			case resourceNodeReads <- struct{}{}:
+				defer func() { <-resourceNodeReads }()
+			case <-ctx.Done():
+				failures <- ctx.Err()
+				return
+			}
+			extra, err := r.getNodeExtra(ctx, name)
+			if err != nil {
+				failures <- err
+				return
+			}
+			resources.NodeExtra = extra
+		})
+	}
+	workers.Wait()
+	close(failures)
+	var failure error
+	for err := range failures {
+		failure = errors.Join(failure, err)
+	}
+	if failure != nil {
+		return nil, failure
+	}
+	return out, nil
 }
 
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {

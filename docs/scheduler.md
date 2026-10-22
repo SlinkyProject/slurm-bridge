@@ -8,6 +8,7 @@
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Design](#design)
+    - [Native gang state](#native-gang-state)
     - [Sequence Diagram](#sequence-diagram)
     - [External Jobs](#external-jobs)
       - [Annotations](#annotations)
@@ -40,6 +41,40 @@ correctly.
 The scheduler refreshes Slurm job information every second and node information
 every 30 seconds. Scheduling may wait for an in-progress refresh for up to two
 seconds for jobs or 60 seconds for nodes. Failed refreshes defer scheduling.
+
+### Native gang state
+
+Within a native PodGroup scheduling attempt, members share one workload
+translation, membership snapshot, and allocation observation from the allocation
+observer's job cache. CompositePodGroup components share the same decision up to
+their allocation boundary; independent allocations below basic groups remain
+separate. Both native `v1alpha2` and `v1beta1` APIs use this path.
+
+Node assignments are prepared once per component, preserving bound nodes and
+existing assignments. Remaining Pods and nodes are matched in name order.
+Duplicate assignments and insufficient capacity reject the attempt. Assignment
+patches use resource-version guards; a partial write is retried from a fresh
+snapshot. Filter reads the decision from cycle state without modifying shared
+framework or informer Pods. Eligibility updates use private copies of the shared
+translation, and all components must pass eligibility before hold release.
+
+Each new scheduling attempt rebuilds its snapshots, including after membership,
+identity, allocation, or feasibility changes. A changed member encountered
+within an attempt is rejected rather than added to an existing allocation
+decision. Snapshots are not cached across retries. This does not change the
+registration policy for composite children that arrive after allocation
+submission.
+
+Member state retains the decision when the framework detaches group state for
+concurrent binding. Each Pod still validates allocation identity and its
+selected node against Slurm before creating claims. A component's resource
+layout is read once and shared across binding members; node metadata reads run
+concurrently, with at most eight such requests across the process. A failed
+resource read fails that attempt and can be retried in a new attempt. These
+checks do not make Slurm validation and Kubernetes binding atomic.
+
+Legacy `scheduling.x-k8s.io/v1alpha1` groups retain their existing scheduling
+path and deprecation policy.
 
 ### Sequence Diagram
 

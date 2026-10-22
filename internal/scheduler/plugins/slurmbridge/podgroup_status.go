@@ -32,6 +32,10 @@ func podsHaveSlurmNodeAssignments(pods *corev1.PodList, jobID string) bool {
 // markPodGroupScheduled sets the served API version's scheduled condition to True.
 // kube-scheduler normally writes this when it admits a gang; slurm-bridge must do the same.
 func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, slurmJobComponent *slurmjobir.SlurmJobComponent, jobID string) {
+	sb.markPodGroupScheduledWithSnapshot(ctx, slurmJobIR, slurmJobComponent, jobID, false)
+}
+
+func (sb *SlurmBridge) markPodGroupScheduledWithSnapshot(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, slurmJobComponent *slurmjobir.SlurmJobComponent, jobID string, snapshot bool) {
 	if slurmJobIR == nil || slurmJobComponent == nil || sb.workloadAPI == nil || slurmJobIR.RootPOM.TypeMeta != sb.workloadAPI.PodGroupTypeMeta || jobID == "" {
 		return
 	}
@@ -48,9 +52,11 @@ func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *sl
 		return
 	}
 
-	if err := sb.refreshSlurmJobIRPods(ctx, slurmJobIR); err != nil {
-		logger.V(4).Info("skip PodGroup status update", "err", err)
-		return
+	if !snapshot {
+		if err := sb.refreshSlurmJobIRPods(ctx, slurmJobIR); err != nil {
+			logger.V(4).Info("skip PodGroup status update", "err", err)
+			return
+		}
 	}
 	if !podsHaveSlurmNodeAssignments(&slurmJobComponent.Pods, jobID) {
 		return

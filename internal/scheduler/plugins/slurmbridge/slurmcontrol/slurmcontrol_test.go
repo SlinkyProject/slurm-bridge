@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -1141,5 +1142,42 @@ func Test_realSlurmControl_ReleaseJob(t *testing.T) {
 				t.Errorf("writes = %d, want %d", writes, tt.wantWrites)
 			}
 		})
+	}
+}
+
+func TestGetResourcesForNodesSharesLayout(t *testing.T) {
+	var layouts, extras atomic.Int32
+	c := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(_ context.Context, key object.ObjectKey, obj object.Object, _ ...client.GetOption) error {
+			switch out := obj.(type) {
+			case *api.V0044NodeResourceLayoutListObject:
+				layouts.Add(1)
+				if key != "10" {
+					t.Errorf("layout key=%s, want 10", key)
+				}
+				// Decode a realistic component response; unrelated nodes are not requested.
+				return json.Unmarshal([]byte(`[{"node":"node1","core_bitmap":"0-1"},{"node":"node2","core_bitmap":"2-3"},{"node":"unused"}]`), out)
+			case *api.V0044Node:
+				extras.Add(1)
+				out.Extra = ptr.To("extra-" + string(key))
+				return nil
+			default:
+				return fmt.Errorf("unexpected read %T", obj)
+			}
+		},
+	}).Build()
+	r := &realSlurmControl{Client: c}
+	pod := &corev1.Pod{ObjectMeta: v1.ObjectMeta{Labels: map[string]string{wellknown.LabelExternalJobId: "10"}}}
+	resources, err := r.GetResourcesForNodes(t.Context(), pod, []string{"node1", "node2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layouts.Load() != 1 || extras.Load() != 2 || len(resources) != 2 {
+		t.Fatalf("layouts=%d extras=%d resources=%v", layouts.Load(), extras.Load(), resources)
+	}
+	for _, node := range []string{"node1", "node2"} {
+		if resources[node] == nil || resources[node].NodeExtra != "extra-"+node || resources[node].CoreBitmap == "" {
+			t.Fatalf("invalid resource snapshot: %v", resources)
+		}
 	}
 }
