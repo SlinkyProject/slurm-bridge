@@ -502,9 +502,10 @@ func (r *realSlurmControl) GetResourcesForNodes(ctx context.Context, pod *corev1
 	return out, nil
 }
 
+// Node Extra comes from the existing informer; the allocation layout stays live.
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {
 	node := &api.V0044Node{}
-	if err := r.Get(ctx, object.ObjectKey(nodeName), node, &client.GetOptions{SkipCache: true}); err != nil {
+	if err := r.Get(ctx, object.ObjectKey(nodeName), node); err != nil {
 		return "", err
 	}
 	return ptr.Deref(node.Extra, ""), nil

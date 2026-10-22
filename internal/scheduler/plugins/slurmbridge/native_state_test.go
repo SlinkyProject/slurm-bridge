@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -45,6 +46,8 @@ type nativeStateControl struct {
 	liveReads       atomic.Int32
 	resourceReads   atomic.Int32
 	resourceErr     error
+	liveErr         error
+	liveJob         *slurmcontrol.ExternalJob
 }
 
 func (c *nativeStateControl) GetAllocation(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
@@ -54,7 +57,10 @@ func (c *nativeStateControl) GetAllocation(context.Context, *corev1.Pod, *slurmj
 
 func (c *nativeStateControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
 	c.liveReads.Add(1)
-	return ptr.To(c.job), nil
+	if c.liveJob != nil {
+		return c.liveJob, c.liveErr
+	}
+	return ptr.To(c.job), c.liveErr
 }
 
 func (c *nativeStateControl) GetResourcesForNodes(ctx context.Context, pod *corev1.Pod, nodes []string) (map[string]*slurmcontrol.NodeResources, error) {
@@ -187,8 +193,8 @@ func TestNativeGangSharesPreparationAndBindingResources(t *testing.T) {
 				})
 			}
 			binding.Wait()
-			if control.resourceReads.Load() != 1 || control.liveReads.Load() != 2 {
-				t.Fatalf("resource reads=%d, live validation reads=%d; want 1, 2", control.resourceReads.Load(), control.liveReads.Load())
+			if control.resourceReads.Load() != 1 || control.liveReads.Load() != 1 || control.allocationReads.Load() != 2 {
+				t.Fatalf("resource reads=%d, live validation reads=%d; want 1, 1", control.resourceReads.Load(), control.liveReads.Load())
 			}
 			if !reflect.DeepEqual(snapshot, &first.slurmJobIR.Components[0].Pods) {
 				t.Fatal("binding mutated shared membership")
@@ -563,6 +569,119 @@ func TestNativeCompositeSharesSnapshotAndReleasesAfterAllComponents(t *testing.T
 						t.Fatal("PostFilter mutated shared translation")
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestNativeGangSharesValidationAcross2048Bindings(t *testing.T) {
+	sb, control, _, _ := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
+	const size = 2048
+	ir := &slurmjobir.SlurmJobIR{Components: make([]slurmjobir.SlurmJobComponent, 1)}
+	ir.Components[0].Pods.Items = make([]corev1.Pod, size)
+	a := &nativeAllocation{ir: ir, jobs: []slurmcontrol.ExternalJob{control.job},
+		components: make([]nativeComponent, 1), members: make(map[client.ObjectKey]nativeMember)}
+	// Sharing is per allocation; every Pod in this fixture uses the same Node
+	// object so the test isolates concurrent validation from placement setup.
+	a.components[0].slurmNodes = []string{"node1"}
+	for i := range size {
+		pod := allocationPod(fmt.Sprintf("pod-%d", i), 0, "10", "")
+		ir.Components[0].Pods.Items[i] = *pod
+		a.members[client.ObjectKeyFromObject(pod)] = nativeMember{pod: &ir.Components[0].Pods.Items[i]}
+	}
+	var bindings sync.WaitGroup
+	for i := range size {
+		bindings.Go(func() {
+			pod := &ir.Components[0].Pods.Items[i]
+			state := framework.NewCycleState()
+			state.Write(stateKey, &stateData{native: a, slurmJobIR: ir, allocation: a.jobs, nodeName: "node1"})
+			if status := sb.PreBind(t.Context(), state, pod, "node1"); !status.IsSuccess() {
+				t.Errorf("binding: %v", status)
+			}
+		})
+	}
+	bindings.Wait()
+	if control.allocationReads.Load() != 1 || control.liveReads.Load() != 1 || control.resourceReads.Load() != 1 {
+		t.Fatalf("allocation=%d live=%d resources=%d; want one each", control.allocationReads.Load(), control.liveReads.Load(), control.resourceReads.Load())
+	}
+}
+
+func TestNativeBindingValidationFailureAndRetry(t *testing.T) {
+	for _, change := range []string{"duplicate", "replacement", "cancelled", "lost node", "live error"} {
+		t.Run(change, func(t *testing.T) {
+			sb, control, pods, _ := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
+			group := framework.NewCycleState()
+			states := []*framework.CycleState{nativePodState(group), nativePodState(group)}
+			for i, pod := range pods {
+				if _, status := sb.PreFilter(t.Context(), states[i], pod, nil); !status.IsSuccess() {
+					t.Fatal(status)
+				}
+			}
+			original := control.job
+			control.liveJob = ptr.To(control.job)
+			switch change {
+			case "duplicate":
+				control.allocationErr = slurmjob.ErrAmbiguousAllocation
+			case "replacement":
+				control.job.JobId = 11
+			case "cancelled":
+				control.liveJob.Finished = true
+			case "lost node":
+				control.liveJob.Nodes = "node1"
+			case "live error":
+				control.liveErr = errors.New("Slurm unavailable")
+			}
+			for i, pod := range pods {
+				if status := sb.PreBind(t.Context(), states[i], pod, fmt.Sprintf("node%d", i+1)); status.IsSuccess() {
+					t.Fatal("invalid allocation bound")
+				}
+			}
+			if control.allocationReads.Load() != 2 || control.liveReads.Load() > 1 || control.resourceReads.Load() != 0 {
+				t.Fatalf("failed validation repeated or fetched resources: %d %d %d", control.allocationReads.Load(), control.liveReads.Load(), control.resourceReads.Load())
+			}
+			control.job, control.liveJob, control.liveErr, control.allocationErr = original, nil, nil, nil
+			next := nativePodState(framework.NewCycleState())
+			if _, status := sb.PreFilter(t.Context(), next, pods[0], nil); !status.IsSuccess() {
+				t.Fatal(status)
+			}
+			if status := sb.PreBind(t.Context(), next, pods[0], "node1"); !status.IsSuccess() {
+				t.Fatal(status)
+			}
+		})
+	}
+}
+
+func TestNativeBindingChecksEachMemberAfterSharedValidation(t *testing.T) {
+	for _, change := range []string{"uid", "job", "hetjob", "node"} {
+		t.Run(change, func(t *testing.T) {
+			sb, control, pods, _ := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
+			group := framework.NewCycleState()
+			states := []*framework.CycleState{nativePodState(group), nativePodState(group)}
+			for i, pod := range pods {
+				if _, status := sb.PreFilter(t.Context(), states[i], pod, nil); !status.IsSuccess() {
+					t.Fatal(status)
+				}
+			}
+			if status := sb.PreBind(t.Context(), states[0], pods[0], "node1"); !status.IsSuccess() {
+				t.Fatal(status)
+			}
+			changed := pods[1].DeepCopy()
+			node := "node2"
+			switch change {
+			case "uid":
+				changed.UID = "replacement"
+			case "job":
+				changed.Labels[wellknown.LabelExternalJobId] = "11"
+			case "hetjob":
+				changed.Labels[wellknown.LabelExternalHetJobId] = "11"
+			case "node":
+				node = "node1"
+			}
+			if status := sb.PreBind(t.Context(), states[1], changed, node); status.Code() != fwk.Unschedulable {
+				t.Fatalf("changed member accepted: %v", status)
+			}
+			if control.liveReads.Load() != 1 {
+				t.Fatal("member validation made another live read")
 			}
 		})
 	}

@@ -1020,8 +1020,10 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if len(s.allocation) == 0 {
 		return fwk.NewStatus(fwk.Unschedulable, "waiting for Slurm registration")
 	}
-	if status := sb.checkAllocation(ctx, s, pod); !status.IsSuccess() {
-		return status
+	if s.native == nil {
+		if status := sb.checkAllocation(ctx, s, pod); !status.IsSuccess() {
+			return status
+		}
 	}
 
 	// Note that whole node allocations in slurm will look like all
@@ -1031,28 +1033,33 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
-	// Revalidate cached placement before creating claims or binding the Pod.
-	liveJob, err := sb.slurmControl.GetJob(ctx, pod)
-	if err != nil {
-		return fwk.AsStatus(err)
-	}
-	expected := s.allocation[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
-	slurmNodes, err := hostlist.Expand(liveJob.Nodes)
-	if err != nil {
-		return fwk.AsStatus(err)
-	}
 	slurmNode := nodecontrollerutils.GetSlurmNodeName(node)
-	if liveJob.JobId != expected.JobId || liveJob.HetJobId != expected.HetJobId ||
-		liveJob.Pending || liveJob.Finished || !slices.Contains(slurmNodes, slurmNode) {
-		return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
-	}
 	var resources *slurmcontrol.NodeResources
 	if s.native != nil {
 		if s.nodeName != nodeName {
 			return fwk.NewStatus(fwk.Unschedulable, "selected node differs from gang assignment")
 		}
-		resources, err = s.native.resourcesFor(ctx, sb.slurmControl, pod, slurmNode)
+		var status *fwk.Status
+		resources, status = s.native.resourcesFor(ctx, sb.slurmControl, pod, slurmNode)
+		if !status.IsSuccess() {
+			return status
+		}
 	} else {
+		// Discovery uses cached state, so validate the selected placement here in
+		// concurrent binding before creating claims or binding a Pod.
+		liveJob, err := sb.slurmControl.GetJob(ctx, pod)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		expected := s.allocation[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
+		slurmNodes, err := hostlist.Expand(liveJob.Nodes)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		if liveJob.JobId != expected.JobId || liveJob.HetJobId != expected.HetJobId ||
+			liveJob.Pending || liveJob.Finished || !slices.Contains(slurmNodes, slurmNode) {
+			return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
+		}
 		resources, err = sb.slurmControl.GetResources(ctx, pod, slurmNode)
 	}
 	if err != nil {

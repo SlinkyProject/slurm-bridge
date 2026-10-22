@@ -30,22 +30,30 @@ import (
 // siblings reached through a CompositePodGroup. A new attempt always rebuilds the
 // snapshot: no membership, allocation or feasibility result survives a retry.
 // Members retain this pointer after the framework detaches the group cycle for
-// binding. Only resourceOnce writes during binding; published snapshots are read-only.
+// binding. Once guards publish binding validation and resources; snapshots are read-only.
 type nativeAllocation struct {
-	ir         *slurmjobir.SlurmJobIR
-	jobs       []slurmcontrol.ExternalJob
-	status     *fwk.Status
-	components []nativeComponent
+	ir               *slurmjobir.SlurmJobIR
+	jobs             []slurmcontrol.ExternalJob
+	status           *fwk.Status
+	components       []nativeComponent
+	members          map[client.ObjectKey]nativeMember
+	validationOnce   sync.Once
+	validationStatus *fwk.Status
+}
+
+type nativeMember struct {
+	pod       *corev1.Pod
+	component int
 }
 
 type nativeComponent struct {
-	prepared     bool
-	status       *fwk.Status
-	assignments  map[client.ObjectKey]string
-	slurmNodes   []string
-	resourceOnce sync.Once
-	resources    map[string]*slurmcontrol.NodeResources
-	resourceErr  error
+	prepared      bool
+	status        *fwk.Status
+	assignments   map[client.ObjectKey]string
+	slurmNodes    []string
+	resourceOnce  sync.Once
+	resources     map[string]*slurmcontrol.NodeResources
+	bindingStatus *fwk.Status
 }
 
 // Use the outermost scheduling attempt, while translation keeps independent
@@ -113,13 +121,17 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 				}
 			}
 		}
-		allocation = &nativeAllocation{ir: ir, components: make([]nativeComponent, len(ir.Components))}
+		allocation = &nativeAllocation{ir: ir, components: make([]nativeComponent, len(ir.Components)), members: make(map[client.ObjectKey]nativeMember)}
 		if group.allocations == nil {
 			group.allocations = make(map[client.ObjectKey]*nativeAllocation)
 		}
-		for _, component := range ir.Components {
+		for index := range ir.Components {
+			component := &ir.Components[index]
 			for i := range component.Pods.Items {
-				group.allocations[client.ObjectKeyFromObject(&component.Pods.Items[i])] = allocation
+				member := &component.Pods.Items[i]
+				key := client.ObjectKeyFromObject(member)
+				group.allocations[key] = allocation
+				allocation.members[key] = nativeMember{pod: member, component: index}
 			}
 		}
 		allocation.status = sb.prepareNativeAllocation(ctx, pod, allocation)
@@ -128,22 +140,15 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 	if !allocation.status.IsSuccess() {
 		return nil, allocation.status
 	}
-	index := allocation.ir.ComponentOf(pod.Namespace, pod.Name)
-	if index < 0 {
+	member, found := allocation.members[key]
+	if !found {
 		return nil, fwk.NewStatus(fwk.Unschedulable, "Pod is absent from gang snapshot")
 	}
-	component := &allocation.ir.Components[index]
-	for i := range component.Pods.Items {
-		member := &component.Pods.Items[i]
-		if member.Name != pod.Name || member.Namespace != pod.Namespace {
-			continue
-		}
-		if member.UID != pod.UID || !equality.Semantic.DeepEqual(member.Spec, pod.Spec) ||
-			member.Labels[wellknown.LabelExternalJobId] != pod.Labels[wellknown.LabelExternalJobId] ||
-			member.Labels[wellknown.LabelExternalHetJobId] != pod.Labels[wellknown.LabelExternalHetJobId] {
-			return nil, fwk.NewStatus(fwk.Unschedulable, "Pod identity or requirements changed during gang scheduling")
-		}
+	index := member.component
+	if !sameNativeMember(member.pod, pod) || !equality.Semantic.DeepEqual(member.pod.Spec, pod.Spec) {
+		return nil, fwk.NewStatus(fwk.Unschedulable, "Pod identity or requirements changed during gang scheduling")
 	}
+
 	s.slurmJobIR, s.allocation, s.native = allocation.ir, allocation.jobs, allocation
 	job := allocation.jobs[index]
 	if job.Finished {
@@ -278,18 +283,56 @@ func nativeAssignments(pods []corev1.Pod, nodes sets.Set[string], snapshot fwk.N
 	return assignments, nil
 }
 
-func (a *nativeAllocation) resourcesFor(ctx context.Context, control slurmcontrol.SlurmControlInterface, pod *corev1.Pod, node string) (*slurmcontrol.NodeResources, error) {
-	index := a.ir.ComponentOf(pod.Namespace, pod.Name)
-	component := &a.components[index]
-	component.resourceOnce.Do(func() {
-		component.resources, component.resourceErr = control.GetResourcesForNodes(ctx, pod, component.slurmNodes)
+// Binding validates the allocation once per attempt and each live component once.
+// Later members deliberately reuse that observation: neither this snapshot nor a
+// per-Pod GET makes Slurm cancellation atomic with Kubernetes binding. Retries
+// rebuild all state, and each member must still match its pinned identity/node.
+func (a *nativeAllocation) resourcesFor(ctx context.Context, control slurmcontrol.SlurmControlInterface, pod *corev1.Pod, node string) (*slurmcontrol.NodeResources, *fwk.Status) {
+	member, found := a.members[client.ObjectKeyFromObject(pod)]
+	if !found || !sameNativeMember(member.pod, pod) {
+		return nil, fwk.NewStatus(fwk.Unschedulable, "Pod identity changed before gang binding")
+	}
+	a.validationOnce.Do(func() {
+		jobs, err := control.GetAllocation(ctx, pod, a.ir)
+		state := &stateData{slurmJobIR: a.ir, allocation: a.jobs}
+		a.validationStatus = state.checkAllocation(pod, jobs, err)
 	})
-	if component.resourceErr != nil {
-		return nil, component.resourceErr
+	if !a.validationStatus.IsSuccess() {
+		return nil, a.validationStatus
+	}
+	component := &a.components[member.component]
+	component.resourceOnce.Do(func() {
+		live, err := control.GetJob(ctx, pod)
+		if err != nil {
+			component.bindingStatus = fwk.AsStatus(err)
+			return
+		}
+		expected := a.jobs[member.component]
+		nodes, err := hostlist.Expand(live.Nodes)
+		if err != nil {
+			component.bindingStatus = fwk.AsStatus(err)
+			return
+		}
+		if live.JobId != expected.JobId || live.HetJobId != expected.HetJobId ||
+			live.Pending || live.Finished || !sets.New(nodes...).HasAll(component.slurmNodes...) {
+			component.bindingStatus = fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the gang's nodes")
+			return
+		}
+		component.resources, err = control.GetResourcesForNodes(ctx, pod, component.slurmNodes)
+		component.bindingStatus = fwk.AsStatus(err)
+	})
+	if !component.bindingStatus.IsSuccess() {
+		return nil, component.bindingStatus
 	}
 	resources, found := component.resources[node]
 	if !found {
-		return nil, fmt.Errorf("Slurm resource snapshot has no allocation for node %q", node)
+		return nil, fwk.AsStatus(fmt.Errorf("Slurm resource snapshot has no allocation for node %q", node))
 	}
 	return resources, nil
+}
+
+func sameNativeMember(expected, pod *corev1.Pod) bool {
+	return expected.UID == pod.UID &&
+		expected.Labels[wellknown.LabelExternalJobId] == pod.Labels[wellknown.LabelExternalJobId] &&
+		expected.Labels[wellknown.LabelExternalHetJobId] == pod.Labels[wellknown.LabelExternalHetJobId]
 }

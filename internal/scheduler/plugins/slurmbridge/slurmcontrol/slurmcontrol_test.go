@@ -1148,7 +1148,7 @@ func Test_realSlurmControl_ReleaseJob(t *testing.T) {
 func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 	var layouts, extras atomic.Int32
 	c := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
-		Get: func(_ context.Context, key object.ObjectKey, obj object.Object, _ ...client.GetOption) error {
+		Get: func(_ context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
 			switch out := obj.(type) {
 			case *api.V0044NodeResourceLayoutListObject:
 				layouts.Add(1)
@@ -1158,6 +1158,11 @@ func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 				// Decode a realistic component response; unrelated nodes are not requested.
 				return json.Unmarshal([]byte(`[{"node":"node1","core_bitmap":"0-1"},{"node":"node2","core_bitmap":"2-3"},{"node":"unused"}]`), out)
 			case *api.V0044Node:
+				options := &client.GetOptions{}
+				options.ApplyOptions(opts)
+				if options.SkipCache {
+					t.Error("node metadata bypassed informer")
+				}
 				extras.Add(1)
 				out.Extra = ptr.To("extra-" + string(key))
 				return nil
