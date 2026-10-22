@@ -18,12 +18,7 @@
     - [Scheduler-managed Pod metadata](#scheduler-managed-pod-metadata)
   - [Pod grouping](#pod-grouping)
     - [Other controller owners](#other-controller-owners)
-  - [Built-in PodGroup](#built-in-podgroup)
-    - [Upgrading from Kubernetes 1.36 to 1.37](#upgrading-from-kubernetes-136-to-137)
-  - [JobSets](#jobsets)
-  - [PodGroup coscheduling](#podgroup-coscheduling)
-    - [Migrating from v1alpha1 PodGroups](#migrating-from-v1alpha1-podgroups)
-  - [LeaderWorkerSet](#leaderworkerset)
+  - [Workload guides](#workload-guides)
   - [Scaling and failure behavior](#scaling-and-failure-behavior)
     - [CPU and memory changes](#cpu-and-memory-changes)
     - [Changing the number of Pods](#changing-the-number-of-pods)
@@ -42,15 +37,16 @@ workloads through Kubernetes. Most workloads that can be submitted to
 batch workload primitive.
 
 At this time, `slurm-bridge` has scheduling support for [Jobs],
-[JobSets](#jobsets), [Pods], [built-in PodGroup](#built-in-podgroup)
+[JobSets](jobset.md), [Pods], [built-in PodGroup](podgroup.md)
 (`scheduling.k8s.io/v1alpha2` on Kubernetes **1.36**, or
 `scheduling.k8s.io/v1beta1` on **1.37**),
-[PodGroup coscheduling](#podgroup-coscheduling) (scheduler-plugins, deprecated),
-and [LeaderWorkerSets]. If your workload requires or benefits from co-scheduled
-pod launch (e.g. MPI, multi-node), use [built-in PodGroup](#built-in-podgroup)
-on Kubernetes **1.36 or 1.37** when its API is enabled. The deprecated
-[PodGroup coscheduling](#podgroup-coscheduling) integration remains available
-for compatibility when the built-in API is unavailable.
+[PodGroup coscheduling](podgroup-coscheduling.md) (scheduler-plugins,
+deprecated), and [LeaderWorkerSets](lws.md). If your workload requires or
+benefits from co-scheduled pod launch (e.g. MPI, multi-node), use
+[built-in PodGroup](podgroup.md) on Kubernetes **1.36 or 1.37** when its API is
+enabled. The deprecated [PodGroup coscheduling](podgroup-coscheduling.md)
+integration remains available for compatibility when the built-in API is
+unavailable.
 
 ## Using the `slurm-bridge` Scheduler
 
@@ -407,306 +403,14 @@ scheduler cannot read the Deployment, and the Pod is still scheduled. If the
 ReplicaSet itself cannot be retrieved, scheduling fails because no controller in
 the chain was successfully resolved.
 
-## Built-in PodGroup
+## Workload guides
 
-`slurm-bridge` supports built-in Workload and PodGroup APIs on Kubernetes **1.36
-and 1.37**. Enable the **`GenericWorkload`** feature gate and the API version
-for your cluster:
-
-| Kubernetes | Workload and PodGroup `apiVersion` | Kind configuration                              |
-| ---------- | ---------------------------------- | ----------------------------------------------- |
-| 1.36       | `scheduling.k8s.io/v1alpha2`       | [`hack/kind-1.36.yaml`](../hack/kind-1.36.yaml) |
-| 1.37       | `scheduling.k8s.io/v1beta1`        | [`hack/kind.yaml`](../hack/kind.yaml)           |
-
-The bridge's **`SlurmBridgeGenericWorkload`** feature gate is enabled by
-default. At startup, the scheduler requires both Workload and PodGroup resources
-in a supported API version, preferring `v1beta1` when both versions are
-available. Missing APIs, incomplete discovery responses, and discovery errors
-fail startup with an error identifying the required feature. The scheduler does
-not silently disable Workload support.
-
-This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
-`GenericWorkload` on the cluster components as shown in the Kind configurations;
-`SlurmBridgeGenericWorkload` controls the bridge's compatibility implementation
-without enabling the embedded scheduler's upstream gang-scheduling path.
-
-When the embedded scheduler's `GenericWorkload` gate is enabled, its shared
-PodGroup client and informers use the discovered native API version. Alpha
-objects and status conditions are converted to the scheduler's beta types;
-status writes are converted back to the served version. Other Kubernetes
-resources retain their original clients. This compatibility wiring does not
-enable native gang scheduling by default.
-
-Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
-out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm
-deployments, set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The
-scheduler then skips Workload discovery and registration. Pods that reference a
-built-in PodGroup through `spec.schedulingGroup.podGroupName` are rejected with
-a clear scheduling failure before Slurm operations. Ordinary Pods, Jobs,
-JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing
-behavior when they do not reference a built-in PodGroup.
-
-For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
-The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
-profile automatically. Other test versions retain the default requirement.
-
-After slurm-bridge assigns nodes to the gang, it sets `PodGroupScheduled=True`
-on 1.36 or `PodGroupInitiallyScheduled=True` on 1.37. These conditions record
-gang admission, independently of Job completion.
-
-A [**Workload**][workload-api] defines **`podGroupTemplates`** (gang or basic
-scheduling). Workload controllers create runtime **`PodGroup`** objects from
-those templates. Pods opt in with **`spec.schedulingGroup.podGroupName`**
-pointing at their **`PodGroup`**. For a **Gang** policy, `slurm-bridge` groups
-pods by scheduling group and applies the same external-job flow as other
-co-scheduled workload types, including the `minCount` check.
-
-For a **Basic** policy, pods follow their normal owner-based scheduling path.
-Jobs and standalone Pods receive independent Slurm allocations, while
-LeaderWorkerSets retain their existing group scheduling. PodGroup and Workload
-annotations still apply with the precedence described below. This also covers
-the Basic PodGroups that Kubernetes 1.37 creates automatically for ordinary Jobs
-when `WorkloadWithJob` is enabled: completed or failed sibling Pods do not
-increase the allocation requested for the next Job Pod.
-
-Example manifest excerpts for Kubernetes **1.37**:
-
-```yaml
-apiVersion: scheduling.k8s.io/v1beta1
-kind: Workload
-metadata:
-  name: training-workload
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: training-job
-    slurmjob.slinky.slurm.net/timelimit: "5"
-spec:
-  controllerRef:
-    apiGroup: batch
-    kind: Job
-    name: training-job
-  podGroupTemplates:
-    - name: workers
-      schedulingPolicy:
-        gang:
-          minCount: 2
----
-apiVersion: scheduling.k8s.io/v1beta1
-kind: PodGroup
-metadata:
-  name: training-job-workers
-spec:
-  workloadRef:
-    workloadName: training-workload
-    templateName: workers
-  schedulingPolicy:
-    gang:
-      minCount: 2
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: training-job
-spec:
-  template:
-    spec:
-      schedulerName: slurm-bridge-scheduler
-      schedulingGroup:
-        podGroupName: training-job-workers
-```
-
-For Kubernetes **1.36**, set `apiVersion: scheduling.k8s.io/v1alpha2` on both
-the Workload and PodGroup, and replace the PodGroup's `spec.workloadRef` with
-`spec.podGroupTemplateRef`:
-
-```yaml
-spec:
-  podGroupTemplateRef:
-    workload:
-      workloadName: training-workload
-      podGroupTemplateName: workers
-```
-
-Keep `spec.schedulingPolicy` and the Job's
-`spec.template.spec.schedulingGroup.podGroupName` unchanged. The complete
-manifests in [`hack/examples/workload/`](../hack/examples/workload/) use this
-1.36 form.
-
-Ref: [Workload API][workload-api]
-
-To override Slurm submission parameters, add optional
-`slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
-controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
-**Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
-job name for a Gang policy defaults to the **PodGroup object name** (not the
-Workload name); Basic policies retain the normal workload's naming behavior. The
-partition defaults to the scheduler configuration. See
-[Annotations](#annotations) for the full key list.
-
-If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
-applied **PodGroup -> selected controller -> Workload**, so the Workload wins.
-In the example above, the PodGroup is named `training-job-workers` but the
-Workload sets `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm
-receives **`training-job`**. A PodGroup cannot override a `job-name` set on its
-Workload or selected controller. For per-gang names, omit `job-name` from
-broader sources and set it on each **PodGroup** instead.
-
-A Workload may define several `podGroupTemplates`, each producing a runtime
-PodGroup. Workload-level identifiers such as `job-name` then apply to **every**
-PodGroup under that Workload. Each gang still submits a separate Slurm external
-job (distinct job ID on the pods), but all share the same Slurm job **name** in
-`squeue`. Use the Workload for **shared** parameters (partition, account, QOS,
-time limit) and **PodGroup** for per-gang identifiers.
-
-### Upgrading from Kubernetes 1.36 to 1.37
-
-Kubernetes 1.37 does not serve `scheduling.k8s.io/v1alpha2`, so Workloads and
-PodGroups created on 1.36 are not available after the upgrade. A Pod's
-`spec.schedulingGroup.podGroupName` cannot change. Running Pods keep running
-with their Slurm jobs. Pending Pods wait until a PodGroup with that name exists
-again.
-
-1. Before the upgrade, save the objects you want to keep:
-
-   ```sh
-   kubectl get workloads.scheduling.k8s.io,podgroups.scheduling.k8s.io \
-     --all-namespaces --output yaml > workloads-v1alpha2.yaml
-   ```
-
-1. Upgrade the cluster. Enable `scheduling.k8s.io/v1beta1` and the
-   `GenericWorkload` gate, as in [`hack/kind.yaml`](../hack/kind.yaml).
-
-1. Restart the scheduler so it discovers `v1beta1`:
-
-   ```sh
-   kubectl --namespace slurm rollout restart deployment/slurm-bridge-scheduler
-   ```
-
-1. Convert the saved objects and apply them with the same names and namespaces.
-   Pending Pods then join their groups.
-
-   - Set `apiVersion: scheduling.k8s.io/v1beta1`.
-   - In PodGroups, replace
-     `spec.podGroupTemplateRef.workload.{workloadName,podGroupTemplateName}`
-     with `spec.workloadRef.{workloadName,templateName}`.
-   - In PodGroups and in each Workload `spec.podGroupTemplates` entry, replace
-     `disruptionMode: Pod` with `disruptionMode: {single: {}}` and
-     `disruptionMode: PodGroup` with `disruptionMode: {all: {}}`.
-   - Remove `status`, `metadata.resourceVersion`, and `metadata.uid`.
-
-## JobSets
-
-This section assumes [JobSets] is installed.
-
-JobSet pods are scheduled on a per-pod basis unless a Gang PodGroup groups them
-into a shared Slurm allocation. The Job and JobSet controllers manage retries,
-failure policies, and completion; slurm-bridge manages the corresponding Slurm
-jobs.
-
-JobSet API validation also limits scaling. In JobSet v0.13.0, changing
-`spec.replicatedJobs[].replicas` or the Pod resource template is rejected and
-requires recreating the JobSet. The upstream `ElasticJobSet` feature gate
-(disabled by default) permits changing `parallelism` and `completions` together
-for non-terminal Indexed Jobs, with equal values. Without gang grouping, each
-additional Pod gets an independent Slurm job. With gang grouping, the allocation
-limitations below still apply, even if the JobSet API accepts the update.
-
-See [Scaling and failure behavior](#scaling-and-failure-behavior) before
-changing an existing workload.
-
-## PodGroup coscheduling
-
-> [!WARNING]
-> Support for the **scheduler-plugins** PodGroup API
-> `scheduling.x-k8s.io/v1alpha1` is deprecated in `slurm-bridge` and will be
-> removed in an upcoming release. Use the
-> [built-in PodGroup](#built-in-podgroup) API for new workloads. Existing legacy
-> workloads remain supported, but the [admission webhook](admission.md) warns on
-> Pod creation and update when the `scheduling.x-k8s.io/pod-group` label is
-> non-empty. This deprecation does not remove scheduling support.
-
-To reject new legacy PodGroup Pods and updates that introduce legacy PodGroup
-usage, set `admission.featureGates.Legacyv1alpha1PodGroups: false` (default:
-`true`). Pods already using legacy PodGroups can still be updated, with a
-deprecation warning, so metadata changes and finalizer removal remain possible.
-
-For compatibility on clusters where the supported built-in PodGroup API is
-unavailable, legacy workloads still require the
-[PodGroup coscheduling CRD][podgroups-crd] plus the out-of-tree CoScheduling
-controller:
-
-```sh
-helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins scheduler-plugins \
-  --namespace scheduler-plugins --create-namespace \
-  --set 'plugins.enabled={CoScheduling}' --set 'scheduler.replicaCount=0'
-```
-
-Pods join the group via the label `scheduling.x-k8s.io/pod-group` (see
-[`hack/examples/podgroup-coscheduling/`](../hack/examples/podgroup-coscheduling/)).
-Gang size is `spec.minMember` on the PodGroup object.
-
-|                 | Built-in PodGroup                                                         | PodGroup coscheduling                 |
-| --------------- | ------------------------------------------------------------------------- | ------------------------------------- |
-| API version     | `scheduling.k8s.io/v1alpha2` (1.36) or `scheduling.k8s.io/v1beta1` (1.37) | `scheduling.x-k8s.io/v1alpha1`        |
-| Install         | Feature gate + runtime config                                             | CRD + helm chart                      |
-| Pod association | `spec.schedulingGroup.podGroupName`                                       | Label `scheduling.x-k8s.io/pod-group` |
-| Gang field      | `spec.schedulingPolicy.gang.minCount`                                     | `spec.minMember`                      |
-
-### Migrating from v1alpha1 PodGroups
-
-The built-in and scheduler-plugins PodGroups are separate APIs with different
-schemas. Changing only `apiVersion` is not sufficient.
-
-1. Enable the built-in Workload and PodGroup APIs for your cluster as described
-   in [Built-in PodGroup](#built-in-podgroup): `scheduling.k8s.io/v1alpha2` on
-   Kubernetes **1.36** or `scheduling.k8s.io/v1beta1` on **1.37**.
-1. Update new Pod manifests or workload Pod templates to reference the built-in
-   PodGroup through `spec.schedulingGroup.podGroupName`. Remove the
-   `scheduling.x-k8s.io/pod-group` label; leaving it set continues to trigger
-   the deprecation warning.
-1. Let existing legacy workloads finish before removing their PodGroups. Keep
-   the scheduler-plugins CRD and CoScheduling controller installed while any
-   workloads still depend on them.
-
-## LeaderWorkerSet
-
-> [!WARNING]
-> Implicit LeaderWorkerSet gang scheduling is deprecated in `slurm-bridge` and
-> will be removed in a future release. Admission warns for LWS Pods without
-> `spec.schedulingGroup.podGroupName`. Enable
-> [native LWS gang scheduling][lws-gang-scheduling] with `spec.scheduling: {}`
-> on the LeaderWorkerSet to migrate.
-
-To reject new legacy LWS Pods and updates that introduce implicit LWS gang
-scheduling, set `admission.featureGates.LegacyLWSGangs: false` (default:
-`true`). Pods already using implicit LWS gang scheduling can still be updated,
-with a deprecation warning, so metadata changes and finalizer removal remain
-possible.
-
-This section assumes [LeaderWorkerSet][leaderworkersets] is installed.
-
-LeaderWorkerSet groups will be co-scheduled so pods of each group will be
-guaranteed to launch together.
-
-Use `spec.groupIdentity: Ordinal` (the LWS default) and
-`spec.startupPolicy: LeaderCreated` for this integration. Each replica group
-receives its own Slurm allocation, with a default job name of
-`<set-name>-<group-index>`. Existing manifests that omit `groupIdentity` retain
-ordinal behavior with LWS v0.11.1. The `Hash` identity mode is not currently
-supported by slurm-bridge.
-
-The development installer uses LWS v0.11.1 with its default feature gates. Keep
-the LWS `WorkloadAwareScheduling` gate disabled when using this direct
-LeaderWorkerSet group scheduling. The existing
-[built-in PodGroup](#built-in-podgroup) integration can still group LWS Pods
-through `spec.schedulingGroup.podGroupName` on their Pod templates.
-
-When upgrading an existing Helm installation, apply the updated LWS CRDs before
-upgrading the controller, following the
-[upstream upgrade instructions](https://lws.sigs.k8s.io/docs/installation/#upgrade-by-helm).
-
-> [!NOTE]
-> Topology-aware placement is not supported yet, so some features of
-> LeaderWorkerSet may not behave as expected.
+- [Built-in PodGroup](podgroup.md): Workload and PodGroup APIs, gang scheduling,
+  and Kubernetes version upgrades.
+- [JobSets](jobset.md): per-Pod allocations, scaling restrictions, and recovery.
+- [LeaderWorkerSet](lws.md): group scheduling, replica scaling, and recovery.
+- [PodGroup coscheduling](podgroup-coscheduling.md): legacy scheduler-plugins
+  integration and migration to built-in PodGroups.
 
 ## Scaling and failure behavior
 
@@ -728,31 +432,29 @@ rejects updates through `pods/resize` with
 phase may already have a Slurm allocation, so its phase does not indicate that
 resizing is allowed.
 
-Use replacement Pods with the desired resource template. For a JobSet, recreate
-the workload as described above. For a LeaderWorkerSet, updating the leader or
-worker resource template triggers the LWS controller's rollout, replacing groups
-according to its rollout strategy. Replacement groups request new Slurm
-allocations; the bridge does not resize the old allocations. This replacement
-behavior also applies when the old Pods have not started running yet.
+Use replacement Pods with the desired resource template. Replacement Pods or
+groups request new Slurm allocations; the bridge does not resize the old
+allocations. This also applies when the old Pods have not started running yet.
+See the [JobSet](jobset.md#scaling) and [LeaderWorkerSet](lws.md#scaling) guides
+for workload-specific replacement behavior.
 
 ### Changing the number of Pods
 
-| Change                                                                                         | Before Slurm allocates the job                                                                                                                                                | After Slurm allocates the job                                                                                                    |
-| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Change membership of an existing gang                                                          | The scheduler can update the pending Slurm job from the current group on a scheduling retry, subject to workload API validation, gang quorum, and Slurm accepting the update. | Live expansion or shrinking is unsupported. Recreate the group for a new allocation.                                             |
-| Change LWS `spec.leaderWorkerTemplate.size`                                                    | LWS rolls out replacement groups; this is not an in-place resize of a queued group.                                                                                           | LWS rolls out replacement groups, each requiring a new allocation.                                                               |
-| Add or remove independent Pods, including ungrouped JobSet Pods when the JobSet API permits it | Each added Pod submits its own job; removed Pods have their pending jobs canceled during cleanup.                                                                             | New Pods queue for separate allocations; removed Pods release their own allocations during cleanup. Other allocations continue.  |
-| Change LWS `spec.replicas`                                                                     | Supported: add or remove whole independent groups, each with its own Slurm job.                                                                                               | Supported: new groups queue independently; removed groups release their allocations during cleanup. Retained groups keep theirs. |
+| Change                                                                                                       | Before Slurm allocates the job                                                                                                                                                | After Slurm allocates the job                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Change membership of an existing gang                                                                        | The scheduler can update the pending Slurm job from the current group on a scheduling retry, subject to workload API validation, gang quorum, and Slurm accepting the update. | Live expansion or shrinking is unsupported. Recreate the group for a new allocation.                                            |
+| Add or remove independent Pods, including ungrouped [JobSet Pods](jobset.md#scaling) when the API permits it | Each added Pod submits its own job; removed Pods have their pending jobs canceled during cleanup.                                                                             | New Pods queue for separate allocations; removed Pods release their own allocations during cleanup. Other allocations continue. |
 
 Gang quorum is `spec.schedulingPolicy.gang.minCount` for built-in PodGroups,
 `spec.minMember` for legacy PodGroups, or the configured LWS group size for
-implicit LWS gangs. If membership falls below quorum before allocation, the
-scheduler waits for enough Pods and cancels an existing job it detects as
-invalid. Pending updates are not an atomic scaling operation and can race with
-Slurm allocation. Once allocated, treat group membership as fixed: additional
-Pods cannot expand that allocation and may remain Pending. For LWS, scale whole
-replica groups instead. If templates put multiple LWS replica groups into one
-Gang PodGroup, those groups share an allocation and cannot scale independently.
+[implicit LWS gangs](lws.md#scaling). If membership falls below quorum before
+allocation, the scheduler waits for enough Pods and cancels an existing job it
+detects as invalid. Pending updates are not an atomic scaling operation and can
+race with Slurm allocation. Once allocated, treat group membership as fixed:
+additional Pods cannot expand that allocation and may remain Pending. For LWS,
+[scale whole replica groups](lws.md#scaling) instead. If templates put multiple
+LWS replica groups into one Gang PodGroup, those groups share an allocation and
+cannot scale independently.
 
 ### Scale-down and resource release
 
@@ -781,13 +483,12 @@ an API error is not evidence that a job was canceled or resources were released.
 A container restart within the same Pod does not by itself release the Slurm
 job. Terminal Pods trigger the cleanup described above. If a Slurm job stops
 running, for example because it is canceled or reaches its time limit, the Pod
-controller deletes its non-terminal, bound Pods. Job retries and JobSet failure
-policies determine whether batch Pods are replaced or the JobSet fails. LWS's
-`spec.leaderWorkerTemplate.restartPolicy` controls group recovery; the default
-`RecreateGroupOnPodRestart` recreates the group on Pod recreation or container
-restart. Replacement Pods need scheduling again. Do not rely on individual Pod
-replacement to extend or repair an allocated gang; recreate the whole group for
-a fresh allocation.
+controller deletes its non-terminal, bound Pods. Workload controllers determine
+whether Pods are replaced; see
+[JobSet recovery](jobset.md#failures-and-recovery) and
+[LeaderWorkerSet recovery](lws.md#failures-and-recovery). Replacement Pods need
+scheduling again. Do not rely on individual Pod replacement to extend or repair
+an allocated gang; recreate the whole group for a fresh allocation.
 
 When scaling stalls, inspect Pod scheduling events, JobSet or LWS status, bridge
 scheduler and controller logs, and the Slurm job in `squeue` or
@@ -799,9 +500,4 @@ assuming its resources have been released.
 <!-- Links -->
 
 [jobs]: https://kubernetes.io/docs/concepts/workloads/controllers/job/
-[jobsets]: https://jobset.sigs.k8s.io/
-[leaderworkersets]: https://lws.sigs.k8s.io/
-[lws-gang-scheduling]: https://lws.sigs.k8s.io/docs/concepts/leaderworkerset/gang-scheduling/
-[podgroups-crd]: https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/config/crd/bases/scheduling.x-k8s.io_podgroups.yaml
 [pods]: https://kubernetes.io/docs/concepts/workloads/pods/
-[workload-api]: https://kubernetes.io/docs/concepts/workloads/workload-api/
