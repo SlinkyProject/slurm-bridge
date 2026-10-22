@@ -9,12 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
@@ -23,7 +21,6 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -84,16 +81,13 @@ func copySchedulingIR(ir *slurmjobir.SlurmJobIR) *slurmjobir.SlurmJobIR {
 	return &copy
 }
 
-func (s *stateData) placementPod(pod *corev1.Pod) *corev1.Pod {
-	if s.nodeName == "" || s.nodeName == pod.Annotations[wellknown.AnnotationExternalJobNode] {
-		return pod
+// assignedNode uses the current native decision, including an empty decision for
+// pending allocations. Only the legacy path may fall back to Pod metadata.
+func (s *stateData) assignedNode(pod *corev1.Pod) string {
+	if s.native != nil || s.nodeName != "" {
+		return s.nodeName
 	}
-	copy := pod.DeepCopy()
-	if copy.Annotations == nil {
-		copy.Annotations = make(map[string]string)
-	}
-	copy.Annotations[wellknown.AnnotationExternalJobNode] = s.nodeName
-	return copy
+	return pod.Annotations[wellknown.AnnotationExternalJobNode]
 }
 
 func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, group *nativeGroupCycle) (*fwk.PreFilterResult, *fwk.Status) {
@@ -191,14 +185,6 @@ func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.
 	jobs, err := sb.slurmControl.GetAllocation(ctx, pod, allocation.ir)
 	s := &stateData{slurmJobIR: allocation.ir}
 	if status := s.checkAllocation(pod, jobs, err); !status.IsSuccess() {
-		inactive := errors.Is(err, slurmjob.ErrAllocationMissing) || err == nil && !slices.ContainsFunc(jobs, func(job slurmcontrol.ExternalJob) bool { return !job.Finished })
-		if node := pod.Annotations[wellknown.AnnotationExternalJobNode]; inactive && node != "" {
-			if err := sb.Get(ctx, client.ObjectKey{Name: node}, &corev1.Node{}); apierrors.IsNotFound(err) {
-				return sb.handleAllocatedNodeError(ctx, s, pod, ErrorNoKubeNodeMatch)
-			} else if err != nil {
-				return fwk.AsStatus(err)
-			}
-		}
 		return status
 	}
 	allocation.jobs = slices.Clone(jobs)
@@ -228,44 +214,42 @@ func (sb *SlurmBridge) prepareNativePlacement(ctx context.Context, pod *corev1.P
 		return sb.handleAllocatedNodeError(ctx, s, pod, err)
 	}
 	component := &allocation.ir.Components[index]
-	assignments, err := nativeAssignments(component.Pods.Items, nodes)
+	assignments, err := nativeAssignments(component.Pods.Items, nodes, sb.handle.SnapshotSharedLister().NodeInfos())
 	if err != nil {
 		return fwk.NewStatus(fwk.Unschedulable, err.Error())
 	}
-	// Patch private objects with an optimistic resource-version guard. An
-	// ambiguous or partial write fails this attempt; the next snapshot preserves
-	// any successfully published assignments instead of reshuffling them.
-	assigned := *component
-	assigned.Pods = *component.Pods.DeepCopy()
-	for i := range assigned.Pods.Items {
-		member := &assigned.Pods.Items[i]
-		node := assignments[client.ObjectKeyFromObject(member)]
-		if member.Annotations[wellknown.AnnotationExternalJobNode] == node {
-			continue
-		}
-		base := member.DeepCopy()
-		if member.Annotations == nil {
-			member.Annotations = make(map[string]string)
-		}
-		member.Annotations[wellknown.AnnotationExternalJobNode] = node
-		if err := sb.Patch(ctx, member, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
-			return fwk.AsStatus(err)
-		}
-	}
-	sb.markPodGroupScheduledWithSnapshot(ctx, allocation.ir, &assigned, strconv.Itoa(int(job.JobId)), true)
+	// Placement belongs to this scheduling attempt. The framework carries it
+	// through binding and owns native PodGroup status; publishing annotations
+	// here would add one serial API write per member and race Pod updates.
 	allocation.components[index].assignments = assignments
 	allocation.components[index].slurmNodes = slurmNodes
 	return nil
 }
 
-func nativeAssignments(pods []corev1.Pod, nodes sets.Set[string]) (map[client.ObjectKey]string, error) {
+func nativeAssignments(pods []corev1.Pod, nodes sets.Set[string], snapshot fwk.NodeInfoLister) (map[client.ObjectKey]string, error) {
+	// The framework snapshot also includes assumed Pods whose binding has not
+	// reached the informer yet. Reserve those placements by UID across retries.
+	placed := make(map[client.ObjectKey]*corev1.Pod)
+	for node := range nodes {
+		info, err := snapshot.Get(node)
+		if err != nil {
+			return nil, err
+		}
+		for _, occupant := range info.GetPods() {
+			pod := occupant.GetPod()
+			placed[client.ObjectKeyFromObject(pod)] = pod
+		}
+	}
 	available := nodes.Clone()
 	assignments := make(map[client.ObjectKey]string, len(pods))
 	for i := range pods {
 		pod := &pods[i]
 		node := pod.Spec.NodeName
-		if node == "" {
-			node = pod.Annotations[wellknown.AnnotationExternalJobNode]
+		if previous := placed[client.ObjectKeyFromObject(pod)]; previous != nil && previous.UID == pod.UID {
+			if node != "" && node != previous.Spec.NodeName {
+				return nil, fmt.Errorf("gang member %s has conflicting bound nodes", client.ObjectKeyFromObject(pod))
+			}
+			node = previous.Spec.NodeName
 		}
 		if node == "" {
 			continue

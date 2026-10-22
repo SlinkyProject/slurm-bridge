@@ -155,8 +155,8 @@ func TestNativeGangSharesPreparationAndBindingResources(t *testing.T) {
 				if err := sb.Get(t.Context(), client.ObjectKeyFromObject(pod), stored); err != nil {
 					t.Fatal(err)
 				}
-				if stored.Annotations[wellknown.AnnotationExternalJobNode] != node {
-					t.Fatalf("assignment not published: %v", stored.Annotations)
+				if stored.Annotations[wellknown.AnnotationExternalJobNode] != "" {
+					t.Fatalf("native placement published as annotation: %v", stored.Annotations)
 				}
 			}
 			if control.allocationReads.Load() != 1 || lists.Load() != 1 {
@@ -218,6 +218,88 @@ func TestNativeGangRetriesRebuildSnapshot(t *testing.T) {
 	refreshed, _ := getStateData(next)
 	if refreshed.native == old.native || control.allocationReads.Load() != 2 || lists.Load() != 2 {
 		t.Fatal("retry reused stale gang state")
+	}
+}
+
+func TestNativeGangPlacementNeedsNoMetadataWrites(t *testing.T) {
+	for _, version := range []string{slurmjobir.WorkloadAPIVersionV1Alpha2, slurmjobir.WorkloadAPIVersionV1Beta1} {
+		t.Run(version, func(t *testing.T) {
+			sb, _, pods, _ := nativeFixture(t, version)
+			for _, pod := range pods {
+				stored := pod.DeepCopy()
+				if err := sb.Get(t.Context(), client.ObjectKeyFromObject(pod), stored); err != nil {
+					t.Fatal(err)
+				}
+				// Simulate old assignments from an earlier scheduler version. Both
+				// members deliberately carry the same invalid node annotation.
+				stored.Annotations = map[string]string{wellknown.AnnotationExternalJobNode: "obsolete-node"}
+				if err := sb.Update(t.Context(), stored); err != nil {
+					t.Fatal(err)
+				}
+				pod.Annotations = stored.Annotations
+			}
+			sb.Client = interceptor.NewClient(sb.Client.(client.WithWatch), interceptor.Funcs{
+				Patch: func(context.Context, client.WithWatch, client.Object, client.Patch, ...client.PatchOption) error {
+					t.Error("native placement attempted a metadata patch")
+					return errors.New("Pod resource version changed")
+				},
+				SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+					t.Error("native placement attempted a status patch")
+					return errors.New("PodGroup status belongs to the framework")
+				},
+			})
+			group := framework.NewCycleState()
+			for i, pod := range pods {
+				state := nativePodState(group)
+				result, status := sb.PreFilter(t.Context(), state, pod, nil)
+				if !status.IsSuccess() || result == nil || !result.NodeNames.Equal(sets.New(fmt.Sprintf("node%d", i+1))) {
+					t.Fatalf("PreFilter: %v %v", result, status)
+				}
+				// Change metadata after snapshotting the gang, before the next
+				// member enters PreFilter. This must not invalidate placement.
+				stored := &corev1.Pod{}
+				if err := sb.Get(t.Context(), client.ObjectKeyFromObject(pods[1]), stored); err != nil {
+					t.Fatal(err)
+				}
+				stored.Annotations["test-update"] = fmt.Sprint(i)
+				if err := sb.Update(t.Context(), stored); err != nil {
+					t.Fatal(err)
+				}
+				if status := sb.PreBind(t.Context(), state, pod, fmt.Sprintf("node%d", i+1)); !status.IsSuccess() {
+					t.Fatalf("PreBind: %v", status)
+				}
+			}
+		})
+	}
+}
+
+func TestNativePostFilterUsesCyclePlacement(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending=%t", pending), func(t *testing.T) {
+			sb, control, pods, _ := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
+			pod := pods[0]
+			pod.Annotations = map[string]string{wellknown.AnnotationExternalJobNode: "node2"}
+			if pending {
+				control.job.Pending, control.job.Nodes = true, ""
+			}
+			state := nativePodState(framework.NewCycleState())
+			if _, status := sb.PreFilter(t.Context(), state, pod, nil); !status.IsSuccess() {
+				t.Fatal(status)
+			}
+			// An allocation that starts after PreFilter must survive this cycle.
+			control.job.Pending, control.job.Nodes = false, "node[1-2]"
+			m := framework.NewNodeToStatus(map[string]*fwk.Status{
+				"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin("OtherPlugin"),
+				"node2": fwk.NewStatus(fwk.Success),
+			}, fwk.NewStatus(fwk.Unschedulable))
+			_, _ = sb.PostFilter(t.Context(), state, pod, m)
+			if deleted := control.deletedPod != nil; deleted == pending {
+				t.Fatalf("allocation deleted=%t with pending=%t", deleted, pending)
+			}
+			if pod.Annotations[wellknown.AnnotationExternalJobNode] != "node2" {
+				t.Fatal("PostFilter mutated input Pod")
+			}
+		})
 	}
 }
 
@@ -306,17 +388,44 @@ func TestNativeAssignmentsReserveBoundNodes(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "b", Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "node1"}}, Spec: corev1.PodSpec{NodeName: "node2"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "a"}},
 	}
-	assigned, err := nativeAssignments(pods, sets.New("node1", "node2"))
+	snapshot := internalcache.NewSnapshot(nil, []*corev1.Node{
+		{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+	})
+	assigned, err := nativeAssignments(pods, sets.New("node1", "node2"), snapshot.NodeInfos())
 	if err != nil || assigned[client.ObjectKey{Name: "a"}] != "node1" || assigned[client.ObjectKey{Name: "b"}] != "node2" {
 		t.Fatalf("assignments=%v err=%v", assigned, err)
 	}
 	pods[1].Spec.NodeName = "node2"
-	if _, err := nativeAssignments(pods, sets.New("node1", "node2")); err == nil {
+	if _, err := nativeAssignments(pods, sets.New("node1", "node2"), snapshot.NodeInfos()); err == nil {
 		t.Fatal("duplicate assignment accepted")
 	}
 	pods[1].Spec.NodeName = ""
-	if _, err := nativeAssignments(pods, sets.New("node2")); err == nil {
+	if _, err := nativeAssignments(pods, sets.New("node2"), snapshot.NodeInfos()); err == nil {
 		t.Fatal("insufficient capacity accepted")
+	}
+}
+
+func TestNativeAssignmentsRecoverAssumedPods(t *testing.T) {
+	pods := []corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: "a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: "b"}},
+	}
+	assumed := pods[1].DeepCopy()
+	assumed.Spec.NodeName = "node1"
+	nodes := []*corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}, {ObjectMeta: metav1.ObjectMeta{Name: "node2"}}}
+	snapshot := internalcache.NewSnapshot([]*corev1.Pod{assumed}, nodes)
+	for _, ordered := range [][]corev1.Pod{pods, {pods[1], pods[0]}} {
+		assigned, err := nativeAssignments(ordered, sets.New("node1", "node2"), snapshot.NodeInfos())
+		if err != nil || assigned[client.ObjectKey{Name: "a"}] != "node2" || assigned[client.ObjectKey{Name: "b"}] != "node1" {
+			t.Fatalf("assumed placement lost: %v %v", assigned, err)
+		}
+	}
+	// A replacement UID must not inherit the deleted member's placement.
+	pods[1].UID = "replacement"
+	assigned, err := nativeAssignments(pods, sets.New("node1", "node2"), snapshot.NodeInfos())
+	if err != nil || assigned[client.ObjectKey{Name: "b"}] != "node2" {
+		t.Fatalf("replacement inherited old placement: %v %v", assigned, err)
 	}
 }
 

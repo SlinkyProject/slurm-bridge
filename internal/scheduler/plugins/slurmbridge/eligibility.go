@@ -110,8 +110,7 @@ func podAllocationID(pod *corev1.Pod) int32 {
 // A resource failure must not tear down a gang that can bind after that handoff.
 // Live allocations must still count: two partially bound gangs sharing nodes
 // could otherwise wait indefinitely for one another to finish.
-func (sb *SlurmBridge) allocatedNodeWaitingForBridge(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m fwk.NodeToStatusReader) (bool, *fwk.Status) {
-	nodeName := pod.Annotations[wellknown.AnnotationExternalJobNode]
+func (sb *SlurmBridge) allocatedNodeWaitingForBridge(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeName string, m fwk.NodeToStatusReader) (bool, *fwk.Status) {
 	status := m.Get(nodeName)
 	if status.Code() != fwk.Unschedulable || status.Plugin() != noderesources.Name {
 		return false, nil

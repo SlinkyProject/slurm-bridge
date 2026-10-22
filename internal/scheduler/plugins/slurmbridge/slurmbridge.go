@@ -53,7 +53,7 @@ import (
 )
 
 var (
-	ErrorNoKubeNode              = errors.New("no more external nodes to annotate pods")
+	ErrorNoKubeNode              = errors.New("no more external nodes available for pod placement")
 	ErrorNoKubeNodeMatch         = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed         = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid       = errors.New("requested node configuration is not available")
@@ -612,13 +612,12 @@ func (sb *SlurmBridge) handleAllocatedNodeError(ctx context.Context, s *stateDat
 
 // allocatedNodeRejectedByKubernetes returns true only when PreFilter observed a
 // Slurm allocation and a Kubernetes Filter plugin rejected the node assigned to
-// this pod. Without the node annotation, Slurm may have allocated the job after
+// this pod. Without a placement decision, Slurm may have allocated the job after
 // PreFilter ran; that valid allocation must be preserved for the next cycle.
-func allocatedNodeRejectedByKubernetes(pod *corev1.Pod, externalJob *slurmcontrol.ExternalJob, m fwk.NodeToStatusReader) bool {
+func allocatedNodeRejectedByKubernetes(assignedNode string, externalJob *slurmcontrol.ExternalJob, m fwk.NodeToStatusReader) bool {
 	if externalJob.JobId == 0 || externalJob.Nodes == "" {
 		return false
 	}
-	assignedNode := pod.Annotations[wellknown.AnnotationExternalJobNode]
 	if assignedNode == "" {
 		return false
 	}
@@ -642,21 +641,21 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	// Eligibility updates are private to this member; shared membership and
 	// allocation snapshots remain immutable through concurrent binding.
 	s.slurmJobIR = copySchedulingIR(s.slurmJobIR)
-	pod = s.placementPod(pod)
+	assignedNode := s.assignedNode(pod)
 	jobs, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
 	if status := s.checkAllocation(pod, jobs, allocationErr); !status.IsSuccess() {
 		return nil, status
 	}
 
 	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
-	if allocatedNodeRejectedByKubernetes(pod, &externalJob, m) {
+	if allocatedNodeRejectedByKubernetes(assignedNode, &externalJob, m) {
 		// TODO: When Slurm supports external-job requeue, confirm the rejected
 		// placement: a refresh may show new nodes under the same job ID while
 		// the Pod annotation and Filter result still refer to the old node.
 		if status := sb.confirmPlacement(ctx, pod, externalJob); !status.IsSuccess() {
 			return nil, status
 		}
-		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, m)
+		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, assignedNode, m)
 		if !status.IsSuccess() {
 			return nil, status
 		}
@@ -1173,7 +1172,7 @@ func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 	return nil
 }
 
-// Filter will verify the node annotation matches the node being filtered.
+// Filter verifies the placement decision matches the node being filtered.
 // This must be the last configured Filter plugin so PostFilter can make
 // the assertion that a failure from this Filter plugin implies no other
 // Filter plugin removed the node from consideration before getting here.
@@ -1181,11 +1180,11 @@ func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *co
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("filter func", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
 	assigned := pod.Annotations[wellknown.AnnotationExternalJobNode]
-	if s, err := getStateData(state); err == nil && (s.native != nil || s.nodeName != "") {
-		assigned = s.nodeName
+	if s, err := getStateData(state); err == nil {
+		assigned = s.assignedNode(pod)
 	}
 	if assigned == nodeInfo.Node().Name {
 		return fwk.NewStatus(fwk.Success, "")
 	}
-	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
+	return fwk.NewStatus(fwk.Unschedulable, "node does not match assignment")
 }

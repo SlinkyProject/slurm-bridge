@@ -798,7 +798,7 @@ func TestSlurmBridge_PostFilterSkipsGangShortOfQuorum(t *testing.T) {
 	}
 }
 
-func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
+func TestSlurmBridge_PreFilterRecordsNativePlacementWithoutStatusWrites(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	utilruntime.Must(corev1.AddToScheme(scheme))
@@ -899,6 +899,17 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		workloadAPI:   workloadAPI,
 	}
 
+	handle, err := fwkruntime.NewFramework(t.Context(), nil, nil,
+		fwkruntime.WithSnapshotSharedLister(internalcache.NewSnapshot(nil, []*corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+		})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handle.Close() })
+	sb.handle = handle
+
 	sb.kubeNodeIndex = testKubeNodeIndex(t, kubeClient)
 
 	rootGroupState := framework.NewCycleState()
@@ -936,8 +947,8 @@ func TestSlurmBridge_PreFilterMarksAssignedPodGroupScheduled(t *testing.T) {
 		t.Fatalf("Get PodGroup: %v", err)
 	}
 	condition := apimeta.FindStatusCondition(updated.Status.Conditions, workloadAPI.ScheduledCondition)
-	if condition == nil || condition.Status != metav1.ConditionTrue {
-		t.Fatalf("PodGroupScheduled condition = %#v, want true", condition)
+	if condition != nil {
+		t.Fatalf("native PreFilter wrote framework-owned condition: %#v", condition)
 	}
 }
 
@@ -983,7 +994,7 @@ func TestAllocatedNodeRejectedByKubernetes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := allocatedNodeRejectedByKubernetes(tt.pod, tt.job, tt.m); got != tt.want {
+			if got := allocatedNodeRejectedByKubernetes(tt.pod.Annotations[wellknown.AnnotationExternalJobNode], tt.job, tt.m); got != tt.want {
 				t.Errorf("allocatedNodeRejectedByKubernetes() = %v, want %v", got, tt.want)
 			}
 		})
@@ -1644,7 +1655,7 @@ func TestSlurmBridge_Filter(t *testing.T) {
 				pod:      podWithoutAnnotation.DeepCopy(),
 				nodeInfo: nodeInfo,
 			},
-			want: fwk.NewStatus(fwk.Unschedulable, "node does not match annotation"),
+			want: fwk.NewStatus(fwk.Unschedulable, "node does not match assignment"),
 		},
 		{
 			name: "GRES compatibility condition is informational",
