@@ -14,6 +14,9 @@ release:
 chart:
   version: 1.2.3
   appVersion: 1.2.3
+capabilities:
+  majorVersion: 1
+  minorVersion: 37
 tests:
   - it: manifests should match snapshot
     asserts:
@@ -87,6 +90,15 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --feature-gates=GenericWorkload=true
+  - it: disables native workload registration automatically on Kubernetes 1.35
+    template: controllers/deployment.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=GenericWorkload=false
   - it: disables native workload registration with the scheduler feature gate
     template: controllers/deployment.yaml
     set:

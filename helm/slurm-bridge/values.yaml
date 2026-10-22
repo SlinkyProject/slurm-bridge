@@ -53,7 +53,7 @@ scheduler:
   leaderElect: false
   # -- Scheduler feature gates. GenericWorkload enables native group scheduling
   # and controller registration by default, requiring the built-in Workload and
-  # PodGroup APIs on Kubernetes 1.36 or newer. Disable it on Kubernetes 1.35.
+  # PodGroup APIs on Kubernetes 1.36 or newer. Automatically disabled on Kubernetes 1.35.
   # CompositePodGroup and TopologyAwareWorkloadScheduling require Kubernetes 1.37
   # and are only enabled when GenericWorkload is enabled.
   featureGates:

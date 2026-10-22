@@ -15,6 +15,9 @@ release:
 chart:
   version: 1.2.3
   appVersion: 1.2.3
+capabilities:
+  majorVersion: 1
+  minorVersion: 37
 kubernetesProvider:
   scheme:
     "v1/Secret":
@@ -513,6 +516,15 @@ tests:
     asserts:
       - isNull:
           path: spec.template.spec.containers[0].env
+  - it: disables native workloads automatically on Kubernetes 1.35
+    template: admission/deployment.yaml
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=GenericWorkload=false,LegacyLWSGangs=true,Legacyv1alpha1PodGroups=true
   - it: shares the native workload opt-out with scheduler and controllers
     template: admission/deployment.yaml
     set:

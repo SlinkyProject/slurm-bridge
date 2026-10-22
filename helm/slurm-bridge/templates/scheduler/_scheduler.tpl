@@ -65,11 +65,13 @@ Determine whether the Kubernetes version supports built-in Workload APIs
 {{- end }}
 
 {{/*
-Use the same default-on native Workload gate for the scheduler and controllers.
+Use the same native Workload gate for all components, default-on where supported.
 */}}
 {{- define "slurm-bridge.genericWorkload.enabled" -}}
 {{- $gates := .Values.scheduler.featureGates | default dict -}}
-{{- if hasKey $gates "GenericWorkload" -}}
+{{- if ne (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true" -}}
+false
+{{- else if hasKey $gates "GenericWorkload" -}}
 {{- $gates.GenericWorkload -}}
 {{- else -}}
 true

@@ -93,16 +93,29 @@ tests:
           path: data["scheduler-config.yaml"]
           pattern: "(?s)GangScheduling.*podGroupPostFilter:.*SlurmBridge"
         template: scheduler/configmap.yaml
-  - it: supports the explicit Kubernetes 1.35 opt-out
+  - it: disables native scheduling automatically on Kubernetes 1.35
     capabilities:
       majorVersion: 1
       minorVersion: 35
-    set:
-      scheduler.featureGates.GenericWorkload: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
+        template: scheduler/deployment.yaml
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: GangScheduling|podGroupPostFilter
+        template: scheduler/configmap.yaml
+  - it: disables native scheduling on Kubernetes 1.35 when the feature map is omitted
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    set:
+      scheduler.featureGates: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=GenericWorkload=false
         template: scheduler/deployment.yaml
       - notMatchRegex:
           path: data["scheduler-config.yaml"]

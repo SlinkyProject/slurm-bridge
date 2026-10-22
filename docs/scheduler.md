@@ -46,7 +46,8 @@ refreshes defer scheduling.
 ### Native gang state
 
 Native group scheduling and bridge Workload support share the default-enabled
-`GenericWorkload` gate; Kubernetes 1.35 deployments must disable it explicitly.
+`GenericWorkload` gate. Helm automatically disables it on Kubernetes 1.35;
+standalone binaries on 1.35 must pass `--feature-gates=GenericWorkload=false`.
 
 Within a native PodGroup scheduling attempt, members share one workload
 translation, membership snapshot, and allocation observation from the allocation
