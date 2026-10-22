@@ -30,15 +30,15 @@ func TestControllerSchemeSupportsWorkloadAdapter(t *testing.T) {
 }
 
 func TestControllerWorkloadFeatureGateFlag(t *testing.T) {
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, true)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.GenericWorkload, true)
 	oldFlags, oldArgs := flag.CommandLine, os.Args
 	t.Cleanup(func() {
 		flag.CommandLine, os.Args = oldFlags, oldArgs
 	})
 	flag.CommandLine = flag.NewFlagSet("controllers", flag.ContinueOnError)
-	os.Args = []string{"controllers", "--feature-gates=SlurmBridgeGenericWorkload=false"}
+	os.Args = []string{"controllers", "--feature-gates=GenericWorkload=false"}
 	parseFlags(&Flags{})
-	if utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
+	if utilfeature.DefaultFeatureGate.Enabled(features.GenericWorkload) {
 		t.Fatal("controller flag did not disable native Workload support")
 	}
 }

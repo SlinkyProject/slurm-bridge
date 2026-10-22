@@ -31,7 +31,7 @@ func TestPreFilterRejectsDisabledPodGroupsBeforeSideEffects(t *testing.T) {
 	if result != nil || status.Code() != fwk.UnschedulableAndUnresolvable {
 		t.Fatalf("PreFilter() = %v, %v; want an unresolvable scheduling rejection", result, status)
 	}
-	if message := status.Message(); !strings.Contains(message, "SlurmBridgeGenericWorkload=true") || !strings.Contains(message, "default/worker") {
+	if message := status.Message(); !strings.Contains(message, "GenericWorkload=true") || !strings.Contains(message, "default/worker") {
 		t.Fatalf("rejection must explain how to enable support: %s", message)
 	}
 	if _, err := state.Read(stateKey); err == nil {

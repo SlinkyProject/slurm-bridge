@@ -322,7 +322,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if workloadAPI != nil {
 		logger.Info("registered built-in Workload API", "apiVersion", workloadAPI.PodGroupTypeMeta.APIVersion)
 	} else {
-		logger.Info("built-in Workload support disabled", "featureGate", features.SlurmBridgeGenericWorkload)
+		logger.Info("built-in Workload support disabled", "featureGate", features.GenericWorkload)
 	}
 
 	// The Pod client uses the same QPS/Burst tuning as the Workload API client.

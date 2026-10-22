@@ -16,6 +16,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	schedulercommand "github.com/SlinkyProject/slurm-bridge/internal/scheduler/command"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
 func TestMain(m *testing.M) {
@@ -23,25 +24,22 @@ func TestMain(m *testing.M) {
 	os.Exit(rc)
 }
 
-func TestSlurmBridgeGenericWorkloadFlagIsIndependent(t *testing.T) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
-		t.Fatal("bridge Workload support must default to enabled")
+func TestGenericWorkloadEnabledByDefaultAndOptOut(t *testing.T) {
+	if !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.GenericWorkload) {
+		t.Fatal("native group scheduling must be enabled by default")
 	}
-	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.GenericWorkload) {
-		t.Fatal("bridge gate must not enable the embedded scheduler's GenericWorkload")
-	}
-	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, true)
+	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.GenericWorkload, true)
 	command := schedulercommand.New(app.WithPlugin(slurmbridge.Name, slurmbridge.New))
-	if err := command.ParseFlags([]string{"--feature-gates=SlurmBridgeGenericWorkload=false"}); err != nil {
+	if err := command.ParseFlags([]string{"--feature-gates=GenericWorkload=false"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := command.PersistentPreRunE(command, nil); err != nil {
 		t.Fatal(err)
 	}
-	if utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
-		t.Fatal("scheduler flag did not disable bridge Workload support")
-	}
 	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.GenericWorkload) {
-		t.Fatal("bridge flag changed the embedded scheduler's GenericWorkload gate")
+		t.Fatal("GenericWorkload=false must disable native scheduling")
+	}
+	if api, err := slurmjobir.NewWorkloadAPI(nil, nil); err != nil || api != nil {
+		t.Fatalf("GenericWorkload=false must skip bridge API discovery: api=%v err=%v", api, err)
 	}
 }

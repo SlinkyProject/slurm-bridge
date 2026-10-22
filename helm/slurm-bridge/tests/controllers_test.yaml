@@ -86,26 +86,23 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=SlurmBridgeGenericWorkload=true
+          content: --feature-gates=GenericWorkload=true
   - it: disables native workload registration with the scheduler feature gate
     template: controllers/deployment.yaml
     set:
-      scheduler.featureGates.SlurmBridgeGenericWorkload: false
+      scheduler.featureGates.GenericWorkload: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=SlurmBridgeGenericWorkload=false
-  - it: preserves binary feature defaults when scheduler feature gates are omitted
+          content: --feature-gates=GenericWorkload=false
+  - it: keeps native registration enabled when the feature map is omitted
     template: controllers/deployment.yaml
     set:
       scheduler.featureGates: null
     asserts:
-      - notContains:
+      - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=SlurmBridgeGenericWorkload=true
-      - notContains:
-          path: spec.template.spec.containers[0].args
-          content: --feature-gates=SlurmBridgeGenericWorkload=false
+          content: --feature-gates=GenericWorkload=true
   - it: the controllers ClusterRole is release-scoped and carries no namespace
     template: controllers/rbac.yaml
     documentSelector:

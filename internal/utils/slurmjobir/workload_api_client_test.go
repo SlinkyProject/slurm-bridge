@@ -49,9 +49,9 @@ func TestNewWorkloadAPI(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.disabled {
-				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, false)
-			} else if !utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
-				t.Fatal("SlurmBridgeGenericWorkload must be enabled by default")
+				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.GenericWorkload, false)
+			} else if !utilfeature.DefaultFeatureGate.Enabled(features.GenericWorkload) {
+				t.Fatal("GenericWorkload must be enabled by default")
 			}
 			calls := 0
 			config := &rest.Config{
@@ -88,7 +88,7 @@ func TestNewWorkloadAPI(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewWorkloadAPI() error = %v, want error %v", err, tt.wantErr)
 			}
-			if err != nil && !strings.Contains(err.Error(), "SlurmBridgeGenericWorkload=true requires") {
+			if err != nil && !strings.Contains(err.Error(), "GenericWorkload=true requires") {
 				t.Errorf("startup error does not identify the required feature: %v", err)
 			}
 			if calls != tt.wantCalls {

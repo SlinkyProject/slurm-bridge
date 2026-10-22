@@ -38,11 +38,15 @@ represented Pods. This scheduler defers scheduling decisions to Slurm, hence
 certain assumptions about the environment must be met for this to function
 correctly.
 
-The scheduler refreshes Slurm job information every second and node information
-every 30 seconds. Scheduling may wait for an in-progress refresh for up to two
-seconds for jobs or 60 seconds for nodes. Failed refreshes defer scheduling.
+The scheduler refreshes Slurm job and node information every 30 seconds. The
+allocation observer primes its cache when the scheduler becomes active.
+Scheduling may wait for an in-progress refresh for up to 60 seconds. Failed
+refreshes defer scheduling.
 
 ### Native gang state
+
+Native group scheduling and bridge Workload support share the default-enabled
+`GenericWorkload` gate; Kubernetes 1.35 deployments must disable it explicitly.
 
 Within a native PodGroup scheduling attempt, members share one workload
 translation, membership snapshot, and allocation observation from the allocation
