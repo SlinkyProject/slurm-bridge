@@ -76,7 +76,10 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 			return cached.Get(ctx, key, obj, opts...)
 		},
 		Delete: func(ctx context.Context, obj object.Object, _ ...slurmclient.DeleteOption) error {
-			id, _ := strconv.Atoi(string(obj.GetKey()))
+			id, err := strconv.ParseInt(string(obj.GetKey()), 10, 32)
+			if err != nil {
+				return err
+			}
 			f.cancellations = append(f.cancellations, int32(id))
 			if f.cancelErr != nil {
 				return f.cancelErr
@@ -178,7 +181,7 @@ func TestLifecycleRetainsCurrentMembers(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(f.cancellations) != 0 {
-				t.Fatalf("cancelled allocation with a current member: %v", f.cancellations)
+				t.Fatalf("canceled allocation with a current member: %v", f.cancellations)
 			}
 		})
 	}
@@ -261,7 +264,7 @@ func TestLifecycleRejectsChangedSlurmOwnership(t *testing.T) {
 		t.Fatal("expected changed ownership error")
 	}
 	if len(f.cancellations) != 0 {
-		t.Fatal("cancelled another owner's job")
+		t.Fatal("canceled another owner's job")
 	}
 }
 
@@ -287,7 +290,7 @@ func TestLifecycleRoutesDeletedMemberToGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Equal(queued, []Request{objectRequest(f.group)}) || len(f.cancellations) != 0 {
-		t.Fatalf("queued=%v, cancelled=%v", queued, f.cancellations)
+		t.Fatalf("queued=%v, canceled=%v", queued, f.cancellations)
 	}
 }
 
@@ -364,7 +367,7 @@ func TestLifecycleHeterogeneousRelease(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(f.cancellations) != 0 {
-				t.Fatal("cancelled whole heterogeneous allocation")
+				t.Fatal("canceled whole heterogeneous allocation")
 			}
 			if pending && len(control.offsets) != 0 || !pending && !slices.Equal(control.offsets, []int32{0}) {
 				t.Fatalf("component offsets=%v", control.offsets)

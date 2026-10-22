@@ -108,7 +108,7 @@ func (r *Reconciler) prepareTerminalPod(ctx context.Context, req reconcile.Reque
 	}
 
 	if len(expected) > 0 && (pod.UID != expected[0].UID || pod.ResourceVersion != expected[0].ResourceVersion) {
-		return fmt.Errorf("Pod changed before finalization: %s", req)
+		return fmt.Errorf("pod changed before finalization: %s", req)
 	}
 	if !podReadyForCleanup(pod) {
 		logger.V(2).Info("Pod is not terminated, skipping", "pod", podKey)

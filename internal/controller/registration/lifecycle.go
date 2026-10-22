@@ -125,17 +125,17 @@ func (r *Reconciler) liveJob(ctx context.Context, id int32) (*api.V0044JobInfo, 
 	key := object.ObjectKey(strconv.Itoa(int(id)))
 	if err := r.slurmClient.Get(ctx, key, raw, &slurmclient.GetOptions{SkipCache: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // An absent allocation is a confirmed release.
 		}
 		return nil, err
 	}
 	if raw.GetKey() != key {
-		return nil, fmt.Errorf("Slurm returned job %s for %s", raw.GetKey(), key)
+		return nil, fmt.Errorf("slurm returned job %s for %s", raw.GetKey(), key)
 	}
 	return raw, nil
 }
 
-// Slurm can report CANCELLED alongside COMPLETING while epilog cleanup still
+// Slurm can report a terminal state alongside COMPLETING while epilog cleanup still
 // holds resources. Keep Kubernetes claims until that allocation is released.
 func allocationReleased(raw *api.V0044JobInfo) (bool, error) {
 	job, err := slurmjob.FromJobInfo(raw)
@@ -166,8 +166,8 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 		return false, err
 	}
 	if live.HetJobId != 0 && live.Pending {
-		// A pending component cannot be cancelled independently. Check every current
-		// root member as well as every component before cancelling the whole hetjob.
+		// A pending component cannot be canceled independently. Check every current
+		// root member as well as every component before canceling the whole hetjob.
 		if info.CompositePodGroup != nil {
 			pods, _, err := r.membersFrom(ctx, r.apiReader, groupKey(*info.CompositePodGroup))
 			if err != nil && !errors.Is(err, slurmjobir.ErrorPodGroupNoPods) {

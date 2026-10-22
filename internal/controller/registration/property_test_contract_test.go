@@ -160,7 +160,7 @@ var registrationContract = controllercheck.Contract[registrationState]{
 					if !slices.Contains(info.Pods, externaljobinfo.PodKey(&pod)) {
 						continue
 					}
-					if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed && !(pod.DeletionTimestamp != nil && pod.Spec.NodeName == "") {
+					if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed && (pod.DeletionTimestamp == nil || pod.Spec.NodeName != "") {
 						return fmt.Errorf("released component %d with live member %s", e.JobID, pod.Name)
 					}
 				}
