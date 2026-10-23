@@ -13,6 +13,7 @@ webhooks:
       path: /mutate--v1-pod
   failurePolicy: Fail
   name: mcluster.kb.io
+  reinvocationPolicy: IfNeeded
   rules:
   - apiGroups:
     - ""

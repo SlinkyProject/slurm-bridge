@@ -3,7 +3,7 @@ module github.com/SlinkyProject/slurm-bridge
 go 1.27.3
 
 require (
-	github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20261009174523-d7043e28fd51
+	github.com/SlinkyProject/slurm-client v1.1.0-rc1.0.20261019145711-ec6da62a54c3
 	github.com/google/cel-go v0.30.0
 	github.com/google/uuid v1.6.0
 	github.com/kelindar/bitmap v1.5.4
@@ -24,6 +24,7 @@ require (
 	k8s.io/kube-scheduler v0.37.1
 	k8s.io/kubernetes v1.37.1
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
+	pgregory.net/rapid v1.3.0
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/e2e-framework v0.6.0
 	sigs.k8s.io/jobset v0.13.0

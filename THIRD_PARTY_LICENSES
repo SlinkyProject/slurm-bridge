@@ -18,7 +18,7 @@ For complete license texts, please refer to the source repositories or the LICEN
 
 ### github.com/SlinkyProject/slurm-client
 - Name: github.com/SlinkyProject/slurm-client
-- Version: v1.1.0-rc1.0.20261009174523-d7043e28fd51
+- Version: v1.1.0-rc1.0.20261019145711-ec6da62a54c3
 - License: Apache-2.0
 
 ### github.com/antlr4-go/antlr/v4
@@ -715,6 +715,11 @@ For complete license texts, please refer to the source repositories or the LICEN
 - Name: k8s.io/utils/third_party/forked/golang/btree
 - Version: v0.0.0-20260707023825-cf1189d6abe3
 - License: Apache-2.0
+
+### pgregory.net/rapid
+- Name: pgregory.net/rapid
+- Version: v1.3.0
+- License: MPL-2.0
 
 ### sigs.k8s.io/apiserver-network-proxy/konnectivity-client
 - Name: sigs.k8s.io/apiserver-network-proxy/konnectivity-client

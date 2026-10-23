@@ -37,6 +37,12 @@ spec:
             - -zap-log-level
             - {{ .Values.controllers.verbosity | default "info" | quote }}
             - --leader-elect={{ .Values.controllers.leaderElect }}
+            {{- if hasKey (.Values.scheduler.featureGates | default dict) "SlurmBridgeGenericWorkload" }}
+            - --feature-gates=SlurmBridgeGenericWorkload={{ .Values.scheduler.featureGates.SlurmBridgeGenericWorkload }}
+            {{- end }}
+            {{- with .Values.controllers.registrationWorkers }}
+            - -registration-workers={{ . }}
+            {{- end }}
             {{- with .Values.controllers.podWorkers }}
             - -pod-workers={{ . }}
             {{- end }}

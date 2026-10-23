@@ -9,13 +9,16 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
 type ExternalJobInfo struct {
 	// Pods contains namespace/name/uid identities, or legacy namespace/name keys.
-	Pods []string `json:"pods"`
+	Pods              []string       `json:"pods"`
+	PodGroup          *GroupIdentity `json:"podGroup,omitempty"`
+	CompositePodGroup *GroupIdentity `json:"compositePodGroup,omitempty"`
 }
 
 // MarshalJSON stores the identities in one string without repeating pod names.
@@ -23,15 +26,19 @@ type ExternalJobInfo struct {
 // the UID as part of a pod name and canceling its allocation.
 func (extInfo ExternalJobInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Pods string `json:"pods"`
-	}{Pods: strings.Join(extInfo.Pods, ",")})
+		Pods              string         `json:"pods"`
+		PodGroup          *GroupIdentity `json:"podGroup,omitempty"`
+		CompositePodGroup *GroupIdentity `json:"compositePodGroup,omitempty"`
+	}{Pods: strings.Join(extInfo.Pods, ","), PodGroup: extInfo.PodGroup, CompositePodGroup: extInfo.CompositePodGroup})
 }
 
 // UnmarshalJSON accepts compact identities and the earlier array/map formats.
 func (extInfo *ExternalJobInfo) UnmarshalJSON(data []byte) error {
 	var wire struct {
-		Pods    json.RawMessage      `json:"pods"`
-		PodUIDs map[string]types.UID `json:"podUIDs"`
+		PodGroup          *GroupIdentity       `json:"podGroup,omitempty"`
+		CompositePodGroup *GroupIdentity       `json:"compositePodGroup,omitempty"`
+		Pods              json.RawMessage      `json:"pods"`
+		PodUIDs           map[string]types.UID `json:"podUIDs"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -57,6 +64,8 @@ func (extInfo *ExternalJobInfo) UnmarshalJSON(data []byte) error {
 		}
 	}
 	extInfo.Pods = pods
+	extInfo.PodGroup = wire.PodGroup
+	extInfo.CompositePodGroup = wire.CompositePodGroup
 	return nil
 }
 
@@ -75,6 +84,29 @@ func ParsePodKey(key string) corev1.ObjectReference {
 	}
 	name, uid, _ := strings.Cut(name, "/")
 	return corev1.ObjectReference{Namespace: namespace, Name: name, UID: types.UID(uid)}
+}
+
+// GroupIdentity identifies a Kubernetes group across served API versions.
+type GroupIdentity struct {
+	APIGroup  string    `json:"apiGroup"`
+	Kind      string    `json:"kind"`
+	Namespace string    `json:"namespace"`
+	Name      string    `json:"name"`
+	UID       types.UID `json:"uid"`
+}
+
+func NewGroupIdentity(meta metav1.PartialObjectMetadata) *GroupIdentity {
+	gk := meta.GroupVersionKind().GroupKind()
+	supported := (gk.Group == "scheduling.k8s.io" && (gk.Kind == "PodGroup" || gk.Kind == "CompositePodGroup")) ||
+		(gk.Group == "scheduling.x-k8s.io" && gk.Kind == "PodGroup")
+	if !supported {
+		return nil
+	}
+	return &GroupIdentity{APIGroup: gk.Group, Kind: gk.Kind, Namespace: meta.Namespace, Name: meta.Name, UID: meta.UID}
+}
+
+func (g GroupIdentity) Key() string {
+	return strings.Join([]string{g.APIGroup, g.Kind, g.Namespace, g.Name, string(g.UID)}, "/")
 }
 
 func (extInfo *ExternalJobInfo) Equal(cmp ExternalJobInfo) bool {

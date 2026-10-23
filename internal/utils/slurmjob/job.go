@@ -19,7 +19,15 @@ type ExternalJob struct {
 	HetJobOffset int32
 	Nodes        string
 	Pending      bool
+	Held         bool
 	Finished     bool
+}
+
+func (j ExternalJob) AllocationID() int32 {
+	if j.HetJobId > 0 {
+		return j.HetJobId
+	}
+	return j.JobId
 }
 
 func FromJobInfo(job *api.V0044JobInfo) (ExternalJob, error) {
@@ -34,6 +42,9 @@ func FromJobInfo(job *api.V0044JobInfo) (ExternalJob, error) {
 		Finished: isFinishedJob(job),
 	}
 
+	if job.Priority != nil {
+		extJob.Held = extJob.Pending && ptr.Deref(job.Priority.Set, false) && ptr.Deref(job.Priority.Number, -1) == 0
+	}
 	return validateExternalJobID(job, extJob)
 }
 

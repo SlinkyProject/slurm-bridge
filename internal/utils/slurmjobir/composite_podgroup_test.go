@@ -55,6 +55,7 @@ func TestTranslateToSlurmJobIRSelectsCompositePodGroupRoot(t *testing.T) {
 		Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 1},
 	})
 	leaf.Spec.ParentCompositePodGroupName = ptr.To(parentName)
+	leaf.UID = "leaf-uid"
 	leaf.Spec.WorkloadRef = &WorkloadReference{TemplateName: leafName, WorkloadName: workloadName}
 	parent := newSchedulingV1Alpha3Object("CompositePodGroup", parentName, map[string]any{
 		"parentCompositePodGroupName": rootName,
@@ -62,6 +63,7 @@ func TestTranslateToSlurmJobIRSelectsCompositePodGroupRoot(t *testing.T) {
 	root := newSchedulingV1Alpha3Object("CompositePodGroup", rootName, map[string]any{
 		"workloadRef": map[string]any{"workloadName": workloadName, "templateName": rootName},
 	})
+	root.SetUID("root-uid")
 	workload := newSchedulingV1Alpha3Object("Workload", workloadName, map[string]any{
 		"compositePodGroupTemplates": []any{map[string]any{
 			"name": rootName,
@@ -81,6 +83,9 @@ func TestTranslateToSlurmJobIRSelectsCompositePodGroupRoot(t *testing.T) {
 	}
 	if got.RootPOM.TypeMeta != compositePodGroupV1Alpha3 || got.RootPOM.Name != rootName {
 		t.Errorf("TranslateToSlurmJobIR() root = %v %q, want %v %q", got.RootPOM.TypeMeta, got.RootPOM.Name, compositePodGroupV1Alpha3, rootName)
+	}
+	if got.RootPOM.UID != root.GetUID() || got.Components[0].ObjectMeta.UID != leaf.UID || got.Components[0].ObjectMeta.TypeMeta != workloadAPI.PodGroupTypeMeta {
+		t.Fatalf("translation lost root or leaf group identity: root=%+v, leaf=%+v", got.RootPOM, got.Components[0].ObjectMeta)
 	}
 }
 
@@ -270,6 +275,7 @@ func Test_translator_fromCompositePodGroup(t *testing.T) {
 			want: &SlurmJobIR{Components: []SlurmJobComponent{
 				{
 					ObjectMeta: metav1.PartialObjectMetadata{
+						TypeMeta: workloadAPI.PodGroupTypeMeta,
 						ObjectMeta: metav1.ObjectMeta{
 							Name:            flatGroup.Name,
 							Namespace:       corev1.NamespaceDefault,
@@ -286,6 +292,7 @@ func Test_translator_fromCompositePodGroup(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.PartialObjectMetadata{
+						TypeMeta: workloadAPI.PodGroupTypeMeta,
 						ObjectMeta: metav1.ObjectMeta{
 							Name:            nestedGroup.Name,
 							Namespace:       corev1.NamespaceDefault,

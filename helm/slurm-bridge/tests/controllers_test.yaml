@@ -81,6 +81,31 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].args
           content: --leader-elect=true
+  - it: enables native workload registration by default
+    template: controllers/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=SlurmBridgeGenericWorkload=true
+  - it: disables native workload registration with the scheduler feature gate
+    template: controllers/deployment.yaml
+    set:
+      scheduler.featureGates.SlurmBridgeGenericWorkload: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=SlurmBridgeGenericWorkload=false
+  - it: preserves binary feature defaults when scheduler feature gates are omitted
+    template: controllers/deployment.yaml
+    set:
+      scheduler.featureGates: null
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=SlurmBridgeGenericWorkload=true
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=SlurmBridgeGenericWorkload=false
   - it: the controllers ClusterRole is release-scoped and carries no namespace
     template: controllers/rbac.yaml
     documentSelector:
@@ -292,3 +317,15 @@ tests:
       - equal:
           path: spec.template.spec.volumes[1].secret.items[0].key
           value: SLURM_JWT
+  - it: configures registration concurrency independently of Pod lifecycle workers
+    template: controllers/deployment.yaml
+    set:
+      controllers.registrationWorkers: 4
+      controllers.podWorkers: 2
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -registration-workers=4
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: -pod-workers=2

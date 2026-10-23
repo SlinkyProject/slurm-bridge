@@ -24,6 +24,8 @@ import (
 )
 
 const PodJobIndex = "bridge.pod"
+const GroupJobIndex = "bridge.group"
+const LegacyPodJobIndex = "bridge.legacy-pod"
 
 // PodIndex provides cached Pod ownership lookups and explicit live verification.
 type PodIndex struct {
@@ -35,7 +37,61 @@ func NewPodIndex(slurmClient client.Client, jobInformer client.InformerCache) (*
 	if err := jobInformer.AddIndex(PodJobIndex, jobPodKeys); err != nil {
 		return nil, fmt.Errorf("register Slurm job index: %w", err)
 	}
+	if err := jobInformer.AddIndex(GroupJobIndex, jobGroupKeys); err != nil {
+		return nil, fmt.Errorf("register Slurm group index: %w", err)
+	}
+	if err := jobInformer.AddIndex(LegacyPodJobIndex, jobLegacyPodKeys); err != nil {
+		return nil, fmt.Errorf("register legacy Slurm Pod index: %w", err)
+	}
 	return &PodIndex{Client: slurmClient, jobInformer: jobInformer}, nil
+}
+
+// jobLegacyPodKeys isolates allocations without group metadata, so compatibility
+// checks do not repeatedly copy a modern gang's allocation for every member.
+func jobLegacyPodKeys(obj object.Object) []string {
+	info := externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(obj.(*api.V0044JobInfo).AdminComment, &info); err != nil {
+		return nil
+	}
+	if info.PodGroup != nil || info.CompositePodGroup != nil {
+		return nil
+	}
+	return info.Pods
+}
+
+func jobGroupKeys(obj object.Object) []string {
+	info := externaljobinfo.ExternalJobInfo{}
+	if err := externaljobinfo.ParseIntoExternalJobInfo(obj.(*api.V0044JobInfo).AdminComment, &info); err != nil {
+		return nil
+	}
+	var keys []string
+	for _, group := range []*externaljobinfo.GroupIdentity{info.PodGroup, info.CompositePodGroup} {
+		if group != nil {
+			keys = append(keys, group.Key())
+		}
+	}
+	return keys
+}
+
+// GetAllocation resolves every component of a single active Kubernetes allocation.
+// Pod labels never select between conflicting allocations.
+func (r *PodIndex) GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]ExternalJob, error) {
+	identity, err := IdentityForAllocation(pod, ir)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := IndexedAllocation(ctx, r.jobInformer, identity)
+	if err != nil {
+		return nil, err
+	}
+	components, complete, err := MatchAllocationComponents(ir, jobs)
+	if err != nil {
+		return nil, err
+	}
+	if !complete {
+		return nil, ErrAllocationMissing
+	}
+	return components, nil
 }
 
 func jobPodKeys(obj object.Object) []string {
@@ -60,9 +116,9 @@ func JobForPod(jobs map[string]ExternalJob, pod *corev1.Pod) (ExternalJob, bool)
 	return job, ok
 }
 
-// GetJobsForPods returns cached candidates for the requested Pods.
-// Ambiguous matches are omitted unless the Pod's job-ID label selects one.
-// Verify candidates before repairing metadata or deciding a handoff.
+// GetJobsForPods returns cached candidates for the requested Pods. Active matches
+// must be unique; neither the Pod label nor index order resolves a conflict.
+// Callers must verify candidates before repairing metadata or deciding a handoff.
 func (r *PodIndex) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error) {
 	podToJob := make(map[string]ExternalJob, len(pods))
 	for _, pod := range pods {
@@ -78,21 +134,28 @@ func (r *PodIndex) GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*ma
 		}
 		jobID := slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId])
 		var candidate ExternalJob
+		var finished ExternalJob
+		finishedMatches := 0
 		matches := 0
 		for i := range jobs.Items {
 			job, err := FromJobInfo(&jobs.Items[i])
 			if err != nil {
 				continue
 			}
+			if job.Finished {
+				finishedMatches++
+				if finished.JobId == 0 || job.JobId == jobID {
+					finished = job
+				}
+				continue
+			}
 			candidate = job
 			matches++
-			if job.JobId == jobID {
-				matches = 1
-				break
-			}
 		}
 		if matches == 1 {
 			podToJob[key] = candidate
+		} else if matches == 0 && (finishedMatches == 1 || finished.JobId == jobID && jobID > 0) {
+			podToJob[key] = finished
 		}
 	}
 	return &podToJob, nil

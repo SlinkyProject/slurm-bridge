@@ -234,7 +234,7 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 			}
 
 			pgPOM := metav1.PartialObjectMetadata{
-				TypeMeta:   pg.TypeMeta,
+				TypeMeta:   t.workloadAPI.PodGroupTypeMeta,
 				ObjectMeta: pg.ObjectMeta,
 			}
 

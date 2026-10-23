@@ -20,6 +20,7 @@ import (
 
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -42,6 +43,10 @@ var _ = Describe("Pod Controller", func() {
 			}
 			err = r.SetupWithManager(mgr)
 			Expect(err).ToNot(HaveOccurred())
+			// Registration shares the Slurm indexes but owns a separate queue.
+			// Optional workload APIs are absent in this envtest control plane.
+			registrationController := registration.NewReconciler(k8sClient, r.SlurmClient, schedulerName, nil, nil, "", "")
+			Expect(registrationController.SetupWithManager(mgr)).To(Succeed())
 		})
 	})
 

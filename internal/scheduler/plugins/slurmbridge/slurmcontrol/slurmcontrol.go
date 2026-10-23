@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/cpuset"
 	"k8s.io/utils/lru"
 	"k8s.io/utils/ptr"
 
@@ -47,8 +47,9 @@ type SlurmControlInterface interface {
 	GetJobsForPods(ctx context.Context, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	VerifyJobsForPods(ctx context.Context, candidates map[string]ExternalJob, pods ...*corev1.Pod) (*map[string]ExternalJob, error)
 	GetJob(ctx context.Context, pod *corev1.Pod) (*ExternalJob, error)
+	GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]ExternalJob, error)
 	GetNodeNames(ctx context.Context, partition *string) ([]string, error)
-	SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error)
+	ReleaseJob(ctx context.Context, jobID int32, priority *int32) error
 	UpdateJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) (int32, error)
 }
 
@@ -182,14 +183,17 @@ func (r *realSlurmControl) GetJob(ctx context.Context, pod *corev1.Pod) (*Extern
 	return &jobOut, nil
 }
 
-// SubmitJob submits an external job to Slurm for a node placement decision. The
-// external job is later used to determine which node to bind a k8s pod to.
-func (r *realSlurmControl) SubmitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
-	if err := slurmJobIR.Validate(); err != nil {
-		return []int32{}, err
-	}
+// JobRegistrar submits a held allocation and returns its accepted leader ID.
+// Component IDs are subsequently resolved through the job indexes.
+type JobRegistrar interface {
+	RegisterJob(context.Context, *slurmjobir.SlurmJobIR) (int32, error)
+}
 
-	return r.submitJob(ctx, pod, slurmJobIR)
+// ErrRegistrationNotSubmitted marks failures before a submission reaches the client.
+var ErrRegistrationNotSubmitted = errors.New("registration was not submitted")
+
+func NewRegistrar(c client.Client, mcsLabel, partition string) JobRegistrar {
+	return &realSlurmControl{Client: c, mcsLabel: mcsLabel, partition: partition}
 }
 
 // UpdateJob updates an external job
@@ -225,7 +229,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	jobID := int32(jobIDValue)
 
 	job := new(api.V0044JobInfo)
-	jobDesc, err := r.buildJobDesc(component, true)
+	jobDesc, err := r.buildJobDesc(slurmJobIR.RootPOM, component, true)
 	if err != nil {
 		return 0, err
 	}
@@ -250,52 +254,49 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	return jobID, nil
 }
 
-// submitJob will create or update an external job in Slurm.
-func (r *realSlurmControl) submitJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) ([]int32, error) {
-	logger := klog.FromContext(ctx)
+// RegisterJob waits for Slurm's create response and returns the accepted job ID.
+func (r *realSlurmControl) RegisterJob(ctx context.Context, ir *slurmjobir.SlurmJobIR) (int32, error) {
+	if err := ir.Validate(); err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrRegistrationNotSubmitted, err)
+	}
 	job := new(api.V0044JobInfo)
-	var jobSubmit api.V0044JobSubmitReq
-
-	var jobDescList []api.V0044JobDescMsg
-	for _, component := range slurmJobIR.Components {
-		jobDesc, err := r.buildJobDesc(component, false)
+	var req api.V0044JobSubmitReq
+	var descriptions []api.V0044JobDescMsg
+	for _, component := range ir.Components {
+		component.JobInfo.Hold = ptr.To(true)
+		desc, err := r.buildJobDesc(ir.RootPOM, component, false)
 		if err != nil {
-			return []int32{}, err
+			return 0, fmt.Errorf("%w: %w", ErrRegistrationNotSubmitted, err)
 		}
-		jobDescList = append(jobDescList, jobDesc)
+		descriptions = append(descriptions, desc)
 	}
-
-	if len(jobDescList) == 1 {
-		jobSubmit = api.V0044JobSubmitReq{Job: ptr.To(jobDescList[0])}
+	if len(descriptions) == 1 {
+		req.Job = &descriptions[0]
 	} else {
-		jobSubmit = api.V0044JobSubmitReq{Jobs: ptr.To(jobDescList)}
+		req.Jobs = &descriptions
 	}
-
-	if err := r.Create(ctx, job, jobSubmit); err != nil {
-		logger.Error(err, "could not create external job", "pod", klog.KObj(pod))
-		return []int32{}, err
+	err := r.Create(ctx, job, req, &client.CreateOptions{SkipReadAfterCreate: true})
+	id := ptr.Deref(job.JobId, 0)
+	if err != nil {
+		return id, err
 	}
-
-	jobID := ptr.Deref(job.JobId, 0)
-	if jobID == 0 {
-		err := errors.New("job submission returned invalid jobid")
-		return nil, err
+	if id <= 0 {
+		return 0, errors.New("registration returned an invalid job ID")
 	}
+	return id, nil
+}
 
-	jobIDs := []int32{}
-	if job.HetJobIdSet != nil && *job.HetJobIdSet != "" {
-		hetJobIDs, err := cpuset.Parse(*job.HetJobIdSet)
-		if err != nil {
-			return nil, err
-		}
-		for _, id := range hetJobIDs.List() {
-			jobIDs = append(jobIDs, int32(id)) // nolint:gosec // Value bounded by Slurm
-		}
-	} else {
-		jobIDs = append(jobIDs, jobID)
+// ReleaseJob is called after every component's eligibility has been updated.
+// Slurm maps hold and priority to the same field: they must be separate requests.
+func (r *realSlurmControl) ReleaseJob(ctx context.Context, id int32, priority *int32) error {
+	job := &api.V0044JobInfo{JobId: ptr.To(id)}
+	if err := r.Update(ctx, job, api.V0044JobDescMsg{Hold: ptr.To(false)}); err != nil {
+		return err
 	}
-
-	return jobIDs, nil
+	if priority != nil {
+		return r.Update(ctx, job, api.V0044JobDescMsg{Priority: &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: priority, Infinite: ptr.To(false)}})
+	}
+	return nil
 }
 
 func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
@@ -320,11 +321,25 @@ func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) 
 	return nodeNames, nil
 }
 
-func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
+// ExternalJobInfoFor records the allocation identity Slurm stores for one component.
+func ExternalJobInfoFor(root metav1.PartialObjectMetadata, component slurmjobir.SlurmJobComponent) externaljobinfo.ExternalJobInfo {
 	extInfo := externaljobinfo.ExternalJobInfo{}
-	for _, p := range jobComponent.Pods.Items {
+	if group := externaljobinfo.NewGroupIdentity(root); group != nil {
+		if group.Kind == "CompositePodGroup" {
+			extInfo.CompositePodGroup = group
+			extInfo.PodGroup = externaljobinfo.NewGroupIdentity(component.ObjectMeta)
+		} else {
+			extInfo.PodGroup = group
+		}
+	}
+	for _, p := range component.Pods.Items {
 		extInfo.Pods = append(extInfo.Pods, externaljobinfo.PodKey(&p))
 	}
+	return extInfo
+}
+
+func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
+	extInfo := ExternalJobInfoFor(root, jobComponent)
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {
 		return api.V0044JobDescMsg{}, err
@@ -332,6 +347,7 @@ func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponen
 	excludedNodes := append(api.V0044CsvString{}, jobComponent.JobInfo.ExcNodes...)
 
 	jobDesc := api.V0044JobDescMsg{
+		Hold:                    jobComponent.JobInfo.Hold,
 		Account:                 jobComponent.JobInfo.Account,
 		AdminComment:            ptr.To(extInfo.ToString()),
 		CpusPerTask:             jobComponent.JobInfo.CpuPerTask,
@@ -389,6 +405,10 @@ func (r *realSlurmControl) buildJobDesc(jobComponent slurmjobir.SlurmJobComponen
 			Number:   jobComponent.JobInfo.Priority,
 			Set:      ptr.To(true),
 		}
+	}
+
+	if jobDesc.Hold != nil || (update && jobComponent.JobInfo.Priority == nil) {
+		jobDesc.Priority = nil
 	}
 
 	if jobComponent.JobInfo.Partition == nil {

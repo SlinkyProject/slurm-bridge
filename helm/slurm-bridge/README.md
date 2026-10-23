@@ -56,6 +56,7 @@ Kubernetes: `>= 1.34.0-0`
 | controllers.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
 | controllers.podWorkers | int | `nil` | Max concurrent workers for the Pod controller. Unset keeps the default (1). |
 | controllers.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
+| controllers.registrationWorkers | int | `nil` | Max concurrent allocation registration workers. Unset keeps the default (1). |
 | controllers.replicas | int | `1` | Set the number of replicas to deploy. |
 | controllers.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
 | controllers.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
@@ -64,7 +65,7 @@ Kubernetes: `>= 1.34.0-0`
 | nameOverride | string | `""` | Overrides the name of the release. |
 | namespaceOverride | string | `""` | Overrides the namespace of the release. |
 | scheduler.affinity | object | `{}` | Set affinity for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity |
-| scheduler.featureGates | object | `{"CompositePodGroup":true,"DRAExtendedResource":true,"DynamicResourceAllocation":true,"GenericWorkload":true,"SchedulerPopFromBackoffQ":false,"SlurmBridgeGenericWorkload":true,"TopologyAwareWorkloadScheduling":true}` | Scheduler feature gates. SlurmBridgeGenericWorkload requires a supported built-in Workload and PodGroup API at startup. The upstream GenericWorkload, TopologyAwareWorkloadScheduling, and CompositePodGroup gates populate the hierarchy cache and require Kubernetes 1.37; disable them on older clusters. |
+| scheduler.featureGates | object | `{"CompositePodGroup":true,"DRAExtendedResource":true,"DynamicResourceAllocation":true,"GenericWorkload":true,"SchedulerPopFromBackoffQ":false,"SlurmBridgeGenericWorkload":true,"TopologyAwareWorkloadScheduling":true}` | Scheduler feature gates. SlurmBridgeGenericWorkload also controls controller registration and requires a supported built-in Workload and PodGroup API at startup. The upstream GenericWorkload, TopologyAwareWorkloadScheduling, and CompositePodGroup gates populate the hierarchy cache and require Kubernetes 1.37; disable them on older clusters. |
 | scheduler.image | object | `{"pullPolicy":"IfNotPresent","repository":"ghcr.io/slinkyproject/slurm-bridge-scheduler","tag":""}` | The image to use, `${repository}:${tag}`. Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names |
 | scheduler.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
 | scheduler.leaderElect | bool | `false` | Enables leader election. |

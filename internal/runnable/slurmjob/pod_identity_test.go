@@ -39,7 +39,7 @@ func TestSyncPodIdentity(t *testing.T) {
 			wantDeleted: []int32{7},
 		},
 		{
-			name:    "matching UID keeps job alive",
+			name:    "matching UID is retained for registration duplicate recovery",
 			comment: `{"pods":"default/work/current-uid"}`,
 		},
 		{
@@ -77,6 +77,7 @@ func TestSyncPodIdentity(t *testing.T) {
 			if err := r.Sync(t.Context()); err != nil {
 				t.Fatal(err)
 			}
+			slices.Sort(deleted)
 			if !slices.Equal(deleted, tt.wantDeleted) {
 				t.Errorf("canceled jobs = %v, want %v", deleted, tt.wantDeleted)
 			}

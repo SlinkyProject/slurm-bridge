@@ -248,6 +248,13 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				ir.Components[0].Pods.Items = append(ir.Components[0].Pods.Items, *p)
 				objects = append(objects, p)
 			}
+			pending.Labels = map[string]string{wellknown.LabelExternalJobId: "42"}
+			for i := range ir.Components[0].Pods.Items {
+				ir.Components[0].Pods.Items[i].Labels = map[string]string{wellknown.LabelExternalJobId: "42"}
+			}
+			for _, obj := range objects {
+				obj.SetLabels(map[string]string{wellknown.LabelExternalJobId: "42"})
+			}
 			state.Write(stateKey, &stateData{slurmJobIR: ir})
 			creates, updates := 0, 0
 			checkRequest := func(job *api.V0044JobDescMsg) {
@@ -263,7 +270,8 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 			}
 			jobs := &api.V0044JobInfoObjectList{Items: []api.V0044JobInfo{{
 				JobId: ptr.To(int32(42)), Nodes: ptr.To(""),
-				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
+				AdminComment: ptr.To(testJobComment(ir, 0)),
+				JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 			}}}
 			slurm := fake.NewClientBuilder().WithLists(slurmNodes, jobs).WithInterceptorFuncs(interceptor.Funcs{
 				Create: func(_ context.Context, obj object.Object, req any, _ ...slurmclient.CreateOption) error {
@@ -273,8 +281,11 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 					return nil
 				},
 				Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
-					updates++
 					job := req.(api.V0044JobDescMsg)
+					if job.Hold != nil {
+						return nil
+					}
+					updates++
 					checkRequest(&job)
 					return nil
 				},
@@ -285,13 +296,11 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				slurmControl:  newTestSlurmControl(t, slurm, "kubernetes", schedulerName),
 				handle:        f,
 			}
-			if _, status := sb.PostFilter(ctx, state, pending, m); !status.IsSuccess() {
+			if _, status := sb.PostFilter(ctx, state, pending, m); tt.wantSubmit && !status.IsSuccess() {
 				t.Fatalf("PostFilter: %v", status)
 			}
 			wantCreates := 0
-			if tt.wantSubmit {
-				wantCreates = 1
-			}
+
 			if creates != wantCreates {
 				t.Fatalf("Slurm submissions = %d, want %d", creates, wantCreates)
 			}
@@ -300,10 +309,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				if err := sb.Get(ctx, kubeclient.ObjectKeyFromObject(&p), got); err != nil {
 					t.Fatal(err)
 				}
-				wantID := ""
-				if tt.wantSubmit {
-					wantID = "42"
-				}
+				wantID := "42"
 				if got.Labels[wellknown.LabelExternalJobId] != wantID || got.Spec.NodeName != "" || got.Annotations[wellknown.AnnotationExternalJobNode] != "" {
 					t.Errorf("pod %s: want job ID %q and no binding/allocation, got labels=%v, annotations=%v, node=%q", got.Name, wantID, got.Labels, got.Annotations, got.Spec.NodeName)
 				}
@@ -315,8 +321,8 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				if _, status := sb.PostFilter(ctx, state, pending, m); !status.IsSuccess() {
 					t.Fatalf("pending update: %v", status)
 				}
-				if creates != 1 || updates != 1 {
-					t.Errorf("want one submission and one pending update, got %d/%d", creates, updates)
+				if creates != 0 || updates != 1 {
+					t.Errorf("want no submissions and one cached pending update, got %d/%d", creates, updates)
 				}
 			}
 			for _, node := range nodes {
@@ -490,7 +496,8 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 			kubeClient := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 			slurmObjects := []object.Object{&api.V0044JobInfo{
 				JobId: ptr.To(int32(42)), Nodes: ptr.To("node[0-47]"),
-				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
+				AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/member18"}, PodGroup: &externaljobinfo.GroupIdentity{APIGroup: "scheduling.x-k8s.io", Kind: "PodGroup", Namespace: "test", Name: "gang"}}).ToString()),
+				JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
 			}}
 			jobState := tt.jobState
 			if jobState == "" {
@@ -674,12 +681,12 @@ func TestPostFilterSharedGangsDoNotWaitForEachOther(t *testing.T) {
 		&api.V0044JobInfo{
 			JobId: ptr.To(int32(42)), Nodes: ptr.To("node[0-1]"),
 			JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/a0", "test/a1"}}).ToString()),
+			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/a0", "test/a1"}, PodGroup: &externaljobinfo.GroupIdentity{APIGroup: "scheduling.x-k8s.io", Kind: "PodGroup", Namespace: "test", Name: "gang-a"}}).ToString()),
 		},
 		&api.V0044JobInfo{
 			JobId: ptr.To(int32(43)), Nodes: ptr.To("node[0-1]"),
 			JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/b0", "test/b1"}}).ToString()),
+			AdminComment: ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{"test/b0", "test/b1"}, PodGroup: &externaljobinfo.GroupIdentity{APIGroup: "scheduling.x-k8s.io", Kind: "PodGroup", Namespace: "test", Name: "gang-b"}}).ToString()),
 		},
 	).WithInterceptorFuncs(interceptor.Funcs{
 		Delete: func(context.Context, object.Object, ...slurmclient.DeleteOption) error { deletes++; return nil },

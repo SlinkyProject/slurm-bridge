@@ -10,16 +10,22 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fwk "k8s.io/kube-scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 type getResourcesSpy struct {
 	slurmcontrol.SlurmControlInterface
 	gotNodeName string
+}
+
+func (s *getResourcesSpy) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+	return testAllocation(ir), nil
 }
 
 func (s *getResourcesSpy) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*slurmcontrol.NodeResources, error) {
@@ -52,7 +58,10 @@ func TestSlurmBridge_PreBind_GetResourcesUsesSlurmNodeName(t *testing.T) {
 		draRegistry:  dra.DefaultRegistry(),
 	}
 
-	if st := sb.PreBind(ctx, nil, pod, node.Name); st != nil && st.Code() != fwk.Success {
+	ir := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}}}
+	state := framework.NewCycleState()
+	state.Write(stateKey, &stateData{slurmJobIR: ir, allocation: testAllocation(ir)})
+	if st := sb.PreBind(ctx, state, pod, node.Name); st != nil && st.Code() != fwk.Success {
 		t.Fatalf("PreBind() status = %v, want success", st)
 	}
 	if spy.gotNodeName != "slurm-worker-0" {

@@ -34,7 +34,7 @@ type workloadAPIResourceDiscovery interface {
 }
 
 // WorkloadAPI describes the built-in Kubernetes Workload and PodGroup API
-// version selected for this scheduler process.
+// version selected for this process.
 type WorkloadAPI struct {
 	PodGroupTypeMeta   metav1.TypeMeta
 	ScheduledCondition string

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	ConfigFile         = "/etc/slurm-bridge/config.yaml"
-	SlurmClientTimeout = 5 * time.Minute
+	ConfigFile           = "/etc/slurm-bridge/config.yaml"
+	SlurmClientTimeout   = 5 * time.Minute
+	SlurmCacheSyncPeriod = 30 * time.Second
 )
 
 // DefaultClientQPS and DefaultClientBurst match kube-scheduler's own default

@@ -59,6 +59,8 @@ func TestIndexedJobsConfirmLiveIdentity(t *testing.T) {
 		{name: "legacy claim for Pod with UID", uid: "current", cached: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`)}, live: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`)}, wantID: 1},
 		{name: "unique claim repairs stale label", label: "2", cached: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`)}, live: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`)}, wantID: 1},
 		{name: "live labeled allocation is not indexed yet", label: "2", cached: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`)}, live: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`), indexedJob(2, `"ns/pod"`)}},
+		{name: "ambiguous claims", cached: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`), indexedJob(2, `"ns/pod"`)}, live: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`), indexedJob(2, `"ns/pod"`)}},
+		{name: "label cannot select between active claims", label: "1", cached: []*api.V0044JobInfo{indexedJob(2, `"ns/pod"`), indexedJob(1, `"ns/pod"`)}, live: []*api.V0044JobInfo{indexedJob(1, `"ns/pod"`), indexedJob(2, `"ns/pod"`)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cached, live := fake.NewClientBuilder(), fake.NewClientBuilder()
@@ -119,8 +121,8 @@ func TestIndexedJobsIgnoreCandidateOrder(t *testing.T) {
 					t.Fatal(err)
 				}
 				job, found := JobForPod(*jobs, pod)
-				if found != (id != 0) || job.JobId != id {
-					t.Fatalf("label %q: jobs = %v, want ID %d", pod.Labels[wellknown.LabelExternalJobId], jobs, id)
+				if found || job.JobId != 0 {
+					t.Fatalf("label %q selected an ambiguous allocation: %v", pod.Labels[wellknown.LabelExternalJobId], jobs)
 				}
 			}
 		})

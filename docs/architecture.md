@@ -43,8 +43,8 @@ the following sequence:
 
 1. A pod is applied to a configured `slurm-bridge` namespace.
 1. The pod is sent to the `slurm-bridge` admission webhook.
-1. The `slurm-bridge` scheduler begins placement of pod.
-1. `slurm-bridge` coordinates with Slurm to create an “external job”.
+1. The `slurm-bridge` controller registers a held Slurm external job.
+1. The scheduler checks eligible nodes and releases the job for allocation.
 1. The external job is scheduled to `node1`.
 1. `slurm-bridge` determines the external job has started on `node1`.
 1. The scheduler binds the pod to `node1`.

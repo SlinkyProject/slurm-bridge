@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/token"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -121,6 +123,9 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 				if err := crClient.Create(ctx, pod); err != nil {
 					t.Fatalf("create Pod %s: %v", pod.Name, err)
 				}
+				if !slices.Contains(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration}) {
+					t.Fatalf("Pod %s was admitted without the registration gate", pod.Name)
+				}
 			}
 			return ctx
 		}).
@@ -161,6 +166,9 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 					t.Fatalf("CompositePodGroup %s did not schedule Pod %s: %v; status: %s", name, pod.Name, err, statusJSON(observed.Status))
 				}
 				pods[i] = observed
+				if slices.Contains(observed.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration}) {
+					t.Fatalf("Pod %s has incomplete controller registration", observed.Name)
+				}
 				assertBridgePod(t, ctx, crClient, observed)
 			}
 			return ctx
@@ -225,6 +233,22 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 				component, ok := components[pod.Labels[slurmJobIDLabel]]
 				if !ok {
 					t.Fatalf("Pod %s job %s is not in hetjob %s", pod.Name, pod.Labels[slurmJobIDLabel], leader)
+				}
+				comment, err := slurmJobField(component, "AdminComment")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var info externaljobinfo.ExternalJobInfo
+				if err := externaljobinfo.ParseIntoExternalJobInfo(&comment, &info); err != nil {
+					t.Fatalf("parse Slurm component identity: %v", err)
+				}
+				group := native("PodGroup", *pod.Spec.SchedulingGroup.PodGroupName, nil)
+				if err := crClient.Get(ctx, client.ObjectKeyFromObject(group), group); err != nil {
+					t.Fatal(err)
+				}
+				if info.CompositePodGroup == nil || info.CompositePodGroup.UID != root.GetUID() ||
+					info.PodGroup == nil || info.PodGroup.UID != group.GetUID() {
+					t.Fatalf("Slurm component has incorrect group identity: %+v", info)
 				}
 				for field, want := range map[string]string{"HetJobId": leader, "NodeList": pod.Spec.NodeName} {
 					if got, err := slurmJobField(component, field); err != nil || got != want {

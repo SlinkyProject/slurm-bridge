@@ -50,6 +50,7 @@ func (s SlurmJobComponent) GetNamespacedName() types.NamespacedName {
 }
 
 type SlurmJobIRJobInfo struct {
+	Hold         *bool
 	Account      *string
 	CpuPerTask   *int32
 	Constraints  *string
@@ -88,6 +89,7 @@ type translator struct {
 	workloadAPI         *WorkloadAPI
 	podGroupStates      fwk.PodGroupStateLister
 	podsByGroup         map[string]corev1.PodList
+	includeTerminalPods bool // Membership discovery retains history; allocation translation does not.
 }
 
 func (t *translator) registry() *dra.Registry {
@@ -155,57 +157,9 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	if err := ValidatePodGroupSupport(workloadAPI, pod); err != nil {
-		return nil, err
-	}
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
-	var rootPOM *metav1.PartialObjectMetadata
-
-	// CompositePodGroup members share an allocation up to the first basic parent.
-	// Otherwise, only Gang PodGroups replace the normal workload root. Basic
-	// PodGroups still supply annotations, but leave allocation membership to the owner.
-	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
-	var pg *PodGroup
-	if pgName, ok := podGroupName(pod); ok {
-		pg = &PodGroup{TypeMeta: workloadAPI.PodGroupTypeMeta}
-		if err := t.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
-			return nil, err
-		}
-		if err := validatePodGroupSpec(pg); err != nil {
-			return nil, err
-		}
-		if pg.Spec.ParentCompositePodGroupName != nil || pg.Spec.SchedulingPolicy.Gang != nil {
-			rootPOM = &metav1.PartialObjectMetadata{
-				TypeMeta:   workloadAPI.PodGroupTypeMeta,
-				ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: pgName},
-			}
-		}
-		if pg.Spec.ParentCompositePodGroupName != nil {
-			rootName, err := t.compositePodGroupRootName(pod.Namespace, *pg.Spec.ParentCompositePodGroupName)
-			if err != nil {
-				return nil, err
-			}
-			if rootName != "" {
-				rootPOM.TypeMeta = compositePodGroupV1Alpha3
-				rootPOM.Name = rootName
-			}
-		}
-	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
-		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
-		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
-		rootPOM = &metav1.PartialObjectMetadata{
-			TypeMeta:   podgroup_coscheduling_v1alpha1,
-			ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: podGroup.Name},
-		}
-	}
-	if rootPOM == nil {
-		rootPOM, err = getRootOwnerMetadata(c, ctx, pod)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), rootPOM); err != nil {
+	rootPOM, pg, err := t.workloadRoot(c, pod)
+	if err != nil {
 		return nil, err
 	}
 
@@ -491,4 +445,72 @@ func formatGRESResources(resources map[dra.GRES]resource.Quantity) string {
 		entries[i] = name + "=" + quantity.String()
 	}
 	return strings.Join(entries, ",")
+}
+
+// WorkloadRootForPod resolves allocation ownership without translating resource
+// requirements or listing the group's Pods. Registration uses it to route events.
+func WorkloadRootForPod(c client.Client, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod) (*metav1.PartialObjectMetadata, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	t := translator{Reader: c, ctx: ctx, workloadAPI: workloadAPI}
+	root, _, err := t.workloadRoot(c, pod)
+	return root, err
+}
+
+func (t *translator) workloadRoot(c client.Client, pod *corev1.Pod) (*metav1.PartialObjectMetadata, *PodGroup, error) {
+	if err := ValidatePodGroupSupport(t.workloadAPI, pod); err != nil {
+		return nil, nil, err
+	}
+	var rootPOM *metav1.PartialObjectMetadata
+	var err error
+
+	// CompositePodGroup members share an allocation up to the first basic parent.
+	// Otherwise, only Gang PodGroups replace the normal workload root. Basic
+	// PodGroups still supply annotations, but leave allocation membership to the owner.
+	// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
+	var pg *PodGroup
+	if pgName, ok := podGroupName(pod); ok {
+		pg = &PodGroup{TypeMeta: t.workloadAPI.PodGroupTypeMeta}
+		if err := t.Get(t.ctx, client.ObjectKey{Namespace: pod.Namespace, Name: pgName}, pg); err != nil {
+			return nil, nil, err
+		}
+		if err := validatePodGroupSpec(pg); err != nil {
+			return nil, nil, err
+		}
+		if pg.Spec.ParentCompositePodGroupName != nil || pg.Spec.SchedulingPolicy.Gang != nil {
+			rootPOM = &metav1.PartialObjectMetadata{
+				TypeMeta:   t.workloadAPI.PodGroupTypeMeta,
+				ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: pgName},
+			}
+		}
+		if pg.Spec.ParentCompositePodGroupName != nil {
+			rootName, err := t.compositePodGroupRootName(pod.Namespace, *pg.Spec.ParentCompositePodGroupName)
+			if err != nil {
+				return nil, nil, err
+			}
+			if rootName != "" {
+				rootPOM.TypeMeta = compositePodGroupV1Alpha3
+				rootPOM.Name = rootName
+			}
+		}
+	} else if _, podGroup := t.GetPodGroupCoscheduling(pod); podGroup != nil {
+		// PodGroup coscheduling does not conventionally own the Pod, rather is associated by the PodGroupLabel.
+		// The Kubernetes co-scheduler would take the PodGroup into consideration when scheduling.
+		rootPOM = &metav1.PartialObjectMetadata{
+			TypeMeta:   podgroup_coscheduling_v1alpha1,
+			ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace, Name: podGroup.Name},
+		}
+	}
+	if rootPOM == nil {
+		rootPOM, err = getRootOwnerMetadata(c, t.ctx, pod)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if err := t.Get(t.ctx, client.ObjectKeyFromObject(rootPOM), rootPOM); err != nil {
+		return nil, nil, err
+	}
+
+	return rootPOM, pg, nil
 }
