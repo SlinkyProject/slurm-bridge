@@ -327,7 +327,7 @@ function slurm-bridge::install() {
 	slurm-bridge::prerequisites
 	if [ -n "$OPT_BRIDGE_VERSION" ]; then
 		echo "[slurm-bridge] Installing released slurm-bridge chart $OPT_BRIDGE_VERSION..."
-		helm install slurm-bridge "$BRIDGE_CHART" \
+		helm upgrade --install slurm-bridge "$BRIDGE_CHART" \
 			--version "$OPT_BRIDGE_VERSION" \
 			--namespace slurm --create-namespace \
 			--wait --timeout 300s
@@ -755,7 +755,12 @@ function slurm-bridge::configure_e2e_device_profiles() {
 		return 0
 	fi
 
-	helm upgrade slurm-bridge "$ROOT_DIR/helm/slurm-bridge" \
+	local chart_args=("$ROOT_DIR/helm/slurm-bridge")
+	if [ -n "$OPT_BRIDGE_VERSION" ]; then
+		chart_args=("$BRIDGE_CHART" --version "$OPT_BRIDGE_VERSION")
+	fi
+
+	helm upgrade slurm-bridge "${chart_args[@]}" \
 		--namespace slurm \
 		--reuse-values \
 		--values "$SCRIPT_DIR/e2e-device-profiles.yaml" \
