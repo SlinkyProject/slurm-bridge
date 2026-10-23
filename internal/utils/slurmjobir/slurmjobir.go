@@ -89,6 +89,7 @@ type translator struct {
 	workloadAPI         *WorkloadAPI
 	podGroupStates      fwk.PodGroupStateLister
 	podsByGroup         map[string]corev1.PodList
+	includeTerminalPods bool // Membership discovery retains history; allocation translation does not.
 }
 
 func (t *translator) registry() *dra.Registry {

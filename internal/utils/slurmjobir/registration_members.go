@@ -19,7 +19,9 @@ import (
 // resolving device resources or building submission descriptions. The caller has
 // already checked the root UID; replicaHash distinguishes legacy LWS replicas.
 func RegistrationMembers(c client.Client, workloadAPI *WorkloadAPI, ctx context.Context, root *metav1.PartialObjectMetadata, replicaHash string) ([]corev1.Pod, error) {
-	t := translator{Reader: c, ctx: ctx, workloadAPI: workloadAPI}
+	// Keep terminal members available for allocation identity and duplicate cleanup.
+	// TranslateToSlurmJobIR separately selects the Pods that still need resources.
+	t := translator{Reader: c, ctx: ctx, workloadAPI: workloadAPI, includeTerminalPods: true}
 	seed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: root.Namespace}}
 	var ir *SlurmJobIR
 	var err error

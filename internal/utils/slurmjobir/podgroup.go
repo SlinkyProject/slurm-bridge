@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	fwk "k8s.io/kube-scheduler/framework"
+	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
@@ -184,6 +185,9 @@ func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodLis
 
 		t.podsByGroup = make(map[string]corev1.PodList)
 		for i := range allPods.Items {
+			if !t.includeTerminalPods && podv1.IsPodTerminal(&allPods.Items[i]) {
+				continue
+			}
 			name, ok := podGroupName(&allPods.Items[i])
 			if !ok {
 				continue
