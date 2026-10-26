@@ -46,43 +46,34 @@ users from using accounts for which they are not authorized.
 
 ### Configuring Kyverno for use with Slurm-Bridge
 
-In order to enforce Kyverno policies for a specific CRD, one must first use
-ClusterRoles to grant the Kyverno controller additional permissions related to
-that CRD. More information on that process can be found
-[here][kyverno-customize-permissions]. For example, the following ClusterRole
-provides the Kyverno controller with sufficient permissions to create Pods and
-PodGroups:
+The admission policies below read the `user-data` ConfigMap in the workload's
+namespace. Ensure that the Kyverno admission controller can read that ConfigMap.
+If its existing roles do not grant access, add the following ClusterRole using
+[Kyverno's role aggregation][kyverno-customize-permissions]:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: kyverno:create-pods-and-podgroups
+  name: kyverno:read-slurm-user-data
   labels:
-    rbac.kyverno.io/aggregate-to-background-controller: 'true'
+    rbac.kyverno.io/aggregate-to-admission-controller: 'true'
 rules:
   - apiGroups:
       - ""
     resources:
-      - pods
+      - configmaps
+    resourceNames:
+      - user-data
     verbs:
-      - create
-      - update
-  - apiGroups:
-      - scheduling.x-k8s.io
-    resources:
-      - podgroups
-    verbs:
-      - create
-      - update
+      - get
 ```
 
-After applying this ClusterRole, confirm that the Kyverno background
-controller's top-level ClusterRole has successfully aggregated your new
-permissions:
+After applying this ClusterRole, confirm that the Kyverno admission controller's
+top-level ClusterRole has successfully aggregated your new permissions:
 
 ```bash
-kubectl get clusterrole kyverno:background-controller -o yaml
+kubectl get clusterrole kyverno:admission-controller -o yaml
 ```
 
 ### Example Kyverno Policies for Slurm-bridge
@@ -94,9 +85,14 @@ Below are some example Kyverno policies that can be used with Slurm-bridge.
 Kyverno policies can be used to automatically configure the annotations on
 Slurm-bridge workloads based on data retrieved from an Identity Provider (IDP).
 With per-user namespaces, this approach can enforce Slurm user and account
-assignments. The examples below cover selected workload types. Extend the
-policies to cover the [annotation sources](workload.md#pod-grouping) used by
-other workload types permitted in your deployment.
+assignments. The examples below cover Pods, Jobs, and built-in PodGroups and
+Workloads. Extend the policies to cover the
+[annotation sources](workload.md#pod-grouping) used by other workload types
+permitted in your deployment.
+
+For built-in PodGroups, annotation precedence is **Workload > PodGroup >
+selected Job or JobSet**. Applying the policies to both Workloads and PodGroups
+ensures that the higher-precedence values come from the same namespace policy.
 
 The process described here uses a script to configure Kubernetes based on data
 from the IDP, and a Kyverno policy to set certain Slinky annotations based on
@@ -106,6 +102,13 @@ that data.
 
 - Usernames in Slurm, Kubernetes, and the IDP should match
 - Kyverno must be installed on the Kubernetes cluster
+- Enable the [built-in Workload and PodGroup APIs](podgroup.md):
+  `scheduling.k8s.io/v1alpha2` on Kubernetes 1.36 or `scheduling.k8s.io/v1beta1`
+  on Kubernetes 1.37. The policies match both versions.
+- Configure Kyverno to evaluate controller-created resources in the workload
+  namespace as well as user requests, including generated Pods and PodGroups.
+  Check `excludeGroups` and `excludeUsernames` in the Kyverno ConfigMap for the
+  identities used by those controllers.
 
 #### IDP connection script
 
@@ -193,6 +196,17 @@ spec:
         operations:
         - CREATE
         - UPDATE
+      - apiGroups:
+        - scheduling.k8s.io
+        apiVersions:
+        - v1alpha2
+        - v1beta1
+        resources:
+        - podgroups
+        - workloads
+        operations:
+        - CREATE
+        - UPDATE
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
@@ -202,6 +216,8 @@ spec:
               annotations: {
                 'slurmjob.slinky.slurm.net/user-id': string(variables.slurmConfigmap.data.user),
                 'slurmjob.slinky.slurm.net/account': string(variables.slurmConfigmap.data.account),
+                'slurmjob.slinky.slurm.net/qos': string(has(object.metadata.annotations) && 'slurmjob.slinky.slurm.net/qos' in object.metadata.annotations ? object.metadata.annotations['slurmjob.slinky.slurm.net/qos'] : variables.slurmConfigmap.data.qos),
+                'slurmjob.slinky.slurm.net/partition': string(has(object.metadata.annotations) && 'slurmjob.slinky.slurm.net/partition' in object.metadata.annotations ? object.metadata.annotations['slurmjob.slinky.slurm.net/partition'] : variables.slurmConfigmap.data.partition),
                 'slurmjob.slinky.slurm.net/job-name': string(has(object.metadata.name) && object.metadata.name != '' ? object.metadata.name : object.metadata.generateName)
               }
             }
@@ -213,6 +229,11 @@ Slurm-bridge will be automatically populated based on the data from the user's
 ConfigMap. This policy also overwrites `slurmjob.slinky.slurm.net/job-name` with
 the object's name, or its `generateName` prefix when no name has been assigned
 yet, even when the user supplied a job name.
+
+Missing `qos` and `partition` annotations are populated from the ConfigMap,
+including on controller-created PodGroups. Supplied values are preserved so the
+validation policies below can reject values that the namespace does not permit.
+Install the mutation and validation policies together.
 
 Below is a snippet of a job that has had these annotations set by the policy:
 
@@ -230,7 +251,9 @@ Annotations:      slurmjob.slinky.slurm.net/account: slinky-dev
 In some cases it may be necessary to ensure that users are only running
 workloads within a specific qos or partition. Kyverno policies can also be used
 for this purpose. These policies assume that the IDP connection script provides
-a string with a qos or partition within the user's ConfigMap.
+a string with a qos or partition within the user's ConfigMap. They validate
+top-level annotations on the same Pods, Jobs, built-in PodGroups, and Workloads
+matched by the mutation policy, on both creation and update.
 
 ```yaml
 apiVersion: policies.kyverno.io/v1
@@ -241,6 +264,8 @@ spec:
   evaluation:
     admission:
       enabled: true
+    background:
+      enabled: false
   variables:
   - name: slurmConfigmap
     expression: >-
@@ -262,14 +287,25 @@ spec:
         resources:
         - pods
       - apiGroups:
-        - 'scheduling.x-k8s.io'
+        - batch
         apiVersions:
-        - v1alpha1
+        - v1
+        operations:
+        - CREATE
+        - UPDATE
+        resources:
+        - jobs
+      - apiGroups:
+        - scheduling.k8s.io
+        apiVersions:
+        - v1alpha2
+        - v1beta1
         operations:
         - CREATE
         - UPDATE
         resources:
         - podgroups
+        - workloads
   validations:
     - message: provided qos is not a permitted qos for user
       expression: >-
@@ -284,6 +320,8 @@ spec:
   evaluation:
     admission:
       enabled: true
+    background:
+      enabled: false
   variables:
   - name: slurmConfigmap
     expression: >-
@@ -305,23 +343,34 @@ spec:
         resources:
         - pods
       - apiGroups:
-        - 'scheduling.x-k8s.io'
+        - batch
         apiVersions:
-        - 'v1alpha1'
+        - v1
+        operations:
+        - CREATE
+        - UPDATE
+        resources:
+        - jobs
+      - apiGroups:
+        - scheduling.k8s.io
+        apiVersions:
+        - v1alpha2
+        - v1beta1
         operations:
         - CREATE
         - UPDATE
         resources:
         - podgroups
+        - workloads
   validations:
     - message: provided partition is not a permitted partition for user
       expression: >-
         has(object.metadata.annotations) && 'slurmjob.slinky.slurm.net/partition' in object.metadata.annotations && object.metadata.annotations['slurmjob.slinky.slurm.net/partition'] == variables.slurmConfigmap.data.partition
 ```
 
-Users who attempt to submit a pod or podgroup with a qos or partition that does
-not match the data in their `user-data` ConfigMap will be unable to do so, and
-will see the following message:
+Users who attempt to submit or update a covered workload with a qos or partition
+that does not match the data in their `user-data` ConfigMap will be unable to do
+so, and will see the following message:
 
 ```bash
 ❯ kubectl apply -f hack/examples/pod/sleep.yaml
