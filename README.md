@@ -109,9 +109,10 @@ version number, upgrade one series at a time: `1.1` → `1.2` → `1.3`. See the
   request non-exclusive placement always use Slurm MCS workload isolation.
 - Supports [DRA Driver CPU][dra-driver-cpu] for CPUs, plus indexed GPU and
   accelerator drivers mapped to Slurm GRES through configured device profiles.
-  The chart includes profiles for [DRA Example Driver][dra-example-driver] and
-  [NVIDIA DRA Driver][dra-driver-nvidia-gpu] GPUs plus RDMA-capable [DRANET]
-  devices by default, and retains its specialized
+  The default profiles cover CPU, [NVIDIA DRA Driver][dra-driver-nvidia-gpu]
+  GPUs, and RDMA-capable [DRANET] devices.
+  [DRA Example Driver][dra-example-driver] requires an explicitly configured
+  profile. The bridge also retains its specialized
   [NVIDIA k8s-dra-driver-gpu][nvidia-dra-driver] path.
 - NVIDIA GPU backend selection is resource-name based:
   `deviceclass.resource.kubernetes.io/gpu.nvidia.com` selects the NVIDIA DRA

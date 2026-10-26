@@ -94,8 +94,9 @@ allocating a tainted device.
 Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
 shared Slurm Bridge configuration. The built-in profiles cover CPU, NVIDIA GPU,
 and PCI-backed DRANET devices. The example GPU driver requires explicit
-configuration. Operators can replace or extend the list through
-`sharedConfig.deviceProfiles`:
+configuration. Setting `sharedConfig.deviceProfiles` replaces the built-in list;
+include the built-in entries too if they are still needed. For example, this
+configuration enables only the custom accelerator profile:
 
 ```yaml
 sharedConfig:
@@ -109,20 +110,21 @@ sharedConfig:
 ```
 
 The DeviceClass must have exactly one CEL selector and it must exactly match a
-configured profile selector. Profile names become Slurm GRES types: they must
-start and end with an alphanumeric character, may contain only alphanumeric
-characters, `.`, `_`, and `-`, and must remain stable while allocations using
-them exist. `driver` must be a valid lowercase Kubernetes DRA driver name, and
-`gresName` must be a DNS-1123 label of at most 60 characters because it is also
-used as the ResourceClaim request name. Every configured `backend.gresName` must
-also be listed in Slurm's `GresTypes`; for example, profiles using `gpu` and
-`nic` require `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory
-when its type is not listed. The bundled external and hybrid Kind configurations
-include `GresTypes=gpu,nic` by default. Selectors use the same length and
-estimated-cost limits as Kubernetes DeviceClass CEL selectors. Profiles for the
-same driver must be mutually exclusive. If a device matches more than one
-profile, the node controller leaves its Slurm GRES inventory unchanged and emits
-an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
+configured profile selector. DeviceClasses with a non-empty `spec.config` are
+unsupported. Profile names become Slurm GRES types: they must start and end with
+an alphanumeric character, may contain only alphanumeric characters, `.`, `_`,
+and `-`, and must remain stable while allocations using them exist. `driver`
+must be a valid lowercase Kubernetes DRA driver name, and `gresName` must be a
+DNS-1123 label of at most 60 characters because it is also used as the
+ResourceClaim request name. Every configured `backend.gresName` must also be
+listed in Slurm's `GresTypes`; for example, profiles using `gpu` and `nic`
+require `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory when its
+type is not listed. The bundled external and hybrid Kind configurations include
+`GresTypes=gpu,nic` by default. Selectors use the same length and estimated-cost
+limits as Kubernetes DeviceClass CEL selectors. Profiles for the same driver
+must be mutually exclusive. If a device matches more than one profile, the node
+controller leaves its Slurm GRES inventory unchanged and emits an
+`OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
 The built-in NVIDIA profile uses `gpu.nvidia.com` as its name and maps to
 `gpu:gpu.nvidia.com` in Slurm. The explicitly configured example GPU profile
