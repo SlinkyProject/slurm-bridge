@@ -12,8 +12,8 @@ import (
 
 type AllocationIdentity struct {
 	Index, Key string
-	// PodGroup allocations created before controller registration have only
-	// Pod ownership metadata. Keep these lookup keys separate from the group index key.
+	// Pre-upgrade PodGroups and legacy LWS replicas without a leader need their
+	// members' Pod ownership keys to discover existing allocations.
 	legacyPodKeys []string
 }
 

@@ -156,8 +156,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	// Lifecycle cleanup must also run for empty or deleted groups.
-	if membershipErr != nil && !apierrors.IsNotFound(membershipErr) && !errors.Is(membershipErr, slurmjobir.ErrorPodGroupNoPods) && !errors.Is(membershipErr, slurmjobir.ErrorLWSNoPods) {
+	// Lifecycle cleanup must also run for empty or deleted groups and LWS replicas
+	// without a leader. Preserve membershipErr to prevent new registration below.
+	if membershipErr != nil && !apierrors.IsNotFound(membershipErr) && !errors.Is(membershipErr, slurmjobir.ErrorPodGroupNoPods) && !errors.Is(membershipErr, slurmjobir.ErrorLWSNoPods) && !errors.Is(membershipErr, slurmjob.ErrLWSLeaderMissing) {
 		return r.registrationReadEvent(key, membershipErr)
 	}
 	waiting, err := r.reconcileLifecycle(ctx, key, pods, jobs)
