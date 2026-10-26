@@ -170,6 +170,8 @@ Project documentation is located in the [docs] directory of this repository.
 
 Feature requests, code contributions, and bug reports are welcome!
 
+Join the [Slinky Slack channel][slinky-slack] for project-wide discussions.
+
 Github/Gitlab submitted issues and PRs/MRs are handled on a best effort basis.
 
 The SchedMD official issue tracker is at <https://support.schedmd.com/>.
@@ -204,6 +206,7 @@ specific language governing permissions and limitations under the License.
 [quickstart]: ./docs/quickstart.md
 [slinky]: https://slinky.ai/
 [slinky-docs]: https://slinky.schedmd.com/
+[slinky-slack]: https://app.slack.com/client/T09NY5SBT/C0CC9B9C1CH
 [slurm]: https://slurm.schedmd.com/overview.html
 [slurm-25.11]: https://www.schedmd.com/slurm-version-25-11-0-is-now-available/
 [slurm-data_parser]: https://slurm.schedmd.com/rest_clients.html#data_parser_lifecycle
