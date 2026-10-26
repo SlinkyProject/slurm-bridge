@@ -166,19 +166,10 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 		return false, err
 	}
 	if live.HetJobId != 0 && live.Pending {
-		// A pending component cannot be canceled independently. Check every current
-		// root member as well as every component before canceling the whole hetjob.
-		if info.CompositePodGroup != nil {
-			pods, _, err := r.membersFrom(ctx, r.apiReader, groupKey(*info.CompositePodGroup))
-			if err != nil && !errors.Is(err, slurmjobir.ErrorPodGroupNoPods) {
-				return false, err
-			}
-			if needsAllocation(pods) {
-				return false, nil
-			}
-		}
-		// The cache may not contain every component yet. A whole-allocation
-		// cancellation must account for all live component records as well.
+		// A pending component cannot be canceled independently. Check every live
+		// component and its current members, including components absent from the
+		// cache. New composite leaves have no component in this allocation and
+		// cannot use it, so they must not prevent its cancellation.
 		all := &api.V0044JobInfoObjectList{}
 		if err := r.slurmClient.List(ctx, all, &slurmclient.ListOptions{SkipCache: true}); err != nil {
 			return false, err

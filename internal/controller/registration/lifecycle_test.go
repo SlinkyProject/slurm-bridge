@@ -15,6 +15,7 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/cache"
 	"k8s.io/utils/ptr"
@@ -382,6 +383,76 @@ func TestLifecycleHeterogeneousRelease(t *testing.T) {
 			}
 			if job.Finished {
 				t.Fatal("released live sibling")
+			}
+		})
+	}
+}
+
+func TestLifecyclePendingCompositeLeaves(t *testing.T) {
+	for _, represented := range []bool{false, true} {
+		t.Run(map[bool]string{false: "new-leaf", true: "existing-leaf"}[represented], func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			root := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "scheduling.k8s.io/v1alpha3", "kind": "CompositePodGroup",
+				"metadata": map[string]any{"namespace": "ns", "name": "root", "uid": "root-uid"},
+				"spec":     map[string]any{"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(1)}}},
+			}}
+			if err := f.kube.Create(t.Context(), root); err != nil {
+				t.Fatal(err)
+			}
+			f.group.Spec.ParentCompositePodGroupName = ptr.To(root.GetName())
+			if err := f.kube.Update(t.Context(), f.group); err != nil {
+				t.Fatal(err)
+			}
+			leaf := f.group.DeepCopy()
+			leaf.Name, leaf.UID, leaf.ResourceVersion = "late-leaf", "late-leaf-uid", ""
+			if err := f.kube.Create(t.Context(), leaf); err != nil {
+				t.Fatal(err)
+			}
+			late := f.latePod(t)
+			late.Spec.SchedulingGroup.PodGroupName = ptr.To(leaf.Name)
+			if err := f.kube.Update(t.Context(), late); err != nil {
+				t.Fatal(err)
+			}
+
+			info := f.jobs[0].Ownership()
+			info.CompositePodGroup = &externaljobinfo.GroupIdentity{APIGroup: "scheduling.k8s.io", Kind: "CompositePodGroup", Namespace: "ns", Name: "root", UID: "root-uid"}
+			f.job.AdminComment = ptr.To(info.ToString())
+			f.job.JobState = ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING})
+			f.job.HetJobId = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](100)}
+			f.job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](0)}
+			if err := f.live.Update(t.Context(), f.job, nil); err != nil {
+				t.Fatal(err)
+			}
+			first, err := slurmjob.RegisteredJobFromInfo(f.job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The second component is absent from the informer. Its recorded Pod is
+			// gone, but a late member of its leaf must still prevent cancellation.
+			sibling := f.job.DeepCopy()
+			sibling.JobId = ptr.To[int32](101)
+			sibling.HetJobOffset.Number = ptr.To[int32](1)
+			info.PodGroup = &externaljobinfo.GroupIdentity{APIGroup: "scheduling.k8s.io", Kind: "PodGroup", Namespace: "ns", Name: "gone", UID: "gone-uid"}
+			if represented {
+				info.PodGroup.Name, info.PodGroup.UID = leaf.Name, leaf.UID
+			}
+			info.Pods = []string{"ns/gone-pod/gone-pod-uid"}
+			sibling.AdminComment = ptr.To(info.ToString())
+			if err := f.live.Create(t.Context(), sibling, nil); err != nil {
+				t.Fatal(err)
+			}
+
+			released, err := f.r.releaseComponent(t.Context(), first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wantCancellations []int32
+			if !represented {
+				wantCancellations = []int32{100}
+			}
+			if released == represented || !slices.Equal(f.cancellations, wantCancellations) {
+				t.Fatalf("released=%t, cancellations=%v; leaf represented=%t", released, f.cancellations, represented)
 			}
 		})
 	}
