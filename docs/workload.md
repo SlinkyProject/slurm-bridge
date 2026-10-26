@@ -300,10 +300,11 @@ Keys that do not conflict are combined.
 
 Prefix every suffix with `slurmjob.slinky.slurm.net/`; for example,
 `slurmjob.slinky.slurm.net/account`. Node counts and priority are base-10
-integers. CPU and memory accept Kubernetes quantities. `timelimit` accepts a
-duration with a unit suffix (`s`, `m`, `h`, `d`, `w`), one of Slurm's `--time`
-formats (`MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM`, `D-HH:MM:SS`), or a bare
-integer, which is read as minutes; sub-minute values are rounded up to one
+integers. CPU and memory accept Kubernetes quantities. `gres` is passed to
+Slurm's `tres_per_node` field; use a value such as `gres/gpu=2`. `timelimit`
+accepts a duration with a unit suffix (`s`, `m`, `h`, `d`, `w`), one of Slurm's
+`--time` formats (`MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM`, `D-HH:MM:SS`), or a
+bare integer, which is read as minutes; sub-minute values are rounded up to one
 minute because Slurm's time limit has minute granularity. Exclusive placement is
 the default. `exclusive: "false"` always requests MCS-category sharing; the
 resulting external job uses Slurm's `Shared=mcs` mode and requires a configured
