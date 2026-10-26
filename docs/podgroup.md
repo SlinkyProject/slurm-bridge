@@ -192,10 +192,11 @@ again.
 1. Upgrade the cluster. Enable `scheduling.k8s.io/v1beta1` and the
    `GenericWorkload` gate, as in [`hack/kind.yaml`](../hack/kind.yaml).
 
-1. Restart the scheduler so it discovers `v1beta1`:
+1. Restart the scheduler and controllers so both discover `v1beta1`:
 
    ```sh
-   kubectl --namespace slurm rollout restart deployment/slurm-bridge-scheduler
+   kubectl --namespace slurm rollout restart \
+     deployment/slurm-bridge-scheduler deployment/slurm-bridge-controllers
    ```
 
 1. Convert the saved objects and apply them with the same names and namespaces.
