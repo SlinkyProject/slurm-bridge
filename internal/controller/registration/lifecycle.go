@@ -205,7 +205,7 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 }
 
 func (r *Reconciler) reconcileLifecycle(ctx context.Context, key Request, pods []corev1.Pod, jobs []slurmjob.RegisteredJob) (bool, error) {
-	if len(jobs) == 0 && r.recent != nil {
+	if len(jobs) == 0 && r.recent != nil && slices.ContainsFunc(pods, func(p corev1.Pod) bool { return podReadyForCleanup(&p) }) {
 		if value, cooling := r.recent.Get(key); cooling {
 			id := value.(int32)
 			if id == 0 {

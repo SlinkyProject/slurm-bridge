@@ -134,6 +134,84 @@ func (f *lifecycleFixture) latePod(t *testing.T) *corev1.Pod {
 	return pod
 }
 
+func TestLifecycleRecentSubmissionBeforePublication(t *testing.T) {
+	for _, scenario := range []string{"pending", "unknown-submission", "terminal", "deleting-unbound", "mixed-members"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			f.pod.Labels = nil // The informer has not published the submitted job yet.
+			f.pod.Status.Phase = corev1.PodPending
+			f.pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: wellknown.SchedulingGateRegistration}}
+			cleanup := scenario == "terminal" || scenario == "deleting-unbound" || scenario == "mixed-members"
+			if scenario == "terminal" || scenario == "mixed-members" {
+				f.pod.Status.Phase = corev1.PodSucceeded
+			}
+			if scenario == "deleting-unbound" {
+				f.pod.DeletionTimestamp = ptr.To(metav1.Now())
+			}
+			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{
+				Namespace: f.pod.Namespace, Name: "claim", UID: "claim-uid",
+				Labels:          map[string]string{wellknown.LabelAllocationPodUID: string(f.pod.UID)},
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Pod", UID: f.pod.UID}},
+			}}
+			f.kube = fake.NewClientBuilder().WithScheme(f.kube.Scheme()).WithObjects(f.group, f.pod, claim).Build()
+			f.r.Client, f.r.apiReader = f.kube, f.kube
+			if scenario == "mixed-members" {
+				f.latePod(t)
+			}
+			cached := slurmfake.NewFakeClient()
+			f.r.informer = &registrationInformer{InformerCache: cached.GetInformer(api.ObjectTypeV0044JobInfo), synced: true}
+			reads := 0
+			f.r.slurmClient = slurminterceptor.NewClient(cached, slurminterceptor.Funcs{
+				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+					if (&slurmclient.GetOptions{}).ApplyOptions(opts).SkipCache {
+						reads++
+						return f.live.Get(ctx, key, obj, opts...)
+					}
+					return cached.Get(ctx, key, obj, opts...)
+				},
+			})
+			var err error
+			f.r.jobIndex, err = slurmjob.NewPodIndex(f.r.slurmClient, f.r.informer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.r.submit = registrationSubmitFunc(func(context.Context, *slurmjobir.SlurmJobIR) (int32, error) {
+				t.Fatal("resubmitted an allocation before the informer observed it")
+				return 0, nil
+			})
+			id := int32(100)
+			if scenario == "unknown-submission" {
+				id = 0
+			}
+			key := objectRequest(f.group)
+			f.r.recent.Set(key, id, registrationCooldown)
+			for range 3 {
+				result, err := f.r.Reconcile(t.Context(), key)
+				if err != nil || result.RequeueAfter != registrationRetry {
+					t.Fatalf("result=%v, error=%v", result, err)
+				}
+			}
+			wantReads := 0
+			if cleanup {
+				wantReads = 3
+			}
+			if reads != wantReads {
+				t.Fatalf("live reads=%d, want %d", reads, wantReads)
+			}
+			current := &corev1.Pod{}
+			if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(f.pod), current); err != nil {
+				t.Fatal(err)
+			}
+			if !hasRegistrationGate(current) || !slices.Contains(current.Finalizers, wellknown.FinalizerScheduler) {
+				t.Fatalf("released an unpublished Pod: gates=%v, finalizers=%v", current.Spec.SchedulingGates, current.Finalizers)
+			}
+			if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(claim), &resourcev1.ResourceClaim{}); err != nil {
+				t.Fatalf("released a claim before its allocation: %v", err)
+			}
+		})
+	}
+}
+
 func TestLifecycleRetainsCurrentMembers(t *testing.T) {
 	for _, scenario := range []string{"late-member", "late-member-only-in-api", "replaced-pod-in-same-group", "deleting-bound-member"} {
 		t.Run(scenario, func(t *testing.T) {
