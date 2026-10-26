@@ -13,6 +13,7 @@ trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 DRANET_INTERFACE_NAME="dranet0"
+BRIDGE_CHART="oci://ghcr.io/slinkyproject/charts/slurm-bridge"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 KWOK_CHART_REPO="https://kwok.sigs.k8s.io/charts/"
@@ -324,6 +325,14 @@ function git::checkout() {
 
 function slurm-bridge::install() {
 	slurm-bridge::prerequisites
+	if [ -n "$OPT_BRIDGE_VERSION" ]; then
+		echo "[slurm-bridge] Installing released slurm-bridge chart $OPT_BRIDGE_VERSION..."
+		helm upgrade --install slurm-bridge "$BRIDGE_CHART" \
+			--version "$OPT_BRIDGE_VERSION" \
+			--namespace slurm --create-namespace \
+			--wait --timeout 300s
+		return 0
+	fi
 	echo "[slurm-bridge] Running skaffold (build and deploy slurm-bridge)..."
 	(
 		cd "$ROOT_DIR/helm/slurm-bridge"
@@ -755,7 +764,12 @@ function slurm-bridge::configure_e2e_device_profiles() {
 		return 0
 	fi
 
-	helm upgrade slurm-bridge "$ROOT_DIR/helm/slurm-bridge" \
+	local chart_args=("$ROOT_DIR/helm/slurm-bridge")
+	if [ -n "$OPT_BRIDGE_VERSION" ]; then
+		chart_args=("$BRIDGE_CHART" --version "$OPT_BRIDGE_VERSION")
+	fi
+
+	helm upgrade slurm-bridge "${chart_args[@]}" \
 		--namespace slurm \
 		--reuse-values \
 		--values "$SCRIPT_DIR/e2e-device-profiles.yaml" \
@@ -772,7 +786,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
 	        [--dra-driver-nvidia-gpu] [--dranet] [--kwok] [--metrics]
-	        [--slurm-node-mode=MODE]
+	        [--slurm-node-mode=MODE] [--bridge-version=VERSION]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [--print-image] [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
@@ -810,6 +824,11 @@ SLURM OPTIONS:
 	--slurm-operator-ref=REF
 	                    Clone slurm-operator from REF. Default: $OPT_SLURM_OPERATOR_REF.
 	                    Can also be set with SLURM_OPERATOR_REF.
+	--bridge-version=VERSION
+	                    With --core, install the released slurm-bridge chart VERSION from
+	                    $BRIDGE_CHART instead of building from source.
+	                    Used as the baseline for upgrade tests.
+	                    Can also be set with SLURM_BRIDGE_VERSION.
 
 HELP OPTIONS:
 	--debug             Show script debug information.
@@ -910,6 +929,7 @@ OPT_METRICS=false
 OPT_SLURM_OPERATOR_REPO="${SLURM_OPERATOR_REPO:-https://github.com/SlinkyProject/slurm-operator.git}"
 OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-main}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
+OPT_BRIDGE_VERSION="${SLURM_BRIDGE_VERSION:-}"
 
 case "$MOCK_NVML" in
 true | false) ;;
@@ -920,7 +940,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -989,6 +1009,14 @@ while :; do
 		OPT_SLURM_OPERATOR_REF="$2"
 		if [ -z "$OPT_SLURM_OPERATOR_REF" ]; then
 			echo "--slurm-operator-ref requires a non-empty REF" >&2
+			exit 1
+		fi
+		shift 2
+		;;
+	--bridge-version)
+		OPT_BRIDGE_VERSION="$2"
+		if [ -z "$OPT_BRIDGE_VERSION" ]; then
+			echo "--bridge-version requires a non-empty VERSION" >&2
 			exit 1
 		fi
 		shift 2
