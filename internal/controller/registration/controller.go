@@ -37,7 +37,7 @@ import (
 
 const ControllerName = "registration-controller"
 
-var maxConcurrentReconciles = 1
+var maxConcurrentReconciles = 10
 var deprecatedPodWorkers = 1
 
 func init() {

@@ -56,7 +56,7 @@ Kubernetes: `>= 1.34.0-0`
 | controllers.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
 | controllers.podWorkers | int | `nil` | Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility. |
 | controllers.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
-| controllers.registrationWorkers | int | `nil` | Max concurrent allocation lifecycle workers. Unset keeps the default (1). |
+| controllers.registrationWorkers | int | `nil` | Max concurrent allocation lifecycle workers. Unset keeps the default (10). |
 | controllers.replicas | int | `1` | Set the number of replicas to deploy. |
 | controllers.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
 | controllers.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |

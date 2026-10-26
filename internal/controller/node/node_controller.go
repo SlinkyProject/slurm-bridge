@@ -44,7 +44,7 @@ func init() {
 var (
 	ControllerName = "node-controller"
 
-	maxConcurrentReconciles = 1
+	maxConcurrentReconciles = 10
 
 	// this is a short cut for any sub-functions to notify the reconcile how long to wait to requeue
 	durationStore = durationstore.NewDurationStore(durationstore.Greater)

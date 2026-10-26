@@ -198,7 +198,7 @@ controllers:
   leaderElect: false
   # -- (int) Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility.
   podWorkers: null
-  # -- (int) Max concurrent allocation lifecycle workers. Unset keeps the default (1).
+  # -- (int) Max concurrent allocation lifecycle workers. Unset keeps the default (10).
   registrationWorkers: null
   # -- PodDisruptionBudget for the controllers deployment
   pdb:

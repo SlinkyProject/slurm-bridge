@@ -135,8 +135,9 @@ The Slurm informer reconstructs cleanup work after restarts. The separate Pod
 controller and dangling-job sweep are no longer used.
 
 Configure concurrency with `controllers.registrationWorkers` in Helm or
-`--registration-workers` on the controllers binary. The default is one worker.
-`controllers.podWorkers` and `--pod-workers` remain accepted for compatibility
-but have no effect. Cache reads retain the existing Slurm client refresh waits.
-This ownership change does not alter allocation formation for late composite
-components.
+`--registration-workers` on the controllers binary. The default is 10 workers.
+The Node controller also defaults to 10 workers, configurable with
+`--node-workers`. `controllers.podWorkers` and `--pod-workers` remain accepted
+for compatibility but have no effect. Cache reads retain the existing Slurm
+client refresh waits. This ownership change does not alter allocation formation
+for late composite components.
