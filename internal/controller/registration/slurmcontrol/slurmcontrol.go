@@ -25,7 +25,8 @@ type SlurmControlInterface interface {
 	IsJobRunning(ctx context.Context, pod *corev1.Pod) (bool, error)
 	// TerminateJob cancels the Slurm job by JobId
 	TerminateJob(ctx context.Context, jobId int32) error
-	// TerminateHetJobComponent cancels only the component at hetJobOffset, including offset zero.
+	// TerminateHetJobComponent cancels the component at hetJobOffset.
+	// Offset zero cancels the whole heterogeneous allocation.
 	TerminateHetJobComponent(ctx context.Context, hetJobId, hetJobOffset int32) error
 }
 

@@ -333,12 +333,20 @@ func (c *componentReleaseRecorder) TerminateHetJobComponent(ctx context.Context,
 }
 
 func TestLifecycleHeterogeneousRelease(t *testing.T) {
-	for _, pending := range []bool{false, true} {
-		t.Run(map[bool]string{false: "running-component-zero", true: "pending-incomplete-cache"}[pending], func(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pending bool
+		offset  int32
+	}{
+		{name: "running-component-zero"},
+		{name: "running-nonzero-component", offset: 1},
+		{name: "pending-incomplete-cache", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newLifecycleFixture(t)
-			f.job.HetJobId = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](100)}
-			f.job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](0)}
-			if pending {
+			f.job.HetJobId = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To[int32](100 - tc.offset)}
+			f.job.HetJobOffset = &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(tc.offset)}
+			if tc.pending {
 				f.job.JobState = ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING})
 			}
 			if err := f.live.Update(t.Context(), f.job, nil); err != nil {
@@ -355,8 +363,8 @@ func TestLifecycleHeterogeneousRelease(t *testing.T) {
 				t.Fatal(err)
 			}
 			sibling := f.job.DeepCopy()
-			sibling.JobId = ptr.To[int32](101)
-			sibling.HetJobOffset.Number = ptr.To[int32](1)
+			sibling.JobId = ptr.To[int32](101 - 2*tc.offset)
+			sibling.HetJobOffset.Number = ptr.To[int32](1 - tc.offset)
 			sibling.AdminComment = ptr.To((&externaljobinfo.ExternalJobInfo{Pods: []string{externaljobinfo.PodKey(siblingPod)}}).ToString())
 			if err := f.live.Create(t.Context(), sibling, nil); err != nil {
 				t.Fatal(err)
@@ -370,7 +378,8 @@ func TestLifecycleHeterogeneousRelease(t *testing.T) {
 			if len(f.cancellations) != 0 {
 				t.Fatal("canceled whole heterogeneous allocation")
 			}
-			if pending && len(control.offsets) != 0 || !pending && !slices.Equal(control.offsets, []int32{0}) {
+			independent := !tc.pending && tc.offset != 0
+			if !independent && len(control.offsets) != 0 || independent && !slices.Equal(control.offsets, []int32{tc.offset}) {
 				t.Fatalf("component offsets=%v", control.offsets)
 			}
 			current := &api.V0044JobInfo{}
@@ -383,6 +392,28 @@ func TestLifecycleHeterogeneousRelease(t *testing.T) {
 			}
 			if job.Finished {
 				t.Fatal("released live sibling")
+			}
+			if !independent {
+				pod := &corev1.Pod{}
+				if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(f.pod), pod); err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Contains(pod.Finalizers, wellknown.FinalizerScheduler) {
+					t.Fatal("released finalizer while a sibling still needs the allocation")
+				}
+				siblingPod.Status.Phase = corev1.PodSucceeded
+				if err := f.kube.Status().Update(t.Context(), siblingPod); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.reconcile(t); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(f.pod), pod); err != nil {
+					t.Fatal(err)
+				}
+				if slices.Contains(pod.Finalizers, wellknown.FinalizerScheduler) {
+					t.Fatal("retained finalizer after all members completed")
+				}
 			}
 		})
 	}

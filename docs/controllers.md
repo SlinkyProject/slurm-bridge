@@ -125,8 +125,8 @@ Cleanup uses current Kubernetes group membership, including late members, as
 well as the Pod identities recorded in Slurm. Before cancellation it confirms
 membership through the Kubernetes API and ownership through Slurm. A deleting,
 bound Pod retains its allocation until it becomes terminal. Running
-heterogeneous jobs can release individual components; pending heterogeneous jobs
-are retained while any member needs the allocation.
+heterogeneous jobs can release individual nonzero components. Component zero and
+pending heterogeneous jobs are retained while any member needs the allocation.
 
 Bound Pods whose jobs stop running are deleted after a live Slurm check. Claims
 and scheduler finalizers are removed only after Slurm reports the allocation

@@ -165,10 +165,10 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 	if err != nil || needsAllocation(members) {
 		return false, err
 	}
-	if live.HetJobId != 0 && live.Pending {
-		// A pending component cannot be canceled independently. Check every live
-		// component and its current members, including components absent from the
-		// cache. New composite leaves have no component in this allocation and
+	if live.HetJobId != 0 && (live.Pending || live.HetJobOffset == 0) {
+		// Pending components and component zero cannot be canceled independently.
+		// Check every live component and its current members, including uncached
+		// components. New composite leaves have no component in this allocation and
 		// cannot use it, so they must not prevent its cancellation.
 		all := &api.V0044JobInfoObjectList{}
 		if err := r.slurmClient.List(ctx, all, &slurmclient.ListOptions{SkipCache: true}); err != nil {
