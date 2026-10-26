@@ -78,6 +78,11 @@ pointing at their **`PodGroup`**. For a **Gang** policy, `slurm-bridge` groups
 pods by scheduling group and applies the same external-job flow as other
 co-scheduled workload types, including the `minCount` check.
 
+The bridge rejects PodGroups with non-empty
+`spec.schedulingConstraints.topology` or `spec.resourceClaims`. Use Slurm
+partitions or constraints for placement and DeviceClass extended resources on
+Pods for DRA devices.
+
 For a **Basic** policy, pods follow their normal owner-based scheduling path.
 Jobs and standalone Pods receive independent Slurm allocations, while
 LeaderWorkerSets retain their existing group scheduling. PodGroup and Workload

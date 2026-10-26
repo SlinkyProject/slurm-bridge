@@ -56,8 +56,8 @@ CPU DRA requires `slurmjob.slinky.slurm.net/exclusive: "false"` on the
 workload's [annotation source](workload.md#pod-grouping). Standalone pods that
 omit it or enable exclusive allocation are rejected at admission. For
 controller-owned and grouped pods, the scheduler checks the resolved annotations
-before Slurm submission. Native CPU and GPU-only requests still support
-exclusive allocation.
+before releasing the held Slurm job for allocation. Native CPU and GPU-only
+requests still support exclusive allocation.
 
 In-place resizing is not supported for managed pods. The admission controller
 rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
