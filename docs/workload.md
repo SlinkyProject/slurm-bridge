@@ -56,14 +56,15 @@ to control which resources are scheduled using the `slurm-bridge-scheduler`. The
 `slurm-bridge-scheduler` is designed as a non-primary scheduler and is not
 intended to replace the default
 [kube-scheduler](https://kubernetes.io/docs/concepts/architecture/#kube-scheduler).
-The `slurm-bridge-scheduler` only schedules pods that request `slurm-bridge` as
-their scheduler or are in a configured namespace. By default, the `slurm-bridge`
-admission controller is configured to automatically use `slurm-bridge` as the
-scheduler for all pods in the configured namespaces.
+The `slurm-bridge-scheduler` only schedules pods whose `spec.schedulerName`
+matches its configured name, `slurm-bridge-scheduler` by default. In managed
+namespaces, admission changes `default-scheduler` to that name; explicitly
+selected custom schedulers are preserved.
 
 Alternatively, a pod can specify `Pod.Spec.schedulerName=slurm-bridge-scheduler`
-from any namespace to indicate that it should be scheduled using the
-`slurm-bridge-scheduler`.
+from an unmanaged namespace to select the `slurm-bridge-scheduler`. The Helm
+webhooks exclude `kube-system` and the bridge's installation namespace, so use a
+separate namespace for bridge workloads.
 
 Please review [`slurm-bridge` admission controller](./admission.md) to learn
 more.
@@ -338,8 +339,10 @@ the external job:
 | `scheduler.slinky.slurm.net/slurm-jobid` | Label      | Slurm job ID associated with the Pod. All Pods represented by one external job receive the same value. |
 | `slinky.slurm.net/slurm-node`            | Annotation | Kubernetes node selected from the Slurm allocation for this Pod.                                       |
 
-These keys are owned by slurm-bridge. Users cannot set them when creating a
-managed Pod or change them after that Pod is running.
+These keys are owned by slurm-bridge and must not be edited manually. Admission
+rejects non-empty values when creating a managed Pod. Subsequent updates are not
+rejected on that basis; the Pod controller repairs metadata using the verified
+Slurm allocation.
 
 ## Pod grouping
 

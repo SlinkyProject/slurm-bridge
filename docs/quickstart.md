@@ -214,9 +214,11 @@ spec:
 `schedulerName: slurm-bridge-scheduler` is what routes the pod to
 `slurm-bridge`. In a namespace listed in the chart's
 `admission.managedNamespaces`, which defaults to just `slurm-bridge`, the
-admission controller rewrites `schedulerName` for you, so the field is optional
-there. The example sets it explicitly so the manifest also works when submitted
-to a namespace the admission controller does not manage.
+admission controller replaces `default-scheduler` for you, so the field is
+optional there. Explicitly selected custom schedulers are preserved. The example
+sets the bridge scheduler explicitly so it also works in an unmanaged namespace.
+Use a workload namespace separate from `kube-system` and the bridge's
+installation namespace, which the Helm webhooks exclude.
 
 Every slurm-bridge annotation is prefixed with `slurmjob.slinky.slurm.net/` and
 must be set on the parent object. An annotation with any other prefix is
