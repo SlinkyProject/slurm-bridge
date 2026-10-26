@@ -462,11 +462,13 @@ cannot scale independently.
 
 Deleting Pods does not partially shrink a running Slurm allocation. The Pod
 controller cancels the Slurm job once all Pods associated with that job are
-terminal (`Succeeded` or `Failed`). Periodic cleanup also cancels pending or
-running jobs whose referenced Pods no longer exist. Removing one independent Pod
-therefore releases its allocation, while removing a whole LWS group releases
-that group's allocation. Removing only some Pods from a shared job retains its
-full allocation while other members remain active.
+terminal (`Succeeded` or `Failed`) or are being deleted before binding to a
+node. Bound Pods must terminate before their allocation is released. Periodic
+cleanup also cancels pending or running jobs whose referenced Pods no longer
+exist. Removing one independent Pod therefore releases its allocation, while
+removing a whole LWS group releases that group's allocation. Removing only some
+Pods from a shared job retains its full allocation while other members remain
+active.
 
 Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
 mean Slurm resources are already free. The bridge also removes its Pod finalizer
@@ -477,10 +479,12 @@ and generated DRA ResourceClaim during terminal Pod cleanup.
 If a scale-up cannot obtain resources, new Pods and their jobs wait for
 scheduling; existing independent allocations continue. Admission rejection
 leaves the Kubernetes object unchanged. If Slurm rejects a pending job update,
-the previous Slurm request remains in effect. Submission or update errors are
-reported through scheduling failures and scheduler logs and can be retried. The
-bridge does not roll back the workload's desired replica count or templates, and
-an API error is not evidence that a job was canceled or resources were released.
+the previous Slurm request remains in effect. Submission errors are reported by
+the registration controller through workload events and controller logs; update
+errors appear in scheduling failures and scheduler logs. Both can be retried.
+The bridge does not roll back the workload's desired replica count or templates,
+and an API error is not evidence that a job was canceled or resources were
+released.
 
 A container restart within the same Pod does not by itself release the Slurm
 job. Terminal Pods trigger the cleanup described above. If a Slurm job stops
@@ -491,6 +495,11 @@ whether Pods are replaced; see
 [LeaderWorkerSet recovery](lws.md#failures-and-recovery). Replacement Pods need
 scheduling again. Do not rely on individual Pod replacement to extend or repair
 an allocated gang; recreate the whole group for a fresh allocation.
+
+When a Pod remains `SchedulingGated`, inspect its `SlurmRegistrationPending`
+event for the group to check. Registration events such as `WaitingForMembers`
+and `SlurmRegistrationFailed` are recorded on that group, including the parent
+CompositePodGroup for composite workloads. Also inspect the controllers' logs.
 
 When scaling stalls, inspect Pod scheduling events, JobSet or LWS status, bridge
 scheduler and controller logs, and the Slurm job in `squeue` or

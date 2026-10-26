@@ -101,7 +101,10 @@ and enforces policy on labels and annotations used by the Slurm scheduler.
 
 ### `internal/controller/`
 
-Contains the node and pod controllers.
+Contains the node, pod, and registration controllers.
+
+The registration controller creates held Slurm jobs and removes Pod registration
+gates once their allocation metadata is available.
 
 The pod controller syncs the state of pods running in Kubernetes with the
 associated external job managed by Slurm, and vice versa. Similarly, the node

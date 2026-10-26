@@ -320,11 +320,11 @@ JobId=1 JobName=job-sleep-single
    OOMKillStep=0
 ```
 
-Note that the `Command` field is equal to `(null)`, and that the `JobState`
-field is equal to `CANCELLED`. This is because this Slurm job is only an
-external job - no work is actually done by the external job. Instead, the job is
-cancelled upon allocation so that `slurm-bridge` can bind the workload to the
-selected node(s) for the duration of the job.
+The `Command` field is `(null)` because kubelet runs the workload instead of
+Slurm. The external job remains running and holds its allocation while the Pod
+runs. In this completed example, `JobState=CANCELLED` reflects the bridge's
+cleanup after the Pod terminated. Cancelling the Slurm job while its Pod is
+still running causes the bridge to delete that Pod.
 
 We can also look at this job using `kubectl`:
 
