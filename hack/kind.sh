@@ -373,9 +373,18 @@ function lws::install() {
 	chartName="lws"
 	if ! helm::find "$chartName"; then
 		echo "[slurm-bridge] Installing lws (LeaderWorkerSet)..."
-		local version="0.11.1"
+		local version="1.0.0"
+		local install_args=(--version "$version" --namespace "${chartName}-system" --create-namespace
+			--wait --timeout 300s)
+		local resources
+		if resources="$(kubectl get --raw /apis/scheduling.k8s.io/v1beta1 2>/dev/null)" &&
+			[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"workloads\" ]] &&
+			[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"podgroups\" ]]; then
+			install_args+=(--set featureGates.WorkloadAwareScheduling=true
+				--set gangSchedulingManagement.schedulerProvider=kubernetes)
+		fi
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
-			--version "$version" --namespace "${chartName}-system" --create-namespace
+			"${install_args[@]}"
 	fi
 }
 

@@ -5,6 +5,8 @@ package slurmjobir
 
 import (
 	"errors"
+	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,8 +35,13 @@ func (t *translator) PreFilterLWS(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.
 		return fwk.NewStatus(fwk.Error, ErrorLWSCouldNotGet.Error())
 	}
 
+	size, err := lwsGroupSize(pod, &lws)
+	if err != nil {
+		return fwk.NewStatus(fwk.Error, err.Error())
+	}
+
 	// Determine if there are enough LWS pods for the group
-	if int32(len(slurmJobIR.AllPods())) < *lws.Spec.LeaderWorkerTemplate.Size { //nolint:gosec
+	if int32(len(slurmJobIR.AllPods())) < size { //nolint:gosec
 		// Siblings are still being created; park until an event instead of retrying blindly.
 		if pod.Labels[wellknown.LabelExternalJobId] == "" {
 			return fwk.NewStatus(fwk.Unschedulable, ErrorInsuffientPods.Error())
@@ -53,7 +60,10 @@ func (t *translator) fromLws(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 		return nil, err
 	}
 
-	size := ptr.Deref(lws.Spec.LeaderWorkerTemplate.Size, 1)
+	size, err := lwsGroupSize(pod, &lws)
+	if err != nil {
+		return nil, err
+	}
 
 	slurmJobIR := &SlurmJobIR{}
 
@@ -85,4 +95,16 @@ func (t *translator) fromLws(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetad
 	}
 	slurmJobIR.Components = []SlurmJobComponent{component}
 	return slurmJobIR, nil
+}
+
+// lwsGroupSize preserves each replica's size while different revisions coexist.
+func lwsGroupSize(pod *corev1.Pod, lws *lwsv1.LeaderWorkerSet) (int32, error) {
+	if value, ok := pod.Annotations[lwsv1.SizeAnnotationKey]; ok {
+		size, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || size < 1 {
+			return 0, fmt.Errorf("invalid LWS group size %q", value)
+		}
+		return int32(size), nil
+	}
+	return ptr.Deref(lws.Spec.LeaderWorkerTemplate.Size, 1), nil
 }

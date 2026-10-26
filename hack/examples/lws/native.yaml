@@ -1,0 +1,47 @@
+---
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: vllm-native
+  namespace: slurm-bridge
+spec:
+  replicas: 2
+  scheduling: {}
+  groupIdentity: Ordinal
+  startupPolicy: LeaderCreated
+  leaderWorkerTemplate:
+    size: 3
+    restartPolicy: RecreateGroupOnPodRestart
+    leaderTemplate:
+      metadata:
+        labels:
+          role: leader
+      spec:
+        schedulerName: slurm-bridge-scheduler
+        containers:
+          - name: leader
+            image: busybox:stable
+            command: [sh, -c, sleep infinite]
+    workerTemplate:
+      spec:
+        schedulerName: slurm-bridge-scheduler
+        containers:
+          - name: worker
+            image: busybox:stable
+            command: [sh, -c, sleep infinite]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-native-leader
+  namespace: slurm-bridge
+spec:
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: 8080
+  selector:
+    leaderworkerset.sigs.k8s.io/name: vllm-native
+    role: leader
+  type: ClusterIP

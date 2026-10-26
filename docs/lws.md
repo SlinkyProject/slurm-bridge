@@ -36,14 +36,30 @@ Use `spec.groupIdentity: Ordinal` (the LWS default) and
 `spec.startupPolicy: LeaderCreated` for this integration. Each replica group
 receives its own Slurm allocation, with a default job name of
 `<set-name>-<group-index>`. Existing manifests that omit `groupIdentity` retain
-ordinal behavior with LWS v0.11.1. The `Hash` identity mode is not currently
+ordinal behavior with LWS v1.0.0. The `Hash` identity mode is not currently
 supported by slurm-bridge.
 
-The development installer uses LWS v0.11.1 with its default feature gates. Keep
-the LWS `WorkloadAwareScheduling` gate disabled when using this direct
-LeaderWorkerSet group scheduling. The existing [built-in PodGroup](podgroup.md)
-integration can still group LWS Pods through `spec.schedulingGroup.podGroupName`
-on their Pod templates.
+The development installer uses LWS v1.0.0. On clusters serving the
+`scheduling.k8s.io/v1beta1` Workload and PodGroup APIs (Kubernetes 1.37), it
+also enables `featureGates.WorkloadAwareScheduling=true` and
+`gangSchedulingManagement.schedulerProvider=kubernetes` on the LWS controller.
+Other clusters retain the default LWS configuration.
+
+For native gang scheduling, enable Kubernetes `GenericWorkload` and the
+`scheduling.k8s.io/v1beta1` API, keep the bridge's `SlurmBridgeGenericWorkload`
+gate enabled, and configure LWS with the settings above. Set
+`spec.scheduling: {}` when creating the LeaderWorkerSet, as in
+[`hack/examples/lws/native.yaml`](../hack/examples/lws/native.yaml). LWS creates
+one PodGroup per replica and sets each Pod's
+`spec.schedulingGroup.podGroupName`. Each replica receives an independent Slurm
+allocation named after its PodGroup. Do not set `spec.schedulingGroup` in the
+Pod templates when using `spec.scheduling`.
+
+Existing LeaderWorkerSets cannot add or remove `spec.scheduling`; recreate the
+workload to migrate. Workloads without `spec.scheduling` continue using the
+deprecated direct scheduling integration, even when the LWS native scheduling
+gate is enabled. The bridge's [built-in PodGroup](podgroup.md) integration also
+supports manually assigned PodGroup references on Pod templates.
 
 When upgrading an existing Helm installation, apply the updated LWS CRDs before
 upgrading the controller, following the
