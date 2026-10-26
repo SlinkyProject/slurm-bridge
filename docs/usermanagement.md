@@ -237,7 +237,7 @@ Install the mutation and validation policies together.
 
 Below is a snippet of a job that has had these annotations set by the policy:
 
-```yaml
+```console
 Name:             job-sleep-single
 Namespace:        alice-hpc
 ...

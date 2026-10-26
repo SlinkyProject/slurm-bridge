@@ -68,7 +68,7 @@ comma-separated list of Slurm partitions. The bridge validates that each
 partition exists, then registers the Slurm node with matching features. Slurm
 `Nodeset` configuration can then map those features into partitions:
 
-```conf
+```text
 Nodeset=slurm-bridge Feature=slurm-bridge
 PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
 ```
@@ -191,7 +191,7 @@ schedulerConfig:
   mcsLabel: kubernetes
 ```
 
-```conf
+```text
 # slurm.conf
 MCSPlugin=mcs/label
 MCSParameters=ondemand,ondemandselect

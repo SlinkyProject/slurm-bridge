@@ -145,8 +145,9 @@ spec:
 
 Keep `spec.schedulingPolicy` and the Job's
 `spec.template.spec.schedulingGroup.podGroupName` unchanged. The complete
-manifests in [`hack/examples/workload/`](../hack/examples/workload/) use this
-1.36 form.
+manifests in
+[`hack/examples/workload/`](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples/workload)
+use this 1.36 form.
 
 Ref: [Workload API][workload-api]
 

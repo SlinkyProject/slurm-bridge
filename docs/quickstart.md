@@ -34,7 +34,7 @@ started.
 ## Pre-requisites
 
 - Kubernetes and Slurm versions supported by the
-  [compatibility matrix](../README.md#compatibility).
+  [compatibility matrix](https://github.com/SlinkyProject/slurm-bridge#compatibility).
 
 - Kubernetes workers configured as [external or hybrid nodes](config.md#nodes).
   Hybrid nodes run colocated [kubelet] and [slurmd]; external nodes do not
@@ -310,7 +310,7 @@ job-sleep-single-w4dfl   0/1     Completed   0          31m   batch.kubernetes.i
 The `scheduler.slinky.slurm.net/slurm-jobid` label tells us that the Slurm JobID
 for our job was 1:
 
-```txt
+```text
 scheduler.slinky.slurm.net/slurm-jobid=1
 ```
 

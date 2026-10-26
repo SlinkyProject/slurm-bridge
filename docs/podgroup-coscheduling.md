@@ -39,7 +39,7 @@ helm install --repo https://scheduler-plugins.sigs.k8s.io scheduler-plugins sche
 ```
 
 Pods join the group via the label `scheduling.x-k8s.io/pod-group` (see
-[`hack/examples/podgroup-coscheduling/`](../hack/examples/podgroup-coscheduling/)).
+[`hack/examples/podgroup-coscheduling/`](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples/podgroup-coscheduling)).
 Gang size is `spec.minMember` on the PodGroup object.
 
 |                 | Built-in PodGroup                                                         | PodGroup coscheduling                 |
