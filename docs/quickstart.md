@@ -33,8 +33,16 @@ started.
 
 ## Pre-requisites
 
-- A functional Kubernetes cluster that includes the hosts running colocated
-  [kubelet] and [slurmd]
+- Kubernetes and Slurm versions supported by the
+  [compatibility matrix](../README.md#compatibility).
+
+- Kubernetes workers configured as [external or hybrid nodes](config.md#nodes).
+  Hybrid nodes run colocated [kubelet] and [slurmd]; external nodes do not
+  require slurmd.
+
+- The built-in Workload and PodGroup APIs enabled on Kubernetes 1.36 or 1.37.
+  Kubernetes 1.35 requires disabling the bridge's `SlurmBridgeGenericWorkload`
+  feature gate. See [Built-in PodGroup](podgroup.md) for cluster configuration.
 
 - Matching NodeNames in Slurm and Kubernetes for all overlapping nodes
 
@@ -86,7 +94,6 @@ When running Slurm on baremetal:
 ```sh
 export $(scontrol token username=slurm lifespan=infinite)
 kubectl create namespace slurm
-kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="SLURM_JWT=$SLURM_JWT" --type=Opaque
 ```
 
@@ -97,13 +104,27 @@ The helm chart used by `slurm-bridge` has a number of parameters in
 that can be modified to tweak various parameters of slurm-bridge. Most of these
 values should work without modification.
 
+Download the chart defaults before editing:
+
+```sh
+helm show values oci://ghcr.io/slinkyproject/charts/slurm-bridge > values.yaml
+```
+
+On Kubernetes 1.35, set this in `values.yaml`:
+
+```yaml
+scheduler:
+  featureGates:
+    SlurmBridgeGenericWorkload: false
+```
+
 Depending on your Slurm configuration, you may need to configure the following
 variables:
 
 - `schedulerConfig.partition` - this is the default partition with which
   `slurm-bridge` will associate jobs. This partition should only include nodes
-  that have both [slurmd] and the [kubelet] running. The default value of this
-  variable is `slurm-bridge`.
+  that map to Kubernetes workers, using either external or hybrid nodes. The
+  default value of this variable is `slurm-bridge`.
 - `schedulerConfig.mcsLabel` - sets the MCS category used whenever a workload
   requests non-exclusive placement. A non-empty label and the additional Slurm
   configuration are required, as described in
@@ -117,7 +138,8 @@ variables:
 
 ```bash
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
-  --namespace=slurm --create-namespace
+  --namespace=slurm --create-namespace --values values.yaml
+kubectl create namespace slurm-bridge
 ```
 
 > [!NOTE]
@@ -142,10 +164,10 @@ slurm-bridge-scheduler-5484467f55-wtspk     1/1     Running   0             1m0s
 
 ## Running Your First Job
 
-`slurm-bridge` has specific scheduling support for [JobSet] and [PodGroup]
-resources and their pods. If your workload requires or benefits from
-co-scheduled pod launch (e.g. MPI, multi-node), consider representing your
-workload as a [JobSet] or [PodGroup].
+`slurm-bridge` supports [JobSet] and [PodGroup] resources and their pods. If
+your workload requires co-scheduled pod launch (e.g. MPI, multi-node), use a
+Gang PodGroup. A JobSet alone uses one Slurm allocation per Pod; see
+[JobSets](jobset.md).
 
 Now that `slurm-bridge` is configured, we can write a workload. `slurm-bridge`
 schedules Kubernetes workloads using the Slurm scheduler by translating a
@@ -388,6 +410,6 @@ running jobs. Recommended next steps involve reviewing our documentation on
 [jobset]: https://jobset.sigs.k8s.io/
 [kubelet]: https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet
 [pod]: https://kubernetes.io/docs/concepts/workloads/pods/
-[podgroup]: https://github.com/kubernetes-sigs/scheduler-plugins/tree/master/kep/42-podgroup-coscheduling
+[podgroup]: podgroup.md
 [slurmd]: https://slurm.schedmd.com/slurmd.html
 [workloads]: workload.md
