@@ -23,14 +23,16 @@
 
 Slurm-bridge uses [external jobs](scheduler.md) to represent Kubernetes
 workloads in Slurm for scheduling purposes. External jobs are submitted using
-the JWT that is generated when the Slurm-bridge Helm chart is deployed. By
-default, external jobs for Kubernetes workloads are submitted as `SlurmUser`,
-but they may be submitted as another user in Slurm by using the
+the JWT in the existing Secret selected by `sharedConfig.slurmJwtSecret`. The
+chart does not generate this token; provision it with `scontrol` or a
+slurm-operator `Token`, as shown in the [quickstart](quickstart.md). By default,
+jobs use the Slurm identity authenticated by that token (the quickstart uses
+`slurm`), but they may be submitted as another user by using the
 `slurmjob.slinky.slurm.net/user-id` annotation.
 
-Kubernetes workloads scheduled by Slurm-bridge always run within the user
-context that they are submitted with - Slurm-bridge does not interfere with a
-Kubernetes workloads' user context at runtime.
+Container users are determined by the Pod's security context and container
+image. The Slurm `user-id` annotation does not change the container's runtime
+user.
 
 ## Using Kyverno Policies with Slurm-bridge
 
@@ -91,10 +93,10 @@ Below are some example Kyverno policies that can be used with Slurm-bridge.
 
 Kyverno policies can be used to automatically configure the annotations on
 Slurm-bridge workloads based on data retrieved from an Identity Provider (IDP).
-When configured in conjunction with per-user namespaces, this approach ensures
-that users cannot impersonate other users in Slurm. This is the recommended
-configuration for sites running Slurm-bridge in multi-tenant production
-environments.
+With per-user namespaces, this approach can enforce Slurm user and account
+assignments. The examples below cover selected workload types. Extend the
+policies to cover the [annotation sources](workload.md#pod-grouping) used by
+other workload types permitted in your deployment.
 
 The process described here uses a script to configure Kubernetes based on data
 from the IDP, and a Kyverno policy to set certain Slinky annotations based on
@@ -145,9 +147,10 @@ This diagram provides a visual reference for the operations of this script:
 A Kyverno MutatingPolicy should be created that reads the Slurm user & account
 data from the ConfigMap in each user's namespace, and sets the
 `slurmjob.slinky.slurm.net/user-id` and `slurmjob.slinky.slurm.net/account`
-annotations on workloads submitted in that namespace. Because this policy runs
-on both `CREATE` and `UPDATE` operations, it prevents users from impersonating
-other users in Slurm when submitting or modifying workloads in Kubernetes.
+annotations on workloads submitted in that namespace. Because this policy sets
+the Slurm user and account from the administrator-managed ConfigMap on both
+`CREATE` and `UPDATE`, users cannot override those assignments for workloads
+covered by the policy.
 
 This diagram illustrates how this MutatingPolicy impacts the job submission
 flow:
@@ -207,10 +210,9 @@ spec:
 
 When this policy is active, the `user-id` and `account` annotations used by
 Slurm-bridge will be automatically populated based on the data from the user's
-ConfigMap. If the user does not set the `slurmjob.slinky.slurm.net/job-name`
-annotation manually, this policy sets this annotation to the name of the
-Kubernetes object, in order to enable easy mapping between Kubernetes workloads
-and their Slurm placeholder jobs.
+ConfigMap. This policy also overwrites `slurmjob.slinky.slurm.net/job-name` with
+the object's name, or its `generateName` prefix when no name has been assigned
+yet, even when the user supplied a job name.
 
 Below is a snippet of a job that has had these annotations set by the policy:
 
@@ -262,7 +264,7 @@ spec:
       - apiGroups:
         - 'scheduling.x-k8s.io'
         apiVersions:
-        - v1
+        - v1alpha1
         operations:
         - CREATE
         - UPDATE
@@ -305,7 +307,7 @@ spec:
       - apiGroups:
         - 'scheduling.x-k8s.io'
         apiVersions:
-        - 'v1'
+        - 'v1alpha1'
         operations:
         - CREATE
         - UPDATE
