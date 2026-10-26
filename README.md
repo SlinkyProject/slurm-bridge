@@ -170,8 +170,8 @@ Project documentation is located in the [docs] directory of this repository.
 
 Feature requests, code contributions, and bug reports are welcome!
 
-Join the [Slinky channel][slinky-slack] in the Kubernetes Slack workspace for
-project-wide discussions.
+Chat with us in the [Slinky channel][slinky-slack] on
+[Kubernetes Slack][kubernetes-slack].
 
 Github/Gitlab submitted issues and PRs/MRs are handled on a best effort basis.
 
@@ -203,6 +203,7 @@ specific language governing permissions and limitations under the License.
 [dra-example-driver]: https://github.com/kubernetes-sigs/dra-example-driver
 [dranet]: https://github.com/kubernetes-sigs/dranet
 [kubernetes]: https://kubernetes.io/
+[kubernetes-slack]: https://slack.k8s.io/
 [nvidia-dra-driver]: https://github.com/NVIDIA/k8s-dra-driver-gpu
 [quickstart]: ./docs/quickstart.md
 [slinky]: https://slinky.ai/
