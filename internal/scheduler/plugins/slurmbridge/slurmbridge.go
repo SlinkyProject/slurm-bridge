@@ -664,9 +664,8 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 				"pod", klog.KObj(pod), "jobId", externalJob.JobId)
 			// NodeResourcesFit's queueing events retry the pod when resources
 			// change. Retain the allocation and all gang members in the meantime.
-			// TODO: Bound this wait and recover if terminating pods or pods from
-			// finished jobs never leave the node; stalled cleanup can otherwise
-			// hold this gang's Slurm allocation indefinitely.
+			// TODO: Bound this wait and recover if pods from finished jobs never
+			// leave the node. Pods stuck Terminating are already excluded.
 			return nil, fwk.NewStatus(fwk.Unschedulable, "waiting for previous Bridge allocation to release resources")
 		}
 		logger.Info("Slurm allocation rejected by Kubernetes, deleting external job for retry",
