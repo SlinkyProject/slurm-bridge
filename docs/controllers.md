@@ -10,6 +10,7 @@
   - [Node Controller](#node-controller)
     - [Node Registration and Partition Assignment](#node-registration-and-partition-assignment)
   - [Registration Controller](#registration-controller)
+    - [Submission Failures](#submission-failures)
 
 <!-- mdformat-toc end -->
 
@@ -136,3 +137,20 @@ Configure concurrency with `scheduler.registrationWorkers` in Helm or
 workers. The Node controller also defaults to 10 workers, configurable with
 `--node-workers`. `scheduler.podWorkers` and `--pod-workers` remain accepted for
 compatibility but have no effect.
+
+### Submission Failures
+
+When Slurm refuses a submission, the Pods stay behind their registration gate.
+The controller records an Event with Slurm's message on the workload, which is
+the Pod or its group object, such as a PodGroup. The Slurm error number decides
+the Event reason and the retry:
+
+| Event reason                          | Slurm errors                                                                                                       | Retry               |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------- |
+| `SlurmRegistrationRejected` (Warning) | Invalid partition, node count, task count, feature, account, licenses, time limit, wckey, QOS, GRES, TRES, or user | Every ten minutes   |
+| `WaitingForSlurm` (Normal)            | Max job count, accounting policy such as a submit limit, partition not available, or partition down                | Every minute        |
+| `SlurmRegistrationFailed` (Warning)   | Any other error, including an unreachable Slurm                                                                    | Exponential backoff |
+
+Slurm checks most requests against its current configuration, so an
+administrator change can make a refused request valid. A change to the
+workload's annotations is picked up within about a minute.
