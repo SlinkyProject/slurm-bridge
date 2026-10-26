@@ -279,8 +279,10 @@ spec:
 
 Slurm parameters are resolved from lowest to highest precedence: **scheduler or
 Slurm defaults -> values derived from the workload and Pods -> Slurm job
-annotations**. For built-in PodGroups, annotation precedence is **PodGroup ->
-selected controller (Job or JobSet) -> Workload**.
+annotations**. For built-in PodGroups, annotation precedence is **selected owner
+-> PodGroup -> Workload**. The owner is resolved as described in
+[Pod grouping](#pod-grouping), typically a Job or JobSet; Basic PodGroups also
+retain annotations from a standalone Pod or LeaderWorkerSet.
 
 Keys that do not conflict are combined.
 

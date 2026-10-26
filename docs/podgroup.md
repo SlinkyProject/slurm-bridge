@@ -142,19 +142,19 @@ Ref: [Workload API][workload-api]
 To override Slurm submission parameters, add optional
 `slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
 controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
-**Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
+**Workload** > **PodGroup** > **selected controller**. Without them, the Slurm
 job name for a Gang policy defaults to the **PodGroup object name** (not the
 Workload name); Basic policies retain the normal workload's naming behavior. The
 partition defaults to the scheduler configuration. See
 [Annotations](workload.md#annotations) for the full key list.
 
 If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
-applied **PodGroup -> selected controller -> Workload**, so the Workload wins.
+applied **selected controller -> PodGroup -> Workload**, so the Workload wins.
 In the example above, the PodGroup is named `training-job-workers` but the
 Workload sets `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm
-receives **`training-job`**. A PodGroup cannot override a `job-name` set on its
-Workload or selected controller. For per-gang names, omit `job-name` from
-broader sources and set it on each **PodGroup** instead.
+receives **`training-job`**. A PodGroup can override a `job-name` set on its
+selected controller, but cannot override its Workload. For per-gang names, omit
+`job-name` from the Workload and set it on each **PodGroup** instead.
 
 A Workload may define several `podGroupTemplates`, each producing a runtime
 PodGroup. Workload-level identifiers such as `job-name` then apply to **every**
