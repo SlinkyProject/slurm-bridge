@@ -174,7 +174,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 		if !r.eligible(pod) {
 			continue
 		}
-		ir, err := slurmjobir.TranslateToSlurmJobIR(r.Client, r.registry, r.workloadAPI, ctx, pod)
+		ir, err := slurmjobir.TranslateToSlurmJobIR(r.Client, r.registry, r.workloadAPI, ctx, pod,
+			slurmjobir.WithResourceSlices(slurmjobir.CachedResourceSlices(ctx, r.Client)))
 		if err != nil {
 			return r.registrationReadEvent(key, err)
 		}

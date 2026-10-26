@@ -1,0 +1,18 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Replaces the host CPU topology with mock-numa-sysfs.yaml.
+driverConfig:
+  sysfsOverlay: /etc/dra-driver-cpu/sysfs-overlay.yaml
+
+extraVolumeMounts:
+  - name: mock-numa-sysfs
+    mountPath: /etc/dra-driver-cpu/sysfs-overlay.yaml
+    subPath: sysfs-overlay.yaml
+    readOnly: true
+
+extraVolumes:
+  - name: mock-numa-sysfs
+    configMap:
+      name: dra-driver-cpu-mock-numa-sysfs

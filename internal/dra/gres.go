@@ -6,6 +6,7 @@ package dra
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/dynamic-resource-allocation/structured"
+	"k8s.io/utils/cpuset"
 )
 
 const (
@@ -73,6 +75,45 @@ func (p DeviceProfile) GRES() (GRES, error) {
 type GRESInventory struct {
 	GRES    GRES
 	Devices []DeviceIdentity
+
+	NUMANodes map[DeviceIdentity][]int
+	// Cores holds the Slurm cores local to each device; see WithNUMACores.
+	Cores map[DeviceIdentity][]int
+}
+
+// WithNUMACores returns a copy of the inventory with each device bound to the
+// union of its NUMA nodes' cores. Slurm takes one core range per device, so
+// devices whose cores are not contiguous stay unbound.
+func (g GRESInventory) WithNUMACores(numaCores map[int][]int) GRESInventory {
+	g.Cores = nil
+	for _, device := range g.Devices {
+		var cores []int
+		for _, node := range g.NUMANodes[device] {
+			cores = append(cores, numaCores[node]...)
+		}
+		if len(cores) == 0 {
+			continue
+		}
+		slices.Sort(cores)
+		cores = slices.Compact(cores)
+		if cores[len(cores)-1]-cores[0] != len(cores)-1 {
+			continue
+		}
+		if g.Cores == nil {
+			g.Cores = make(map[DeviceIdentity][]int)
+		}
+		g.Cores[device] = cores
+	}
+	return g
+}
+
+// deviceCores returns the Slurm cores of the device at index i, or "".
+func (g GRESInventory) deviceCores(i int) string {
+	cores := g.Cores[g.Devices[i]]
+	if len(cores) == 0 {
+		return ""
+	}
+	return cpuset.New(cores...).String()
 }
 
 // GRES translates indexed-GRES profiles into Slurm GRES inventory.
@@ -91,8 +132,9 @@ func (n NodeInventory) GRES() ([]GRESInventory, error) {
 			return nil, err
 		}
 		inventory = append(inventory, GRESInventory{
-			GRES:    gres,
-			Devices: slices.Clone(profileInventory.Devices),
+			GRES:      gres,
+			Devices:   slices.Clone(profileInventory.Devices),
+			NUMANodes: maps.Clone(profileInventory.NUMANodes),
 		})
 	}
 	return inventory, nil
@@ -130,6 +172,11 @@ func (g GRESInventory) SlurmConfig() (string, string, error) {
 	gresConf := make([]string, len(devices))
 	for i, device := range devices {
 		gresConf[i] = fmt.Sprintf("count=1,name=%s,type=%s,file=%s", g.GRES.Name, profileName, device)
+		if cores := g.deviceCores(i); cores != "" {
+			// Dynamic node GresConf rejects the Cores key; its cpus key
+			// takes core indexes.
+			gresConf[i] += ",cpus=" + cores
+		}
 	}
 	// Dynamic-node GresConf records are separated by '+'. One record per
 	// device preserves the array order as Slurm's GRES index order.
@@ -174,6 +221,8 @@ func (a AppliedInventory) Devices(profileName string, indexes []int) ([]DeviceId
 type appliedProfileInventoryWire struct {
 	FirstIndex int      `json:"firstIndex"`
 	Devices    []string `json:"devices"`
+	// Cores makes locality changes re-register the node.
+	Cores []string `json:"cores,omitempty"`
 }
 
 type appliedInventoryWire struct {
@@ -199,10 +248,17 @@ func EncodeAppliedInventory(inventory []GRESInventory) (string, error) {
 			return "", fmt.Errorf("cannot encode duplicate device profile %q", profileName)
 		}
 		firstIndex := nextIndexes[gres.GRES.Name]
-		profiles[profileName] = appliedProfileInventoryWire{
+		profile := appliedProfileInventoryWire{
 			FirstIndex: firstIndex,
 			Devices:    devices,
 		}
+		if len(gres.Cores) > 0 {
+			profile.Cores = make([]string, len(devices))
+			for i := range devices {
+				profile.Cores[i] = gres.deviceCores(i)
+			}
+		}
+		profiles[profileName] = profile
 		nextIndexes[gres.GRES.Name] = firstIndex + len(devices)
 	}
 

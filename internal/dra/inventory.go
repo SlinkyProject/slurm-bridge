@@ -7,11 +7,13 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
+	"k8s.io/dynamic-resource-allocation/deviceattribute"
 	"k8s.io/dynamic-resource-allocation/structured"
 	"k8s.io/utils/ptr"
 )
@@ -44,6 +46,8 @@ func (e *OverlappingDeviceProfilesError) Error() string {
 type ProfileInventory struct {
 	Profile DeviceProfile
 	Devices []DeviceIdentity
+	// NUMANodes holds each device's standard numaNode attribute.
+	NUMANodes map[DeviceIdentity][]int
 }
 
 // NodeInventory is the profile-classified device inventory computed for one
@@ -95,6 +99,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 
 	profilesByName := make(map[string]DeviceProfile)
 	devicesByProfile := make(map[string][]DeviceIdentity)
+	numaNodes := make(map[DeviceIdentity][]int)
 	seen := make(map[DeviceIdentity]struct{})
 	for _, poolSnapshot := range poolSnapshots {
 		for _, resourceSlice := range poolSnapshot.Slices {
@@ -112,6 +117,9 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 					return NodeInventory{}, fmt.Errorf("duplicate DRA device identity %q", identity.String())
 				}
 				seen[identity] = struct{}{}
+				if nodes := deviceNUMANodes(device); len(nodes) > 0 {
+					numaNodes[identity] = nodes
+				}
 				profilesByName[profile.Name] = profile
 				devicesByProfile[profile.Name] = append(devicesByProfile[profile.Name], identity)
 			}
@@ -120,7 +128,7 @@ func BuildNodeInventory(ctx context.Context, registry *Registry, node *corev1.No
 
 	return NodeInventory{
 		NodeName: node.Name,
-		Profiles: sortedProfileInventories(profilesByName, devicesByProfile),
+		Profiles: sortedProfileInventories(profilesByName, devicesByProfile, numaNodes),
 	}, nil
 }
 
@@ -263,7 +271,31 @@ func matchDeviceProfile(
 	return matchedProfile, matched, nil
 }
 
-func sortedProfileInventories(profilesByName map[string]DeviceProfile, devicesByProfile map[string][]DeviceIdentity) []ProfileInventory {
+// deviceNUMANodes returns the standard numaNode attribute as a sorted set; the
+// list form has set semantics, so its order is not a preference.
+func deviceNUMANodes(device *resourcev1.Device) []int {
+	attribute, ok := device.Attributes[deviceattribute.StandardDeviceAttributeNUMANode]
+	if !ok {
+		return nil
+	}
+	values := attribute.IntValues
+	if attribute.IntValue != nil {
+		values = []int64{*attribute.IntValue}
+	}
+	var nodes []int
+	for _, value := range values {
+		if value < 0 || value > math.MaxInt32 {
+			continue
+		}
+		if node := int(value); !slices.Contains(nodes, node) {
+			nodes = append(nodes, node)
+		}
+	}
+	slices.Sort(nodes)
+	return nodes
+}
+
+func sortedProfileInventories(profilesByName map[string]DeviceProfile, devicesByProfile map[string][]DeviceIdentity, numaNodes map[DeviceIdentity][]int) []ProfileInventory {
 	profileNames := make([]string, 0, len(devicesByProfile))
 	for name := range devicesByProfile {
 		profileNames = append(profileNames, name)
@@ -280,12 +312,26 @@ func sortedProfileInventories(profilesByName map[string]DeviceProfile, devicesBy
 			if n := cmp.Compare(a.Pool.String(), b.Pool.String()); n != 0 {
 				return n
 			}
+			// TODO: External nodes take GRES indexes from this order, but hybrid
+			// nodes take them from the site's gres.conf: its record order or
+			// AutoDetect's ordering. String order puts gpu-10 before gpu-2, so
+			// verify hybrid ordering on >10 GPUs before choosing natural sort vs.
+			// an ordering by pciBusID.
 			return cmp.Compare(a.Device.String(), b.Device.String())
 		})
-		inventories = append(inventories, ProfileInventory{
+		inventory := ProfileInventory{
 			Profile: profilesByName[name],
 			Devices: devices,
-		})
+		}
+		for _, device := range devices {
+			if nodes, ok := numaNodes[device]; ok {
+				if inventory.NUMANodes == nil {
+					inventory.NUMANodes = make(map[DeviceIdentity][]int)
+				}
+				inventory.NUMANodes[device] = nodes
+			}
+		}
+		inventories = append(inventories, inventory)
 	}
 	return inventories
 }

@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	resourcelisters "k8s.io/client-go/listers/resource/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
@@ -170,6 +171,8 @@ type SlurmBridge struct {
 	allocationObserver *allocationObserver
 	mu                 sync.Mutex
 	pending            map[groupAllocation]*groupProgress
+
+	resourceSlices resourcelisters.ResourceSliceLister
 }
 
 type groupAllocation struct {
@@ -341,6 +344,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		draRegistry:   draRegistry,
 		workloadAPI:   workloadAPI,
 	}
+	plugin.resourceSlices = handle.SharedInformerFactory().Resource().V1().ResourceSlices().Lister()
 	plugin.kubeNodeIndex, err = newKubeNodeNameIndex(handle.SharedInformerFactory().Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
@@ -438,7 +442,8 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	state.Write(stateKey, s)
 
 	// Construct an intermediate representation of the Slurm external job
-	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
+	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
+		slurmjobir.WithResourceSlices(sb.resourceSlices))
 	if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}

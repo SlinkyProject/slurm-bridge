@@ -12,6 +12,7 @@
     - [Supported DRA DeviceClasses](#supported-dra-deviceclasses)
     - [Legacy GPU device plugins](#legacy-gpu-device-plugins)
   - [CPU DRA](#cpu-dra)
+  - [NUMA alignment](#numa-alignment)
   - [Annotations](#annotations)
     - [Resolution rules](#resolution-rules)
     - [Supported Slurm job annotations](#supported-slurm-job-annotations)
@@ -210,10 +211,11 @@ define their container CPU sets.
 CPU DRA requires Kubernetes 1.36 or newer with `DRAExtendedResource` and
 `DRAConsumableCapacity` enabled, plus containerd with CDI and NRI enabled. Use
 the [pinned CPU driver](../hack/dra-driver-cpu/build.sh) with
-`cpuDeviceMode: grouped`, `groupBy: socket`, and `allocator: external`. After
-reserved CPUs are excluded, sockets must have equal core counts and cores must
-have equal thread counts. Slurm must be the sole allocator for these devices;
-kubelet's CPU Manager must not assign the same CPUs independently.
+`cpuDeviceMode: grouped`, `groupBy: numanode` or `groupBy: socket`, and
+`allocator: external`. Use `numanode` for [NUMA alignment](#numa-alignment).
+After reserved CPUs are excluded, sockets must have equal core counts and cores
+must have equal thread counts. Slurm must be the sole allocator for these
+devices; kubelet's CPU Manager must not assign the same CPUs independently.
 
 To migrate from individual CPU devices, drain Slurm nodes and wait for all
 claims to be unprepared before replacing the driver and bridge. Use the same
@@ -221,6 +223,31 @@ procedure before changing CPU reservations or topology. Resume work after Slurm
 registration matches the new inventory. Hybrid nodes also require matching
 slurmd geometry; geometry checks do not verify Linux CPU ordering on physical
 hardware.
+
+## NUMA alignment
+
+`slurm-bridge` binds each DRA device to the Slurm cores of its NUMA node, so
+Slurm can place a job's CPUs, GPUs, and NICs on the same NUMA node. This
+requires:
+
+- [CPU DRA](#cpu-dra) with `groupBy: numanode`.
+- Kubernetes 1.37 or newer with the `DRAListTypeAttributes` feature gate on the
+  API server, scheduler, controller manager, and kubelet.
+- DRA drivers which publish `resource.kubernetes.io/numaNode`, such as the
+  NVIDIA GPU driver and DRANET with their `DRAListTypeAttributes` feature gate.
+
+Alignment is best effort: Slurm prefers local cores, but a job which needs more
+than one NUMA node still runs. Slurm binds GRES only to whole sockets, so nodes
+with several NUMA nodes per socket, such as with sub-NUMA clustering, register
+without device locality.
+
+Hybrid nodes are aligned only when the site's `gres.conf` describes the same
+topology; `slurm-bridge` does not write it, and the `SlinkySlurmGRESCompatible`
+condition checks only GRES names, types, and counts. For each GRES type, list
+devices in the string order of their DRA device names (`gpu-10` before `gpu-2`),
+give each the `Cores=` of its NUMA node's socket, and set slurmd's `Sockets` and
+`CoresPerSocket` to match CPU DRA. Otherwise jobs still run, but their devices
+and CPUs may come from different NUMA nodes.
 
 ## Annotations
 

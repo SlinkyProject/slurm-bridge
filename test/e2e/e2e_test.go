@@ -83,3 +83,28 @@ func TestSocketCPUAllocation(t *testing.T) {
 	_ = testEnv.Test(t, withSuiteLabel(testExclusiveCPUDRARejected(), "scheduling"))
 	_ = testEnv.Test(t, withSuiteLabel(testSlurmBridgeDRAResourceScheduling(true), "scheduling"))
 }
+
+// TestNUMAAlignment checks that devices and CPUs share a NUMA node. It runs
+// alone so other workloads cannot hold the NUMA-local cores.
+func TestNUMAAlignment(t *testing.T) {
+	requireE2ESuite(t, "scheduling", false)
+	testEnv, err := newTestEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeMode, err := parseSlurmNodeModeFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nodeMode == slurmNodeModeHybrid {
+		t.Skip("hybrid nodes take device locality from the site gres.conf")
+	}
+	requireNvidiaGPU, err := parseMockNVMLFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseE2ECleanupFromEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	_ = testEnv.Test(t, withSuiteLabel(testNUMAAlignment(requireNvidiaGPU), "scheduling"))
+}

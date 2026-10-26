@@ -74,6 +74,9 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 	}
 	pod := &corev1.Pod{}
 	claim := &resourcev1.ResourceClaim{}
+	// Mocked topology presents dranet0 as a PCI NIC, which DRANET names by its
+	// PCI address, so match the allocation by interface rather than device name.
+	var allocatedDevice string
 
 	return features.New("DRANET device allocated to container").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
@@ -115,7 +118,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("ResourceClaim allocates dranet0 on the pod node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("ResourceClaim allocates a DRANET device on the pod node", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
@@ -131,15 +134,16 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 						continue
 					}
 					for _, result := range candidate.Status.Allocation.Devices.Results {
-						if result.Driver == dranetDriver && result.Pool == pod.Spec.NodeName && result.Device == dranetDeviceName {
+						if result.Driver == dranetDriver && result.Pool == pod.Spec.NodeName {
 							*claim = *candidate
+							allocatedDevice = result.Device
 							return true, nil
 						}
 					}
 				}
 				return false, nil
 			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
-				t.Fatalf("ResourceClaim never allocated %s/%s/%s: %v", dranetDriver, pod.Spec.NodeName, dranetDeviceName, err)
+				t.Fatalf("ResourceClaim never allocated a %s device in pool %s: %v", dranetDriver, pod.Spec.NodeName, err)
 			}
 			return ctx
 		}).
@@ -153,7 +157,7 @@ func testSlurmBridgeDRANETResourceScheduling() types.Feature {
 					return false, err
 				}
 				for _, status := range claim.Status.Devices {
-					if status.Driver != dranetDriver || status.Pool != pod.Spec.NodeName || status.Device != dranetDeviceName {
+					if status.Driver != dranetDriver || status.Pool != pod.Spec.NodeName || status.Device != allocatedDevice {
 						continue
 					}
 					return status.NetworkData != nil && status.NetworkData.InterfaceName == dranetDeviceName &&

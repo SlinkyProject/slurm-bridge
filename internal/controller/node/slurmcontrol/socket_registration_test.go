@@ -69,7 +69,7 @@ func TestSocketRegistrationWithAppliedGPUInventory(t *testing.T) {
 	slice := testNodeCPUResourceSlice("worker")
 	info := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*slice})
 	inventory := testExampleDRAInventory()
-	gres, err := buildNodeGRESConfig(inventory)
+	gres, err := buildNodeGRESConfig(inventory, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

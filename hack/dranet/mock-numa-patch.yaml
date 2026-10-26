@@ -1,0 +1,49 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Presents the dummy dranet0 interface to DRANET as a PCI NIC on NUMA node 1 by
+# mounting a fake /sys/bus/pci/devices and /sys/class/net into its pods.
+  - op: add
+    path: /spec/template/spec/initContainers
+    value:
+      - name: mock-numa-sysfs
+        image: busybox:stable
+        command:
+          - sh
+          - -ec
+          - |
+            device=/mock/pci-devices/0000:a0:00.0
+            mkdir -p "$device/i40e"
+            echo 'pci:v00008086d00001572sv00008086sd00000000bc02sc00i00' >"$device/modalias"
+            echo 1 >"$device/numa_node"
+            echo 0x01 >"$device/revision"
+            ln -sfn i40e "$device/driver"
+            ln -sfn ../../devices/pci0000:80/0000:a0:00.0/net/dranet0 /mock/class-net/dranet0
+        volumeMounts:
+          - name: mock-pci-devices
+            mountPath: /mock/pci-devices
+          - name: mock-class-net
+            mountPath: /mock/class-net
+  - op: add
+    path: /spec/template/spec/volumes/-
+    value:
+      name: mock-pci-devices
+      emptyDir: {}
+  - op: add
+    path: /spec/template/spec/volumes/-
+    value:
+      name: mock-class-net
+      emptyDir: {}
+  - op: add
+    path: /spec/template/spec/containers/0/volumeMounts/-
+    value:
+      name: mock-pci-devices
+      mountPath: /sys/bus/pci/devices
+      readOnly: true
+  - op: add
+    path: /spec/template/spec/containers/0/volumeMounts/-
+    value:
+      name: mock-class-net
+      mountPath: /sys/class/net
+      readOnly: true

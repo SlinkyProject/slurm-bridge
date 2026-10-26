@@ -75,6 +75,8 @@ const (
 )
 
 const (
+	// DraDriverCpu_NUMANodeID identifies the NUMA node of a NUMA-grouped device.
+	DraDriverCpu_NUMANodeID resourcev1.QualifiedName = "dra.cpu/numaNodeID"
 	DraDriverCpu_CPUIDs     resourcev1.QualifiedName = "dra.cpu/cpuIDs"
 	DraDriverCpu_SMTLayout  resourcev1.QualifiedName = "dra.cpu/smtLayout"
 	DraDriverCpu_SMTEnabled resourcev1.QualifiedName = "dra.cpu/smtEnabled"
@@ -82,7 +84,7 @@ const (
 	maxTopologyCPUs                                  = 65535
 )
 
-// NewCPUInfos expands socket devices into allocatable CPUs.
+// NewCPUInfos expands socket or NUMA node devices into allocatable CPUs.
 // Each core is identified by its lowest allocatable Linux CPU ID.
 func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
 	if rSlice == nil {
@@ -99,6 +101,11 @@ func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
 		socket, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_SocketID)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := device.Attributes[DraDriverCpu_NUMANodeID]; ok {
+			if _, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_NUMANodeID); err != nil {
+				return nil, err
+			}
 		}
 		smt, ok := device.Attributes[DraDriverCpu_SMTEnabled]
 		if !ok || smt.BoolValue == nil {
@@ -148,7 +155,7 @@ func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
 func requiredCPUIntegerAttribute(sliceName string, device resourcev1.Device, name resourcev1.QualifiedName) (int, error) {
 	attribute, found := device.Attributes[name]
 	if !found || attribute.IntValue == nil {
-		return 0, fmt.Errorf("DRA CPU ResourceSlice %q device %q does not use the supported socket-device schema: attribute %q must be an integer", sliceName, device.Name, name)
+		return 0, fmt.Errorf("DRA CPU ResourceSlice %q device %q does not use the supported grouped CPU device schema: attribute %q must be an integer", sliceName, device.Name, name)
 	}
 	if *attribute.IntValue < 0 || *attribute.IntValue > math.MaxInt32 {
 		return 0, fmt.Errorf("device %q attribute %q must be between 0 and %d", device.Name, name, math.MaxInt32)

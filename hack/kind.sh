@@ -635,6 +635,26 @@ function slurm-bridge::secret() {
 	kubectl apply -f "${SCRIPT_DIR}"/token.yaml
 }
 
+# Drivers may publish list attributes only when the API server accepts them.
+function dra::list_type_attributes_enabled() {
+	local metrics
+	metrics="$(kubectl get --raw /metrics 2>/dev/null)" || return 1
+	grep -q '^kubernetes_feature_enabled{name="DRAListTypeAttributes",[^}]*} 1$' <<<"$metrics"
+}
+
+# Applies a JSON patch unless the DaemonSet already has the named volume.
+function dra::patch_daemonset_once() {
+	local namespace="$1"
+	local daemonset="$2"
+	local volume="$3"
+	local patch="$4"
+	local volumes
+	volumes="$(kubectl -n "$namespace" get daemonset "$daemonset" -o jsonpath='{.spec.template.spec.volumes[*].name}')"
+	if [[ " $volumes " != *" $volume "* ]]; then
+		kubectl -n "$namespace" patch daemonset "$daemonset" --type=json --patch-file="$patch"
+	fi
+}
+
 function dra-example-driver::install() {
 	local version="0.4.0"
 	local chart="oci://registry.k8s.io/dra-example-driver/charts/dra-example-driver"
@@ -698,22 +718,31 @@ function dra-driver-cpu::install() {
 	fi
 	image_repository="${image%:*}"
 	image_tag="${image##*:}"
+	local values_args=(--values "$config_dir/values.yaml")
+	# Hybrid slurmd registers the host CPU geometry, which must match DRA.
+	if $MOCK_NVML && [[ $OPT_SLURM_NODE_MODE == "$SLURM_NODE_MODE_EXTERNAL" ]]; then
+		kubectl apply -f "$config_dir/mock-numa-sysfs.yaml"
+		values_args+=(--values "$config_dir/mock-numa-values.yaml")
+	fi
 	helm upgrade --install dra-driver-cpu "$source_dir/deployment/helm/dra-driver-cpu" \
 		--namespace kube-system \
-		--values "$config_dir/values.yaml" \
+		"${values_args[@]}" \
 		--set-string "image.repository=$image_repository" \
 		--set-string "image.tag=$image_tag"
 	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
 function dra-driver-nvidia-gpu::install() {
-	local version="0.5.0"
+	local version="0.5.1"
 	local chart="oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu"
 	local config_dir="$SCRIPT_DIR/dra-driver-nvidia-gpu"
 	local values_args=(--values "$config_dir/values.yaml")
 
 	if $MOCK_NVML; then
 		values_args+=(--values "$config_dir/mock-values.yaml")
+	fi
+	if dra::list_type_attributes_enabled; then
+		values_args+=(--set featureGates.DRAListTypeAttributes=true)
 	fi
 
 	helm upgrade --install dra-driver-nvidia-gpu "$chart" \
@@ -722,6 +751,11 @@ function dra-driver-nvidia-gpu::install() {
 		--create-namespace \
 		"${values_args[@]}" \
 		--wait --timeout=180s
+	if $MOCK_NVML; then
+		dra::patch_daemonset_once dra-driver-nvidia-gpu dra-driver-nvidia-gpu-kubelet-plugin \
+			nvml-mock-sysfs "$config_dir/mock-numa-patch.yaml"
+		kubectl -n dra-driver-nvidia-gpu rollout status daemonset/dra-driver-nvidia-gpu-kubelet-plugin --timeout=180s
+	fi
 }
 
 function nvml-mock::install() {
@@ -747,14 +781,24 @@ function nvml-mock::uninstall() {
 }
 
 function dranet::install() {
-	local version="v1.4.0"
+	local version="v1.5.0"
 	local chart="oci://registry.k8s.io/networking/charts/dranet"
 	local config_dir="$SCRIPT_DIR/dranet"
+	local feature_gate="--feature-gates=DRAListTypeAttributes=true"
 
 	helm upgrade --install dranet "$chart" \
 		--version "$version" \
 		--namespace kube-system \
 		--values "$config_dir/values.yaml"
+	# The chart does not expose DRANET feature gates.
+	if dra::list_type_attributes_enabled &&
+		[[ "$(kubectl -n kube-system get daemonset dranet -o jsonpath='{.spec.template.spec.containers[0].args}')" != *"$feature_gate"* ]]; then
+		kubectl -n kube-system patch daemonset dranet --type=json \
+			-p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"$feature_gate\"}]"
+	fi
+	if $MOCK_NVML; then
+		dra::patch_daemonset_once kube-system dranet mock-pci-devices "$config_dir/mock-numa-patch.yaml"
+	fi
 	kubectl -n kube-system rollout status daemonset/dranet --timeout=120s
 }
 
@@ -811,6 +855,8 @@ HELM OPTIONS:
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
+	                    It also mocks a two-NUMA-node GPU and DRANET topology, and
+	                    the CPU topology for external Slurm nodes.
 	--dranet            Install DRA driver: DRANET
 	--kwok              Install KWOK and its fast stage configuration.
 	--metrics           Install metrics collection for Slurm Bridge.

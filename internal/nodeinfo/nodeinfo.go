@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	resourcev1 "k8s.io/api/resource/v1"
@@ -16,8 +17,9 @@ import (
 
 // Represents a Kubernetes node for Slurm.
 type NodeInfo struct {
-	CpuMap        CPUMap
-	SocketDevices map[int]resourcev1.Device
+	CpuMap CPUMap
+	// CPUDevices holds the socket or NUMA node devices by name.
+	CPUDevices map[string]resourcev1.Device
 }
 
 func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string) (*NodeInfo, error) {
@@ -31,7 +33,7 @@ func NewNodeInfo(ctx context.Context, kubeclient client.Client, nodeName string)
 // NewNodeInfoFromResourceSlices builds CPU topology from an existing
 // ResourceSlice snapshot.
 func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.ResourceSlice) (*NodeInfo, error) {
-	nodeInfo := &NodeInfo{SocketDevices: make(map[int]resourcev1.Device)}
+	nodeInfo := &NodeInfo{CPUDevices: make(map[string]resourcev1.Device)}
 	pool, cpuSlices, err := selectCPUResourcePool(nodeName, resourceSlices)
 	if err != nil {
 		return nil, err
@@ -40,6 +42,7 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 	var cpuInfos []*CPUInfo
 	deviceSlices := make(map[string]string)
 	cpuIDSlices := make(map[int]string)
+	groups := make(map[cpuDeviceGroup]string)
 	for _, resourceSlice := range cpuSlices {
 		sliceCPUInfos, err := NewCPUInfos(resourceSlice)
 		if err != nil {
@@ -49,11 +52,12 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 			if previous, ok := deviceSlices[device.Name]; ok {
 				return nil, fmt.Errorf("duplicate device name %q in ResourceSlices %q and %q", device.Name, previous, resourceSlice.Name)
 			}
-			socket := int(*device.Attributes[DraDriverCpu_SocketID].IntValue)
-			if _, ok := nodeInfo.SocketDevices[socket]; ok {
-				return nil, fmt.Errorf("multiple devices represent socket %d", socket)
+			group := cpuDeviceGroupOf(device)
+			if previous, ok := groups[group]; ok {
+				return nil, fmt.Errorf("devices %q and %q both represent %s", previous, device.Name, group)
 			}
-			nodeInfo.SocketDevices[socket] = *device.DeepCopy()
+			groups[group] = device.Name
+			nodeInfo.CPUDevices[device.Name] = *device.DeepCopy()
 			deviceSlices[device.Name] = resourceSlice.Name
 		}
 		for _, cpuInfo := range sliceCPUInfos {
@@ -65,6 +69,9 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 		cpuInfos = append(cpuInfos, sliceCPUInfos...)
 	}
 	if len(cpuInfos) != 0 {
+		if err := validateCPUDeviceGroups(groups); err != nil {
+			return nil, err
+		}
 		if err := validateCPUCoreTopology(pool, cpuInfos); err != nil {
 			return nil, err
 		}
@@ -72,7 +79,8 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 		if _, _, _, err := nodeInfo.Geometry(); err != nil {
 			return nil, err
 		}
-		for socket, device := range nodeInfo.SocketDevices {
+		for _, device := range nodeInfo.CPUDevices {
+			socket := cpuDeviceGroupOf(device).socket
 			siblings, err := decodeSMTLayout(*device.Attributes[DraDriverCpu_SMTLayout].StringValue)
 			if err != nil {
 				return nil, err
@@ -89,6 +97,99 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 	}
 
 	return nodeInfo, nil
+}
+
+// cpuDeviceGroup identifies a grouped CPU device; numaNode is -1 for sockets.
+type cpuDeviceGroup struct {
+	socket   int
+	numaNode int
+}
+
+func (g cpuDeviceGroup) String() string {
+	if g.numaNode < 0 {
+		return fmt.Sprintf("socket %d", g.socket)
+	}
+	return fmt.Sprintf("NUMA node %d", g.numaNode)
+}
+
+// cpuDeviceGroupOf returns the group of a device which NewCPUInfos accepted.
+func cpuDeviceGroupOf(device resourcev1.Device) cpuDeviceGroup {
+	group := cpuDeviceGroup{socket: int(*device.Attributes[DraDriverCpu_SocketID].IntValue), numaNode: -1}
+	if numa, ok := device.Attributes[DraDriverCpu_NUMANodeID]; ok && numa.IntValue != nil {
+		group.numaNode = int(*numa.IntValue)
+	}
+	return group
+}
+
+// validateCPUDeviceGroups rejects mixed grouping and NUMA nodes spanning sockets.
+func validateCPUDeviceGroups(groups map[cpuDeviceGroup]string) error {
+	byNUMA := make(map[int]int)
+	numaGrouped := 0
+	for group := range groups {
+		if group.numaNode < 0 {
+			continue
+		}
+		numaGrouped++
+		if socket, ok := byNUMA[group.numaNode]; ok && socket != group.socket {
+			return fmt.Errorf("NUMA node %d spans sockets %d and %d", group.numaNode, socket, group.socket)
+		}
+		byNUMA[group.numaNode] = group.socket
+	}
+	if numaGrouped != 0 && numaGrouped != len(groups) {
+		return fmt.Errorf("CPU devices mix socket and NUMA node grouping")
+	}
+	return nil
+}
+
+// sortedCPUDeviceNames orders devices by socket, then NUMA node, which keeps
+// the order of earlier socket-grouped releases.
+func (n *NodeInfo) sortedCPUDeviceNames() []string {
+	names := slices.Collect(maps.Keys(n.CPUDevices))
+	slices.SortFunc(names, func(a, b string) int {
+		ga, gb := cpuDeviceGroupOf(n.CPUDevices[a]), cpuDeviceGroupOf(n.CPUDevices[b])
+		return cmp.Or(cmp.Compare(ga.socket, gb.socket), cmp.Compare(ga.numaNode, gb.numaNode), cmp.Compare(a, b))
+	})
+	return names
+}
+
+// NUMACores returns the Slurm cores of each NUMA node, or nil unless the CPU
+// inventory is grouped by NUMA node. Slurm binds GRES only to whole sockets,
+// so NUMA nodes sharing a socket are omitted.
+func (n *NodeInfo) NUMACores() map[int][]int {
+	if n == nil {
+		return nil
+	}
+	numaPerSocket := make(map[int]int)
+	for _, device := range n.CPUDevices {
+		group := cpuDeviceGroupOf(device)
+		if group.numaNode < 0 {
+			return nil
+		}
+		numaPerSocket[group.socket]++
+	}
+	var cores map[int][]int
+	for _, device := range n.CPUDevices {
+		group := cpuDeviceGroupOf(device)
+		// TODO: Register NUMA nodes as Slurm sockets for sub-NUMA clustering.
+		if numaPerSocket[group.socket] != 1 {
+			continue
+		}
+		cpus, err := parseCPUSet(ptr.Deref(device.Attributes[DraDriverCpu_CPUIDs].StringValue, ""))
+		if err != nil {
+			return nil
+		}
+		if cores == nil {
+			cores = make(map[int][]int)
+		}
+		for _, cpu := range cpus.List() {
+			core, ok := n.CpuMap.MachineToAbstract[cpu]
+			if ok && !slices.Contains(cores[group.numaNode], core) {
+				cores[group.numaNode] = append(cores[group.numaNode], core)
+			}
+		}
+		slices.Sort(cores[group.numaNode])
+	}
+	return cores
 }
 
 type cpuCoreID struct {

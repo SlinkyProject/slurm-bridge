@@ -3,12 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # https://kind.sigs.k8s.io/docs/user/configuration/
 # Kubernetes 1.37: v1beta1 Workload/PodGroup and v1alpha3 CompositePodGroup APIs.
+# Component feature-gates replace the top-level featureGates for that component,
+# so control-plane gates are repeated in each component's extraArgs.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 featureGates:
   DRAExtendedResource: true
   DRAResourceClaimDeviceStatus: true
   DRAConsumableCapacity: true
+  DRAListTypeAttributes: true
   GenericWorkload: true
   WorkloadWithJob: true
 containerdConfigPatches:
@@ -23,18 +26,18 @@ nodes:
         controllerManager:
           extraArgs:
             v: "6"
-            feature-gates: "GenericWorkload=true,WorkloadWithJob=true,CompositePodGroup=true,TopologyAwareWorkloadScheduling=true"
+            feature-gates: "DRAListTypeAttributes=true,GenericWorkload=true,WorkloadWithJob=true,CompositePodGroup=true,TopologyAwareWorkloadScheduling=true"
         scheduler:
           extraArgs:
             v: "5"
             vmodule: "allocator=6,dynamicresources=6"
-            feature-gates: "GenericWorkload=true,WorkloadWithJob=true"
+            feature-gates: "DRAListTypeAttributes=true,GenericWorkload=true,WorkloadWithJob=true"
       - |
         kind: ClusterConfiguration
         apiServer:
           extraArgs:
             runtime-config: "scheduling.k8s.io/v1beta1=true,scheduling.k8s.io/v1alpha3=true"
-            feature-gates: "GenericWorkload=true,WorkloadWithJob=true,CompositePodGroup=true,TopologyAwareWorkloadScheduling=true"
+            feature-gates: "DRAListTypeAttributes=true,GenericWorkload=true,WorkloadWithJob=true,CompositePodGroup=true,TopologyAwareWorkloadScheduling=true"
   - role: worker
   - role: worker
   - role: worker

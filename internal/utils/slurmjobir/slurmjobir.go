@@ -17,9 +17,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	resourcehelper "k8s.io/component-helpers/resource"
+	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -87,6 +89,7 @@ type translator struct {
 	draRegistry         *dra.Registry
 	deviceClassProfiles map[string]dra.DeviceProfile
 	workloadAPI         *WorkloadAPI
+	resourceSlices      ResourceSliceLister
 	podGroupStates      fwk.PodGroupStateLister
 	podsByGroup         map[string]corev1.PodList
 	includeTerminalPods bool // Membership discovery retains history; allocation translation does not.
@@ -150,7 +153,44 @@ func PreFilter(c client.Client, registry *dra.Registry, handle fwk.Handle, workl
 	}
 }
 
-func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod) (slurmJobIR *SlurmJobIR, err error) {
+// TranslateOption configures TranslateToSlurmJobIR.
+type TranslateOption func(*translator)
+
+// ResourceSliceLister lists cached ResourceSlices, as client-go listers do.
+type ResourceSliceLister interface {
+	List(selector labels.Selector) ([]*resourcev1.ResourceSlice, error)
+}
+
+// WithResourceSlices orders a job's GRES by NUMA spread; see formatGRESResources.
+func WithResourceSlices(lister ResourceSliceLister) TranslateOption {
+	return func(t *translator) {
+		t.resourceSlices = lister
+	}
+}
+
+// CachedResourceSlices lists ResourceSlices from a cached controller-runtime reader.
+func CachedResourceSlices(ctx context.Context, reader client.Reader) ResourceSliceLister {
+	return cachedResourceSlices{ctx: ctx, reader: reader}
+}
+
+type cachedResourceSlices struct {
+	ctx    context.Context
+	reader client.Reader
+}
+
+func (c cachedResourceSlices) List(selector labels.Selector) ([]*resourcev1.ResourceSlice, error) {
+	list := &resourcev1.ResourceSliceList{}
+	if err := c.reader.List(c.ctx, list, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+		return nil, err
+	}
+	resourceSlices := make([]*resourcev1.ResourceSlice, len(list.Items))
+	for i := range list.Items {
+		resourceSlices[i] = &list.Items[i]
+	}
+	return resourceSlices, nil
+}
+
+func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, opts ...TranslateOption) (slurmJobIR *SlurmJobIR, err error) {
 	// All calls below make live apiserver requests; bound so a slow apiserver
 	// doesn't block the single-threaded scheduling loop indefinitely.
 	var cancel context.CancelFunc
@@ -158,6 +198,9 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	defer cancel()
 
 	t := translator{Reader: c, ctx: ctx, draRegistry: registry, workloadAPI: workloadAPI}
+	for _, opt := range opts {
+		opt(&t)
+	}
 	rootPOM, pg, err := t.workloadRoot(c, pod)
 	if err != nil {
 		return nil, err
@@ -299,10 +342,39 @@ func (t *translator) parseDeviceResources(slurmJobComponent *SlurmJobComponent) 
 		}
 	}
 
-	if gres := formatGRESResources(maxByGRES); gres != "" {
+	var spans map[string]float64
+	if len(maxByGRES) > 1 {
+		spans = t.numaSpans(maxByGRES)
+	}
+	if gres := formatGRESResources(maxByGRES, spans); gres != "" {
 		slurmJobComponent.JobInfo.Gres = ptr.To(gres)
 	}
 	return nil
+}
+
+// numaSpans returns the NUMA spread of each requested GRES type. Ordering is
+// best effort, so an unavailable cache falls back to name order.
+//
+// TODO: Cache per-node, per-profile NUMA coverage and refresh it on
+// ResourceSlice changes instead of scanning the cluster for every component.
+// Reuse the cached coverage across a translation, and derive GRES ordering
+// from eligible nodes before releasing the held Slurm job.
+func (t *translator) numaSpans(resources map[dra.GRES]resource.Quantity) map[string]float64 {
+	if t.resourceSlices == nil {
+		return nil
+	}
+	var profileNames []string
+	for gres := range resources {
+		if gres.Type != "" {
+			profileNames = append(profileNames, gres.Type)
+		}
+	}
+	resourceSlices, err := t.resourceSlices.List(labels.Everything())
+	if err != nil {
+		klog.FromContext(t.ctx).V(2).Info("Requesting GRES in name order; cached ResourceSlices are unavailable", "err", err)
+		return nil
+	}
+	return dra.NUMASpans(t.ctx, t.registry(), resourceSlices, profileNames)
 }
 
 func (t *translator) podDeviceResources(pod *corev1.Pod) (map[dra.GRES]resource.Quantity, resource.Quantity, error) {
@@ -424,12 +496,25 @@ func mergeMaxGRESQuantities(maxByGRES, podGRES map[dra.GRES]resource.Quantity) {
 	}
 }
 
-func formatGRESResources(resources map[dra.GRES]resource.Quantity) string {
+// formatGRESResources orders GRES by NUMA spread, narrowest first, because
+// Slurm picks sockets for the first core-bound GRES before the rest.
+func formatGRESResources(resources map[dra.GRES]resource.Quantity, numaSpans map[string]float64) string {
 	gresNames := make([]dra.GRES, 0, len(resources))
 	for gres := range resources {
 		gresNames = append(gresNames, gres)
 	}
 	slices.SortFunc(gresNames, func(a, b dra.GRES) int {
+		spanA, localA := numaSpans[a.Type]
+		spanB, localB := numaSpans[b.Type]
+		if localA != localB {
+			if localA {
+				return -1
+			}
+			return 1
+		}
+		if n := cmp.Compare(spanA, spanB); n != 0 {
+			return n
+		}
 		if n := cmp.Compare(a.Name, b.Name); n != 0 {
 			return n
 		}
