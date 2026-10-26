@@ -38,7 +38,7 @@ manifests should match snapshot:
           plugins:
             queueSort:
               enabled:
-              - name: 'PrioritySort'
+              - name: 'SlurmBridge'
             preEnqueue:
               enabled:
               - name: 'SchedulingGates'
@@ -102,7 +102,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
-            checksum/scheduler-config: 48d3159b938354d8b2a22588b175b4545b066fb88bd730551b4b5d798d250679
+            checksum/scheduler-config: bd91a7073173e14e3e8aaa6ae05608becb86cbea0f8a542def92ec75e73b337e
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release

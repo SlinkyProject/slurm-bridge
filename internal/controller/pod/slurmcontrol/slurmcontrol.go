@@ -108,7 +108,7 @@ func (r *realSlurmControl) TerminateJob(ctx context.Context, jobId int32) error 
 	job := &api.V0044JobInfo{
 		JobId: ptr.To(jobId),
 	}
-	if err := r.Delete(ctx, job); err != nil {
+	if err := r.Delete(ctx, job, &client.DeleteOptions{SkipReadAfterDelete: true}); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return nil
 		}

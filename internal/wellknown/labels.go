@@ -15,6 +15,11 @@ const (
 	// the pod's external job.
 	LabelExternalJobId = SchedulerPrefix + "slurm-jobid"
 
+	// LabelAllocatedJobId is the reconciled queue hint for a ready Slurm allocation.
+	// It is meaningful only while it matches LabelExternalJobId; scheduling and
+	// binding still validate the allocation independently.
+	LabelAllocatedJobId = SchedulerPrefix + "allocated-jobid"
+
 	// LabelExternalHetJobId indicates the Slurm Heterogeneous JobId which
 	// corresponds to the pod's external job.
 	LabelExternalHetJobId = SchedulerPrefix + "slurm-het-jobid"

@@ -148,7 +148,7 @@ func (r *Reconciler) cleanAllocationConflict(ctx context.Context, key string, al
 		if id == keep || canceled[id] {
 			continue
 		}
-		if err := r.slurmClient.Delete(ctx, &api.V0044JobInfo{JobId: ptr.To(id)}); err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
+		if err := r.slurmClient.Delete(ctx, &api.V0044JobInfo{JobId: ptr.To(id)}, &slurmclient.DeleteOptions{SkipReadAfterDelete: true}); err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
 			errs = append(errs, fmt.Errorf("cancel duplicate allocation %d: %w", id, err))
 			continue
 		}

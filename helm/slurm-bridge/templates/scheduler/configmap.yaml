@@ -25,7 +25,7 @@ data:
       plugins:
         queueSort:
           enabled:
-          - name: 'PrioritySort'
+          - name: 'SlurmBridge'
         preEnqueue:
           enabled:
           - name: 'SchedulingGates'

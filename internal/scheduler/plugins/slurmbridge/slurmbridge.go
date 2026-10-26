@@ -161,14 +161,15 @@ func isJobNotPendingError(err error) bool {
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {
 	client.Client
-	schedulerName string
-	slurmControl  slurmcontrol.SlurmControlInterface
-	handle        fwk.Handle
-	draRegistry   *dra.Registry
-	workloadAPI   *slurmjobir.WorkloadAPI
-	kubeNodeIndex *kubeNodeNameIndex
-	mu            sync.Mutex
-	pending       map[groupAllocation]*groupProgress
+	schedulerName      string
+	slurmControl       slurmcontrol.SlurmControlInterface
+	handle             fwk.Handle
+	draRegistry        *dra.Registry
+	workloadAPI        *slurmjobir.WorkloadAPI
+	kubeNodeIndex      *kubeNodeNameIndex
+	allocationObserver *allocationObserver
+	mu                 sync.Mutex
+	pending            map[groupAllocation]*groupProgress
 }
 
 type groupAllocation struct {
@@ -355,6 +356,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	}); err != nil {
 		return nil, fmt.Errorf("register initial Pod diagnostics: %w", err)
 	}
+	plugin.allocationObserver, err = newAllocationObserver(ctx, plugin, clientConfig)
+	if err != nil {
+		return nil, err
+	}
 	go jobInformer.Run(ctx.Done())
 	if err := wait.PollUntilContextCancel(ctx, time.Millisecond, true, func(context.Context) (bool, error) {
 		return jobInformer.HasStarted(), nil
@@ -396,6 +401,10 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 }
 
 func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
+	if sb.allocationObserver != nil {
+		// Start only once this replica is scheduling; standby replicas must not patch hints.
+		sb.allocationObserver.start()
+	}
 	logger := klog.FromContext(ctx)
 	var err error
 
@@ -712,9 +721,11 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	delete(sb.pending, groupAllocation{uid: s.slurmJobIR.RootPOM.UID, jobID: s.allocation[0].AllocationID()})
 	sb.mu.Unlock()
 
-	// If we get here, that means the job started running after PreFilter occurred.
-	// Return a success so the pod will get another PreFilter attempt.
-	sb.activatePod(logger, pod)
+	// Successful PostFilter ends this attempt; it does not proceed to binding.
+	// Writes have been acknowledged without reading back the updated jobs, and
+	// eligibility is updated, but the job may still be pending in Slurm.
+	// The allocation observer activates the workload when its allocation arrives.
+	// Otherwise retain normal backoff, including for an unchanged ready allocation.
 	return nil, fwk.NewStatus(fwk.Success, "")
 }
 
