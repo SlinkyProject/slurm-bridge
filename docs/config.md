@@ -162,19 +162,22 @@ metadata:
     topology.slinky.slurm.net/spec: topo-switch:s1,topo-block:b1
 ```
 
-External and hybrid modes use the same Kubernetes annotation, but different
-controllers apply it to Slurm:
+External nodes and hybrid nodes managed by slurm-operator use the same
+Kubernetes annotation, but different controllers apply it to Slurm:
 
 - In external mode, `slurm-bridge` reads `topology.slinky.slurm.net/spec` from
   the labeled Kubernetes node and reconciles the external Slurm node's dynamic
   topology.
-- In hybrid mode, slurm-operator reads `topology.slinky.slurm.net/spec` from the
-  Kubernetes node where the `Nodeset` pod is scheduled, copies it to the pod,
-  and reconciles the `slurmd` pod's Slurm node topology.
+- For hybrid nodes managed by slurm-operator, the operator reads
+  `topology.slinky.slurm.net/spec` from the Kubernetes node where the `Nodeset`
+  pod is scheduled, copies it to the pod, and reconciles the `slurmd` pod's
+  Slurm node topology.
 
-Removing the annotation clears the dynamic topology in either mode. When using
-multiple topologies, Slurm partitions can select a specific topology with the
-partition `Topology` setting; otherwise Slurm uses the `cluster_default`
+Removing the annotation clears the dynamic topology for those nodes.
+Host-installed hybrid daemons require administrators to configure their Slurm
+node topology directly; neither controller applies the annotation to them. When
+using multiple topologies, Slurm partitions can select a specific topology with
+the partition `Topology` setting; otherwise Slurm uses the `cluster_default`
 topology.
 
 ### Hybrid Workload Isolation

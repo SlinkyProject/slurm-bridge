@@ -58,6 +58,9 @@ slurm-operator `Nodeset` instead, as described in
   controller to `slurmd` on TCP 6818.
 - A controller address reachable from the host network. A Kubernetes Service
   `ClusterIP` works only when node processes can route to Service addresses.
+- For DRA-backed devices, matching Slurm GRES inventory as described in
+  [Hybrid Nodes](config.md#hybrid-nodes). CPU DRA also requires matching
+  `slurmd` geometry; see [CPU DRA](workload.md#cpu-dra).
 
 ## Configure Slurm
 
@@ -70,7 +73,7 @@ basics, but verify them when using another Slurm deployment.
 Configure a feature-based `NodeSet` and a bridge-only partition before starting
 the worker daemon:
 
-```conf
+```text
 ReconfigFlags=KeepPartInfo
 NodeSet=slurm-bridge Feature=slurm-bridge
 PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
@@ -127,22 +130,31 @@ The following steps should be automated for every worker. Validate that each
 target is a Kubernetes node, is not a control-plane node, has an `InternalIP`,
 and resolves over SSH to the expected short hostname before modifying it.
 
+On the administrative host, select the worker before running the installation
+and verification commands:
+
+```bash
+export NODE=worker-1
+export SLURM_NODE="$NODE"
+```
+
+If the node names differ, set `SLURM_NODE` to the value of the Kubernetes node's
+`slinky.slurm.net/slurm-nodename` label.
+
 ### Release an External Node
 
 If the node was previously registered in external-node mode, first transfer
 ownership away from the bridge controller:
 
 ```bash
-export NODE=worker-1
-
 kubectl label node "$NODE" scheduler.slinky.slurm.net/external-node-
 kubectl annotate node "$NODE" \
   scheduler.slinky.slurm.net/external-node-partitions-
 ```
 
-Wait until `scontrol show node "$NODE"` either returns no node or no longer
-reports `EXTERNAL`. Do not start the native daemon while the bridge controller
-still owns the external node.
+Wait until `scontrol show node "$SLURM_NODE"` either returns no node or no
+longer reports `EXTERNAL`. Do not start the native daemon while the bridge
+controller still owns the external node.
 
 ### Copy Authentication Material
 
@@ -186,7 +198,9 @@ On the worker:
    so stale controller configuration cannot survive a reinstall.
 
 The controller-served configuration commonly refers to the controller by its
-Kubernetes DNS name. Make that name resolvable from the host, for example:
+Kubernetes DNS name. Make that name resolvable from the host, for example in
+`/etc/hosts`. Replace `10.96.120.15` here and in `SLURMD_OPTIONS` below with the
+reachable controller address selected earlier:
 
 ```text
 10.96.120.15 slurm-controller.slurm slurm-controller.slurm.svc slurm-controller.slurm.svc.cluster.local
@@ -209,11 +223,13 @@ The options have the following roles:
 - `--conf=Feature=slurm-bridge` attaches the feature used by the controller's
   `NodeSet` and partition.
 
-Some packages expect `/etc/slurm/slurm.conf` to exist even with configless
-operation. An empty, `slurm`-owned file is sufficient when `--conf-server` is
-passed. Confirm that `systemctl cat slurmd` includes
-`EnvironmentFile=/etc/sysconfig/slurmd`; use an equivalent systemd drop-in if
-the distribution unit does not.
+Confirm that `systemctl cat slurmd` reads `/etc/sysconfig/slurmd` (typically
+`EnvironmentFile=-/etc/sysconfig/slurmd`) and passes `$SLURMD_OPTIONS` to
+`slurmd`; use an equivalent systemd drop-in if the distribution unit does not.
+If the unit requires a local `slurm.conf` through `ConditionPathExists`, clear
+that condition in a systemd override. A local `slurm.conf` is unnecessary when
+using `--conf-server`; see the
+[configless systemd requirements](https://slurm.schedmd.com/configless_slurm.html#limitations).
 
 Start and enable the service:
 
@@ -230,7 +246,7 @@ Confirm the worker's binary version and inspect the node from the controller:
 
 ```bash
 ssh "root@$NODE" /usr/sbin/slurmd -V
-kubectl exec -n slurm slurm-controller-0 -- scontrol show node "$NODE"
+kubectl exec -n slurm slurm-controller-0 -- scontrol show node "$SLURM_NODE"
 kubectl exec -n slurm slurm-controller-0 -- sinfo -Nel
 ```
 
@@ -251,6 +267,19 @@ Expected output includes:
 slinky.slurm.net/managed-node=slurm-bridge-scheduler:NoExecute
 ```
 
+Before submitting bridge workloads, check the node's compatibility condition:
+
+```bash
+kubectl get node "$NODE" \
+  -o jsonpath='{range .status.conditions[?(@.type=="SlinkySlurmGRESCompatible")]}{.status}{": "}{.message}{"\n"}{end}'
+```
+
+It should be `True`, and the Slurm node should have the
+`slurm_bridge_gres_compatible` feature. If compatibility checks fail, the
+condition explains the required GRES or CPU configuration. The bridge withholds
+that feature, preventing bridge jobs from using the node even if it has joined
+the partition.
+
 Submit a small Kubernetes workload through `slurm-bridge` to verify the full
 scheduling path. Also submit a native Slurm job if the installation is intended
 to support both workload types. Never allow native and bridge-managed user
@@ -262,6 +291,9 @@ workloads to run on the same physical node at the same time; see
 - Host package installation, credentials, `slurmd`, and service upgrades remain
   the responsibility of the host automation. slurm-operator does not manage a
   host-installed daemon.
+- Configure Slurm topology through host automation when needed. The Kubernetes
+  [topology annotation](config.md#topology) is not reconciled for host-installed
+  daemons.
 - Keep the external-node label absent. Reapplying it transfers node-registration
   ownership to the bridge controller and conflicts with the native daemon.
 - Treat the controller key as a secret. Use mode `0600`, avoid logging it, and
