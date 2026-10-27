@@ -242,6 +242,10 @@ func (r *Reconciler) reconcileLifecycle(ctx context.Context, key Request, pods [
 			members[externaljobinfo.PodKey(&pod)] = pod
 			associatedJobs[externaljobinfo.PodKey(&pod)] = append(associatedJobs[externaljobinfo.PodKey(&pod)], job.JobId)
 		}
+		if job.Finished && !slices.ContainsFunc(current, func(p corev1.Pod) bool { return slices.Contains(p.Finalizers, wellknown.FinalizerScheduler) }) {
+			released[job.JobId] = true
+			continue
+		}
 		if needsAllocation(current) && !job.Finished {
 			continue
 		}

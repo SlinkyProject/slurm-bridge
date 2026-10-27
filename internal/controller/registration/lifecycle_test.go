@@ -592,6 +592,58 @@ func TestLifecycleIndexedMembership(t *testing.T) {
 	}
 }
 
+func TestLifecycleFinishedJobReads(t *testing.T) {
+	for _, scenario := range []string{"finalized", "deleted", "finalizer", "stale-finalizer"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			retain := scenario == "finalizer" || scenario == "stale-finalizer"
+			if !retain {
+				if waiting, err := f.reconcile(t); err != nil || waiting {
+					t.Fatalf("initial cleanup: waiting=%t error=%v", waiting, err)
+				}
+			} else {
+				f.job.JobState = ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED, api.V0044JobInfoJobStateCOMPLETING})
+				if err := f.live.Update(t.Context(), f.job, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "deleted" {
+				if err := f.kube.Delete(t.Context(), f.pod); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "stale-finalizer" {
+				// The cached finalizer must still require live release verification.
+				pod := f.pod.DeepCopy()
+				pod.Finalizers = nil
+				f.r.apiReader = fake.NewClientBuilder().WithScheme(f.kube.Scheme()).WithObjects(f.group, pod).Build()
+			}
+			f.jobs[0].Finished = true
+			reads := 0
+			f.r.slurmClient = slurminterceptor.NewClient(f.live, slurminterceptor.Funcs{
+				Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
+					if (&slurmclient.GetOptions{}).ApplyOptions(opts).SkipCache {
+						reads++
+					}
+					return f.live.Get(ctx, key, obj, opts...)
+				},
+			})
+			for range 3 {
+				if waiting, err := f.reconcile(t); err != nil || waiting != retain {
+					t.Fatalf("waiting=%t error=%v, want waiting=%t", waiting, err, retain)
+				}
+			}
+			wantReads := 0
+			if retain {
+				wantReads = 3
+			}
+			if reads != wantReads {
+				t.Fatalf("live reads=%d, want %d", reads, wantReads)
+			}
+		})
+	}
+}
+
 func TestLifecycleWaitsForSlurmCompleting(t *testing.T) {
 	f := newLifecycleFixture(t)
 	job := f.job.DeepCopy()
