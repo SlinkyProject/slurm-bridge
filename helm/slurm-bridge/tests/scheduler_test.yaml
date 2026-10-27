@@ -122,6 +122,9 @@ tests:
           pattern: GangScheduling|podGroupPostFilter
         template: scheduler/configmap.yaml
   - it: keeps native scheduling enabled when the feature map is omitted
+    capabilities:
+      majorVersion: 1
+      minorVersion: 37
     set:
       scheduler.featureGates: null
     asserts:

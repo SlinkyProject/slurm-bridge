@@ -46,9 +46,9 @@ also enables `featureGates.WorkloadAwareScheduling=true` and
 Other clusters retain the default LWS configuration.
 
 For native gang scheduling, enable Kubernetes `GenericWorkload` and the
-`scheduling.k8s.io/v1beta1` API, keep the bridge's `SlurmBridgeGenericWorkload`
-gate enabled, and configure LWS with the settings above. Set
-`spec.scheduling: {}` when creating the LeaderWorkerSet, as in
+`scheduling.k8s.io/v1beta1` API, keep the bridge's `GenericWorkload` gate
+enabled, and configure LWS with the settings above. Set `spec.scheduling: {}`
+when creating the LeaderWorkerSet, as in
 [`hack/examples/lws/native.yaml`](../hack/examples/lws/native.yaml). LWS creates
 one PodGroup per replica and sets each Pod's
 `spec.schedulingGroup.podGroupName`. Each replica receives an independent Slurm

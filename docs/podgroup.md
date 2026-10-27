@@ -39,14 +39,15 @@ CompositePodGroup and topology hierarchy gates only on Kubernetes 1.37 and
 newer. Cluster components must also enable `GenericWorkload` and serve the API
 version shown in the Kind configurations above.
 
-Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
-out with `--feature-gates=GenericWorkload=false`. For Helm deployments, set
-`scheduler.featureGates.GenericWorkload=false`. The scheduler then skips
-Workload discovery and registration. Pods that reference a built-in PodGroup
-through `spec.schedulingGroup.podGroupName` are rejected with a clear scheduling
-failure before Slurm operations. Ordinary Pods, Jobs, JobSets, LeaderWorkerSets,
-and scheduler-plugins PodGroups retain their existing behavior when they do not
-reference a built-in PodGroup.
+Standalone binaries on clusters without these APIs, including Kubernetes
+**1.35**, must opt out with `--feature-gates=GenericWorkload=false`. Helm
+disables this gate automatically on Kubernetes 1.35; on other clusters it can be
+disabled with `scheduler.featureGates.GenericWorkload=false`. The scheduler then
+skips Workload discovery and registration. Pods that reference a built-in
+PodGroup through `spec.schedulingGroup.podGroupName` are rejected with a clear
+scheduling failure before Slurm operations. Ordinary Pods, Jobs, JobSets,
+LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing behavior
+when they do not reference a built-in PodGroup.
 
 For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
 The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
