@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	fwk "k8s.io/kube-scheduler/framework"
+	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
@@ -55,6 +56,11 @@ func TestNewInitializesIndexes(t *testing.T) {
 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SlurmBridgeGenericWorkload, false)
 	var lists atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/slurm/v0.0.44/nodes/" {
+			_, _ = io.WriteString(w, `{"nodes":[{"name":"node1","partitions":["batch"]}]}`)
+			return
+		}
 		if r.URL.Path != "/slurm/v0.0.44/jobs/" {
 			t.Errorf("unexpected Slurm request: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -90,6 +96,19 @@ func TestNewInitializesIndexes(t *testing.T) {
 		t.Fatal("Node index is not registered")
 	}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pod", UID: "pod-uid"}}
+	sb := plugin.(*SlurmBridge)
+	if lists.Load() != 0 {
+		t.Fatal("standby scheduler started polling jobs")
+	}
+	sb.allocationObserver.start()
+	if err := wait.PollUntilContextCancel(ctx, time.Millisecond, true, func(context.Context) (bool, error) {
+		if !sb.allocationObserver.jobs.HasStarted() {
+			return false, nil
+		}
+		return sb.allocationObserver.jobs.HasSynced()
+	}); err != nil {
+		t.Fatal(err)
+	}
 	jobs, err := plugin.(*SlurmBridge).slurmControl.GetJobsForPods(ctx, pod)
 	if err != nil {
 		t.Fatalf("initial job lookup: %v", err)
@@ -99,6 +118,10 @@ func TestNewInitializesIndexes(t *testing.T) {
 	}
 	if got := lists.Load(); got != 1 {
 		t.Fatalf("initial Slurm lists = %d, want 1", got)
+	}
+	nodes, err := sb.slurmControl.GetNodeNames(ctx, ptr.To("batch"))
+	if err != nil || len(nodes) != 1 || nodes[0] != "node1" {
+		t.Fatalf("initial node lookup = %v, %v; want node1", nodes, err)
 	}
 }
 

@@ -73,8 +73,7 @@ func allocatedJobID(pod *corev1.Pod) string {
 }
 
 // allocationObserver discovers allocations even when the corresponding pods
-// never win a scheduling attempt. It doesn't change the synchronous Slurm client
-// used to validate allocations in PreFilter/PreBind.
+// never win a scheduling attempt.
 type allocationObserver struct {
 	ctx       context.Context
 	once      sync.Once
@@ -100,8 +99,6 @@ func allocationJobIDs(obj interface{}) ([]string, error) {
 }
 
 func newAllocationObserver(ctx context.Context, sb *SlurmBridge, cfg *slurmclient.Config) (*allocationObserver, error) {
-	// A dedicated informer keeps cache refreshes out of the live client used
-	// to validate allocations during scheduling and binding.
 	reader, err := slurmclient.NewClient(cfg, &slurmclient.ClientOptions{CacheSyncPeriod: time.Second})
 	if err != nil {
 		return nil, err

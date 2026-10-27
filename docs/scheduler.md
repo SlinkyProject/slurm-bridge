@@ -37,6 +37,10 @@ represented Pods. This scheduler defers scheduling decisions to Slurm, hence
 certain assumptions about the environment must be met for this to function
 correctly.
 
+The scheduler refreshes Slurm job information every second and node information
+every 30 seconds. Scheduling may wait for an in-progress refresh for up to two
+seconds for jobs or 60 seconds for nodes. Failed refreshes defer scheduling.
+
 ### Sequence Diagram
 
 ```mermaid

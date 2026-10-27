@@ -105,7 +105,7 @@ func (i orderedJobIndex) ByIndex(_ context.Context, _, _ string, list object.Obj
 func TestIndexedJobsIgnoreCandidateOrder(t *testing.T) {
 	for _, ids := range [][2]int32{{1, 2}, {2, 1}} {
 		t.Run(fmt.Sprint(ids), func(t *testing.T) {
-			control, err := NewControl(nil, orderedJobIndex{jobs: []api.V0044JobInfo{
+			control, err := NewControl(fake.NewClientBuilder().Build(), orderedJobIndex{jobs: []api.V0044JobInfo{
 				*indexedJob(ids[0], `"ns/pod"`), *indexedJob(ids[1], `"ns/pod"`),
 			}}, "", "")
 			if err != nil {

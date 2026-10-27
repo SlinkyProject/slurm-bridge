@@ -743,26 +743,6 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "List nodes fails",
-			fields: fields{
-				Client: func() client.Client {
-					f := interceptor.Funcs{
-						List: func(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
-							return fmt.Errorf("failed to list nodes")
-						},
-					}
-					return fake.NewClientBuilder().
-						WithInterceptorFuncs(f).
-						Build()
-				}(),
-			},
-			args: args{
-				ctx: context.Background(),
-			},
-			want:    nil,
-			wantErr: true,
-		},
-		{
 			name: "List nodes using configured partitions",
 			fields: fields{
 				partition: "slurm-bridge, gpu",
@@ -830,11 +810,9 @@ func Test_realSlurmControl_GetNodeNames(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &realSlurmControl{
-				lastUpdate: lru.New(10),
-				Client:     tt.fields.Client,
-				mcsLabel:   tt.fields.mcsLabel,
-				partition:  tt.fields.partition,
+			r, err := NewControl(tt.fields.Client, tt.fields.Client.GetInformer(api.ObjectTypeV0044JobInfo), tt.fields.mcsLabel, tt.fields.partition)
+			if err != nil {
+				t.Fatal(err)
 			}
 			got, err := r.GetNodeNames(tt.args.ctx, tt.args.partition)
 			if (err != nil) != tt.wantErr {

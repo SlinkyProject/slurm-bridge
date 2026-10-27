@@ -28,6 +28,10 @@ func (s *getResourcesSpy) GetAllocation(_ context.Context, _ *corev1.Pod, ir *sl
 	return testAllocation(ir), nil
 }
 
+func (s *getResourcesSpy) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
+	return &slurmcontrol.ExternalJob{JobId: 1, Nodes: "slurm-worker-0"}, nil
+}
+
 func (s *getResourcesSpy) GetResources(ctx context.Context, pod *corev1.Pod, nodeName string) (*slurmcontrol.NodeResources, error) {
 	s.gotNodeName = nodeName
 	return &slurmcontrol.NodeResources{}, nil

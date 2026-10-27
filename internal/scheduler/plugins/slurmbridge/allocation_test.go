@@ -132,6 +132,7 @@ func TestSchedulerAllocationBeforeBind(t *testing.T) {
 			ir, jobs := schedulerAllocation()
 			for i := range jobs {
 				jobs[i].JobState = &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING}
+				jobs[i].Nodes = ptr.To("node")
 			}
 			base := fake.NewClientBuilder().WithObjects(&jobs[0], &jobs[1]).Build()
 			reads := 0
