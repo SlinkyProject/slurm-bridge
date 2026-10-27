@@ -105,18 +105,18 @@ container restart. Replacement Pods need scheduling again. Do not rely on
 individual Pod replacement to extend or repair an allocated gang; recreate the
 whole group for a fresh allocation. slurm-bridge supports only
 `RecreateGroupOnPodRestart`: Pods from a LeaderWorkerSet with any other
-`restartPolicy`, including `None`, are rejected.
+`restartPolicy`, including `None`, are rejected. When any Pod in a group is
+lost, slurm-bridge cancels the group's Slurm job without waiting for the other
+Pods to stop. LWS then recreates the group, which gets a new Slurm job.
 
-Set `spec.podTerminationPolicy: Parallel` when creating a LeaderWorkerSet for
-slurm-bridge. The default `Sequential` policy can deadlock group cleanup: LWS
-waits for the leader to disappear before deleting its workers, while the bridge
-retains the leader's finalizer until their shared Slurm allocation is released.
-Running workers keep that allocation alive, preventing leader replacement.
+Both `spec.podTerminationPolicy` values work with slurm-bridge. With the default
+`Sequential`, LWS waits for the leader to disappear before deleting its workers.
+Once the leader stops, it counts as a lost Pod, so the bridge cancels the
+group's Slurm job and releases the leader, and LWS then deletes the workers.
 
-With `Parallel`, LWS starts terminating the leader and workers concurrently, so
-all members can stop and the bridge can release their allocation. Workloads must
-tolerate concurrent shutdown. This field is immutable; recreate existing
-LeaderWorkerSets to change the policy.
+With `Parallel`, LWS starts terminating the leader and workers concurrently.
+Workloads must tolerate concurrent shutdown. This field is immutable; recreate
+existing LeaderWorkerSets to change the policy.
 
 See [Scaling and failure behavior](workload.md#scaling-and-failure-behavior) for
 shared admission, Slurm update, cleanup, and troubleshooting behavior.

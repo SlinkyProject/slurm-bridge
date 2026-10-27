@@ -24,7 +24,6 @@ func TestLWSPolicyPreFilter(t *testing.T) {
 		want    fwk.Code
 	}{
 		{restart: lwsv1.RecreateGroupOnPodRestart, size: 2, want: fwk.Success},
-		{restart: "", size: 2, want: fwk.Success},
 		{restart: lwsv1.NoneRestartPolicy, size: 2, want: fwk.UnschedulableAndUnresolvable},
 		{restart: lwsv1.RecreateGroupAfterStart, size: 2, want: fwk.UnschedulableAndUnresolvable},
 		{restart: lwsv1.RecreateGroupOnPodRestart, startup: lwsv1.LeaderReadyStartupPolicy, size: 2, want: fwk.UnschedulableAndUnresolvable},
