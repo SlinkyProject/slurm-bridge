@@ -27,6 +27,7 @@ import (
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	schedulercontrol "github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/ratelimiter"
@@ -36,33 +37,41 @@ import (
 
 const ControllerName = "registration-controller"
 
-var maxConcurrentReconciles = 1
+var maxConcurrentReconciles = 10
+var deprecatedPodWorkers = 1
 
 func init() {
-	flag.IntVar(&maxConcurrentReconciles, "registration-workers", maxConcurrentReconciles, "Max concurrent allocation registration workers.")
+	flag.IntVar(&deprecatedPodWorkers, "pod-workers", 1, "Deprecated: Pod lifecycle uses --registration-workers.")
+	flag.IntVar(&maxConcurrentReconciles, "registration-workers", maxConcurrentReconciles, "Max concurrent allocation lifecycle workers.")
 }
 
 type Reconciler struct {
 	client.Client
-	slurmClient   slurmclient.Client
-	informer      slurmclient.InformerCache
-	schedulerName string
-	submit        schedulercontrol.JobRegistrar
-	registry      *dra.Registry
-	workloadAPI   *slurmjobir.WorkloadAPI
-	recent        *cache.Expiring
-	eventRecorder record.EventRecorder
-	eventHistory  *cache.Expiring
-	enqueue       func(Request) // Installed by the source before controller workers start.
+	apiReader      client.Reader
+	membersIndexed bool
+	jobIndex       *slurmjob.PodIndex
+	slurmControl   slurmcontrol.SlurmControlInterface
+	slurmClient    slurmclient.Client
+	informer       slurmclient.InformerCache
+	schedulerName  string
+	submit         schedulercontrol.JobRegistrar
+	registry       *dra.Registry
+	workloadAPI    *slurmjobir.WorkloadAPI
+	recent         *cache.Expiring
+	eventRecorder  record.EventRecorder
+	eventHistory   *cache.Expiring
+	enqueue        func(Request) // Installed by the source before controller workers start.
 }
 
 func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName string, registry *dra.Registry, workloadAPI *slurmjobir.WorkloadAPI, mcsLabel, partition string) *Reconciler {
-	return &Reconciler{Client: kube, slurmClient: slurm, informer: slurm.GetInformer(api.ObjectTypeV0044JobInfo), schedulerName: schedulerName,
+	return &Reconciler{Client: kube, apiReader: kube, slurmControl: slurmcontrol.NewControl(slurm), slurmClient: slurm, informer: slurm.GetInformer(api.ObjectTypeV0044JobInfo), schedulerName: schedulerName,
 		submit: schedulercontrol.NewRegistrar(slurm, mcsLabel, partition), registry: registry, workloadAPI: workloadAPI, recent: cache.NewExpiring()}
 }
 
-// SetupWithManager requires the shared Slurm indexes installed by the Pod
-// controller. Every submission and duplicate cancellation runs under this queue.
+// SetupWithManager serializes allocation registration, publication, and cleanup.
+// +kubebuilder:rbac:groups="",resources=pods,verbs=delete;get;list;patch;watch
+// +kubebuilder:rbac:groups="",resources=pods/finalizers,verbs=patch;update
+// +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceclaims,verbs=delete;get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=replicasets;deployments;statefulsets;daemonsets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=jobset.x-k8s.io,resources=jobsets,verbs=get;list;watch
@@ -72,6 +81,18 @@ func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName s
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=deviceclasses,verbs=get;list;watch
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.apiReader = mgr.GetAPIReader()
+	for name, extract := range map[string]client.IndexerFunc{podGroupMemberIndex: nativePodGroupKeys, publishedJobIndex: publishedJobKeys} {
+		if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, name, extract); err != nil {
+			return err
+		}
+	}
+	r.membersIndexed = true
+	var err error
+	r.jobIndex, err = slurmjob.NewPodIndex(r.slurmClient, r.informer)
+	if err != nil {
+		return err
+	}
 	r.eventRecorder = mgr.GetEventRecorderFor(ControllerName) //nolint:staticcheck // Record core/v1 Events, matching the other controllers.
 	r.eventHistory = cache.NewExpiring()
 	jobs := &jobSource{reconciler: r}
@@ -114,6 +135,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 	// Recover conflicts before interpreting submission settings. Invalid current
 	// annotations must not prevent cleanup of allocations already in Slurm.
 	jobs, err := slurmjob.IndexedAllocation(ctx, r.informer, identity)
+	// Deleted Pod and child-group events must still use the root allocation
+	// queue; the job's recorded group identity survives Kubernetes deletion.
+	for _, job := range jobs {
+		owner := job.Ownership().CompositePodGroup
+		if owner == nil {
+			owner = job.Ownership().PodGroup
+		}
+		if owner != nil && groupKey(*owner) != key {
+			r.enqueue(groupKey(*owner))
+			return reconcile.Result{}, nil
+		}
+	}
 	if errors.Is(err, slurmjob.ErrAmbiguousAllocation) {
 		// Normalize expected membership waits before joining cleanup errors so
 		// missing Pods cannot mask a failed duplicate cancellation.
@@ -122,6 +155,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 	}
 	if err != nil {
 		return reconcile.Result{}, err
+	}
+	// Lifecycle cleanup must also run for empty or deleted groups and LWS replicas
+	// without a leader. Preserve membershipErr to prevent new registration below.
+	if membershipErr != nil && !apierrors.IsNotFound(membershipErr) && !errors.Is(membershipErr, slurmjobir.ErrorPodGroupNoPods) && !errors.Is(membershipErr, slurmjobir.ErrorLWSNoPods) && !errors.Is(membershipErr, slurmjob.ErrLWSLeaderMissing) {
+		return r.registrationReadEvent(key, membershipErr)
+	}
+	waiting, err := r.reconcileLifecycle(ctx, key, pods, jobs)
+	if err != nil || waiting {
+		return reconcile.Result{RequeueAfter: registrationRetry}, err
 	}
 	if membershipErr != nil {
 		return r.registrationReadEvent(key, membershipErr)

@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package pod
+package registration
 
 import (
-	"context"
 	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -14,22 +13,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
-	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
-	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
-	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
-	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -117,7 +109,7 @@ func newRequest(name string) ctrl.Request {
 }
 
 var _ = Describe("syncKubernetes()", func() {
-	var controller *PodReconciler
+	var controller *Reconciler
 
 	podName := "foo"
 	req := newRequest(podName)
@@ -183,14 +175,10 @@ var _ = Describe("syncKubernetes()", func() {
 				*newQueuedPod("queued-dead", 7),
 			},
 		}
-		controller = &PodReconciler{
+		controller = &Reconciler{
 			Client:        fake.NewFakeClient(podList),
-			SchedulerName: schedulerName,
-			Scheme:        scheme.Scheme,
-			SlurmClient:   c,
-			EventCh:       make(chan event.GenericEvent, 5),
+			schedulerName: schedulerName,
 			slurmControl:  slurmcontrol.NewControl(c),
-			eventRecorder: record.NewFakeRecorder(10),
 		}
 	})
 
@@ -337,351 +325,8 @@ var _ = Describe("syncKubernetes()", func() {
 	})
 })
 
-var _ = Describe("syncSlurm()", func() {
-	var controller *PodReconciler
-
-	podName := "foo"
-	req := newRequest(podName)
-	var jobId int32 = 1
-
-	BeforeEach(func() {
-		jobList := &api.V0044JobInfoObjectList{
-			Items: []api.V0044JobInfo{
-				{
-
-					JobId:        ptr.To(jobId),
-					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-					AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-				},
-				{
-
-					JobId:        ptr.To[int32](2),
-					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-					AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
-				},
-			},
-		}
-		c := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
-		podList := &corev1.PodList{
-			Items: []corev1.Pod{
-				*newPod("foo", jobId),
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Namespace: metav1.NamespaceDefault,
-						Name:      "bar",
-						Labels: map[string]string{
-							wellknown.LabelExternalJobId: "2",
-						},
-					},
-					Spec: corev1.PodSpec{
-						SchedulerName: schedulerName,
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodSucceeded,
-					},
-				},
-			},
-		}
-		controller = &PodReconciler{
-			Client:        fake.NewFakeClient(podList),
-			Scheme:        scheme.Scheme,
-			SlurmClient:   c,
-			EventCh:       make(chan event.GenericEvent, 5),
-			slurmControl:  slurmcontrol.NewControl(c),
-			eventRecorder: record.NewFakeRecorder(10),
-		}
-	})
-
-	Context("With pods and jobs", func() {
-		It("Should not terminate the job", func() {
-			By("Reconciling")
-			err := controller.syncSlurm(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check pod existence")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
-			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
-
-			By("Check job existence")
-			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(exists).To(BeTrue())
-		})
-
-		It("Should not terminate the job for a terminating pod", func() {
-			By("Setting the pod as terminating but non-terminal")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
-			pod := &corev1.Pod{}
-			err := controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
-			pod.Finalizers = []string{wellknown.FinalizerScheduler}
-			err = controller.Update(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
-			err = controller.Delete(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
-			err = controller.Get(ctx, key, pod)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(pod.DeletionTimestamp).NotTo(BeNil())
-
-			By("Reconciling")
-			err = controller.syncSlurm(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check job is still running")
-			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(exists).To(BeTrue())
-		})
-
-		It("Should not terminate the job while another pod is terminating", func() {
-			By("Creating a terminal pod and a non-terminal terminating pod for the same Slurm job")
-			terminalPod := newTerminalPod("foo-terminal", jobId)
-			terminatingPod := newPod("foo-terminating", jobId)
-			terminatingPod.Finalizers = []string{wellknown.FinalizerScheduler}
-			podList := &corev1.PodList{
-				Items: []corev1.Pod{*terminalPod, *terminatingPod},
-			}
-			jobList := &api.V0044JobInfoObjectList{
-				Items: []api.V0044JobInfo{
-					{
-
-						JobId:        ptr.To(jobId),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-						AdminComment: ptr.To(newExternalJobInfo("foo-terminal").ToString()),
-					},
-				},
-			}
-			baseClient := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
-			getCalls := 0
-			c := slurmclientfake.NewClientBuilder().WithInterceptorFuncs(slurminterceptor.Funcs{
-				Get: func(ctx context.Context, key slurmobject.ObjectKey, obj slurmobject.Object, opts ...slurmclient.GetOption) error {
-					getCalls++
-					return baseClient.Get(ctx, key, obj, opts...)
-				},
-			}).Build()
-			localController := &PodReconciler{
-				Client:        fake.NewFakeClient(podList),
-				Scheme:        scheme.Scheme,
-				SlurmClient:   c,
-				EventCh:       make(chan event.GenericEvent, 5),
-				slurmControl:  slurmcontrol.NewControl(c),
-				eventRecorder: record.NewFakeRecorder(10),
-			}
-			err := localController.Delete(ctx, terminatingPod)
-			Expect(err).NotTo(HaveOccurred())
-			err = localController.Get(ctx, types.NamespacedName{
-				Namespace: corev1.NamespaceDefault,
-				Name:      terminatingPod.Name,
-			}, terminatingPod)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(terminatingPod.DeletionTimestamp).NotTo(BeNil())
-
-			By("Reconciling the terminal pod")
-			err = localController.syncSlurm(ctx, newRequest("foo-terminal"))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(getCalls).To(BeZero())
-
-			By("Check job is still running because a non-terminal pod still exists")
-			exists, err := localController.slurmControl.IsJobRunning(ctx, terminatingPod)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(exists).To(BeTrue())
-		})
-
-		It("Should terminate the job", func() {
-			By("Terminating the corresponding Slurm job")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: "bar"}
-			pod := &corev1.Pod{}
-			err := controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
-
-			By("Reconciling")
-			err = controller.syncSlurm(ctx, newRequest("bar"))
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check job is not running")
-			exists, err := controller.slurmControl.IsJobRunning(ctx, pod)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(exists).To(BeFalse())
-		})
-
-		It("Should cancel a pending heterogeneous job through its leader", func() {
-			pod := newTerminalPod("pending-component", 95)
-			pod.Labels[wellknown.LabelExternalHetJobId] = "93"
-			pod.Labels[wellknown.LabelExternalHetJobOffset] = "2"
-			var cancelledID int32
-			c := slurmclientfake.NewClientBuilder().WithObjects(&api.V0044JobInfo{
-				JobId:    ptr.To[int32](95),
-				JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
-			}).WithInterceptorFuncs(slurminterceptor.Funcs{
-				Delete: func(_ context.Context, obj slurmobject.Object, _ ...slurmclient.DeleteOption) error {
-					cancelledID = *obj.(*api.V0044JobInfo).JobId
-					return nil
-				},
-			}).Build()
-			localController := &PodReconciler{
-				Client:       fake.NewFakeClient(pod),
-				slurmControl: slurmcontrol.NewControl(c),
-			}
-
-			Expect(localController.syncSlurm(ctx, newRequest(pod.Name))).To(Succeed())
-			Expect(cancelledID).To(Equal(int32(93)))
-		})
-
-		It("Should reject a heterogeneous job with a missing offset", func() {
-			pod := &corev1.Pod{}
-			err := controller.Get(ctx, newRequest("bar").NamespacedName, pod)
-			Expect(err).NotTo(HaveOccurred())
-			pod.Labels[wellknown.LabelExternalHetJobId] = "2"
-			err = controller.Update(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
-
-			err = controller.syncSlurm(ctx, newRequest("bar"))
-			Expect(err).To(MatchError("missing heterogeneous job offset for job 2"))
-
-			running, err := controller.slurmControl.IsJobRunning(ctx, pod)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(running).To(BeTrue())
-		})
-
-		It("Should not terminate an already canceled job", func() {
-			By("Creating a terminal pod and canceled Slurm job")
-			podName := "canceled"
-			pod := newTerminalPod(podName, jobId)
-			jobList := &api.V0044JobInfoObjectList{
-				Items: []api.V0044JobInfo{
-					{
-
-						JobId:        ptr.To(jobId),
-						JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED},
-						AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-					},
-				},
-			}
-			terminateCalls := 0
-			c := slurmclientfake.NewClientBuilder().
-				WithLists(jobList).
-				WithInterceptorFuncs(slurminterceptor.Funcs{
-					Delete: func(context.Context, slurmobject.Object, ...slurmclient.DeleteOption) error {
-						terminateCalls++
-						return nil
-					},
-				}).
-				Build()
-			localController := &PodReconciler{
-				Client:        fake.NewFakeClient(pod),
-				Scheme:        scheme.Scheme,
-				SlurmClient:   c,
-				EventCh:       make(chan event.GenericEvent, 5),
-				slurmControl:  slurmcontrol.NewControl(c),
-				eventRecorder: record.NewFakeRecorder(10),
-			}
-
-			By("Reconciling")
-			err := localController.syncSlurm(ctx, newRequest(podName))
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check job termination was not requested")
-			Expect(terminateCalls).To(BeZero())
-		})
-	})
-})
-
-var _ = Describe("Sync()", func() {
-	ctx := context.Background()
-	var controller *PodReconciler
-
-	podName := "foo"
-	req := newRequest(podName)
-	var jobId int32 = 1
-
-	BeforeEach(func() {
-		jobList := &api.V0044JobInfoObjectList{
-			Items: []api.V0044JobInfo{
-				{
-
-					JobId:        ptr.To(jobId),
-					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-					AdminComment: ptr.To(newExternalJobInfo(podName).ToString()),
-				},
-				{
-
-					JobId:        ptr.To[int32](2),
-					JobState:     &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateRUNNING},
-					AdminComment: ptr.To(newExternalJobInfo("bar").ToString()),
-				},
-			},
-		}
-		c := slurmclientfake.NewClientBuilder().WithLists(jobList).Build()
-		podList := &corev1.PodList{
-			Items: []corev1.Pod{
-				*newPod("foo", jobId),
-				*newPod("bar", 2),
-			},
-		}
-		controller = &PodReconciler{
-			Client:        fake.NewFakeClient(podList),
-			Scheme:        scheme.Scheme,
-			SchedulerName: schedulerName,
-			SlurmClient:   c,
-			EventCh:       make(chan event.GenericEvent, 5),
-			slurmControl:  slurmcontrol.NewControl(c),
-			eventRecorder: record.NewFakeRecorder(10),
-		}
-		var err error
-		controller.jobIndex, err = slurmjob.NewPodIndex(c, c.GetInformer(api.ObjectTypeV0044JobInfo))
-		Expect(err).NotTo(HaveOccurred())
-
-	})
-
-	Context("With pods and jobs", func() {
-		It("Should not terminate the pod or job", func() {
-			By("Reconciling")
-			err := controller.Sync(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check pod existence")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
-			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).ToNot(BeTrue())
-		})
-
-		It("Should terminate the pod", func() {
-			By("Terminating the corresponding Slurm job")
-			err := controller.slurmControl.TerminateJob(ctx, jobId)
-			Expect(err).ToNot(HaveOccurred())
-
-			By("Reconciling")
-			err = controller.Sync(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-
-			By("Check pod existence")
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
-			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).To(BeTrue())
-		})
-
-		It("Should terminate the job", func() {
-			By("Terminating the corresponding Kubernetes pod")
-			err := controller.Delete(ctx, newPod(podName, jobId))
-			Expect(err).ToNot(HaveOccurred())
-			key := types.NamespacedName{Namespace: corev1.NamespaceDefault, Name: podName}
-			pod := &corev1.Pod{}
-			err = controller.Get(ctx, key, pod)
-			Expect(apierrors.IsNotFound(err)).To(BeTrue())
-
-			By("Reconciling")
-			err = controller.Sync(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
-})
-
 var _ = Describe("prepareTerminalPod()", func() {
-	var controller *PodReconciler
+	var controller *Reconciler
 
 	podName := "foo"
 	req := newRequest(podName)
@@ -717,13 +362,9 @@ var _ = Describe("prepareTerminalPod()", func() {
 				Namespace: metav1.NamespaceDefault,
 			},
 		}
-		controller = &PodReconciler{
-			Client:        fake.NewFakeClient(podList, claim),
-			Scheme:        scheme.Scheme,
-			SlurmClient:   c,
-			EventCh:       make(chan event.GenericEvent, 5),
-			slurmControl:  slurmcontrol.NewControl(c),
-			eventRecorder: record.NewFakeRecorder(10),
+		controller = &Reconciler{
+			Client:       fake.NewFakeClient(podList, claim),
+			slurmControl: slurmcontrol.NewControl(c),
 		}
 	})
 
@@ -763,13 +404,9 @@ var _ = Describe("prepareTerminalPod()", func() {
 					Namespace: metav1.NamespaceDefault,
 				},
 			}
-			localController := &PodReconciler{
-				Client:        fake.NewFakeClient(terminatingPod, claim),
-				Scheme:        scheme.Scheme,
-				SlurmClient:   slurmclientfake.NewFakeClient(),
-				EventCh:       make(chan event.GenericEvent, 5),
-				slurmControl:  slurmcontrol.NewControl(slurmclientfake.NewFakeClient()),
-				eventRecorder: record.NewFakeRecorder(10),
+			localController := &Reconciler{
+				Client:       fake.NewFakeClient(terminatingPod, claim),
+				slurmControl: slurmcontrol.NewControl(slurmclientfake.NewFakeClient()),
 			}
 
 			By("Reconciling")

@@ -35,9 +35,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/node"
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
-	"github.com/SlinkyProject/slurm-bridge/internal/controller/pod"
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration"
-	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmnode"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
@@ -188,20 +186,9 @@ func main() {
 		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmNode")
 		os.Exit(1)
 	}
-	podEventCh := make(chan event.GenericEvent, 100)
-	podController := pod.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, podEventCh)
-	if err := podController.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Pod")
-		os.Exit(1)
-	}
 	registrationController := registration.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, draRegistry, workloadAPI, cfg.MCSLabel, cfg.Partition)
 	if err := registrationController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Registration")
-		os.Exit(1)
-	}
-	jobRunnable := slurmjob.NewRunnable(mgr.GetClient(), mgr.GetAPIReader(), slurmClient, podEventCh)
-	if err := jobRunnable.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create runnable", "runnable", "SlurmJob")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -19,8 +19,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client"
 	"github.com/SlinkyProject/slurm-client/pkg/client/token"
 
-	podcontrol "github.com/SlinkyProject/slurm-bridge/internal/controller/pod/slurmcontrol"
-	jobcontrol "github.com/SlinkyProject/slurm-bridge/internal/runnable/slurmjob/slurmcontrol"
+	registrationcontrol "github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
 	schedulercontrol "github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -30,11 +29,8 @@ func TestJobCancellationDoesNotDependOnReadback(t *testing.T) {
 		name   string
 		cancel func(context.Context, client.Client) error
 	}{
-		{name: "Pod cleanup", cancel: func(ctx context.Context, c client.Client) error {
-			return podcontrol.NewControl(c).TerminateJob(ctx, 42)
-		}},
 		{name: "allocation cleanup", cancel: func(ctx context.Context, c client.Client) error {
-			return jobcontrol.NewControl(c).TerminateJob(ctx, 42)
+			return registrationcontrol.NewControl(c).TerminateJob(ctx, 42)
 		}},
 		{name: "scheduler cancellation", cancel: func(ctx context.Context, c client.Client) error {
 			control, err := schedulercontrol.NewControl(c, c.GetInformer(api.ObjectTypeV0044JobInfo), "", "")

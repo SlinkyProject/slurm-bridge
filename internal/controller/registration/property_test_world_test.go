@@ -14,6 +14,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/cache"
 	clocktesting "k8s.io/utils/clock/testing"
@@ -30,6 +32,7 @@ import (
 	slurminterceptor "github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
 	schedulercontrol "github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/controllercheck"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -46,6 +49,7 @@ type registrationEffect struct {
 	JobID                               int32
 	BoundPods                           []string
 	BeforeJobs, Submitted, ObservedJobs []api.V0044JobInfo
+	BeforePods                          []corev1.Pod
 }
 
 type registrationState struct {
@@ -89,6 +93,9 @@ func newRegistrationWorld(ctx context.Context, slots int) (*registrationWorld, e
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
+	if err := resourcev1.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
 	if err := batchv1.AddToScheme(scheme); err != nil {
 		return nil, err
 	}
@@ -112,7 +119,10 @@ func newRegistrationWorld(ctx context.Context, slots int) (*registrationWorld, e
 				}
 				after := &corev1.Pod{}
 				if err := c.Get(ctx, client.ObjectKeyFromObject(obj), after); err != nil {
-					return err
+					if !apierrors.IsNotFound(err) {
+						return err
+					}
+					after = obj.(*corev1.Pod).DeepCopy()
 				}
 				w.queue.Add(podRequest(after))
 				w.record(registrationEffect{Operation: "pod.patch", BeforePod: before, AfterPod: after})
@@ -174,11 +184,12 @@ func (w *registrationWorld) restart(ctx context.Context) error {
 	w.queue.Now = w.clock.Now().Sub(time.Unix(0, 0))
 	w.cached = slurmfake.NewFakeClient()
 	w.informer = &registrationInformer{InformerCache: w.cached.GetInformer(api.ObjectTypeV0044JobInfo)}
-	if _, err := slurmjob.NewPodIndex(w.cached, w.informer); err != nil {
-		return err
-	}
+
 	slurm := slurminterceptor.NewClient(w.live, slurminterceptor.Funcs{
 		List: func(ctx context.Context, list object.ObjectList, opts ...slurmclient.ListOption) error {
+			if (&slurmclient.ListOptions{}).ApplyOptions(opts).SkipCache {
+				return w.live.List(ctx, list, opts...)
+			}
 			return w.cached.List(ctx, list, opts...)
 		},
 		Get: func(ctx context.Context, key object.ObjectKey, obj object.Object, opts ...slurmclient.GetOption) error {
@@ -200,13 +211,23 @@ func (w *registrationWorld) restart(ctx context.Context) error {
 				if err := w.transitionAllocation(ctx, worldLeader(*job), api.V0044JobInfoJobStateCANCELLED); err != nil {
 					return err
 				}
-				w.record(registrationEffect{Operation: "slurm.cancel", JobID: *job.JobId, BeforeJobs: before})
+				pods := &corev1.PodList{}
+				if err := w.kube.List(ctx, pods); err != nil {
+					return err
+				}
+				beforePods := append([]corev1.Pod{}, pods.Items...)
+				w.record(registrationEffect{Operation: "slurm.cancel", JobID: *job.JobId, BeforeJobs: before, BeforePods: beforePods})
 				return nil
 			})
 		},
 	})
-	w.reconciler = &Reconciler{Client: w.kube, slurmClient: slurm, informer: w.informer,
+	w.reconciler = &Reconciler{Client: w.kube, apiReader: w.kube, slurmControl: worldLifecycleControl{SlurmControlInterface: slurmcontrol.NewControl(slurm), world: w}, slurmClient: slurm, informer: w.informer,
 		schedulerName: "slurm-bridge", workloadAPI: w.workloadAPI, submit: w, recent: cache.NewExpiringWithClock(w.clock), enqueue: w.queue.Add}
+	index, err := slurmjob.NewPodIndex(slurm, w.informer)
+	if err != nil {
+		return err
+	}
+	w.reconciler.jobIndex = index
 	// Model startup lists, including the initial synchronized Slurm list. A
 	// restarted process cannot advertise an empty, synchronized informer.
 	pods := &corev1.PodList{}
@@ -519,4 +540,36 @@ func (w *registrationWorld) campaign() controllercheck.Campaign[registrationStat
 		},
 		Restart: w.restart, Retryable: func(err error) bool { return errors.Is(err, controllercheck.ErrInjected) }, RecoverySteps: 32,
 	}
+}
+
+// Model the REST component selector separately from whole-allocation deletion.
+type worldLifecycleControl struct {
+	slurmcontrol.SlurmControlInterface
+	world *registrationWorld
+}
+
+func (c worldLifecycleControl) TerminateHetJobComponent(ctx context.Context, leader, offset int32) error {
+	w := c.world
+	return w.faults.Call("slurm.cancel", func() error {
+		before, err := worldJobs(ctx, w.live)
+		if err != nil {
+			return err
+		}
+		for _, job := range before {
+			if worldLeader(job) != leader || ptr.Deref(job.HetJobOffset.Number, -1) != offset {
+				continue
+			}
+			job.JobState = ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCANCELLED})
+			if err := w.live.Update(ctx, &job, nil); err != nil {
+				return err
+			}
+			pods := &corev1.PodList{}
+			if err := w.kube.List(ctx, pods); err != nil {
+				return err
+			}
+			w.record(registrationEffect{Operation: "slurm.release-component", JobID: *job.JobId, BeforeJobs: before, BeforePods: append([]corev1.Pod{}, pods.Items...)})
+			return nil
+		}
+		return nil
+	})
 }

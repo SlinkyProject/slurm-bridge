@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
@@ -24,5 +25,17 @@ func lwsAllocationIdentity(pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) (Allocati
 			return podAllocationIdentity(&member), nil
 		}
 	}
-	return AllocationIdentity{}, ErrLWSLeaderMissing
+	if hash == "" {
+		return AllocationIdentity{}, ErrLWSLeaderMissing
+	}
+	// Surviving workers still identify existing allocations for lifecycle cleanup.
+	// Keep the error so registration and scheduling continue to require a leader.
+	identity := podAllocationIdentity(pod)
+	for _, member := range ir.AllPods() {
+		if member.Labels[lwsv1.GroupUniqueHashLabelKey] == hash {
+			identity.legacyPodKeys = append(identity.legacyPodKeys,
+				externaljobinfo.PodKey(&member), member.Namespace+"/"+member.Name)
+		}
+	}
+	return identity, ErrLWSLeaderMissing
 }

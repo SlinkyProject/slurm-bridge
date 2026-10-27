@@ -9,6 +9,7 @@ spec:
   scheduling: {}
   groupIdentity: Ordinal
   startupPolicy: LeaderCreated
+  podTerminationPolicy: Parallel
   leaderWorkerTemplate:
     size: 3
     restartPolicy: RecreateGroupOnPodRestart

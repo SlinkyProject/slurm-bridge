@@ -78,9 +78,9 @@ var registrationContract = controllercheck.Contract[registrationState]{
 			}
 			return nil
 		}},
-		{Name: "bound-publication", Statement: "the controller never patches a bound Pod", Check: func(s registrationState) error {
+		{Name: "bound-publication", Statement: "lifecycle repair never changes the binding or removes a bound Pod registration gate", Check: func(s registrationState) error {
 			for _, e := range s.Effects {
-				if e.Operation == "pod.patch" && e.BeforePod.Spec.NodeName != "" {
+				if e.Operation == "pod.patch" && e.BeforePod.Spec.NodeName != "" && (e.AfterPod.Spec.NodeName != e.BeforePod.Spec.NodeName || hasRegistrationGate(e.BeforePod) && !hasRegistrationGate(e.AfterPod)) {
 					return fmt.Errorf("patched bound Pod %s", e.BeforePod.Name)
 				}
 			}
@@ -137,8 +137,32 @@ var registrationContract = controllercheck.Contract[registrationState]{
 						other = true
 					}
 				}
-				if !other {
+				if !other && allocationNeededAtEffect(e, key, s.Allocations) {
 					return fmt.Errorf("canceled job %d without an unfinished survivor for %s", e.JobID, key)
+				}
+			}
+			return nil
+		}},
+		{Name: "component-release", Statement: "component cancellation retains every component with a live member", Check: func(s registrationState) error {
+			for _, e := range s.Effects {
+				if e.Operation != "slurm.release-component" {
+					continue
+				}
+				target, err := worldJobByID(e.BeforeJobs, e.JobID)
+				if err != nil {
+					return err
+				}
+				info, err := worldIdentity(target)
+				if err != nil {
+					return err
+				}
+				for _, pod := range e.BeforePods {
+					if !slices.Contains(info.Pods, externaljobinfo.PodKey(&pod)) {
+						continue
+					}
+					if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed && (pod.DeletionTimestamp == nil || pod.Spec.NodeName != "") {
+						return fmt.Errorf("released component %d with live member %s", e.JobID, pod.Name)
+					}
 				}
 			}
 			return nil
@@ -186,6 +210,9 @@ func checkSurvivorPreference(s registrationState) error {
 		if err != nil {
 			return err
 		}
+		if !allocationNeededAtEffect(e, key, s.Allocations) {
+			continue
+		}
 		best, bestLeader := -1, int32(0)
 		for _, job := range e.BeforeJobs {
 			candidate, err := worldAllocationKey(job, s.Allocations)
@@ -205,6 +232,31 @@ func checkSurvivorPreference(s registrationState) error {
 		}
 	}
 	return nil
+}
+
+// The cancellation oracle uses workload intent and Pods captured at the effect,
+// independent of the controller's current-membership implementation.
+func allocationNeededAtEffect(e registrationEffect, key string, allocations []worldAllocation) bool {
+	if e.BeforePods == nil {
+		return true
+	} // Synthetic duplicate-policy fixtures.
+	for _, allocation := range allocations {
+		if allocation.Key != key {
+			continue
+		}
+		for _, component := range allocation.Components {
+			for _, pod := range e.BeforePods {
+				if !slices.Contains(component, externaljobinfo.PodKey(&pod)) {
+					continue
+				}
+				if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil && pod.Spec.NodeName == "" {
+					continue
+				}
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func worldJobByID(jobs []api.V0044JobInfo, id int32) (api.V0044JobInfo, error) {

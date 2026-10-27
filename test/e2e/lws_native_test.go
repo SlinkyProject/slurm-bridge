@@ -59,6 +59,11 @@ func nativeLWS(name string, replicas, size int32) *lwsv1.LeaderWorkerSet {
 
 func testLeaderWorkerSetNativeLifecycle() types.Feature {
 	lws := nativeLWS(envconf.RandomName("lws-native-e2e", 30), 2, 2)
+	// TODO: Support sequential LWS termination without a cleanup deadlock.
+	// LWS waits for the leader to disappear before deleting its workers, while
+	// Bridge retains the leader's finalizer until the shared allocation is released.
+	// Running workers keep that allocation alive, so terminate the group in parallel.
+	lws.Spec.PodTerminationPolicy = lwsv1.ParallelPodTerminationPolicy
 	var pods []corev1.Pod
 	return features.New("LeaderWorkerSet generated PodGroup lifecycle").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
