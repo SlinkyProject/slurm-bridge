@@ -1160,8 +1160,8 @@ func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 			case *api.V0044Node:
 				options := &client.GetOptions{}
 				options.ApplyOptions(opts)
-				if options.SkipCache {
-					t.Error("node metadata bypassed informer")
+				if !options.SkipCache {
+					t.Error("node metadata must bypass informer to match the live allocation")
 				}
 				extras.Add(1)
 				out.Extra = ptr.To("extra-" + string(key))

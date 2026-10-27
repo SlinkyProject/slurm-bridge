@@ -30,7 +30,6 @@ import (
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 	slurmutils "github.com/SlinkyProject/slurm-client/pkg/utils"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -100,7 +99,7 @@ func allocationJobIDs(obj interface{}) ([]string, error) {
 }
 
 func newAllocationObserver(ctx context.Context, sb *SlurmBridge, cfg *slurmclient.Config) (*allocationObserver, error) {
-	reader, err := slurmclient.NewClient(cfg, &slurmclient.ClientOptions{CacheSyncPeriod: config.SlurmCacheSyncPeriod})
+	reader, err := slurmclient.NewClient(cfg, &slurmclient.ClientOptions{CacheSyncPeriod: time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +144,8 @@ func (o *allocationObserver) start() {
 	o.once.Do(func() {
 		go o.jobs.Run(o.ctx.Done())
 		go func() {
-			// Prime the job index when this replica starts scheduling; periodic
-			// refreshes retain the normal 30-second Slurm client interval.
+			// Prime the job index when this replica starts scheduling; subsequent
+			// refreshes observe registrations and allocations every second.
 			if !cache.WaitForCacheSync(o.ctx.Done(), o.jobs.HasStarted) {
 				return
 			}
