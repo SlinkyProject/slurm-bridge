@@ -66,10 +66,13 @@ Determine whether the Kubernetes version supports built-in Workload APIs
 
 {{/*
 Use the same native Workload gate for all components, default-on where supported.
+Preserve an explicit legacy opt-out when upgrading existing Helm values.
 */}}
 {{- define "slurm-bridge.genericWorkload.enabled" -}}
 {{- $gates := .Values.scheduler.featureGates | default dict -}}
 {{- if ne (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true" -}}
+false
+{{- else if and (hasKey $gates "SlurmBridgeGenericWorkload") (not $gates.SlurmBridgeGenericWorkload) -}}
 false
 {{- else if hasKey $gates "GenericWorkload" -}}
 {{- $gates.GenericWorkload -}}
@@ -85,6 +88,7 @@ PodGroups; hierarchy gates require the 1.37 APIs and native scheduling enabled.
 {{- define "slurm-bridge.scheduler.featureGates" -}}
 {{- $featureGates := list }}
 {{- $gates := deepCopy (.Values.scheduler.featureGates | default dict) }}
+{{- $_ := unset $gates "SlurmBridgeGenericWorkload" }}
 {{- $enabled := eq (include "slurm-bridge.genericWorkload.enabled" .) "true" }}
 {{- $_ := set $gates "GenericWorkload" $enabled }}
 {{- $hierarchyGates := list "CompositePodGroup" "TopologyAwareWorkloadScheduling" }}
