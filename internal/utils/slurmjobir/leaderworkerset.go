@@ -27,12 +27,30 @@ var (
 	ErrorLWSNoPods      = errors.New("no pods for LWS group found")
 )
 
+// ValidateLWSPolicies rejects LeaderWorkerSet policies Slurm-bridge cannot honor.
+// Slurm-bridge cancels a group's Slurm job when any of its pods is lost, which
+// is only correct when LWS recreates the whole group
+// (RecreateGroupOnPodRestart, the LWS default when restartPolicy is unset).
+func ValidateLWSPolicies(lws *lwsv1.LeaderWorkerSet) error {
+	if ptr.Deref(lws.Spec.LeaderWorkerTemplate.Size, 1) > 1 && lws.Spec.StartupPolicy == lwsv1.LeaderReadyStartupPolicy {
+		return errors.New("LeaderReady startup policy is incompatible with LWS gang scheduling; use LeaderCreated")
+	}
+	if policy := lws.Spec.LeaderWorkerTemplate.RestartPolicy; policy != "" && policy != lwsv1.RecreateGroupOnPodRestart {
+		return fmt.Errorf("LeaderWorkerSet restartPolicy %q is unsupported by Slurm-bridge; use %s", policy, lwsv1.RecreateGroupOnPodRestart)
+	}
+	return nil
+}
+
 // PreFilter performs LeaderWorkerSet specific PreFilter functions
 func (t *translator) PreFilterLWS(pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {
 	lws := lwsv1.LeaderWorkerSet{}
 	key := client.ObjectKey{Namespace: slurmJobIR.RootPOM.GetNamespace(), Name: slurmJobIR.RootPOM.GetName()}
 	if err := t.Get(t.ctx, key, &lws); err != nil {
 		return fwk.NewStatus(fwk.Error, ErrorLWSCouldNotGet.Error())
+	}
+
+	if err := ValidateLWSPolicies(&lws); err != nil {
+		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
 
 	size, err := lwsGroupSize(pod, &lws)
