@@ -62,32 +62,79 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: Always
-  - it: enables upstream workload cache for CompositePodGroups
+  - it: enables native scheduling and hierarchy gates on Kubernetes 1.37
     template: scheduler/deployment.yaml
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true,TopologyAwareWorkloadScheduling=true
-  - it: allows a bridge Workload opt-out independently of upstream cache gates
-    template: scheduler/deployment.yaml
+          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
+  - it: disables native scheduling and hierarchy together
     set:
-      scheduler.featureGates.SlurmBridgeGenericWorkload: false
+      scheduler.featureGates.GenericWorkload: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=false,TopologyAwareWorkloadScheduling=true
-  - it: omits Kubernetes 1.37 workload gates on older clusters
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
+        template: scheduler/deployment.yaml
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: GangScheduling|podGroupPostFilter
+        template: scheduler/configmap.yaml
+  - it: enables native group scheduling with the Kubernetes 1.36 adapter
     capabilities:
       majorVersion: 1
       minorVersion: 36
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?s)GangScheduling.*podGroupPostFilter:.*SlurmBridge"
+        template: scheduler/configmap.yaml
+  - it: disables native scheduling automatically on Kubernetes 1.35
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
         template: scheduler/deployment.yaml
       - notMatchRegex:
           path: data["scheduler-config.yaml"]
           pattern: GangScheduling|podGroupPostFilter
+        template: scheduler/configmap.yaml
+  - it: disables native scheduling on Kubernetes 1.35 when the feature map is omitted
+    capabilities:
+      majorVersion: 1
+      minorVersion: 35
+    set:
+      scheduler.featureGates: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=GenericWorkload=false
+        template: scheduler/deployment.yaml
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: GangScheduling|podGroupPostFilter
+        template: scheduler/configmap.yaml
+  - it: keeps native scheduling enabled when the feature map is omitted
+    capabilities:
+      majorVersion: 1
+      minorVersion: 37
+    set:
+      scheduler.featureGates: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --feature-gates=GenericWorkload=true
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?s)GangScheduling.*podGroupPostFilter:.*SlurmBridge"
         template: scheduler/configmap.yaml
   - it: exposes authenticated metrics over HTTPS
     template: scheduler/service.yaml

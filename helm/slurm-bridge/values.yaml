@@ -51,18 +51,17 @@ scheduler:
     maxUnavailable:
   # -- Enables leader election.
   leaderElect: false
-  # -- Scheduler feature gates. SlurmBridgeGenericWorkload also controls controller
-  # registration and requires a supported built-in Workload and PodGroup API at
-  # startup. The upstream GenericWorkload,
-  # TopologyAwareWorkloadScheduling, and CompositePodGroup gates populate the
-  # hierarchy cache and require Kubernetes 1.37; disable them on older clusters.
+  # -- Scheduler feature gates. GenericWorkload enables native group scheduling
+  # and controller registration by default, requiring the built-in Workload and
+  # PodGroup APIs on Kubernetes 1.36 or newer. Automatically disabled on Kubernetes 1.35.
+  # CompositePodGroup and TopologyAwareWorkloadScheduling require Kubernetes 1.37
+  # and are only enabled when GenericWorkload is enabled.
   featureGates:
     CompositePodGroup: true
     DRAExtendedResource: true
     DynamicResourceAllocation: true
     GenericWorkload: true
     SchedulerPopFromBackoffQ: false
-    SlurmBridgeGenericWorkload: true
     TopologyAwareWorkloadScheduling: true
   # -- Set the priority class to use.
   # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass

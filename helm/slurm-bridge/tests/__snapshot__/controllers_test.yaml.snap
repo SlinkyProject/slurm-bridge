@@ -55,7 +55,7 @@ manifests should match snapshot:
                 - -zap-log-level
                 - info
                 - --leader-elect=false
-                - --feature-gates=SlurmBridgeGenericWorkload=true
+                - --feature-gates=GenericWorkload=true
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token

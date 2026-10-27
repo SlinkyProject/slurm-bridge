@@ -144,6 +144,14 @@ func (o *allocationObserver) start() {
 	o.once.Do(func() {
 		go o.jobs.Run(o.ctx.Done())
 		go func() {
+			// Prime the job index when this replica starts scheduling; subsequent
+			// refreshes observe registrations and allocations every second.
+			if !cache.WaitForCacheSync(o.ctx.Done(), o.jobs.HasStarted) {
+				return
+			}
+			if err := o.jobs.List(o.ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true}); err != nil && o.ctx.Err() == nil {
+				klog.FromContext(o.ctx).Error(err, "initialize Slurm allocation index")
+			}
 			if !cache.WaitForCacheSync(o.ctx.Done(), o.hasSynced, func() bool {
 				if !o.jobs.HasStarted() {
 					return false

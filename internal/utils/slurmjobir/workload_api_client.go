@@ -17,7 +17,7 @@ import (
 // NewWorkloadAPI configures native workload support for a controller or scheduler.
 // When enabled, discovery or API availability failures must prevent startup.
 func NewWorkloadAPI(config *rest.Config, scheme *runtime.Scheme) (*WorkloadAPI, error) {
-	if !utilfeature.DefaultFeatureGate.Enabled(features.SlurmBridgeGenericWorkload) {
+	if !utilfeature.DefaultFeatureGate.Enabled(features.GenericWorkload) {
 		return nil, nil //nolint:nilnil // An explicitly disabled gate needs no discovery or API registration.
 	}
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
@@ -26,7 +26,7 @@ func NewWorkloadAPI(config *rest.Config, scheme *runtime.Scheme) (*WorkloadAPI, 
 	}
 	api, err := RegisterWorkloadAPI(discoveryClient, scheme)
 	if err != nil {
-		return nil, fmt.Errorf("%s=true requires a supported Workload and PodGroup API: %w", features.SlurmBridgeGenericWorkload, err)
+		return nil, fmt.Errorf("%s=true requires a supported Workload and PodGroup API: %w", features.GenericWorkload, err)
 	}
 	return api, nil
 }

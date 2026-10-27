@@ -29,7 +29,7 @@ data:
         preEnqueue:
           enabled:
           - name: 'SchedulingGates'
-          {{- if and .Values.scheduler.featureGates.GenericWorkload (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
+          {{- if and (eq (include "slurm-bridge.genericWorkload.enabled" .) "true") (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
           - name: 'GangScheduling'
           {{- end }}
         preFilter:
@@ -46,7 +46,7 @@ data:
         postFilter:
           enabled:
           - name: 'SlurmBridge'
-        {{- if and .Values.scheduler.featureGates.GenericWorkload (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
+        {{- if and (eq (include "slurm-bridge.genericWorkload.enabled" .) "true") (eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true") }}
         podGroupPostFilter:
           enabled:
           - name: 'SlurmBridge'

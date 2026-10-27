@@ -114,7 +114,7 @@ manifests should match snapshot:
           containers:
             - args:
                 - --config=/etc/kubernetes/scheduler-config.yaml
-                - --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,SlurmBridgeGenericWorkload=true,TopologyAwareWorkloadScheduling=true
+                - --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token

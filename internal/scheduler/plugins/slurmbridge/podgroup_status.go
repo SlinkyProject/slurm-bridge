@@ -30,7 +30,8 @@ func podsHaveSlurmNodeAssignments(pods *corev1.PodList, jobID string) bool {
 }
 
 // markPodGroupScheduled sets the served API version's scheduled condition to True.
-// kube-scheduler normally writes this when it admits a gang; slurm-bridge must do the same.
+// The native framework owns this status when GenericWorkload is enabled. This
+// helper supports per-Pod scheduling when native group scheduling is disabled.
 func (sb *SlurmBridge) markPodGroupScheduled(ctx context.Context, slurmJobIR *slurmjobir.SlurmJobIR, slurmJobComponent *slurmjobir.SlurmJobComponent, jobID string) {
 	if slurmJobIR == nil || slurmJobComponent == nil || sb.workloadAPI == nil || slurmJobIR.RootPOM.TypeMeta != sb.workloadAPI.PodGroupTypeMeta || jobID == "" {
 		return

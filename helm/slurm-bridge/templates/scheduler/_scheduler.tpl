@@ -58,22 +58,44 @@ Determine scheduler image reference (repo:tag)
 {{- end }}
 
 {{/*
-Determine whether the Kubernetes version supports the built-in workload APIs
+Determine whether the Kubernetes version supports built-in Workload APIs
 */}}
 {{- define "slurm-bridge.scheduler.supportsWorkloadAPI" -}}
-{{- semverCompare ">=1.37-0" .Capabilities.KubeVersion.Version -}}
+{{- semverCompare ">=1.36-0" .Capabilities.KubeVersion.Version -}}
 {{- end }}
 
 {{/*
-List compatible scheduler feature gates
+Use the same native Workload gate for all components, default-on where supported.
+Preserve an explicit legacy opt-out when upgrading existing Helm values.
+*/}}
+{{- define "slurm-bridge.genericWorkload.enabled" -}}
+{{- $gates := .Values.scheduler.featureGates | default dict -}}
+{{- if ne (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true" -}}
+false
+{{- else if and (hasKey $gates "SlurmBridgeGenericWorkload") (not $gates.SlurmBridgeGenericWorkload) -}}
+false
+{{- else if hasKey $gates "GenericWorkload" -}}
+{{- $gates.GenericWorkload -}}
+{{- else -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
+List compatible scheduler feature gates. The 1.36 API adapter supports ordinary
+PodGroups; hierarchy gates require the 1.37 APIs and native scheduling enabled.
 */}}
 {{- define "slurm-bridge.scheduler.featureGates" -}}
 {{- $featureGates := list }}
-{{- $workloadFeatureGates := list "CompositePodGroup" "GenericWorkload" "TopologyAwareWorkloadScheduling" }}
-{{- $supportsWorkloadAPI := eq (include "slurm-bridge.scheduler.supportsWorkloadAPI" .) "true" }}
-{{- range $name, $enabled := .Values.scheduler.featureGates }}
-    {{- if or $supportsWorkloadAPI (not (has $name $workloadFeatureGates)) }}
-    {{- $featureGates = append $featureGates (printf "%s=%t" $name $enabled) }}
+{{- $gates := deepCopy (.Values.scheduler.featureGates | default dict) }}
+{{- $_ := unset $gates "SlurmBridgeGenericWorkload" }}
+{{- $enabled := eq (include "slurm-bridge.genericWorkload.enabled" .) "true" }}
+{{- $_ := set $gates "GenericWorkload" $enabled }}
+{{- $hierarchyGates := list "CompositePodGroup" "TopologyAwareWorkloadScheduling" }}
+{{- $supportsHierarchy := and $enabled (semverCompare ">=1.37-0" .Capabilities.KubeVersion.Version) }}
+{{- range $name, $value := $gates }}
+    {{- if or $supportsHierarchy (not (has $name $hierarchyGates)) }}
+    {{- $featureGates = append $featureGates (printf "%s=%t" $name $value) }}
     {{- end }}
 {{- end }}
 {{- join "," $featureGates }}

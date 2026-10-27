@@ -510,18 +510,26 @@ func TestAllocationInformerLifecycle(t *testing.T) {
 	}
 	await("late registration sees existing allocation", func() bool { return hint("late", "10") && activations.Load() == 2 })
 	state.Store(3)
+	// Drive the next refresh without waiting for the production polling interval.
+	_ = o.jobs.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true})
 	await("failed refresh observed", func() bool { _, err := o.jobs.HasSynced(); return err != nil })
 	if !hint("pod", "10") || !hint("late", "10") {
 		t.Fatal("failed refresh cleared allocation")
 	}
 	state.Store(1)
+	// Drive the next refresh without waiting for the production polling interval.
+	_ = o.jobs.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true})
 	await("allocation loss clears hints", func() bool { return hint("pod", "") && hint("late", "") })
 	if activations.Load() != 2 {
 		t.Fatal("allocation loss reactivated pods")
 	}
 	state.Store(0)
+	// Drive the next refresh without waiting for the production polling interval.
+	_ = o.jobs.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true})
 	await("new allocation reactivates pods", func() bool { return hint("pod", "10") && hint("late", "10") && activations.Load() == 4 })
 	state.Store(2)
+	// Drive the next refresh without waiting for the production polling interval.
+	_ = o.jobs.List(ctx, &api.V0044JobInfoObjectList{}, &slurmclient.ListOptions{RefreshCache: true})
 	await("deleted job clears hints", func() bool { return hint("pod", "") && hint("late", "") })
 	if activations.Load() != 4 {
 		t.Fatal("deletion reactivated pods")

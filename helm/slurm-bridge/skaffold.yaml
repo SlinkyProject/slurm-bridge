@@ -56,7 +56,7 @@ profiles:
       - op: add
         path: /deploy/helm/releases/0/setValues
         value:
-          scheduler.featureGates.SlurmBridgeGenericWorkload: false
+          scheduler.featureGates.GenericWorkload: false
 portForward:
   - resourceType: deployment
     resourceName: slurm-bridge-scheduler

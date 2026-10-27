@@ -53,7 +53,7 @@ import (
 )
 
 var (
-	ErrorNoKubeNode              = errors.New("no more external nodes to annotate pods")
+	ErrorNoKubeNode              = errors.New("no more external nodes available for pod placement")
 	ErrorNoKubeNodeMatch         = errors.New("slurm node matches no Kube nodes")
 	ErrorPodUpdateFailed         = errors.New("failed to update pod")
 	ErrorNodeConfigInvalid       = errors.New("requested node configuration is not available")
@@ -230,10 +230,13 @@ func (sb *SlurmBridge) Name() string {
 type stateData struct {
 	slurmJobIR *slurmjobir.SlurmJobIR
 	allocation []slurmcontrol.ExternalJob
+	native     *nativeAllocation
+	nodeName   string
 }
 
 func (d *stateData) Clone() fwk.StateData {
-	return d
+	copy := *d
+	return &copy
 }
 
 func getStateData(cs fwk.CycleState) (*stateData, error) {
@@ -319,7 +322,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if workloadAPI != nil {
 		logger.Info("registered built-in Workload API", "apiVersion", workloadAPI.PodGroupTypeMeta.APIVersion)
 	} else {
-		logger.Info("built-in Workload support disabled", "featureGate", features.SlurmBridgeGenericWorkload)
+		logger.Info("built-in Workload support disabled", "featureGate", features.GenericWorkload)
 	}
 
 	// The Pod client uses the same QPS/Burst tuning as the Workload API client.
@@ -436,6 +439,10 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	if hasRequiredAffinity(pod) {
 		logger.Error(ErrorPodWithRequiredAffinity, "required affinity is not supported")
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error())
+	}
+
+	if group := nativeSchedulingCycle(state, pod); group != nil {
+		return sb.preFilterNative(ctx, state, pod, group)
 	}
 
 	s := &stateData{}
@@ -564,11 +571,16 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
 		sb.markPodGroupScheduled(ctx, s.slurmJobIR, component, strconv.Itoa(int(externalJob.JobId)))
-		// Update pod after performing a Patch so subsequent plugins have
-		// accurate annotations
-		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
+		// Read refreshed metadata into a private object. Informer and framework
+		// Pods are shared with the allocation observer and must stay immutable.
+		refreshed := &corev1.Pod{}
+		if err := sb.Get(ctx, client.ObjectKeyFromObject(pod), refreshed); err != nil {
 			return nil, fwk.NewStatus(fwk.Error, err.Error())
 		}
+		if refreshed.UID != pod.UID {
+			return nil, fwk.NewStatus(fwk.Unschedulable, "Pod identity changed during placement")
+		}
+		s.nodeName = refreshed.Annotations[wellknown.AnnotationExternalJobNode]
 		// By passing the list of nodes in the external job as PreFilterResult,
 		// Filter plugins will only run for nodes in the Slurm job. This is the final
 		// PreFilter step that must occur before pods are allowed to run.
@@ -600,13 +612,12 @@ func (sb *SlurmBridge) handleAllocatedNodeError(ctx context.Context, s *stateDat
 
 // allocatedNodeRejectedByKubernetes returns true only when PreFilter observed a
 // Slurm allocation and a Kubernetes Filter plugin rejected the node assigned to
-// this pod. Without the node annotation, Slurm may have allocated the job after
+// this pod. Without a placement decision, Slurm may have allocated the job after
 // PreFilter ran; that valid allocation must be preserved for the next cycle.
-func allocatedNodeRejectedByKubernetes(pod *corev1.Pod, externalJob *slurmcontrol.ExternalJob, m fwk.NodeToStatusReader) bool {
+func allocatedNodeRejectedByKubernetes(assignedNode string, externalJob *slurmcontrol.ExternalJob, m fwk.NodeToStatusReader) bool {
 	if externalJob.JobId == 0 || externalJob.Nodes == "" {
 		return false
 	}
-	assignedNode := pod.Annotations[wellknown.AnnotationExternalJobNode]
 	if assignedNode == "" {
 		return false
 	}
@@ -627,20 +638,24 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	if s.slurmJobIR == nil {
 		return nil, fwk.NewStatus(fwk.Unschedulable)
 	}
+	// Eligibility updates are private to this member; shared membership and
+	// allocation snapshots remain immutable through concurrent binding.
+	s.slurmJobIR = copySchedulingIR(s.slurmJobIR)
+	assignedNode := s.assignedNode(pod)
 	jobs, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
 	if status := s.checkAllocation(pod, jobs, allocationErr); !status.IsSuccess() {
 		return nil, status
 	}
 
 	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
-	if allocatedNodeRejectedByKubernetes(pod, &externalJob, m) {
+	if allocatedNodeRejectedByKubernetes(assignedNode, &externalJob, m) {
 		// TODO: When Slurm supports external-job requeue, confirm the rejected
 		// placement: a refresh may show new nodes under the same job ID while
 		// the Pod annotation and Filter result still refer to the old node.
 		if status := sb.confirmPlacement(ctx, pod, externalJob); !status.IsSuccess() {
 			return nil, status
 		}
-		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, m)
+		waiting, status := sb.allocatedNodeWaitingForBridge(ctx, state, pod, assignedNode, m)
 		if !status.IsSuccess() {
 			return nil, status
 		}
@@ -744,8 +759,9 @@ const nativeGroupCycleKey fwk.StateKey = Name + "/native-group"
 // Each member's ordinary state retains the immutable allocation for binding,
 // after the framework detaches the PodGroup scheduling-cycle state.
 type nativeGroupCycle struct {
-	completed map[types.UID]bool
-	members   []nativeGroupMemberCycle
+	completed   map[types.UID]bool
+	members     []nativeGroupMemberCycle
+	allocations map[client.ObjectKey]*nativeAllocation
 }
 
 type nativeGroupMemberCycle struct {
@@ -789,11 +805,15 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 		}
 		for _, pod := range unevaluated {
 			podState := framework.NewCycleState()
+			podState.SetPodGroupSchedulingCycle(state)
+			previousMembers := len(group.members)
 			result, status, _ := runner.RunPreFilterPlugins(ctx, podState, pod)
 			if status.IsError() {
 				return nil, status
 			}
-			group.members = append(group.members, nativeGroupMemberCycle{state: podState, pod: pod, result: result, status: status})
+			if len(group.members) == previousMembers {
+				group.members = append(group.members, nativeGroupMemberCycle{state: podState, pod: pod, result: result, status: status})
+			}
 		}
 	}
 	allocations := make(map[types.UID]types.UID)
@@ -807,6 +827,11 @@ func (sb *SlurmBridge) PodGroupPostFilter(ctx context.Context, state fwk.PodGrou
 				return nil, fwk.AsStatus(err)
 			}
 			continue
+		}
+		if s.native != nil {
+			// Replaced or late members can fail before receiving a valid IR.
+			// They still block the allocation whose snapshot rejected them.
+			allocations[member.pod.UID] = s.native.ir.RootPOM.UID
 		}
 		if s.slurmJobIR == nil {
 			continue
@@ -995,8 +1020,10 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if len(s.allocation) == 0 {
 		return fwk.NewStatus(fwk.Unschedulable, "waiting for Slurm registration")
 	}
-	if status := sb.checkAllocation(ctx, s, pod); !status.IsSuccess() {
-		return status
+	if s.native == nil {
+		if status := sb.checkAllocation(ctx, s, pod); !status.IsSuccess() {
+			return status
+		}
 	}
 
 	// Note that whole node allocations in slurm will look like all
@@ -1006,24 +1033,37 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
-	// Revalidate cached placement before creating claims or binding the Pod.
-	liveJob, err := sb.slurmControl.GetJob(ctx, pod)
-	if err != nil {
-		return fwk.AsStatus(err)
-	}
-	expected := s.allocation[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
-	slurmNodes, err := hostlist.Expand(liveJob.Nodes)
-	if err != nil {
-		return fwk.AsStatus(err)
-	}
 	slurmNode := nodecontrollerutils.GetSlurmNodeName(node)
-	if liveJob.JobId != expected.JobId || liveJob.HetJobId != expected.HetJobId ||
-		liveJob.Pending || liveJob.Finished || !slices.Contains(slurmNodes, slurmNode) {
-		return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
-	}
-	resources, err := sb.slurmControl.GetResources(ctx, pod, slurmNode)
-	if err != nil {
-		return fwk.NewStatus(fwk.Error, err.Error())
+	var resources *slurmcontrol.NodeResources
+	if s.native != nil {
+		if s.nodeName != nodeName {
+			return fwk.NewStatus(fwk.Unschedulable, "selected node differs from gang assignment")
+		}
+		var status *fwk.Status
+		resources, status = s.native.resourcesFor(ctx, sb.slurmControl, pod, slurmNode)
+		if !status.IsSuccess() {
+			return status
+		}
+	} else {
+		// Discovery uses cached state, so validate the selected placement here in
+		// concurrent binding before creating claims or binding a Pod.
+		liveJob, err := sb.slurmControl.GetJob(ctx, pod)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		expected := s.allocation[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
+		slurmNodes, err := hostlist.Expand(liveJob.Nodes)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		if liveJob.JobId != expected.JobId || liveJob.HetJobId != expected.HetJobId ||
+			liveJob.Pending || liveJob.Finished || !slices.Contains(slurmNodes, slurmNode) {
+			return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
+		}
+		resources, err = sb.slurmControl.GetResources(ctx, pod, slurmNode)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
 	}
 
 	err = sb.manageResourceClaim(ctx, pod, nodeName, resources)
@@ -1139,15 +1179,19 @@ func (sb *SlurmBridge) PreFilterExtensions() fwk.PreFilterExtensions {
 	return nil
 }
 
-// Filter will verify the node annotation matches the node being filtered.
+// Filter verifies the placement decision matches the node being filtered.
 // This must be the last configured Filter plugin so PostFilter can make
 // the assertion that a failure from this Filter plugin implies no other
 // Filter plugin removed the node from consideration before getting here.
 func (sb *SlurmBridge) Filter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo fwk.NodeInfo) *fwk.Status {
 	logger := klog.FromContext(ctx)
 	logger.V(5).Info("filter func", "pod", klog.KObj(pod), "node", nodeInfo.Node().Name)
-	if pod.Annotations[wellknown.AnnotationExternalJobNode] == nodeInfo.Node().Name {
+	assigned := pod.Annotations[wellknown.AnnotationExternalJobNode]
+	if s, err := getStateData(state); err == nil {
+		assigned = s.assignedNode(pod)
+	}
+	if assigned == nodeInfo.Node().Name {
 		return fwk.NewStatus(fwk.Success, "")
 	}
-	return fwk.NewStatus(fwk.Unschedulable, "node does not match annotation")
+	return fwk.NewStatus(fwk.Unschedulable, "node does not match assignment")
 }

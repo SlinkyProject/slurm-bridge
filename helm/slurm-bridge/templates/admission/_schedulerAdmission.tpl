@@ -15,7 +15,9 @@ List admission feature gates
 */}}
 {{- define "slurm-bridge.admission.featureGates" -}}
 {{- $featureGates := list }}
-{{- range $name, $enabled := .Values.admission.featureGates }}
+{{- $gates := deepCopy (.Values.admission.featureGates | default dict) }}
+{{- $_ := set $gates "GenericWorkload" (eq (include "slurm-bridge.genericWorkload.enabled" .) "true") }}
+{{- range $name, $enabled := $gates }}
 {{- $featureGates = append $featureGates (printf "%s=%t" $name $enabled) }}
 {{- end }}
 {{- join "," $featureGates }}
