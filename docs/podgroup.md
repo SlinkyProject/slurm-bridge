@@ -25,32 +25,43 @@ for your cluster:
 | 1.37       | `scheduling.k8s.io/v1beta1`        | [`hack/kind.yaml`](../hack/kind.yaml)           |
 
 The bridge's **`SlurmBridgeGenericWorkload`** feature gate is enabled by
-default. At startup, the scheduler requires both Workload and PodGroup resources
-in a supported API version, preferring `v1beta1` when both versions are
-available. Missing APIs, incomplete discovery responses, and discovery errors
-fail startup with an error identifying the required feature. The scheduler does
-not silently disable Workload support.
+default. At startup, the scheduler and registration controller require both
+Workload and PodGroup resources in a supported API version, preferring `v1beta1`
+when both versions are available. Missing APIs, incomplete discovery responses,
+and discovery errors fail startup with an error identifying the required
+feature. The scheduler does not silently disable Workload support.
 
 This bridge gate is separate from Kubernetes' `GenericWorkload` gate. Enable
 `GenericWorkload` on the cluster components as shown in the Kind configurations;
 `SlurmBridgeGenericWorkload` controls the bridge's compatibility implementation
-without enabling the embedded scheduler's upstream gang-scheduling path.
+independently of the embedded scheduler's upstream gang-scheduling path. On
+Kubernetes 1.37, the Helm chart enables `GenericWorkload`,
+`TopologyAwareWorkloadScheduling`, and `CompositePodGroup`, and configures the
+upstream `GangScheduling` pre-enqueue plugin and the bridge's PodGroup
+post-filter plugin. On older clusters, the chart omits those upstream gates and
+plugins, retaining the bridge's compatibility path.
 
 When the embedded scheduler's `GenericWorkload` gate is enabled, its shared
 PodGroup client and informers use the discovered native API version. Alpha
 objects and status conditions are converted to the scheduler's beta types;
 status writes are converted back to the served version. Other Kubernetes
-resources retain their original clients. This compatibility wiring does not
-enable native gang scheduling by default.
+resources retain their original clients.
 
 Clusters without these APIs, including Kubernetes **1.35**, must explicitly opt
-out with `--feature-gates=SlurmBridgeGenericWorkload=false`. For Helm
-deployments, set `scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The
-scheduler then skips Workload discovery and registration. Pods that reference a
-built-in PodGroup through `spec.schedulingGroup.podGroupName` are rejected with
-a clear scheduling failure before Slurm operations. Ordinary Pods, Jobs,
-JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing
-behavior when they do not reference a built-in PodGroup.
+out with `--feature-gates=SlurmBridgeGenericWorkload=false` on both the
+scheduler and controllers binaries. For Helm deployments, set
+`scheduler.featureGates.SlurmBridgeGenericWorkload=false`. The scheduler and
+registration controller then skip built-in Workload discovery. Pods that
+reference a built-in PodGroup through `spec.schedulingGroup.podGroupName` cannot
+register or schedule, and report the disabled feature before Slurm operations.
+Ordinary Pods, Jobs, JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups
+retain their existing behavior when they do not reference a built-in PodGroup.
+
+If deploying on Kubernetes 1.37 without the built-in APIs, also set
+`scheduler.featureGates.GenericWorkload`,
+`scheduler.featureGates.TopologyAwareWorkloadScheduling`, and
+`scheduler.featureGates.CompositePodGroup` to `false` so the embedded scheduler
+does not start their informers.
 
 For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
 The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
@@ -66,6 +77,11 @@ those templates. Pods opt in with **`spec.schedulingGroup.podGroupName`**
 pointing at their **`PodGroup`**. For a **Gang** policy, `slurm-bridge` groups
 pods by scheduling group and applies the same external-job flow as other
 co-scheduled workload types, including the `minCount` check.
+
+The bridge rejects PodGroups with non-empty
+`spec.schedulingConstraints.topology` or `spec.resourceClaims`. Use Slurm
+partitions or constraints for placement and DeviceClass extended resources on
+Pods for DRA devices.
 
 For a **Basic** policy, pods follow their normal owner-based scheduling path.
 Jobs and standalone Pods receive independent Slurm allocations, while
@@ -134,27 +150,28 @@ spec:
 
 Keep `spec.schedulingPolicy` and the Job's
 `spec.template.spec.schedulingGroup.podGroupName` unchanged. The complete
-manifests in [`hack/examples/workload/`](../hack/examples/workload/) use this
-1.36 form.
+manifests in
+[`hack/examples/workload/`](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples/workload)
+use this 1.36 form.
 
 Ref: [Workload API][workload-api]
 
 To override Slurm submission parameters, add optional
 `slurmjob.slinky.slurm.net/*` annotations on the **Workload**, selected
 controller (**Job** or **JobSet**), or runtime **PodGroup**. On conflict,
-**Workload** > **selected controller** > **PodGroup**. Without them, the Slurm
+**Workload** > **PodGroup** > **selected controller**. Without them, the Slurm
 job name for a Gang policy defaults to the **PodGroup object name** (not the
 Workload name); Basic policies retain the normal workload's naming behavior. The
 partition defaults to the scheduler configuration. See
 [Annotations](workload.md#annotations) for the full key list.
 
 If multiple layers set `slurmjob.slinky.slurm.net/job-name`, annotations are
-applied **PodGroup -> selected controller -> Workload**, so the Workload wins.
+applied **selected controller -> PodGroup -> Workload**, so the Workload wins.
 In the example above, the PodGroup is named `training-job-workers` but the
 Workload sets `slurmjob.slinky.slurm.net/job-name: training-job`, so Slurm
-receives **`training-job`**. A PodGroup cannot override a `job-name` set on its
-Workload or selected controller. For per-gang names, omit `job-name` from
-broader sources and set it on each **PodGroup** instead.
+receives **`training-job`**. A PodGroup can override a `job-name` set on its
+selected controller, but cannot override its Workload. For per-gang names, omit
+`job-name` from the Workload and set it on each **PodGroup** instead.
 
 A Workload may define several `podGroupTemplates`, each producing a runtime
 PodGroup. Workload-level identifiers such as `job-name` then apply to **every**
@@ -181,10 +198,11 @@ again.
 1. Upgrade the cluster. Enable `scheduling.k8s.io/v1beta1` and the
    `GenericWorkload` gate, as in [`hack/kind.yaml`](../hack/kind.yaml).
 
-1. Restart the scheduler so it discovers `v1beta1`:
+1. Restart the scheduler and controllers so both discover `v1beta1`:
 
    ```sh
-   kubectl --namespace slurm rollout restart deployment/slurm-bridge-scheduler
+   kubectl --namespace slurm rollout restart \
+     deployment/slurm-bridge-scheduler deployment/slurm-bridge-controllers
    ```
 
 1. Convert the saved objects and apply them with the same names and namespaces.

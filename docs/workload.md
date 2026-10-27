@@ -56,14 +56,15 @@ to control which resources are scheduled using the `slurm-bridge-scheduler`. The
 `slurm-bridge-scheduler` is designed as a non-primary scheduler and is not
 intended to replace the default
 [kube-scheduler](https://kubernetes.io/docs/concepts/architecture/#kube-scheduler).
-The `slurm-bridge-scheduler` only schedules pods that request `slurm-bridge` as
-their scheduler or are in a configured namespace. By default, the `slurm-bridge`
-admission controller is configured to automatically use `slurm-bridge` as the
-scheduler for all pods in the configured namespaces.
+The `slurm-bridge-scheduler` only schedules pods whose `spec.schedulerName`
+matches its configured name, `slurm-bridge-scheduler` by default. In managed
+namespaces, admission changes `default-scheduler` to that name; explicitly
+selected custom schedulers are preserved.
 
 Alternatively, a pod can specify `Pod.Spec.schedulerName=slurm-bridge-scheduler`
-from any namespace to indicate that it should be scheduled using the
-`slurm-bridge-scheduler`.
+from an unmanaged namespace to select the `slurm-bridge-scheduler`. The Helm
+webhooks exclude `kube-system` and the bridge's installation namespace, so use a
+separate namespace for bridge workloads.
 
 Please review [`slurm-bridge` admission controller](./admission.md) to learn
 more.
@@ -94,8 +95,9 @@ allocating a tainted device.
 Indexed DRA devices are mapped to Slurm GRES through `deviceProfiles` in the
 shared Slurm Bridge configuration. The built-in profiles cover CPU, NVIDIA GPU,
 and PCI-backed DRANET devices. The example GPU driver requires explicit
-configuration. Operators can replace or extend the list through
-`sharedConfig.deviceProfiles`:
+configuration. Setting `sharedConfig.deviceProfiles` replaces the built-in list;
+include the built-in entries too if they are still needed. For example, this
+configuration enables only the custom accelerator profile:
 
 ```yaml
 sharedConfig:
@@ -109,20 +111,21 @@ sharedConfig:
 ```
 
 The DeviceClass must have exactly one CEL selector and it must exactly match a
-configured profile selector. Profile names become Slurm GRES types: they must
-start and end with an alphanumeric character, may contain only alphanumeric
-characters, `.`, `_`, and `-`, and must remain stable while allocations using
-them exist. `driver` must be a valid lowercase Kubernetes DRA driver name, and
-`gresName` must be a DNS-1123 label of at most 60 characters because it is also
-used as the ResourceClaim request name. Every configured `backend.gresName` must
-also be listed in Slurm's `GresTypes`; for example, profiles using `gpu` and
-`nic` require `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory
-when its type is not listed. The bundled external and hybrid Kind configurations
-include `GresTypes=gpu,nic` by default. Selectors use the same length and
-estimated-cost limits as Kubernetes DeviceClass CEL selectors. Profiles for the
-same driver must be mutually exclusive. If a device matches more than one
-profile, the node controller leaves its Slurm GRES inventory unchanged and emits
-an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
+configured profile selector. DeviceClasses with a non-empty `spec.config` are
+unsupported. Profile names become Slurm GRES types: they must start and end with
+an alphanumeric character, may contain only alphanumeric characters, `.`, `_`,
+and `-`, and must remain stable while allocations using them exist. `driver`
+must be a valid lowercase Kubernetes DRA driver name, and `gresName` must be a
+DNS-1123 label of at most 60 characters because it is also used as the
+ResourceClaim request name. Every configured `backend.gresName` must also be
+listed in Slurm's `GresTypes`; for example, profiles using `gpu` and `nic`
+require `GresTypes=gpu,nic`. Slurm omits a GRES from its node inventory when its
+type is not listed. The bundled external and hybrid Kind configurations include
+`GresTypes=gpu,nic` by default. Selectors use the same length and estimated-cost
+limits as Kubernetes DeviceClass CEL selectors. Profiles for the same driver
+must be mutually exclusive. If a device matches more than one profile, the node
+controller leaves its Slurm GRES inventory unchanged and emits an
+`OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
 The built-in NVIDIA profile uses `gpu.nvidia.com` as its name and maps to
 `gpu:gpu.nvidia.com` in Slurm. The explicitly configured example GPU profile
@@ -279,8 +282,10 @@ spec:
 
 Slurm parameters are resolved from lowest to highest precedence: **scheduler or
 Slurm defaults -> values derived from the workload and Pods -> Slurm job
-annotations**. For built-in PodGroups, annotation precedence is **PodGroup ->
-selected controller (Job or JobSet) -> Workload**.
+annotations**. For built-in PodGroups, annotation precedence is **selected owner
+-> PodGroup -> Workload**. The owner is resolved as described in
+[Pod grouping](#pod-grouping), typically a Job or JobSet; Basic PodGroups also
+retain annotations from a standalone Pod or LeaderWorkerSet.
 
 Keys that do not conflict are combined.
 
@@ -295,10 +300,11 @@ Keys that do not conflict are combined.
 
 Prefix every suffix with `slurmjob.slinky.slurm.net/`; for example,
 `slurmjob.slinky.slurm.net/account`. Node counts and priority are base-10
-integers. CPU and memory accept Kubernetes quantities. `timelimit` accepts a
-duration with a unit suffix (`s`, `m`, `h`, `d`, `w`), one of Slurm's `--time`
-formats (`MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM`, `D-HH:MM:SS`), or a bare
-integer, which is read as minutes; sub-minute values are rounded up to one
+integers. CPU and memory accept Kubernetes quantities. `gres` is passed to
+Slurm's `tres_per_node` field; use a value such as `gres/gpu=2`. `timelimit`
+accepts a duration with a unit suffix (`s`, `m`, `h`, `d`, `w`), one of Slurm's
+`--time` formats (`MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM`, `D-HH:MM:SS`), or a
+bare integer, which is read as minutes; sub-minute values are rounded up to one
 minute because Slurm's time limit has minute granularity. Exclusive placement is
 the default. `exclusive: "false"` always requests MCS-category sharing; the
 resulting external job uses Slurm's `Shared=mcs` mode and requires a configured
@@ -334,8 +340,10 @@ the external job:
 | `scheduler.slinky.slurm.net/slurm-jobid` | Label      | Slurm job ID associated with the Pod. All Pods represented by one external job receive the same value. |
 | `slinky.slurm.net/slurm-node`            | Annotation | Kubernetes node selected from the Slurm allocation for this Pod.                                       |
 
-These keys are owned by slurm-bridge. Users cannot set them when creating a
-managed Pod or change them after that Pod is running.
+These keys are owned by slurm-bridge and must not be edited manually. Admission
+rejects non-empty values when creating a managed Pod. Subsequent updates are not
+rejected on that basis; the Pod controller repairs metadata using the verified
+Slurm allocation.
 
 ## Pod grouping
 
@@ -460,11 +468,13 @@ cannot scale independently.
 
 Deleting Pods does not partially shrink a running Slurm allocation. The Pod
 controller cancels the Slurm job once all Pods associated with that job are
-terminal (`Succeeded` or `Failed`). Periodic cleanup also cancels pending or
-running jobs whose referenced Pods no longer exist. Removing one independent Pod
-therefore releases its allocation, while removing a whole LWS group releases
-that group's allocation. Removing only some Pods from a shared job retains its
-full allocation while other members remain active.
+terminal (`Succeeded` or `Failed`) or are being deleted before binding to a
+node. Bound Pods must terminate before their allocation is released. Periodic
+cleanup also cancels pending or running jobs whose referenced Pods no longer
+exist. Removing one independent Pod therefore releases its allocation, while
+removing a whole LWS group releases that group's allocation. Removing only some
+Pods from a shared job retains its full allocation while other members remain
+active.
 
 Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
 mean Slurm resources are already free. The bridge also removes its Pod finalizer
@@ -475,10 +485,12 @@ and generated DRA ResourceClaim during terminal Pod cleanup.
 If a scale-up cannot obtain resources, new Pods and their jobs wait for
 scheduling; existing independent allocations continue. Admission rejection
 leaves the Kubernetes object unchanged. If Slurm rejects a pending job update,
-the previous Slurm request remains in effect. Submission or update errors are
-reported through scheduling failures and scheduler logs and can be retried. The
-bridge does not roll back the workload's desired replica count or templates, and
-an API error is not evidence that a job was canceled or resources were released.
+the previous Slurm request remains in effect. Submission errors are reported by
+the registration controller through workload events and controller logs; update
+errors appear in scheduling failures and scheduler logs. Both can be retried.
+The bridge does not roll back the workload's desired replica count or templates,
+and an API error is not evidence that a job was canceled or resources were
+released.
 
 A container restart within the same Pod does not by itself release the Slurm
 job. Terminal Pods trigger the cleanup described above. If a Slurm job stops
@@ -489,6 +501,11 @@ whether Pods are replaced; see
 [LeaderWorkerSet recovery](lws.md#failures-and-recovery). Replacement Pods need
 scheduling again. Do not rely on individual Pod replacement to extend or repair
 an allocated gang; recreate the whole group for a fresh allocation.
+
+When a Pod remains `SchedulingGated`, inspect its `SlurmRegistrationPending`
+event for the group to check. Registration events such as `WaitingForMembers`
+and `SlurmRegistrationFailed` are recorded on that group, including the parent
+CompositePodGroup for composite workloads. Also inspect the controllers' logs.
 
 When scaling stalls, inspect Pod scheduling events, JobSet or LWS status, bridge
 scheduler and controller logs, and the Slurm job in `squeue` or

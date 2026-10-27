@@ -18,10 +18,11 @@ author = 'SchedMD'
 
 extensions = ["myst_parser", "sphinx_design", "sphinx_copybutton", "sphinxmermaid", "sphinx_multiversion"]
 myst_enable_extensions = ["colon_fence"]
+myst_heading_anchors = 6
 myst_fence_as_directive = ["mermaid"]
 
 templates_path = ['_templates']
-exclude_patterns = []
+exclude_patterns = ['_static/toc.rst']
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -36,8 +37,8 @@ html_show_sourcelink = False
 # Whitelist pattern for tags (set to None to ignore all tags)
 smv_tag_whitelist = r'^v\d+\.\d+\.\d+$'
 
-# Whitelist pattern for branches (set to None to ignore all branches)
-smv_branch_whitelist = None
+# Exclude branches; build only release tags.
+smv_branch_whitelist = r'(?!)'
 
 # Whitelist pattern for remotes (set to None to use local branches only)
 smv_remote_whitelist = None

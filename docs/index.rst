@@ -156,14 +156,15 @@ Limitations
 - Supports `DRA Driver
   CPU <https://github.com/kubernetes-sigs/dra-driver-cpu>`__ for CPUs,
   plus indexed GPU and accelerator drivers mapped to Slurm GRES through
-  configured device profiles. The chart includes profiles for `DRA
-  Example
-  Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__ and
-  `NVIDIA DRA
+  configured device profiles. The default profiles cover CPU, `NVIDIA
+  DRA
   Driver <https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu>`__
-  GPUs plus RDMA-capable
-  `DRANET <https://github.com/kubernetes-sigs/dranet>`__ devices by
-  default, and retains its specialized `NVIDIA
+  GPUs, and RDMA-capable
+  `DRANET <https://github.com/kubernetes-sigs/dranet>`__ devices. `DRA
+  Example
+  Driver <https://github.com/kubernetes-sigs/dra-example-driver>`__
+  requires an explicitly configured profile. The bridge also retains its
+  specialized `NVIDIA
   k8s-dra-driver-gpu <https://github.com/NVIDIA/k8s-dra-driver-gpu>`__
   path.
 - NVIDIA GPU backend selection is resource-name based:
@@ -198,7 +199,14 @@ Create a secret for slurm-bridge to communicate with Slurm.
    kubectl create namespace slurm-bridge
    kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="SLURM_JWT=$SLURM_JWT" --type=Opaque
 
-Install the slurm-bridge scheduler:
+Install the slurm-bridge scheduler after configuring the `quickstart
+prerequisites <quickstart.html#pre-requisites>`__, including
+cert-manager for the default webhook certificates. The default
+configuration requires the built-in Workload and PodGroup APIs. On
+Kubernetes 1.35, add
+``--set scheduler.featureGates.SlurmBridgeGenericWorkload=false`` to the
+command below; see `Built-in PodGroup <podgroup.html>`__ for other
+cluster versions.
 
 .. code:: sh
 
@@ -264,6 +272,7 @@ limitations under the License.
     controllers.md
     jobset.md
     lws.md
+    native-hybrid-nodes.md
     podgroup-coscheduling.md
     podgroup.md
     quickstart.md

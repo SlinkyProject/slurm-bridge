@@ -109,9 +109,10 @@ version number, upgrade one series at a time: `1.1` → `1.2` → `1.3`. See the
   request non-exclusive placement always use Slurm MCS workload isolation.
 - Supports [DRA Driver CPU][dra-driver-cpu] for CPUs, plus indexed GPU and
   accelerator drivers mapped to Slurm GRES through configured device profiles.
-  The chart includes profiles for [DRA Example Driver][dra-example-driver] and
-  [NVIDIA DRA Driver][dra-driver-nvidia-gpu] GPUs plus RDMA-capable [DRANET]
-  devices by default, and retains its specialized
+  The default profiles cover CPU, [NVIDIA DRA Driver][dra-driver-nvidia-gpu]
+  GPUs, and RDMA-capable [DRANET] devices.
+  [DRA Example Driver][dra-example-driver] requires an explicitly configured
+  profile. The bridge also retains its specialized
   [NVIDIA k8s-dra-driver-gpu][nvidia-dra-driver] path.
 - NVIDIA GPU backend selection is resource-name based:
   `deviceclass.resource.kubernetes.io/gpu.nvidia.com` selects the NVIDIA DRA
@@ -142,7 +143,12 @@ kubectl create namespace slurm-bridge
 kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="SLURM_JWT=$SLURM_JWT" --type=Opaque
 ```
 
-Install the slurm-bridge scheduler:
+Install the slurm-bridge scheduler after configuring the
+[quickstart prerequisites](./docs/quickstart.md#pre-requisites), including
+cert-manager for the default webhook certificates. The default configuration
+requires the built-in Workload and PodGroup APIs. On Kubernetes 1.35, add
+`--set scheduler.featureGates.SlurmBridgeGenericWorkload=false` to the command
+below; see [Built-in PodGroup](./docs/podgroup.md) for other cluster versions.
 
 ```sh
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \

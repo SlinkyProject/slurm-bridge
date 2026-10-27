@@ -42,8 +42,9 @@ nodes.
 Additionally, this controller will reconcile certain node states for scheduling
 purposes. Slurm becomes the source of truth for scheduling among managed nodes.
 
-A managed node is defined as a node that has a colocated `kubelet` and `slurmd`
-on the same physical host, and the slurm-bridge can schedule on.
+A managed node is a Kubernetes node with a corresponding Slurm node. This
+includes both [external and hybrid nodes](config.md#nodes); only hybrid nodes
+require a colocated `slurmd`.
 
 ### Node Registration and Partition Assignment
 

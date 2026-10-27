@@ -27,9 +27,9 @@ basis. For production support, see
 
 ### Development setup
 
-Read
-[`README.md`](https://github.com/SlinkyProject/slurm-bridge/blob/main/README.md)
-for clone, build, and test instructions for this repository.
+Read [Developing Slurm Bridge](docs/testing.md) for development cluster setup,
+deployment, and end-to-end test instructions. Build and unit-test targets are
+listed by `make help` in the repository root.
 
 ### Pull requests
 

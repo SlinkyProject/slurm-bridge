@@ -38,9 +38,9 @@ Slurm bridge supports two ways to make Kubernetes nodes available to Slurm:
 - **External nodes**: `slurm-bridge` registers labeled Kubernetes nodes with
   Slurm as external Slurm nodes. No slurm-operator `Nodeset` is required for the
   bridge partition.
-- **Hybrid nodes**: slurm-operator runs `slurmd` side-by-side with kubelet,
-  typically using a DaemonSet-mode `Nodeset`. The `slurmd` pods register Slurm
-  dynamic nodes.
+- **Hybrid nodes**: `slurmd` runs side-by-side with kubelet and registers a
+  Slurm dynamic node. slurm-operator can manage `slurmd` with a DaemonSet-mode
+  `Nodeset`, or host automation can install it as a native systemd service.
 
 In both modes, Slurm should only schedule bridge jobs to Slurm nodes that map
 back to Kubernetes nodes.
@@ -68,24 +68,26 @@ comma-separated list of Slurm partitions. The bridge validates that each
 partition exists, then registers the Slurm node with matching features. Slurm
 `Nodeset` configuration can then map those features into partitions:
 
-```conf
+```text
 Nodeset=slurm-bridge Feature=slurm-bridge
 PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
 ```
 
 ### Hybrid Nodes
 
-Hybrid nodes run kubelet and `slurmd` on the same physical host. In this mode,
-slurm-operator manages the Slurm nodes with a `Nodeset`, and bridge jobs run on
-the Slurm nodes registered by those `slurmd` pods.
+Hybrid nodes run kubelet and `slurmd` on the same physical host. Bridge jobs run
+on the dynamic Slurm nodes registered by those daemons. `slurmd` can run in a
+slurm-operator pod or as a native host service. See
+[Host-installed Hybrid Slurm Nodes](native-hybrid-nodes.md) for a bare-metal
+package and configless-registration procedure.
 
 Hybrid nodes share capacity between workload managers over time. A physical node
 must not run a native Slurm user workload and a Slurm-bridge-managed Kubernetes
 user workload simultaneously. System components such as kubelet, `slurmd`, CNI,
 device plugins, and monitoring DaemonSets are expected exceptions.
 
-For example, a DaemonSet-mode `Nodeset` can place one `slurmd` pod on each
-Kubernetes worker node selected for bridge scheduling:
+For Kubernetes-managed daemons, a DaemonSet-mode `Nodeset` can place one
+`slurmd` pod on each worker node selected for bridge scheduling:
 
 ```yaml
 nodesets:
@@ -160,19 +162,22 @@ metadata:
     topology.slinky.slurm.net/spec: topo-switch:s1,topo-block:b1
 ```
 
-External and hybrid modes use the same Kubernetes annotation, but different
-controllers apply it to Slurm:
+External nodes and hybrid nodes managed by slurm-operator use the same
+Kubernetes annotation, but different controllers apply it to Slurm:
 
 - In external mode, `slurm-bridge` reads `topology.slinky.slurm.net/spec` from
   the labeled Kubernetes node and reconciles the external Slurm node's dynamic
   topology.
-- In hybrid mode, slurm-operator reads `topology.slinky.slurm.net/spec` from the
-  Kubernetes node where the `Nodeset` pod is scheduled, copies it to the pod,
-  and reconciles the `slurmd` pod's Slurm node topology.
+- For hybrid nodes managed by slurm-operator, the operator reads
+  `topology.slinky.slurm.net/spec` from the Kubernetes node where the `Nodeset`
+  pod is scheduled, copies it to the pod, and reconciles the `slurmd` pod's
+  Slurm node topology.
 
-Removing the annotation clears the dynamic topology in either mode. When using
-multiple topologies, Slurm partitions can select a specific topology with the
-partition `Topology` setting; otherwise Slurm uses the `cluster_default`
+Removing the annotation clears the dynamic topology for those nodes.
+Host-installed hybrid daemons require administrators to configure their Slurm
+node topology directly; neither controller applies the annotation to them. When
+using multiple topologies, Slurm partitions can select a specific topology with
+the partition `Topology` setting; otherwise Slurm uses the `cluster_default`
 topology.
 
 ### Hybrid Workload Isolation
@@ -191,7 +196,7 @@ schedulerConfig:
   mcsLabel: kubernetes
 ```
 
-```conf
+```text
 # slurm.conf
 MCSPlugin=mcs/label
 MCSParameters=ondemand,ondemandselect

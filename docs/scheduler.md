@@ -45,12 +45,19 @@ sequenceDiagram
 
   actor user as User
   participant KAPI as Kubernetes API
+  participant SBC as Slurm-Bridge Registration Controller
   participant SBS as Slurm-Bridge Scheduler
   participant SAPI as Slurm REST API
 
   loop Workload Submission
     user->>KAPI: Submit Pod
+    note over KAPI: Admission adds the registration scheduling gate
     KAPI-->>user: Return Request Status
+    KAPI-->>SBC: Observe Pod
+    SBC->>SAPI: Register held external job after group quorum is met
+    SAPI-->>SBC: Return Job ID
+    note over SBC: Wait for allocation to appear in the Slurm cache
+    SBC->>KAPI: Publish job metadata and remove registration gate
   end %% loop Workload Submission
 
   loop Scheduling Loop
@@ -62,11 +69,11 @@ sequenceDiagram
       SBS->>SAPI: Get External Job
       SAPI-->>SBS: Return External Job
     option Job is NotFound
-      note over SBS: Translate Pod(s) into Slurm Job
-      SBS->>SAPI: Submit External Job
-      SAPI-->>SBS: Return Submit Status
+      note over SBS: Wait for controller registration
+      SBS->>SBS: Requeue
     option Job is Pending
-      note over SBS: Check again later...
+      SBS->>SAPI: Update eligible nodes and release hold when feasible
+      SAPI-->>SBS: Return Update Status
       SBS->>SBS: Requeue
     option Job is Allocated
       note over SBS: Bind Pod(s) to Node(s) from the Slurm Job
@@ -91,12 +98,13 @@ Slurm-bridge accepts the following workload types: Jobs, JobSets, Pods,
 PodGroups, and LeaderWorkerSets. Annotations can be set on the workload object
 to change the parameters that are used to submit an external job to Slurm. The
 following table lists some of the available annotations. For a complete list,
-see the [annotations.go] source.
+see
+[Supported Slurm job annotations](workload.md#supported-slurm-job-annotations).
 
 | Annotation                             | Description                       | Example      |
 | -------------------------------------- | --------------------------------- | ------------ |
 | slurmjob.slinky.slurm.net/account      | Sets the account at submission.   | "schedmd"    |
-| slurmjob.slinky.slurm.net/gres         | Overrides the default gres.       | "GPU:V100:2" |
+| slurmjob.slinky.slurm.net/gres         | Overrides the default gres.       | "gres/gpu=2" |
 | slurmjob.slinky.slurm.net/job-name     | Sets the job name.                | "research"   |
 | slurmjob.slinky.slurm.net/max-nodes    | Sets the maximum number of nodes. | "3"          |
 | slurmjob.slinky.slurm.net/mem-per-node | Sets the amount of memory.        | "8Gi"        |
@@ -145,6 +153,5 @@ spec:
 
 <!-- Links -->
 
-[annotations.go]: https://github.com/SlinkyProject/slurm-bridge/blob/main/internal/wellknown/annotations.go
 [kube-scheduler]: https://kubernetes.io/docs/concepts/architecture/#kube-scheduler
 [scheduling]: https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/#scheduling

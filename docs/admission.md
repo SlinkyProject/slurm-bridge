@@ -34,10 +34,13 @@ and rejects unsupported scheduling and resource configurations.
 
 ## Design
 
-Any pods created in the specified namespaces will have their
-`.spec.schedulerName` changed to the slurm-bridge [scheduler]. Admission also
-adds its managed-node toleration and a registration scheduling gate. New Pods
-remain `SchedulingGated` until the controller registers their Slurm allocation.
+Pods created in the specified namespaces with the default Kubernetes scheduler
+have `.spec.schedulerName` changed to the slurm-bridge [scheduler]. Explicitly
+selected custom schedulers are preserved. Pods selecting the bridge scheduler,
+including those outside managed namespaces, receive its managed-node toleration
+and a registration scheduling gate. New Pods remain `SchedulingGated` until the
+controller registers their Slurm allocation. The Helm webhooks exclude
+`kube-system` and the bridge's installation namespace.
 
 Managed namespaces are defined as a list of namespaces as configured in the
 admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
@@ -53,24 +56,29 @@ CPU DRA requires `slurmjob.slinky.slurm.net/exclusive: "false"` on the
 workload's [annotation source](workload.md#pod-grouping). Standalone pods that
 omit it or enable exclusive allocation are rejected at admission. For
 controller-owned and grouped pods, the scheduler checks the resolved annotations
-before Slurm submission. Native CPU and GPU-only requests still support
-exclusive allocation.
+before releasing the held Slurm job for allocation. Native CPU and GPU-only
+requests still support exclusive allocation.
 
 In-place resizing is not supported for managed pods. The admission controller
 rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
 diverge from the corresponding Slurm allocation.
 
 Pod topology spread constraints are not supported. The admission controller
-rejects managed pods with a non-empty `spec.topologySpreadConstraints` field
-rather than allowing the scheduler to ignore the requested placement behavior.
+rejects managed pods with a non-empty `spec.topologySpreadConstraints` field.
+Required node affinity, Pod affinity, and Pod anti-affinity are also rejected at
+creation; use a Slurm partition or constraint for placement. Pods cannot provide
+`spec.resourceClaims`; request DRA devices through DeviceClass extended
+resources instead.
 
 The `slurmjob.slinky.slurm.net/constraints` annotation is combined with the
 `slurm_bridge_gres_compatible` node feature that every bridge job requires. The
-admission controller rejects the few constraint expressions that Slurm's grammar
-does not allow to be combined with an additional feature, such as a bare feature
-count (`rack1*2`) or an OR outside parentheses mixed with parentheses or
-brackets (`(a&b)|(c&d)`), so the job fails at creation rather than on every
-scheduling cycle. See [supported Slurm job annotations] for the supported forms.
+admission controller rejects Pod annotations containing constraint expressions
+that Slurm's grammar does not allow to be combined with an additional feature,
+such as a bare feature count (`rack1*2`) or an OR outside parentheses mixed with
+parentheses or brackets (`(a&b)|(c&d)`), so the job fails at creation rather
+than on every scheduling cycle. Annotations on owning workloads and PodGroups
+are resolved later and checked before Slurm submission, not by the Pod admission
+webhook. See [supported Slurm job annotations] for the supported forms.
 
 Managed pods are also validated against the supported DRA DeviceClass set.
 Unsupported DeviceClass resources in requests or limits are rejected for init
@@ -89,11 +97,12 @@ sequenceDiagram
   participant KAPI as Kubernetes API
   participant SBA as Slurm-Bridge Admission
 
-  KAPI-->>SBA: Watch Pod Create/Update
-  opt Pod in managed Namespaces
-    SBA->>KAPI: Update `.spec.schedulerName` and Tolerations
-    KAPI-->>SBA: Update Response
-  end %% opt Pod in managed Namespaces
+  KAPI->>SBA: Admission request for Pod Create/Update
+  opt Pod in a managed namespace or selecting the bridge scheduler
+    note over SBA: Apply scheduler defaults, toleration, and creation gate
+    note over SBA: Validate supported Pod configuration
+  end
+  SBA-->>KAPI: Admission response with patch or rejection
 ```
 
 <!-- Links -->
