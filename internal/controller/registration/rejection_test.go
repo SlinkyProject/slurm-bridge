@@ -30,12 +30,12 @@ func TestClassifyRejection(t *testing.T) {
 		err  error
 		want rejection
 	}{
-		"invalid time limit":  {slurm(2051), rejectRequest},
-		"invalid account":     {slurm(2045), rejectRequest},
-		"invalid GRES string": {slurm(2072), rejectRequest},
-		"invalid user ID":     {slurm(2165), rejectRequest},
-		"accounting policy":   {slurm(2050), rejectLimit},
-		"partition down":      {slurm(2101), rejectLimit},
+		"invalid time limit":  {slurm(slurmerrors.ErrInvalidTimeLimit), rejectRequest},
+		"invalid account":     {slurm(slurmerrors.ErrInvalidAccount), rejectRequest},
+		"invalid GRES string": {slurm(slurmerrors.ErrInvalidGRES), rejectRequest},
+		"invalid user ID":     {slurm(slurmerrors.ErrUserIDInvalid), rejectRequest},
+		"accounting policy":   {slurm(slurmerrors.ErrAccountingPolicy), rejectLimit},
+		"partition down":      {slurm(slurmerrors.ErrPartitionDown), rejectLimit},
 		"update only code":    {slurm(2069), rejectOther},
 		"no Slurm error":      {errors.New("connection refused"), rejectOther},
 		"nil":                 {nil, rejectOther},
@@ -53,8 +53,8 @@ func TestRegisterRejectionBehavior(t *testing.T) {
 		wantType  string
 		wantWhy   string
 	}{
-		"refused request retries slowly": {2072, requestRetry, corev1.EventTypeWarning, "SlurmRegistrationRejected"},
-		"limit waits without errors":     {2050, limitRetry, corev1.EventTypeNormal, "WaitingForSlurm"},
+		"refused request retries slowly": {slurmerrors.ErrInvalidGRES, requestRetry, corev1.EventTypeWarning, "SlurmRegistrationRejected"},
+		"limit waits without errors":     {slurmerrors.ErrAccountingPolicy, limitRetry, corev1.EventTypeNormal, "WaitingForSlurm"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
