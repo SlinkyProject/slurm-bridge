@@ -7,6 +7,8 @@ import (
 	"errors"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	slurmerrors "github.com/SlinkyProject/slurm-client/pkg/errors"
 )
 
@@ -30,30 +32,29 @@ const (
 	limitRetry = time.Minute
 )
 
-// Slurm error numbers from slurm_errno.h.
 var (
-	requestErrors = map[int32]bool{
-		2000: true, // ESLURM_INVALID_PARTITION_NAME
-		2006: true, // ESLURM_INVALID_NODE_COUNT
-		2025: true, // ESLURM_BAD_TASK_COUNT
-		2029: true, // ESLURM_INVALID_FEATURE
-		2045: true, // ESLURM_INVALID_ACCOUNT
-		2048: true, // ESLURM_INVALID_LICENSES
-		2051: true, // ESLURM_INVALID_TIME_LIMIT
-		2057: true, // ESLURM_INVALID_WCKEY
-		2066: true, // ESLURM_INVALID_QOS
-		2072: true, // ESLURM_INVALID_GRES
-		2115: true, // ESLURM_INVALID_TRES
-		2165: true, // ESLURM_USER_ID_INVALID
-		2166: true, // ESLURM_USER_ID_UNKNOWN
-	}
-	// ESLURM_ACCOUNTING_POLICY covers submit limits and some association errors.
-	limitErrors = map[int32]bool{
-		2007: true, // ESLURM_MAX_JOB_COUNT
-		2050: true, // ESLURM_ACCOUNTING_POLICY
-		2070: true, // ESLURM_PARTITION_NOT_AVAIL
-		2101: true, // ESLURM_PARTITION_DOWN
-	}
+	requestErrors = sets.New[int32](
+		slurmerrors.ErrInvalidPartitionName,
+		slurmerrors.ErrInvalidNodeCount,
+		slurmerrors.ErrBadTaskCount,
+		slurmerrors.ErrInvalidFeature,
+		slurmerrors.ErrInvalidAccount,
+		slurmerrors.ErrInvalidLicenses,
+		slurmerrors.ErrInvalidTimeLimit,
+		slurmerrors.ErrInvalidWCKey,
+		slurmerrors.ErrInvalidQOS,
+		slurmerrors.ErrInvalidGRES,
+		slurmerrors.ErrInvalidTRES,
+		slurmerrors.ErrUserIDInvalid,
+		slurmerrors.ErrUserIDUnknown,
+	)
+	// ErrAccountingPolicy covers submit limits and some association errors.
+	limitErrors = sets.New[int32](
+		slurmerrors.ErrMaxJobCount,
+		slurmerrors.ErrAccountingPolicy,
+		slurmerrors.ErrPartitionNotAvail,
+		slurmerrors.ErrPartitionDown,
+	)
 )
 
 func classifyRejection(err error) rejection {
@@ -61,9 +62,9 @@ func classifyRejection(err error) rejection {
 	switch {
 	case !errors.As(err, &se):
 		return rejectOther
-	case requestErrors[se.Number]:
+	case requestErrors.Has(se.Number):
 		return rejectRequest
-	case limitErrors[se.Number]:
+	case limitErrors.Has(se.Number):
 		return rejectLimit
 	}
 	return rejectOther
