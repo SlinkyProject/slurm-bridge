@@ -16,7 +16,7 @@ args:
 
 driverConfig:
   cpuDeviceMode: grouped
-  groupBy: socket
+  groupBy: numanode
   allocator: external
   reservedCPUs: ''
 

@@ -7,8 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/utils/ptr"
@@ -41,8 +39,12 @@ func (n *NodeInfo) Geometry() (sockets, coresPerSocket, threadsPerCore int, err 
 			return 0, 0, 0, fmt.Errorf("non-uniform cores per socket after CPU reservations")
 		}
 	}
-	if len(cores) != len(n.SocketDevices) {
-		return 0, 0, 0, fmt.Errorf("socket inventory does not match CPU mapping")
+	deviceSockets := make(map[int]struct{})
+	for _, device := range n.CPUDevices {
+		deviceSockets[cpuDeviceGroupOf(device).socket] = struct{}{}
+	}
+	if len(cores) != len(deviceSockets) {
+		return 0, 0, 0, fmt.Errorf("CPU device inventory does not match CPU mapping")
 	}
 	return len(cores), coresPerSocket, threadsPerCore, nil
 }
@@ -52,8 +54,8 @@ func (n *NodeInfo) Geometry() (sockets, coresPerSocket, threadsPerCore int, err 
 // Bump the prefix version if the mapping or canonicalization rules change.
 // The hash identifies topology; claims retain the allocated CPU sets.
 func (n *NodeInfo) cpuFingerprint() (string, error) {
-	if n == nil || len(n.SocketDevices) == 0 {
-		return "", fmt.Errorf("missing socket CPU inventory")
+	if n == nil || len(n.CPUDevices) == 0 {
+		return "", fmt.Errorf("missing grouped CPU inventory")
 	}
 	if _, _, _, err := n.Geometry(); err != nil {
 		return "", err
@@ -63,8 +65,8 @@ func (n *NodeInfo) cpuFingerprint() (string, error) {
 		Devices []resourcev1.Device
 		Cores   []string
 	}{Pool: n.CpuMap.Pool}
-	for _, socket := range slices.Sorted(maps.Keys(n.SocketDevices)) {
-		device := n.SocketDevices[socket]
+	for _, name := range n.sortedCPUDeviceNames() {
+		device := n.CPUDevices[name]
 		d := device.DeepCopy()
 		delete(d.Attributes, DraDriverCpu_SMTLayout)
 		cpus, err := parseCPUSet(ptr.Deref(d.Attributes[DraDriverCpu_CPUIDs].StringValue, ""))
@@ -86,7 +88,7 @@ func (n *NodeInfo) cpuFingerprint() (string, error) {
 
 // EncodeApplied adds the CPU fingerprint to the GRES inventory in Extra.
 func (n *NodeInfo) EncodeApplied(extra string) (string, error) {
-	if n == nil || len(n.SocketDevices) == 0 {
+	if n == nil || len(n.CPUDevices) == 0 {
 		return extra, nil
 	}
 	fingerprint, err := n.cpuFingerprint()

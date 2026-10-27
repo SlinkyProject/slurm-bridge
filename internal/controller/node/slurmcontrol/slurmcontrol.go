@@ -248,7 +248,7 @@ func (r *realSlurmControl) NodeNeedsRecreate(ctx context.Context, node *corev1.N
 		return false, err
 	}
 
-	desiredGRES, err := buildNodeGRESConfig(draInventory)
+	desiredGRES, err := buildNodeGRESConfig(draInventory, nodeInfo)
 	if err != nil {
 		return false, err
 	}
@@ -309,7 +309,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 	key := slurmobject.ObjectKey(slurmNodeName)
-	gresConfig, err := buildNodeGRESConfig(draInventory)
+	gresConfig, err := buildNodeGRESConfig(draInventory, nodeInfo)
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 func (r *realSlurmControl) UpdateHybridNode(ctx context.Context, node *corev1.Node, nodeInfo *nodeinfo.NodeInfo, draInventory []dra.GRESInventory) error {
 	slurmNodeName := nodeutils.GetSlurmNodeName(node)
 	key := slurmobject.ObjectKey(slurmNodeName)
-	gresConfig, err := buildNodeGRESConfig(draInventory)
+	gresConfig, err := buildNodeGRESConfig(draInventory, nodeInfo)
 	if err != nil {
 		return err
 	}
@@ -491,7 +491,14 @@ type nodeGRESConfig struct {
 	gresConfInventory []string
 }
 
-func buildNodeGRESConfig(draInventory []dra.GRESInventory) (nodeGRESConfig, error) {
+// buildNodeGRESConfig translates DRA inventory into Slurm GRES bound to the
+// cores of each device's NUMA nodes.
+func buildNodeGRESConfig(draInventory []dra.GRESInventory, nodeInfo *nodeinfo.NodeInfo) (nodeGRESConfig, error) {
+	numaCores := nodeInfo.NUMACores()
+	draInventory = slices.Clone(draInventory)
+	for i := range draInventory {
+		draInventory[i] = draInventory[i].WithNUMACores(numaCores)
+	}
 	var gresEntries, gresConfEntries, gresConfInventory []string
 	for _, inventory := range draInventory {
 		gres, gresConf, err := inventory.SlurmConfig()
@@ -617,14 +624,33 @@ func updateFeatureList(current []string, feature string, present bool) []string 
 	return updated
 }
 
-// gresEqual ignores the order in which Slurm reports GRES entries, while
-// preserving differences in resource names, types, counts and multiplicity.
+// gresEqual ignores the order of GRES entries and socket suffixes such as
+// "(S:0-1)", while preserving differences in names, types, counts and multiplicity.
 func gresEqual(a, b string) bool {
-	aEntries := strings.Split(a, ",")
-	bEntries := strings.Split(b, ",")
-	slices.Sort(aEntries)
-	slices.Sort(bEntries)
-	return slices.Equal(aEntries, bEntries)
+	entries := func(gres string) []string {
+		list := gresEntries(gres)
+		slices.Sort(list)
+		return list
+	}
+	return slices.Equal(entries(a), entries(b))
+}
+
+// gresEntries splits a Slurm GRES string after removing socket affinity
+// suffixes, which may contain commas, e.g. "gpu:a100:4(S:0,2)".
+func gresEntries(gres string) []string {
+	for {
+		before, rest, ok := strings.Cut(gres, "(")
+		if !ok {
+			break
+		}
+		_, after, _ := strings.Cut(rest, ")")
+		gres = before + after
+	}
+	entries := strings.Split(gres, ",")
+	for i, entry := range entries {
+		entries[i] = strings.TrimSpace(entry)
+	}
+	return entries
 }
 
 // validateHybridNodeGRES checks that every DRA-managed GRES entry is present
@@ -637,11 +663,7 @@ func validateHybridNodeGRES(nodeName, current string, desired nodeGRESConfig) er
 	}
 
 	currentEntries := make(map[string]struct{})
-	for entry := range strings.SplitSeq(current, ",") {
-		entry = strings.TrimSpace(entry)
-		if suffix := strings.IndexByte(entry, '('); suffix >= 0 {
-			entry = entry[:suffix]
-		}
+	for _, entry := range gresEntries(current) {
 		currentEntries[entry] = struct{}{}
 	}
 	for required := range strings.SplitSeq(desired.gres, ",") {

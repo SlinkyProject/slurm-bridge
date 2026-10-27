@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"slices"
 
 	"github.com/google/uuid"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -52,7 +50,7 @@ func (n *NodeInfo) AllocateCPUs(ctx context.Context, kubeclient client.Client, r
 		return nil, err
 	}
 	if sockets == 0 {
-		return nil, fmt.Errorf("no applied socket CPU inventory")
+		return nil, fmt.Errorf("no applied grouped CPU inventory")
 	}
 	if (resources.SocketsPerNode != 0 && int(resources.SocketsPerNode) != sockets) || (resources.CoresPerSocket != 0 && int(resources.CoresPerSocket) != cores) {
 		return nil, fmt.Errorf("allocated Slurm geometry differs from applied CPU mapping")
@@ -74,21 +72,23 @@ func (n *NodeInfo) AllocateCPUs(ctx context.Context, kubeclient client.Client, r
 	if cpus.IsEmpty() {
 		return nil, fmt.Errorf("empty Slurm CPU allocation")
 	}
-	bySocket := make(map[int]cpuset.CPUSet)
-	for _, cpu := range cpus.List() {
-		info, ok := n.CpuMap.CPUInfoMap[cpu]
-		if !ok {
-			return nil, fmt.Errorf("CPU %d missing from applied mapping", cpu)
+	deviceCPUs := make(map[string]cpuset.CPUSet, len(n.CPUDevices))
+	for name, device := range n.CPUDevices {
+		set, err := parseCPUSet(ptr.Deref(device.Attributes[DraDriverCpu_CPUIDs].StringValue, ""))
+		if err != nil {
+			return nil, fmt.Errorf("CPU device %q: %w", name, err)
 		}
-		bySocket[info.SocketID] = bySocket[info.SocketID].Union(cpuset.New(cpu))
+		deviceCPUs[name] = set
 	}
 	allocation := &CPUAllocation{CPUCount: int64(cpus.Size())}
 	celCache := dracel.NewCache(8, dracel.Features{EnableConsumableCapacity: true, EnableListTypeAttributes: true})
-	for _, socket := range slices.Sorted(maps.Keys(bySocket)) {
-		device, ok := n.SocketDevices[socket]
-		if !ok {
-			return nil, fmt.Errorf("socket %d has no applied device", socket)
+	for _, deviceName := range n.sortedCPUDeviceNames() {
+		set := deviceCPUs[deviceName].Intersection(cpus)
+		if set.IsEmpty() {
+			continue
 		}
+		cpus = cpus.Difference(set)
+		device := n.CPUDevices[deviceName]
 		for _, selector := range class.Spec.Selectors {
 			if selector.CEL == nil {
 				return nil, fmt.Errorf("CPU DeviceClass has an unsupported selector")
@@ -102,19 +102,18 @@ func (n *NodeInfo) AllocateCPUs(ctx context.Context, kubeclient client.Client, r
 				return nil, err
 			}
 			if !matched {
-				return nil, fmt.Errorf("socket device %q does not match CPU DeviceClass %q", device.Name, className)
+				return nil, fmt.Errorf("CPU device %q does not match CPU DeviceClass %q", device.Name, className)
 			}
 		}
-		set := bySocket[socket]
 		count := *resource.NewQuantity(int64(set.Size()), resource.DecimalSI)
 		capacity := device.Capacity[DraDriverCpu_Capacity]
 		if capacity.Value.Cmp(count) < 0 {
-			return nil, fmt.Errorf("CPU allocation exceeds socket %d capacity", socket)
+			return nil, fmt.Errorf("CPU allocation exceeds %s capacity", cpuDeviceGroupOf(device))
 		}
-		name := fmt.Sprintf("cpu-socket-%d", socket)
+		name, expression := cpuDeviceRequest(cpuDeviceGroupOf(device))
 		allocation.Requests = append(allocation.Requests, resourcev1.DeviceRequest{Name: name, Exactly: &resourcev1.ExactDeviceRequest{
 			DeviceClassName: className, AllocationMode: resourcev1.DeviceAllocationModeExactCount, Count: 1,
-			Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: fmt.Sprintf("device.driver == 'dra.cpu' && device.attributes['dra.cpu'].socketID == %d", socket)}}},
+			Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: expression}}},
 			Capacity:  &resourcev1.CapacityRequirements{Requests: map[resourcev1.QualifiedName]resource.Quantity{DraDriverCpu_Capacity: count}},
 		}})
 		share := types.UID(uuid.NewSHA1(uuid.NameSpaceOID, []byte(allocationKey+"/"+DraDriverCpu+"/"+n.CpuMap.Pool+"/"+device.Name)).String())
@@ -132,5 +131,17 @@ func (n *NodeInfo) AllocateCPUs(ctx context.Context, kubeclient client.Client, r
 		}
 		allocation.Config = append(allocation.Config, resourcev1.DeviceClaimConfiguration{Requests: []string{name}, DeviceConfiguration: resourcev1.DeviceConfiguration{Opaque: &resourcev1.OpaqueDeviceConfiguration{Driver: DraDriverCpu, Parameters: runtime.RawExtension{Raw: parameters}}}})
 	}
+	if !cpus.IsEmpty() {
+		return nil, fmt.Errorf("CPUs %s have no applied device", cpus)
+	}
 	return allocation, nil
+}
+
+// cpuDeviceRequest returns a CPU device's request name and selector. Socket
+// requests keep the names of earlier releases.
+func cpuDeviceRequest(group cpuDeviceGroup) (string, string) {
+	if group.numaNode < 0 {
+		return fmt.Sprintf("cpu-socket-%d", group.socket), fmt.Sprintf("device.driver == 'dra.cpu' && device.attributes['dra.cpu'].socketID == %d", group.socket)
+	}
+	return fmt.Sprintf("cpu-numa-%d", group.numaNode), fmt.Sprintf("device.driver == 'dra.cpu' && device.attributes['dra.cpu'].numaNodeID == %d", group.numaNode)
 }

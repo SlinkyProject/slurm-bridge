@@ -107,8 +107,10 @@ provide matching `Name`, `Type`, and `Count` values. Other GRES entries are
 allowed and remain available to native Slurm workloads. If the DRA-managed
 entries do not match, the controller sets the Kubernetes node's
 `SlinkySlurmGRESCompatible` condition to `False` with the required `gres.conf`
-inventory. This condition reports compatibility to administrators; Slurm node
-features control bridge-job placement.
+inventory. It does not check device order or `Cores=`, which
+[NUMA alignment](workload.md#numa-alignment) also needs. This condition reports
+compatibility to administrators; Slurm node features control bridge-job
+placement.
 
 The controller adds the `slurm_bridge_gres_compatible` Slurm feature to every
 external node and to hybrid nodes whose GRES configuration has been verified.

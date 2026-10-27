@@ -129,8 +129,9 @@ The CPU fixture builds the unmodified upstream revision pinned in
 Kind, and installs its matching chart with
 [`values.yaml`](../hack/dra-driver-cpu/values.yaml). For `--existing-cluster`,
 set `DRA_CPU_IMAGE` to a tagged build of that revision that every node can pull.
-Hosts without usable NUMA sysfs need the driver's `sysfsOverlay` test fixture;
-synthetic topology does not validate physical socket or SMT discovery.
+Hosts without usable NUMA sysfs need the driver's `sysfsOverlay` test fixture,
+which `MOCK_NVML=true` applies; synthetic topology does not validate physical
+socket or SMT discovery.
 
 The `--dra-example-driver` and `--dranet` flags also configure Slurm Bridge with
 the [e2e device profiles](../hack/e2e-device-profiles.yaml). This explicitly
@@ -146,6 +147,12 @@ on the managed Kind workers before the NVIDIA DRA driver:
 ```sh
 MOCK_NVML=true make kind-start
 ```
+
+`MOCK_NVML=true` also mocks two NUMA nodes for
+[NUMA alignment](workload.md#numa-alignment) tests: GPUs 0-3 and CPUs 0-3 on
+NUMA node 0, and GPUs 4-7, CPUs 4-7, and `dranet0` on NUMA node 1. The CPU
+topology is mocked only for external Slurm nodes, which need at least eight
+CPUs, so the NUMA alignment test skips hybrid mode.
 
 Examples remain individually selectable:
 

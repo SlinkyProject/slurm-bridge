@@ -27,6 +27,12 @@ import (
 
 func requireCPUDRA(t *testing.T, config *envconf.Config) {
 	t.Helper()
+	requireKubernetes(t, config, "1.36", "CPU DRA")
+}
+
+// requireKubernetes skips the test when the server is older than minimum.
+func requireKubernetes(t *testing.T, config *envconf.Config, minimum, feature string) {
+	t.Helper()
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config.Client().RESTConfig())
 	if err != nil {
 		t.Fatalf("create Kubernetes discovery client: %v", err)
@@ -39,8 +45,8 @@ func requireCPUDRA(t *testing.T, config *envconf.Config) {
 	if err != nil {
 		t.Fatalf("parse Kubernetes server version: %v", err)
 	}
-	if serverVersion.LessThan(utilversion.MustParseGeneric("1.36.0")) {
-		t.Skipf("CPU DRA requires Kubernetes 1.36 or newer; server is %s", serverVersion)
+	if serverVersion.LessThan(utilversion.MustParseGeneric(minimum)) {
+		t.Skipf("%s requires Kubernetes %s or newer; server is %s", feature, minimum, serverVersion)
 	}
 }
 

@@ -7,3 +7,9 @@ nvidiaDriverRoot: /var/lib/nvml-mock/driver
 kubeletPlugin:
   # Kind workers have no physical PCI device for the chart's default affinity.
   affinity:
+  containers:
+    gpus:
+      # Read the nvml-mock PCI tree mounted by mock-numa-patch.yaml.
+      env:
+        - name: NVIDIA_DRA_SYSFS_ROOT
+          value: /nvml-mock-sysfs

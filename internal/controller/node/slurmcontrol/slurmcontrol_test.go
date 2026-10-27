@@ -1768,7 +1768,7 @@ func TestBuildNodeGRESConfigOffsetsProfilesSharingGRESName(t *testing.T) {
 		},
 	}
 
-	config, err := buildNodeGRESConfig(inventory)
+	config, err := buildNodeGRESConfig(inventory, nil)
 	if err != nil {
 		t.Fatalf("buildNodeGRESConfig() error = %v", err)
 	}
