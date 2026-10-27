@@ -33,11 +33,13 @@ LeaderWorkerSet groups will be co-scheduled so pods of each group will be
 guaranteed to launch together.
 
 Use `spec.groupIdentity: Ordinal` (the LWS default) and
-`spec.startupPolicy: LeaderCreated` for this integration. Each replica group
-receives its own Slurm allocation, with a default job name of
-`<set-name>-<group-index>`. Existing manifests that omit `groupIdentity` retain
-ordinal behavior with LWS v1.0.0. The `Hash` identity mode is not currently
-supported by slurm-bridge.
+`spec.startupPolicy: LeaderCreated` for this integration. `LeaderReady` is
+rejected for groups larger than one pod: workers are not created until the
+leader is ready, but slurm-bridge waits for the full group before scheduling its
+leader. Each replica group receives its own Slurm allocation, with a default job
+name of `<set-name>-<group-index>`. Existing manifests that omit `groupIdentity`
+retain ordinal behavior with LWS v1.0.0. The `Hash` identity mode is not
+currently supported by slurm-bridge.
 
 The development installer uses LWS v1.0.0. On clusters serving the
 `scheduling.k8s.io/v1beta1` Workload and PodGroup APIs (Kubernetes 1.37), it
@@ -101,7 +103,9 @@ LWS's `spec.leaderWorkerTemplate.restartPolicy` controls group recovery; the
 default `RecreateGroupOnPodRestart` recreates the group on Pod recreation or
 container restart. Replacement Pods need scheduling again. Do not rely on
 individual Pod replacement to extend or repair an allocated gang; recreate the
-whole group for a fresh allocation.
+whole group for a fresh allocation. slurm-bridge supports only
+`RecreateGroupOnPodRestart`: Pods from a LeaderWorkerSet with any other
+`restartPolicy`, including `None`, are rejected.
 
 Set `spec.podTerminationPolicy: Parallel` when creating a LeaderWorkerSet for
 slurm-bridge. The default `Sequential` policy can deadlock group cleanup: LWS
