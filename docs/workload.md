@@ -20,6 +20,7 @@
   - [Pod grouping](#pod-grouping)
     - [Other controller owners](#other-controller-owners)
   - [Workload guides](#workload-guides)
+  - [Workload Preemption](#workload-preemption)
   - [Scaling and failure behavior](#scaling-and-failure-behavior)
     - [CPU and memory changes](#cpu-and-memory-changes)
     - [Changing the number of Pods](#changing-the-number-of-pods)
@@ -446,6 +447,27 @@ the chain was successfully resolved.
 - [LeaderWorkerSet](lws.md): group scheduling, replica scaling, and recovery.
 - [PodGroup coscheduling](podgroup-coscheduling.md): legacy scheduler-plugins
   integration and migration to built-in PodGroups.
+
+## Workload Preemption
+
+`PreemptMode=REQUEUE` and `PreemptMode=CANCEL` currently have the same effect on
+`slurm-bridge` workloads. Slurm terminates the external job rather than
+requeueing it, and the bridge deletes its non-terminal, bound Pods. Pod
+termination is asynchronous.
+
+Workload controllers determine whether Pods are replaced:
+
+- Standalone Pods and PodGroup or CompositePodGroup members without an owning
+  workload controller are not recreated.
+- Jobs and JobSets recover according to Job retry budgets and JobSet failure
+  policies. Preempted Pods count as failed attempts, so `backoffLimit: 0` can
+  cause the workload to fail.
+- LeaderWorkerSets recreate groups according to their
+  [group recovery policy](lws.md#failures-and-recovery).
+
+Replacement Pods need scheduling again and request new Slurm allocations.
+Slurm-bridge does not resume the preempted Pods or requeue their original
+allocations.
 
 ## Scaling and failure behavior
 
