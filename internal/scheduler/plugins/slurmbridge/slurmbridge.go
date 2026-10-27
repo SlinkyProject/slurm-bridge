@@ -503,7 +503,6 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		return &fwk.PreFilterResult{NodeNames: phNode}, fwk.NewStatus(fwk.Success)
 	}
 
-	// Allocation identity and membership were checked above using the index.
 	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
 
 	// Perform resource specific PreFilter
@@ -630,13 +629,9 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 
 	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
 	if allocatedNodeRejectedByKubernetes(pod, &externalJob, m) {
-		// A cached rejection may be stale. Confirm the same placement before
-		// deciding to cancel it; ordinary scheduling does not need this read.
-		// TODO: For Slurm versions supporting external-job requeue, tie this
-		// confirmation to the placement Kubernetes actually rejected. Requeue
-		// can retain the job ID while changing nodes; a cache refresh can make
-		// this check confirm the new placement while the Pod annotation and
-		// Filter result still refer to the old node.
+		// TODO: When Slurm supports external-job requeue, confirm the rejected
+		// placement: a refresh may show new nodes under the same job ID while
+		// the Pod annotation and Filter result still refer to the old node.
 		if status := sb.confirmPlacement(ctx, pod, externalJob); !status.IsSuccess() {
 			return nil, status
 		}
@@ -1006,8 +1001,7 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 	if err := sb.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		return fwk.NewStatus(fwk.Error, err.Error())
 	}
-	// Discovery uses cached state, so validate the selected placement here in
-	// concurrent binding before creating claims or binding a Pod.
+	// Revalidate cached placement before creating claims or binding the Pod.
 	liveJob, err := sb.slurmControl.GetJob(ctx, pod)
 	if err != nil {
 		return fwk.AsStatus(err)

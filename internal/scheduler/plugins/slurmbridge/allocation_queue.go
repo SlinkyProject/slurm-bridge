@@ -73,8 +73,7 @@ func allocatedJobID(pod *corev1.Pod) string {
 }
 
 // allocationObserver discovers allocations even when the corresponding pods
-// never win a scheduling attempt. Scheduling uses the same job informer for
-// allocation discovery; destructive decisions retain explicit live validation.
+// never win a scheduling attempt.
 type allocationObserver struct {
 	ctx       context.Context
 	once      sync.Once
@@ -100,8 +99,6 @@ func allocationJobIDs(obj interface{}) ([]string, error) {
 }
 
 func newAllocationObserver(ctx context.Context, sb *SlurmBridge, cfg *slurmclient.Config) (*allocationObserver, error) {
-	// Share this informer with scheduling, while keeping its refreshes separate
-	// from the client used for writes and explicit live validation.
 	reader, err := slurmclient.NewClient(cfg, &slurmclient.ClientOptions{CacheSyncPeriod: time.Second})
 	if err != nil {
 		return nil, err

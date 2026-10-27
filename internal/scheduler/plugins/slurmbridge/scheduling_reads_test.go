@@ -126,8 +126,6 @@ func TestCachedPlacementRequiresLiveConfirmation(t *testing.T) {
 						"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin("NodeAffinity"),
 					}, nil))
 				case "missing node":
-					// The cached allocation names a deleted node, but Slurm may
-					// already have moved or requeued the allocation elsewhere.
 					pod.Annotations = nil
 					sb.Client = kubefake.NewClientBuilder().WithObjects(pod.DeepCopy()).Build()
 					sb.kubeNodeIndex = testKubeNodeIndex(t, sb.Client)

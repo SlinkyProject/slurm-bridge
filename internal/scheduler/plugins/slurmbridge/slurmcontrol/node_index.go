@@ -20,9 +20,6 @@ func nodePartitionKeys(obj object.Object) []string {
 	return ptr.Deref(obj.(*api.V0044Node).Partitions, nil)
 }
 
-// GetNodeNames reads the node informer's partition index. ByIndex waits for
-// synchronization and propagates refresh failures; it never falls back to a
-// live node list on the scheduling path.
 func (r *realSlurmControl) GetNodeNames(ctx context.Context, partition *string) ([]string, error) {
 	names := sets.New[string]()
 	for _, name := range strings.Split(ptr.Deref(partition, r.partition), ",") {
