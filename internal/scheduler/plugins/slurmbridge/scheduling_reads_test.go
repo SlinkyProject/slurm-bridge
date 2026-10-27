@@ -120,11 +120,12 @@ func TestCachedPlacementRequiresLiveConfirmation(t *testing.T) {
 				state.Write(stateKey, &stateData{slurmJobIR: ir, allocation: []slurmcontrol.ExternalJob{{JobId: 10, Nodes: "node1"}}})
 				var status *fwk.Status
 				wantStatus := tc.want
-				if operation == "cancel" {
+				switch operation {
+				case "cancel":
 					_, status = sb.PostFilter(t.Context(), state, pod, framework.NewNodeToStatus(map[string]*fwk.Status{
 						"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin("NodeAffinity"),
 					}, nil))
-				} else if operation == "missing node" {
+				case "missing node":
 					// The cached allocation names a deleted node, but Slurm may
 					// already have moved or requeued the allocation elsewhere.
 					pod.Annotations = nil
@@ -134,7 +135,7 @@ func TestCachedPlacementRequiresLiveConfirmation(t *testing.T) {
 					if wantStatus == fwk.Success {
 						wantStatus = fwk.Unschedulable
 					}
-				} else {
+				default:
 					status = sb.PreBind(t.Context(), state, pod, "node1")
 				}
 				if status.Code() != wantStatus || control.reads != 1 {
