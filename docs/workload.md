@@ -507,6 +507,14 @@ Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
 mean Slurm resources are already free. The bridge also removes its Pod finalizer
 and generated DRA ResourceClaim during terminal Pod cleanup.
 
+A new allocation can land on a node that still holds a terminating Bridge Pod.
+The scheduler waits for that Pod until five minutes past its deletion deadline,
+which is the deletion time plus `terminationGracePeriodSeconds`. After that, the
+scheduler treats the node as unavailable. If the waiting gang has already bound
+some Pods, the scheduler cancels its Slurm allocation and the gang schedules
+again. Set `terminationGracePeriodSeconds` high enough to cover your workload's
+full shutdown so that a slow exit does not cancel the next allocation.
+
 ### Failures and recovery
 
 If a scale-up cannot obtain resources, new Pods and their jobs wait for
