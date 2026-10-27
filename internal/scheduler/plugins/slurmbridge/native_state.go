@@ -327,7 +327,7 @@ func (a *nativeAllocation) resourcesFor(ctx context.Context, control slurmcontro
 	}
 	resources, found := component.resources[node]
 	if !found {
-		return nil, fwk.AsStatus(fmt.Errorf("Slurm resource snapshot has no allocation for node %q", node))
+		return nil, fwk.AsStatus(fmt.Errorf("slurm resource snapshot has no allocation for node %q", node))
 	}
 	return resources, nil
 }

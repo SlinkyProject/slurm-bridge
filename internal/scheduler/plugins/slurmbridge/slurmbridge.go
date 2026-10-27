@@ -1061,9 +1061,9 @@ func (sb *SlurmBridge) PreBind(ctx context.Context, state fwk.CycleState, pod *c
 			return fwk.NewStatus(fwk.Unschedulable, "Slurm allocation no longer owns the selected node")
 		}
 		resources, err = sb.slurmControl.GetResources(ctx, pod, slurmNode)
-	}
-	if err != nil {
-		return fwk.NewStatus(fwk.Error, err.Error())
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
 	}
 
 	err = sb.manageResourceClaim(ctx, pod, nodeName, resources)

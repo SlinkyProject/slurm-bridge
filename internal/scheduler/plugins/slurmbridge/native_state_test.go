@@ -607,7 +607,7 @@ func TestNativeGangSharesValidationAcross2048Bindings(t *testing.T) {
 }
 
 func TestNativeBindingValidationFailureAndRetry(t *testing.T) {
-	for _, change := range []string{"duplicate", "replacement", "cancelled", "lost node", "live error"} {
+	for _, change := range []string{"duplicate", "replacement", "canceled", "lost node", "live error"} {
 		t.Run(change, func(t *testing.T) {
 			sb, control, pods, _ := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
 			group := framework.NewCycleState()
@@ -624,7 +624,7 @@ func TestNativeBindingValidationFailureAndRetry(t *testing.T) {
 				control.allocationErr = slurmjob.ErrAmbiguousAllocation
 			case "replacement":
 				control.job.JobId = 11
-			case "cancelled":
+			case "canceled":
 				control.liveJob.Finished = true
 			case "lost node":
 				control.liveJob.Nodes = "node1"
