@@ -374,7 +374,7 @@ generate-docs: pandoc-bin
 	find docs -type f -name "*.md" -exec basename {} \; | awk '{print "    "$$1}' | env LC_ALL=C sort >> docs/index.rst
 	$(SED) -i -E '/<.\/docs\/[A-Za-z]*.md/s/.\/docs\///g' docs/index.rst
 	$(SED) -i -E '/.\/docs\/.*.svg/s/.\/docs\///g' docs/index.rst
-	$(SED) -i -E '/<[A-Za-z]*.md>`/s/.md>/.html>/g' docs/index.rst
+	$(SED) -i -E 's/<([A-Za-z0-9_-]+)\.md(#[^>]*)?>`/<\1.html\2>`/g' docs/index.rst
 
 DOCS_IMAGE ?= $(REGISTRY)/sphinx
 

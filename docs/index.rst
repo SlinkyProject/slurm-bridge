@@ -200,7 +200,7 @@ Create a secret for slurm-bridge to communicate with Slurm.
    kubectl create secret generic slurm-bridge-token --namespace=slurm --from-literal="SLURM_JWT=$SLURM_JWT" --type=Opaque
 
 Install the slurm-bridge scheduler after configuring the `quickstart
-prerequisites <quickstart.md#pre-requisites>`__, including
+prerequisites <quickstart.html#pre-requisites>`__, including
 cert-manager for the default webhook certificates. The default
 configuration requires the built-in Workload and PodGroup APIs. On
 Kubernetes 1.35, add
