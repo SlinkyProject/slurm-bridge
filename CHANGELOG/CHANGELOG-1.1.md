@@ -1,3 +1,34 @@
+## v1.1.5
+
+### Added
+
+- Stop Slurm Bridge before Helm upgrades.
+
+### Fixed
+
+- GO-2026-6505 GO-2026-6505 GO-2026-6505.
+- Isolate non-exclusive Kubernetes jobs from native Slurm workloads.
+- Render GHFM alerts correctly in generated docs.
+- GO-2026-6599 GO-2026-6600 GO-2026-6603 GO-2026-6603 GO-2026-6604 GO-2026-6605
+  GO-2026-6607 GO-2026-6608 GO-2026-6609 GO-2026-6610 GO-2026-6610 GO-2026-6611
+  GO-2026-6611 GO-2026-6612 GO-2026-6612 GO-2026-6613 GO-2026-6617 GO-2026-6617.
+- Preserve MCS isolation when updating pending bridge jobs.
+- Avoid redundant node patches during taint reconciliation.
+- Preserve concurrent node taint changes during reconciliation.
+- Skip Slurm node drain for Bridge-drained nodes.
+- Use cluster credentials for the pre-upgrade shutdown hook.
+- Prevent retained terminal pods from blocking bridge upgrades.
+- GO-2026-6809.
+- Stop Kind setup when cluster discovery fails.
+- Recomputed Slurm allocations after an allocated Kubernetes node is deleted.
+- GO-2026-6860 GO-2026-6866.
+
+### Changed
+
+- Reduce no-op node reconcile latency.
+- Scope admission webhooks to bridge-managed pods.
+- Use the upstream Kubernetes image for upgrade hooks.
+
 ## v1.1.4
 
 ### Fixed
