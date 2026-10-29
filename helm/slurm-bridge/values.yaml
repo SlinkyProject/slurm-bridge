@@ -228,3 +228,14 @@ sharedConfig:
   slurmJwtSecret:
     name: slurm-bridge-token
     key: SLURM_JWT
+
+# -- Extra Kubernetes objects to deploy alongside the chart.
+# Each entry is rendered as a standalone Kubernetes object.
+# Supports Helm templating (e.g. {{ .Release.Namespace }}).
+extraObjects: []
+  # - apiVersion: v1
+  #   kind: ConfigMap
+  #   metadata:
+  #     name: extra-config
+  #   data:
+  #     key: value
