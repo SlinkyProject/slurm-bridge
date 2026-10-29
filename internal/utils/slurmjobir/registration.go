@@ -40,6 +40,12 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 	if err := c.List(ctx, leaves, client.InNamespace(pod.Namespace)); err != nil {
 		return false, "", err
 	}
+	// Count the members this IR submits, not a fresh list: a Pod created after
+	// translation would otherwise pass quorum while missing from the Slurm job.
+	members := make(map[string][]corev1.Pod)
+	for _, component := range ir.Components {
+		members[component.ObjectMeta.Name] = append(members[component.ObjectMeta.Name], component.Pods.Items...)
+	}
 	var message string
 	var ready func(string, int) (bool, error)
 	ready = func(name string, depth int) (bool, error) {
@@ -70,13 +76,9 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 			if err := validatePodGroupSpec(&leaf); err != nil {
 				return false, err
 			}
-			pods, err := t.podsForPodGroup(leaf.Namespace, leaf.Name)
-			if err != nil {
-				return false, err
-			}
 			minCount := ptr.Deref(leaf.gangMinCount(), 1)
 			count := int32(0)
-			for _, p := range pods.Items {
+			for _, p := range members[leaf.Name] {
 				if p.DeletionTimestamp == nil && p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
 					count++
 				}
