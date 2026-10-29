@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/flags"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -728,6 +729,8 @@ func testSlurmBridgePodScheduling() types.Feature {
 
 func testSlurmBridgeDRAResourceScheduling(checkReuse bool) types.Feature {
 	podName := envconf.RandomName("pod-dra-e2e", 32)
+	var controller *corev1.Pod
+	var reusePartition string
 	exclusiveValue := "false"
 	featureName := "Non-exclusive DRA resources allocated to container"
 	pod := &corev1.Pod{
@@ -838,9 +841,27 @@ func testSlurmBridgeDRAResourceScheduling(checkReuse bool) types.Feature {
 			if err := crClient.Get(ctx, client.ObjectKey{Name: pod.Spec.NodeName}, node); err != nil {
 				t.Fatal(err)
 			}
-			reused := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName + "-reuse", Namespace: slurmBridgeNamespace, Annotations: map[string]string{wellknown.AnnotationExclusive: exclusiveValue}}, Spec: *pod.Spec.DeepCopy()}
+			controller, err = getSlurmControllerPod(ctx, crClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := execInPod(ctx, config, controller, "scontrol", "create",
+				"PartitionName="+podName, "Nodes="+nodeutils.GetSlurmNodeName(node), "Default=NO", "State=UP"); err != nil {
+				t.Fatalf("create single-node CPU reuse test partition: %v", err)
+			}
+			reusePartition = podName
+			reused := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName + "-reuse",
+					Namespace: slurmBridgeNamespace,
+					Annotations: map[string]string{
+						wellknown.AnnotationExclusive: exclusiveValue,
+						wellknown.AnnotationPartition: reusePartition,
+					},
+				},
+				Spec: *pod.Spec.DeepCopy(),
+			}
 			reused.Spec.NodeName = ""
-			reused.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": node.Labels["kubernetes.io/hostname"]}
 			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
 			if t.Failed() {
 				t.FailNow()
@@ -853,9 +874,15 @@ func testSlurmBridgeDRAResourceScheduling(checkReuse bool) types.Feature {
 				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 					return false, err
 				}
+				if pod.Status.Phase == corev1.PodFailed {
+					return false, fmt.Errorf("CPU reuse pod failed: %s", pod.Status.Message)
+				}
 				return pod.Status.Phase == corev1.PodRunning, nil
 			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(2*time.Second)); err != nil {
 				t.Fatal(err)
+			}
+			if pod.Spec.NodeName != node.Name {
+				t.Fatalf("CPU reuse pod ran on %s, want %s", pod.Spec.NodeName, node.Name)
 			}
 			current, err := verifySlurmCPUSet(ctx, config, crClient, pod)
 			if err != nil {
@@ -881,6 +908,11 @@ func testSlurmBridgeDRAResourceScheduling(checkReuse bool) types.Feature {
 				return ctx
 			}
 			deletePodAndAssertCleanup(ctx, t, config, crClient, pod)
+			if reusePartition != "" {
+				if _, err := execInPod(ctx, config, controller, "scontrol", "delete", "PartitionName="+reusePartition); err != nil {
+					t.Errorf("delete CPU reuse test partition: %v", err)
+				}
+			}
 			return ctx
 		}).
 		Feature()

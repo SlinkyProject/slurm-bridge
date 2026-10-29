@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -70,7 +71,7 @@ func nodeNUMATopology(ctx context.Context, c client.Client, nodeName string) (nu
 
 // requireNUMAAlignment returns a worker with NUMA-grouped CPUs and NUMA-local
 // GPUs and NICs. MOCK_NVML clusters must have one.
-func requireNUMAAlignment(ctx context.Context, t *testing.T, config *envconf.Config, c client.Client, required bool) string {
+func requireNUMAAlignment(ctx context.Context, t *testing.T, config *envconf.Config, c client.Client, required bool) *corev1.Node {
 	t.Helper()
 	requireKubernetes(t, config, "1.37", "NUMA alignment")
 	nodes := &corev1.NodeList{}
@@ -87,14 +88,14 @@ func requireNUMAAlignment(ctx context.Context, t *testing.T, config *envconf.Con
 			drivers.Insert(id.Driver.String())
 		}
 		if len(topology.cpus) > 1 && drivers.HasAll(draNvidiaGPUDriver, dranetDriver) {
-			return node.Name
+			return &node
 		}
 	}
 	if required {
 		t.Fatal("MOCK_NVML is enabled, but no Slurm Bridge worker publishes NUMA-local CPUs, GPUs, and NICs")
 	}
 	t.Skip("no Slurm Bridge worker publishes NUMA-local CPUs, GPUs, and NICs")
-	return ""
+	return nil
 }
 
 // testNUMAAlignment checks that a shared job's CPUs, GPU, and NIC are aligned.
@@ -120,7 +121,10 @@ func testNUMAAlignment(required bool) types.Feature {
 			Name:      podName,
 			Namespace: slurmBridgeNamespace,
 			// A shared allocation leaves Slurm to choose the cores.
-			Annotations: map[string]string{wellknown.AnnotationExclusive: "false"},
+			Annotations: map[string]string{
+				wellknown.AnnotationExclusive: "false",
+				wellknown.AnnotationPartition: podName,
+			},
 		},
 		Spec: corev1.PodSpec{
 			SchedulerName: slurmBridgeScheduler,
@@ -133,6 +137,7 @@ func testNUMAAlignment(required bool) types.Feature {
 			}},
 		},
 	}
+	var node *corev1.Node
 	return features.New(featureName).
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			requireCPUDRA(t, config)
@@ -140,8 +145,25 @@ func testNUMAAlignment(required bool) types.Feature {
 			if err != nil {
 				t.Fatalf("failed to get client: %v", err)
 			}
-			nodeName := requireNUMAAlignment(ctx, t, config, crClient, required)
-			pod.Spec.NodeSelector = map[string]string{corev1.LabelHostname: nodeName}
+			node = requireNUMAAlignment(ctx, t, config, crClient, required)
+			controller, err := getSlurmControllerPod(ctx, crClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := execInPod(ctx, config, controller, "scontrol", "create",
+				"PartitionName="+podName, "Nodes="+nodeutils.GetSlurmNodeName(node), "Default=NO", "State=UP"); err != nil {
+				t.Fatalf("create single-node NUMA test partition: %v", err)
+			}
+			t.Cleanup(func() {
+				if !e2eCleanupEnabled(t) {
+					return
+				}
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), slurmCleanupTimeout)
+				defer cancel()
+				if _, err := execInPod(cleanupCtx, config, controller, "scontrol", "delete", "PartitionName="+podName); err != nil {
+					t.Errorf("delete NUMA test partition: %v", err)
+				}
+			})
 			if err := crClient.Create(ctx, deviceClass); err != nil {
 				t.Fatalf("failed to create DRANET DeviceClass: %v", err)
 			}
@@ -165,6 +187,9 @@ func testNUMAAlignment(required bool) types.Feature {
 				return pod.Status.Phase == corev1.PodRunning, nil
 			}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(5*time.Second)); err != nil {
 				t.Fatalf("NUMA alignment pod never reached Running: %v; observed status: %s", err, statusJSON(pod.Status))
+			}
+			if pod.Spec.NodeName != node.Name {
+				t.Fatalf("NUMA alignment pod ran on %s, want %s", pod.Spec.NodeName, node.Name)
 			}
 			return ctx
 		}).
