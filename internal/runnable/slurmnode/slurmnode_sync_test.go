@@ -17,6 +17,9 @@ import (
 	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 	slurmclientfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
+	slurmobject "github.com/SlinkyProject/slurm-client/pkg/object"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func TestSlurmNodeRunnable_Sync(t *testing.T) {
@@ -73,5 +76,62 @@ func TestSlurmNodeRunnable_Sync(t *testing.T) {
 				t.Errorf("Sync() eventCnt = %v , want = %v", gotEventCnt, tt.wantEventCnt)
 			}
 		})
+	}
+}
+
+func TestSlurmNodeRunnable_SyncRemovesDeletedNodes(t *testing.T) {
+	bridged := func(name string, state ...slurmapi.V0044NodeState) slurmapi.V0044Node {
+		return slurmapi.V0044Node{
+			Name:     ptr.To(name),
+			State:    ptr.To(state),
+			Features: ptr.To(slurmapi.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
+		}
+	}
+	slurmClient := slurmclientfake.NewClientBuilder().
+		WithLists(&slurmapi.V0044NodeObjectList{
+			Items: []slurmapi.V0044Node{
+				bridged("kept", slurmapi.V0044NodeStateEXTERNAL),
+				bridged("deleted", slurmapi.V0044NodeStateEXTERNAL),
+				// Not external: slurmd owns its lifecycle.
+				bridged("hybrid", slurmapi.V0044NodeStateIDLE),
+				// External but not registered by slurm-bridge.
+				{Name: ptr.To("other"), State: ptr.To([]slurmapi.V0044NodeState{slurmapi.V0044NodeStateEXTERNAL})},
+			},
+		}).
+		Build()
+	kubeClient := fake.NewFakeClient(&corev1.NodeList{
+		Items: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "kept"}}},
+	})
+
+	r := NewRunnable(kubeClient, slurmClient, make(chan event.GenericEvent, 10))
+	if err := r.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() failed: %v", err)
+	}
+
+	for name, wantExists := range map[string]bool{"kept": true, "deleted": false, "hybrid": true, "other": true} {
+		err := slurmClient.Get(context.Background(), slurmobject.ObjectKey(name), &slurmapi.V0044Node{})
+		if exists := err == nil; exists != wantExists {
+			t.Errorf("Slurm node %q exists = %v, want %v (err %v)", name, exists, wantExists, err)
+		}
+	}
+}
+
+func TestSlurmNodeRunnable_SyncKeepsNodesWhenKubeListEmpty(t *testing.T) {
+	slurmClient := slurmclientfake.NewClientBuilder().
+		WithLists(&slurmapi.V0044NodeObjectList{
+			Items: []slurmapi.V0044Node{{
+				Name:     ptr.To("bridge-1"),
+				State:    ptr.To([]slurmapi.V0044NodeState{slurmapi.V0044NodeStateEXTERNAL}),
+				Features: ptr.To(slurmapi.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
+			}},
+		}).
+		Build()
+
+	r := NewRunnable(fake.NewFakeClient(), slurmClient, make(chan event.GenericEvent, 10))
+	if err := r.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() failed: %v", err)
+	}
+	if err := slurmClient.Get(context.Background(), slurmobject.ObjectKey("bridge-1"), &slurmapi.V0044Node{}); err != nil {
+		t.Errorf("Slurm node removed with an empty Kubernetes node list: %v", err)
 	}
 }
