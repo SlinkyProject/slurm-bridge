@@ -653,3 +653,41 @@ func TestTraverseParentChain(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistrationReadyCountsTranslatedMembers(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	for _, tt := range []struct {
+		name       string
+		translated int
+		want       bool
+	}{
+		{name: "pod created after translation", translated: 1, want: false},
+		{name: "all pods translated", translated: 2, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+			root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+				"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(1)}},
+			})
+			leaf := newPodGroup("leaf", ns, schedulingv1beta1.PodGroupSchedulingPolicy{
+				Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
+			})
+			leaf.Spec.ParentCompositePodGroupName = ptr.To("root")
+			pods := []corev1.Pod{*podWithSchedulingGroup(ns, "pod-0", "leaf"), *podWithSchedulingGroup(ns, "pod-1", "leaf")}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(root, leaf, &pods[0], &pods[1]).Build()
+			ir := &SlurmJobIR{
+				RootPOM: metav1.PartialObjectMetadata{TypeMeta: compositePodGroupV1Alpha3, ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}},
+				Components: []SlurmJobComponent{{
+					ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "leaf", Namespace: ns}},
+					Pods:       corev1.PodList{Items: pods[:tt.translated]},
+				}},
+			}
+			got, _, err := RegistrationReady(cl, nil, api, context.Background(), &pods[0], ir)
+			if err != nil || got != tt.want {
+				t.Errorf("RegistrationReady() = %v, %v, want %v, nil", got, err, tt.want)
+			}
+		})
+	}
+}
