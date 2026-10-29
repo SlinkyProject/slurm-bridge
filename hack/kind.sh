@@ -253,9 +253,10 @@ function slurm-stack::installed_node_mode() {
 		return 0
 	fi
 
-	if kubectl get nodes \
+	# Not piped to grep -q: with pipefail, a large fleet's output can fail kubectl with SIGPIPE.
+	if [ -n "$(kubectl get nodes \
 		-l scheduler.slinky.slurm.net/slurm-bridge=worker,scheduler.slinky.slurm.net/external-node=true \
-		-o name 2>/dev/null | grep -q .; then
+		-o name 2>/dev/null)" ]; then
 		echo "$SLURM_NODE_MODE_EXTERNAL"
 		return 0
 	fi
