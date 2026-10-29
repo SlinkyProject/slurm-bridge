@@ -90,11 +90,14 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, name string) error {
 			State:  ptr.To([]slurmapi.V0044UpdateNodeMsgState{slurmapi.V0044UpdateNodeMsgStateDRAIN}),
 			Reason: ptr.To("slurm-bridge: Kubernetes node was deleted"),
 		}
-		if err := r.Update(ctx, node, req); err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
+		// Each read-back waits for a full node cache refresh; the next Sync refreshes it anyway.
+		if err := r.Update(ctx, node, req, &client.UpdateOptions{SkipReadAfterUpdate: true}); err != nil &&
+			!errors.Is(err, slurmerrors.ErrNotFound) {
 			return err
 		}
 	}
-	if err := r.Delete(ctx, node); err != nil && !errors.Is(err, slurmerrors.ErrNotFound) {
+	if err := r.Delete(ctx, node, &client.DeleteOptions{SkipReadAfterDelete: true}); err != nil &&
+		!errors.Is(err, slurmerrors.ErrNotFound) {
 		return err
 	}
 	return nil
