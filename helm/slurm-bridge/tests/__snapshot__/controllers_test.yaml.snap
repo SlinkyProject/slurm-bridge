@@ -199,6 +199,15 @@ manifests should match snapshot:
           - list
           - watch
       - apiGroups:
+          - ray.io
+        resources:
+          - rayclusters
+          - rayjobs
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
           - resource.k8s.io
         resources:
           - deviceclasses

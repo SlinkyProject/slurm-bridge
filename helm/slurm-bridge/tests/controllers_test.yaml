@@ -178,6 +178,24 @@ tests:
             verbs:
               - create
               - patch
+  - it: controllers can read Ray owners when registering native PodGroups
+    template: controllers/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - ray.io
+            resources:
+              - rayclusters
+              - rayjobs
+            verbs:
+              - get
+              - list
+              - watch
   - it: applies the controllers resources to the controllers container
     template: controllers/deployment.yaml
     set:
