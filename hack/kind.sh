@@ -397,6 +397,51 @@ function lws::install() {
 	fi
 }
 
+function kuberay::install() {
+	local chart="kuberay-operator"
+	local install_args=(--namespace kuberay-system --create-namespace --wait --timeout 300s)
+	local resources
+	if resources="$(kubectl get --raw /apis/scheduling.k8s.io/v1alpha3 2>/dev/null)" &&
+		[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"podgroups\" ]]; then
+		# Released KubeRay 1.7.1 only supports the v1alpha2 native API.
+		local source_dir image context cluster
+		source_dir=$("$SCRIPT_DIR/kuberay/build.sh" --prepare)
+		chart="$source_dir/helm-chart/kuberay-operator"
+		if $OPT_EXISTING_CLUSTER; then
+			if [[ -z ${KUBERAY_IMAGE:-} ]]; then
+				echo "Set KUBERAY_IMAGE to a tagged build of hack/kuberay/build.sh available to this cluster." >&2
+				return 1
+			fi
+			image="$KUBERAY_IMAGE"
+		else
+			"$SCRIPT_DIR/kuberay/build.sh" --build
+			image=$("$SCRIPT_DIR/kuberay/build.sh" --image)
+			context=$(kubectl config current-context)
+			cluster="${context#kind-}"
+			if [[ $context == "$cluster" ]]; then
+				echo "KubeRay image loading requires an explicitly selected Kind context." >&2
+				return 1
+			fi
+			kind load docker-image --name "$cluster" "$image"
+		fi
+		if [[ $image == *@* || ${image##*/} != *:* ]]; then
+			echo "KUBERAY_IMAGE must use an explicit repository:tag for the pinned chart." >&2
+			return 1
+		fi
+		install_args+=(--set-string "image.repository=${image%:*}"
+			--set-string "image.tag=${image##*:}" --set image.pullPolicy=IfNotPresent
+			--set 'featureGates[0].name=KubernetesWAS' --set 'featureGates[0].enabled=true')
+	else
+		install_args+=(--repo https://ray-project.github.io/kuberay-helm/ --version 1.7.1)
+		if resources="$(kubectl get --raw /apis/scheduling.k8s.io/v1alpha2 2>/dev/null)" &&
+			[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"podgroups\" ]]; then
+			install_args+=(--set 'featureGates[0].name=KubernetesWAS' --set 'featureGates[0].enabled=true')
+		fi
+	fi
+	echo "[kuberay] Installing KubeRay operator..."
+	helm upgrade --install kuberay-operator "$chart" "${install_args[@]}"
+}
+
 function storage::has_default_class() {
 	kubectl get storageclass \
 		-o go-template='{{range .items}}{{if or (eq (index .metadata.annotations "storageclass.kubernetes.io/is-default-class") "true") (eq (index .metadata.annotations "storageclass.beta.kubernetes.io/is-default-class") "true")}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null |
@@ -829,7 +874,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu]
-	        [--dra-driver-nvidia-gpu] [--dranet] [--kwok] [--metrics]
+	        [--dra-driver-nvidia-gpu] [--dranet] [--kuberay] [--kwok] [--metrics]
 	        [--slurm-node-mode=MODE] [--bridge-version=VERSION]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [--print-image] [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -848,7 +893,7 @@ KIND OPTIONS:
 
 HELM OPTIONS:
 	--all               Equivalent of: --core --extras
-	--extras            Install all DRA driver fixtures below.
+	--extras            Install all DRA driver fixtures and the KubeRay operator.
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
 	--dra-driver-cpu    Install dra-driver-cpu on Kubernetes 1.36 or newer.
@@ -858,6 +903,9 @@ HELM OPTIONS:
 	                    It also mocks a two-NUMA-node GPU and DRANET topology, and
 	                    the CPU topology for external Slurm nodes.
 	--dranet            Install DRA driver: DRANET
+	--kuberay           Install KubeRay, enabling native PodGroups when available.
+	                    Kubernetes 1.37 builds a pinned upstream operator image.
+	                    With --existing-cluster, set KUBERAY_IMAGE to that build.
 	--kwok              Install KWOK and its fast stage configuration.
 	--metrics           Install metrics collection for Slurm Bridge.
 
@@ -922,6 +970,9 @@ function main() {
 
 	make -C "$ROOT_DIR" values-dev || true
 
+	if $OPT_KUBERAY; then
+		kuberay::install
+	fi
 	if $OPT_KWOK; then
 		kwok::install
 	fi
@@ -965,6 +1016,7 @@ OPT_CORE=false
 OPT_PREREQS=false
 OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
+OPT_KUBERAY=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
@@ -986,7 +1038,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
+LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,kuberay,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -1071,6 +1123,10 @@ while :; do
 		OPT_EXTRAS=true
 		shift
 		;;
+	--kuberay)
+		OPT_KUBERAY=true
+		shift
+		;;
 	--dra-driver-cpu)
 		OPT_DRA_DRIVER_CPU=true
 		shift
@@ -1117,6 +1173,7 @@ while :; do
 done
 
 if $OPT_EXTRAS; then
+	OPT_KUBERAY=true
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
 	OPT_DRA_DRIVER_NVIDIA_GPU=true
