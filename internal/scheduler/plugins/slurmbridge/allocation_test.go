@@ -149,7 +149,7 @@ func TestSchedulerAllocationBeforeBind(t *testing.T) {
 				}
 				return base.Get(ctx, key, obj, opts...)
 			}})
-			sb := &SlurmBridge{Client: kubefake.NewClientBuilder().WithObjects(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}}).Build(), slurmControl: newTestSlurmControl(t, c, "", "")}
+			sb := &SlurmBridge{Client: kubefake.NewClientBuilder().WithObjects(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}}).Build(), slurmControl: newTestSlurmControl(t, c, "", ""), resourceClaims: emptyResourceClaimLister()}
 			s := &stateData{slurmJobIR: ir}
 			pod := &ir.Components[1].Pods.Items[0]
 			if status := sb.checkAllocation(t.Context(), s, pod); !status.IsSuccess() {

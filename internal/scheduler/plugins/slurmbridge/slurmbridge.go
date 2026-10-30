@@ -177,6 +177,7 @@ type SlurmBridge struct {
 	releases      sync.WaitGroup // queued releases, so tests can wait for them
 
 	resourceSlices resourcelisters.ResourceSliceLister
+	resourceClaims resourcelisters.ResourceClaimLister
 }
 
 type groupAllocation struct {
@@ -352,6 +353,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		releaseCtx:    ctx,
 	}
 	plugin.resourceSlices = handle.SharedInformerFactory().Resource().V1().ResourceSlices().Lister()
+	plugin.resourceClaims = handle.SharedInformerFactory().Resource().V1().ResourceClaims().Lister()
 	plugin.kubeNodeIndex, err = newKubeNodeNameIndex(handle.SharedInformerFactory().Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err

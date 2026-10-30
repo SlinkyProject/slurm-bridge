@@ -111,7 +111,7 @@ func nativeFixture(t *testing.T, version string) (*SlurmBridge, *nativeStateCont
 	}
 	t.Cleanup(func() { _ = handle.Close() })
 	control := &nativeStateControl{job: slurmcontrol.ExternalJob{JobId: 10, Nodes: "node[1-2]"}}
-	return &SlurmBridge{Client: kc, workloadAPI: api, slurmControl: control, handle: handle, kubeNodeIndex: testKubeNodeIndex(t, kc)}, control, pods, lists
+	return &SlurmBridge{Client: kc, workloadAPI: api, slurmControl: control, handle: handle, kubeNodeIndex: testKubeNodeIndex(t, kc), resourceClaims: emptyResourceClaimLister()}, control, pods, lists
 }
 
 func nativePodState(group fwk.PodGroupCycleState) *framework.CycleState {

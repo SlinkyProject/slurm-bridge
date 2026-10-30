@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -244,6 +245,9 @@ func (sb *SlurmBridge) bindClaim(
 	if err := validateDeviceProfileAllocationCounts(resources, devices); err != nil {
 		return err
 	}
+	if err := sb.checkDevicesReleased(claim, devices); err != nil {
+		return err
+	}
 
 	toUpdate := claim.DeepCopy()
 
@@ -343,6 +347,37 @@ func deviceClassAllocationConfigs(claim *resourcev1.ResourceClaim, deviceClasses
 		configRanges[className] = configRange{start: start, end: len(configs)}
 	}
 	return configs, nil
+}
+
+type deviceKey struct{ driver, pool, device string }
+
+// checkDevicesReleased fails while another claim still holds one of the devices.
+// Slurm reuses the GRES of a job as soon as the job ends, but its pod can run
+// until the end of its grace period. The scheduler retries the bind later.
+func (sb *SlurmBridge) checkDevicesReleased(claim *resourcev1.ResourceClaim, devices []resourcev1.DeviceRequestAllocationResult) error {
+	wanted := make(map[deviceKey]struct{}, len(devices))
+	for _, d := range devices {
+		wanted[deviceKey{d.Driver, d.Pool, d.Device}] = struct{}{}
+	}
+	claims, err := sb.resourceClaims.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	for _, other := range claims {
+		if other.UID == claim.UID || other.Status.Allocation == nil {
+			continue
+		}
+		for _, d := range other.Status.Allocation.Devices.Results {
+			// As in kube-scheduler, a share or an admin access does not hold the device.
+			if d.ShareID != nil || ptr.Deref(d.AdminAccess, false) {
+				continue
+			}
+			if _, ok := wanted[deviceKey{d.Driver, d.Pool, d.Device}]; ok {
+				return fmt.Errorf("device %s/%s is still allocated to claim %s", d.Pool, d.Device, klog.KObj(other))
+			}
+		}
+	}
+	return nil
 }
 
 func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {

@@ -62,9 +62,10 @@ func TestSlurmBridge_PreBind_GetResources(t *testing.T) {
 	}
 	spy := &getResourcesSpy{}
 	sb := &SlurmBridge{
-		Client:       fake.NewClientBuilder().WithObjects(node).Build(),
-		slurmControl: spy,
-		draRegistry:  dra.DefaultRegistry(),
+		Client:         fake.NewClientBuilder().WithObjects(node).Build(),
+		slurmControl:   spy,
+		draRegistry:    dra.DefaultRegistry(),
+		resourceClaims: emptyResourceClaimLister(),
 	}
 
 	ir := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}}}
