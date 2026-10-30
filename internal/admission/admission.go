@@ -19,6 +19,7 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/featuregate"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -89,7 +90,10 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 	}
 	if pod.Spec.SchedulerName == r.SchedulerName {
 		pod.Spec.Tolerations = utils.MergeTolerations(pod.Spec.Tolerations, *utils.NewTolerationNodeBridged(r.SchedulerName))
-		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
+		// The scheduler translates native PodGroups itself, so their members need no published
+		// allocation. A gate would make it recheck the whole group on each member's release.
+		nativeGroup := pod.Spec.SchedulingGroup != nil && ptr.Deref(pod.Spec.SchedulingGroup.PodGroupName, "") != ""
+		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && !nativeGroup {
 			if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration }) {
 				pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
 			}

@@ -11,6 +11,7 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
@@ -44,6 +45,13 @@ func TestRegistrationAdmission(t *testing.T) {
 	}
 	if len(pod.Spec.SchedulingGates) != 1 {
 		t.Fatal("update added an immutable scheduling gate")
+	}
+	native := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: "slurm-bridge", SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("group")}}}
+	if err := r.Default(ctx, native); err != nil {
+		t.Fatal(err)
+	}
+	if len(native.Spec.SchedulingGates) != 0 {
+		t.Fatalf("gated a native PodGroup member: %v", native.Spec.SchedulingGates)
 	}
 	foreign := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: "other"}}
 	if err := r.Default(ctx, foreign); err != nil {
