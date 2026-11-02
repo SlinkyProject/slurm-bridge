@@ -539,15 +539,15 @@ cannot scale independently.
 
 ### Scale-down and resource release
 
-Deleting Pods does not partially shrink a running Slurm allocation. The Pod
-controller cancels the Slurm job once all Pods associated with that job are
-terminal (`Succeeded` or `Failed`) or are being deleted before binding to a
-node. Bound Pods must terminate before their allocation is released. Periodic
-cleanup also cancels pending or running jobs whose referenced Pods no longer
-exist. Removing one independent Pod therefore releases its allocation, while
-removing a whole LWS group releases that group's allocation. Removing only some
-Pods from a shared job retains its full allocation while other members remain
-active.
+Deleting Pods does not partially shrink a running Slurm allocation. The
+registration controller cancels the Slurm job once all Pods associated with that
+job are terminal (`Succeeded` or `Failed`) or are being deleted before binding
+to a node. Bound Pods must terminate before their allocation is released.
+Periodic cleanup also cancels pending or running jobs whose referenced Pods no
+longer exist. Removing one independent Pod therefore releases its allocation,
+while removing a whole LWS group releases that group's allocation. Removing only
+some Pods from a shared job retains its full allocation while other members
+remain active.
 
 Cleanup is asynchronous: a deletion request or a Pod in `Terminating` does not
 mean Slurm resources are already free. The bridge also removes its Pod finalizer
@@ -567,9 +567,9 @@ released.
 
 A container restart within the same Pod does not by itself release the Slurm
 job. Terminal Pods trigger the cleanup described above. If a Slurm job stops
-running, for example because it is canceled or reaches its time limit, the Pod
-controller deletes its non-terminal, bound Pods. Workload controllers determine
-whether Pods are replaced; see
+running, for example because it is canceled or reaches its time limit, the
+registration controller deletes its non-terminal, bound Pods. Workload
+controllers determine whether Pods are replaced; see
 [JobSet recovery](jobset.md#failures-and-recovery) and
 [LeaderWorkerSet recovery](lws.md#failures-and-recovery). Replacement Pods need
 scheduling again. Do not rely on individual Pod replacement to extend or repair
