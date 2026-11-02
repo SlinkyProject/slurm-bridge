@@ -93,7 +93,7 @@ behavior they validate.
 
 ### Ray-generated PodGroups
 
-The focused Ray suite requires a running KubeRay operator with
+The Ray scheduling feature requires a running KubeRay operator with
 `KubernetesWAS=true`, the `ray.io/v1` RayJob and RayCluster CRDs, and a native
 Workload/PodGroup API (Kubernetes 1.36 or newer). Install the optional operator
 fixture with `./hack/kind.sh --extras slurm-bridge-dev`, or install only
@@ -109,28 +109,29 @@ installs its matching chart with native v1alpha3 scheduling enabled. The
 released KubeRay 1.7.1 provider only supports v1alpha2, so older clusters use
 that release with native scheduling enabled when v1alpha2 is served. On
 Kubernetes 1.35 the operator is installed without native scheduling, and the Ray
-suite skips. For Kubernetes 1.37 with `--existing-cluster`, set `KUBERAY_IMAGE`
-to a tagged build of the pinned revision available to the cluster. Use only
-native WAS, without an external `batchScheduler` integration.
+feature skips. For Kubernetes 1.37 with `--existing-cluster`, set
+`KUBERAY_IMAGE` to a tagged build of the pinned revision available to the
+cluster. Use only native WAS, without an external `batchScheduler` integration.
 
 With KubeRay and Slurm Bridge deployed in the selected cluster, run:
 
 ```sh
 E2E_KUBE_CONTEXT=kind-slurm-bridge-dev \
-E2E_LABELS=suite=ray \
-E2E_RUN='^TestRayPodGroupScheduling$' \
+E2E_LABELS=suite=scheduling \
+E2E_RUN='^TestScheduling$/^RayJob_generated_native_PodGroup_scheduling$' \
 make test-e2e
 ```
 
-The suite creates an HTTP-mode RayJob with one head and one worker. KubeRay must
-create its RayCluster and native PodGroup; the test does not create either on
-its behalf. It checks controller owner-read permissions, running pods on two
-bridge nodes sharing one Slurm allocation, the real RayJob/RayCluster/PodGroup
-ownership chain, and the PodGroup scheduled condition. Deleting the RayJob must
+The feature creates an HTTP-mode RayJob with one head and one worker. KubeRay
+must create its RayCluster and native PodGroup; the test does not create either
+on its behalf. It selects the head and worker using a unique label and checks
+that they run on two bridge nodes sharing one Slurm allocation, reference the
+same native PodGroup, and have a scheduled PodGroup. Deleting the RayJob must
 release its allocation. HTTP submission avoids requiring an additional node for
 a separate submitter Job. The Ray images are `rayproject/ray:2.52.0`, with 3 GiB
-for the head and 1 GiB for the worker. This suite demonstrates basic scheduling,
-without testing Ray autoscaling, recovery, or job execution results.
+for the head and 1 GiB for the worker. This feature runs in the scheduling suite
+and demonstrates basic scheduling, without testing Ray autoscaling, recovery, or
+job execution results.
 
 ## Remote cluster
 
