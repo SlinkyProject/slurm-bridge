@@ -66,7 +66,7 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 	if !submissionAllowed(jobs, cooldown, ir.AllPods(), r.eligible) {
 		return waiting, nil
 	}
-	ready, message, err := slurmjobir.RegistrationReady(r.Client, r.registry, r.workloadAPI, ctx, pod, ir)
+	ready, message, err := slurmjobir.RegistrationReady(r.cachedMembers(), r.registry, r.workloadAPI, ctx, pod, ir)
 	if err != nil {
 		return r.registrationReadEvent(key, err)
 	}
