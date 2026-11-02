@@ -47,8 +47,12 @@ func TestRegisterJob(t *testing.T) {
 			ir := &slurmjobir.SlurmJobIR{}
 			for i := range tc.components {
 				ir.Components = append(ir.Components, slurmjobir.SlurmJobComponent{
-					Pods:    corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: fmt.Sprintf("pod-%d", i)}}}},
-					JobInfo: slurmjobir.SlurmJobIRJobInfo{Hold: ptr.To(false)},
+					Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: fmt.Sprintf("pod-%d", i)}}}},
+					JobInfo: slurmjobir.SlurmJobIRJobInfo{
+						Hold: ptr.To(false), Priority: ptr.To(int32(50)),
+						UserId: ptr.To("1001"), GroupId: ptr.To("1002"),
+						Account: ptr.To("research"), Exclusive: ptr.To(false),
+					},
 				})
 			}
 			if tc.invalidDescription {
@@ -75,14 +79,26 @@ func TestRegisterJob(t *testing.T) {
 						descriptions = *req.Jobs
 					}
 					for _, desc := range descriptions {
-						if !ptr.Deref(desc.Hold, false) {
-							t.Error("every submitted component must be held")
+						if !ptr.Deref(desc.Hold, false) || desc.Priority != nil {
+							t.Error("every submitted component must be held without a conflicting priority")
+						}
+						if ptr.Deref(desc.UserId, "") != "1001" || ptr.Deref(desc.GroupId, "") != "1002" || ptr.Deref(desc.Account, "") != "research" {
+							t.Error("submission lost ownership or accounting")
+						}
+						if desc.Shared == nil || len(*desc.Shared) != 1 || (*desc.Shared)[0] != api.V0044JobDescMsgSharedMcs || ptr.Deref(desc.McsLabel, "") != "kubernetes" {
+							t.Error("submission lost MCS isolation")
+						}
+						if ptr.Deref(desc.CurrentWorkingDirectory, "") != "/tmp" || desc.Flags == nil || len(*desc.Flags) != 1 || (*desc.Flags)[0] != api.V0044JobDescMsgFlagsEXTERNALJOB {
+							t.Error("submission lost external job setup")
+						}
+						if desc.ExcludedNodes != nil {
+							t.Error("submission should omit empty exclusions")
 						}
 					}
 					obj.(*api.V0044JobInfo).JobId = tc.responseID
 					return tc.createErr
 				},
-			}).Build(), "", "")
+			}).Build(), "kubernetes", "")
 			id, err := registrar.RegisterJob(t.Context(), ir)
 			if id != tc.wantID || (err != nil) != tc.wantErr {
 				t.Fatalf("RegisterJob = (%d, %v), want ID %d, error %t", id, err, tc.wantID, tc.wantErr)

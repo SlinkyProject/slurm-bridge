@@ -40,7 +40,11 @@ func TestBuildJobDescAllocationIdentity(t *testing.T) {
 				want.PodGroup = &externaljobinfo.GroupIdentity{APIGroup: "scheduling.k8s.io", Kind: "PodGroup", Namespace: "ns", Name: "leaf", UID: "leaf-uid"}
 			}
 			for _, update := range []bool{false, true} {
-				desc, err := (&realSlurmControl{}).buildJobDesc(root, ir.Components[0], update)
+				build := (&realSlurmControl{}).buildJobSubmission
+				if update {
+					build = (&realSlurmControl{}).buildJobUpdate
+				}
+				desc, err := build(root, ir.Components[0])
 				if err != nil {
 					t.Fatal(err)
 				}
