@@ -91,6 +91,10 @@ push-charts: build-chart ## Push OCI packages.
 KIND_CLUSTER_NAME ?= slurm-bridge-dev
 SLURM_NODE_MODE ?= external
 
+.PHONY: kind-image
+kind-image: ## Print the pinned Kind node image for KUBERNETES_VERSION.
+	@./hack/kind.sh --print-image
+
 .PHONY: kind-start
 kind-start: ## Create a Kind cluster and deploy the Slurm Bridge stack with DRA drivers.
 	./hack/kind.sh --all --slurm-node-mode="$(SLURM_NODE_MODE)" "$(KIND_CLUSTER_NAME)"
