@@ -37,6 +37,7 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeSequentialJobScheduling(),
 		testSlurmBridgeJobSetScheduling(),
 		testSchedulerPluginsPodGroupScheduling(),
+		testRayPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),
 		testSlurmJobRoundTrip(),
 		testKubernetesCancellation(),
