@@ -29,6 +29,10 @@ type CPUInfo struct {
 	// SocketID is the physical socket ID
 	SocketID int `json:"socketID"`
 
+	// NUMANodeID identifies the Slurm socket for NUMA-grouped inventory.
+	// SocketID retains the physical package for topology validation.
+	NUMANodeID *int `json:"numaNodeID,omitempty"`
+
 	// CPU Sibling of the CpuID
 	SiblingCpuID cpuset.CPUSet `json:"siblingCpuID"`
 
@@ -102,10 +106,13 @@ func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		var numaNode *int
 		if _, ok := device.Attributes[DraDriverCpu_NUMANodeID]; ok {
-			if _, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_NUMANodeID); err != nil {
+			numa, err := requiredCPUIntegerAttribute(rSlice.Name, device, DraDriverCpu_NUMANodeID)
+			if err != nil {
 				return nil, err
 			}
+			numaNode = ptr.To(numa)
 		}
 		smt, ok := device.Attributes[DraDriverCpu_SMTEnabled]
 		if !ok || smt.BoolValue == nil {
@@ -146,10 +153,14 @@ func NewCPUInfos(rSlice *resourcev1.ResourceSlice) ([]*CPUInfo, error) {
 			if sibling >= 0 && cpus.Contains(sibling) {
 				core = min(cpu, sibling)
 			}
-			infos = append(infos, &CPUInfo{Name: device.Name, CpuID: cpu, CoreID: core, SocketID: socket, CoreType: CoreTypeStandard})
+			infos = append(infos, &CPUInfo{Name: device.Name, CpuID: cpu, CoreID: core, SocketID: socket, NUMANodeID: numaNode, CoreType: CoreTypeStandard})
 		}
 	}
 	return infos, nil
+}
+
+func (c *CPUInfo) deviceGroup() cpuDeviceGroup {
+	return cpuDeviceGroup{socket: c.SocketID, numaNode: ptr.Deref(c.NUMANodeID, -1)}
 }
 
 func requiredCPUIntegerAttribute(sliceName string, device resourcev1.Device, name resourcev1.QualifiedName) (int, error) {

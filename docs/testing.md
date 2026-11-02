@@ -148,11 +148,20 @@ on the managed Kind workers before the NVIDIA DRA driver:
 MOCK_NVML=true make kind-start
 ```
 
-`MOCK_NVML=true` also mocks two NUMA nodes for
+`MOCK_NVML=true` also mocks two NUMA domains sharing one physical socket for
 [NUMA alignment](workload.md#numa-alignment) tests: GPUs 0-3 and CPUs 0-3 on
 NUMA node 0, and GPUs 4-7, CPUs 4-7, and `dranet0` on NUMA node 1. The CPU
 topology is mocked only for external Slurm nodes, which need at least eight
-CPUs, so the NUMA alignment test skips hybrid mode.
+CPUs, so the NUMA alignment test skips hybrid mode. The test verifies that the
+inventory represents sub-NUMA clustering, Slurm registers two sockets with four
+cores each, and GPU/NIC socket affinity is retained before checking the job's
+allocation and effective container CPU set.
+
+Run this regression on the mocked Kubernetes 1.37+ cluster with:
+
+```sh
+MOCK_NVML=true E2E_RUN=TestNUMAAlignment make test-e2e
+```
 
 Examples remain individually selectable:
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kelindar/bitmap"
 	"k8s.io/utils/cpuset"
+	"k8s.io/utils/ptr"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
 )
@@ -70,6 +71,10 @@ func NewCPUMap(pool string, cpuInfos []*CPUInfo) CPUMap {
 		// Align sockets
 		if cpuInfos[i].SocketID != cpuInfos[j].SocketID {
 			return cpuInfos[i].SocketID < cpuInfos[j].SocketID
+		}
+		// Keep each NUMA domain contiguous in Slurm's abstract core bitmap.
+		if a, b := ptr.Deref(cpuInfos[i].NUMANodeID, -1), ptr.Deref(cpuInfos[j].NUMANodeID, -1); a != b {
+			return a < b
 		}
 		// Align core siblings
 		if cpuInfos[i].CoreID != cpuInfos[j].CoreID {

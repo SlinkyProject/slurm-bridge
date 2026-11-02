@@ -121,7 +121,7 @@ func TestCPUFingerprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	fingerprint, err := dra.AppliedCPUFingerprint(extra)
-	if err != nil || !strings.HasPrefix(fingerprint, "v1:") || len(fingerprint) != 67 {
+	if err != nil || !strings.HasPrefix(fingerprint, "v2:") || len(fingerprint) != 67 {
 		t.Fatalf("invalid fingerprint %q: %v", fingerprint, err)
 	}
 	// Extra stores the GRES map and a fixed-size CPU fingerprint.
@@ -167,7 +167,7 @@ func TestCPUFingerprint(t *testing.T) {
 			}
 		})
 	}
-	for _, invalid := range []string{"", gres, "corrupt", strings.Replace(extra, "v1:", "v99:", 1), strings.Replace(extra, fingerprint, "invalid", 1), `slurm-bridge.dra-gres-map={"v":2,"profiles":{},"cpu":{"v":1}}`} {
+	for _, invalid := range []string{"", gres, "corrupt", strings.Replace(extra, "v2:", "v99:", 1), strings.Replace(extra, fingerprint, "invalid", 1), `slurm-bridge.dra-gres-map={"v":2,"profiles":{},"cpu":{"v":1}}`} {
 		if err := n.ValidateCPUFingerprint(invalid); err == nil {
 			t.Fatalf("accepted missing/invalid fingerprint: %s", invalid)
 		}

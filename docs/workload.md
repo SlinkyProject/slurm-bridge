@@ -238,9 +238,10 @@ CPU DRA requires Kubernetes 1.36 or newer with `DRAExtendedResource` and
 the [pinned CPU driver](../hack/dra-driver-cpu/build.sh) with
 `cpuDeviceMode: grouped`, `groupBy: numanode` or `groupBy: socket`, and
 `allocator: external`. Use `numanode` for [NUMA alignment](#numa-alignment).
-After reserved CPUs are excluded, sockets must have equal core counts and cores
-must have equal thread counts. Slurm must be the sole allocator for these
-devices; kubelet's CPU Manager must not assign the same CPUs independently.
+After reserved CPUs are excluded, groups (NUMA domains or physical sockets) must
+have equal core counts and cores must have equal thread counts. Slurm must be
+the sole allocator for these devices; kubelet's CPU Manager must not assign the
+same CPUs independently.
 
 To migrate from individual CPU devices, drain Slurm nodes and wait for all
 claims to be unprepared before replacing the driver and bridge. Use the same
@@ -262,17 +263,28 @@ requires:
   NVIDIA GPU driver and DRANET with their `DRAListTypeAttributes` feature gate.
 
 Alignment is best effort: Slurm prefers local cores, but a job which needs more
-than one NUMA node still runs. Slurm binds GRES only to whole sockets, so nodes
-with several NUMA nodes per socket, such as with sub-NUMA clustering, register
-without device locality.
+than one NUMA node still runs. With NUMA-grouped CPU inventory, each NUMA domain
+is registered as a Slurm socket. This preserves device locality when several
+NUMA domains share a physical socket, including sub-NUMA clustering. Abstract
+Slurm cores are ordered by physical socket, NUMA domain, and then core; each
+domain occupies a contiguous range.
+
+Upgrading from physical-socket registration changes the CPU topology
+fingerprint. Drain nodes and wait for claims to be unprepared before upgrading.
+External nodes are re-registered with the new geometry before accepting bridge
+jobs.
 
 Hybrid nodes are aligned only when the site's `gres.conf` describes the same
 topology; `slurm-bridge` does not write it, and the `SlinkySlurmGRESCompatible`
 condition checks only GRES names, types, and counts. For each GRES type, list
 devices in the string order of their DRA device names (`gpu-10` before `gpu-2`),
-give each the `Cores=` of its NUMA node's socket, and set slurmd's `Sockets` and
-`CoresPerSocket` to match CPU DRA. Otherwise jobs still run, but their devices
-and CPUs may come from different NUMA nodes.
+give each the `Cores=` of its NUMA domain, and set slurmd's `Sockets` and
+`CoresPerSocket` to match CPU DRA. For sub-NUMA clustering, configure
+`SlurmdParameters=numa_node_as_socket` and update the node geometry to match
+`slurmd -C --parameters=numa_node_as_socket`. Geometry mismatches prevent bridge
+jobs from using the node. Verify Linux CPU ordering against the bridge mapping
+as well; geometry checks alone cannot establish it. Incorrect GRES locality can
+still let jobs run with devices and CPUs from different NUMA domains.
 
 ## Annotations
 
