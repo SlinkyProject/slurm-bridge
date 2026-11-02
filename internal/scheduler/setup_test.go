@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 // SPDX-License-Identifier: Apache-2.0
 
-package command
+package scheduler
 
 import (
 	"context"
@@ -26,7 +26,6 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo/fifo"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
-	"k8s.io/kubernetes/cmd/kube-scheduler/app/options"
 	"k8s.io/kubernetes/pkg/features"
 )
 
@@ -130,15 +129,21 @@ profiles:
 `, kubeconfig)), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			opts := options.NewOptions()
-			opts.ConfigFile = config
-			opts.SecureServing.BindPort = 0
+			runnable, err := NewRunnable(config, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := runnable.opts
 			informerName, err := cache.NewInformerName(t.Name())
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(informerName.Release)
 			opts.InformerName = informerName
+			managerConfig, err := runnable.KubeConfig("")
+			if err != nil {
+				t.Fatal(err)
+			}
 			var handle fwk.Handle
 			cc, sched, err := setup(t.Context(), opts, app.WithPlugin("ClientProbe", func(_ context.Context, _ runtime.Object, h fwk.Handle) (fwk.Plugin, error) {
 				handle = h
@@ -157,6 +162,9 @@ profiles:
 			t.Cleanup(func() { _ = sched.Profiles.Close() })
 			if handle == nil || handle.ClientSet() != cc.Client || handle.SharedInformerFactory() != cc.InformerFactory {
 				t.Fatal("framework consumers do not share the configured client and informer factory")
+			}
+			if cc.KubeConfig.Host != managerConfig.Host || handle.KubeConfig().Host != managerConfig.Host {
+				t.Fatal("manager and scheduler do not use the same Kubernetes connection")
 			}
 			// Exercise the active Pod store, so a discarded informer retaining the
 			// metrics reservation cannot make this check pass.
