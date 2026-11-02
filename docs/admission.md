@@ -47,6 +47,12 @@ admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
 `managedNamespaceSelector` can be used to select namespaces based on labels. If
 `managedNamespaceSelector` is set, `managedNamespaces` will be ignored.
 
+Pods selected for the slurm-bridge [scheduler] receive the
+`slinky.slurm.net/managed-node` toleration during admission. If admission is
+disabled or the pod's namespace is excluded from the webhook, set this
+toleration explicitly to run on bridged nodes. The scheduler treats the pods it
+receives as immutable and does not add tolerations.
+
 Managed pods can request either native `cpu` or the CPU DRA extended resource
 `deviceclass.resource.kubernetes.io/dra.cpu`, but cannot specify both. CPU DRA
 must be requested explicitly; native `cpu` requests are not converted to DRA

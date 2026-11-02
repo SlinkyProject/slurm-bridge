@@ -662,7 +662,11 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 				draRegistry:   dra.DefaultRegistry(),
 			}
 			sb.kubeNodeIndex = testKubeNodeIndex(t, sb.Client)
+			original := tt.args.pod.DeepCopy()
 			got, got1 := sb.PreFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.nodeinfo)
+			if !apiequality.Semantic.DeepEqual(tt.args.pod, original) {
+				t.Fatal("PreFilter mutated the framework pod")
+			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("SlurmBridge.PreFilter() got = %v, want %v", got, tt.want)
 			}
@@ -671,6 +675,15 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got1.Reasons(), tt.want1.Reasons()) {
 				t.Errorf("SlurmBridge.PreFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
+			}
+			if got1.IsSuccess() && got != nil {
+				for name := range got.NodeNames {
+					nodeInfo := framework.NewNodeInfo()
+					nodeInfo.SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}})
+					if status := sb.Filter(tt.args.ctx, tt.args.state, tt.args.pod, nodeInfo); !status.IsSuccess() {
+						t.Errorf("Filter rejected assigned node %s with the original pod: %v", name, status)
+					}
+				}
 			}
 		})
 	}
@@ -1535,7 +1548,11 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			s := &stateData{}
 			s.slurmJobIR, _ = slurmjobir.TranslateToSlurmJobIR(tt.fields.Client, sb.draRegistry, sb.workloadAPI, tt.args.ctx, tt.args.pod)
 			tt.args.state.Write(stateKey, s)
+			original := tt.args.pod.DeepCopy()
 			got, got1 := sb.PostFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.m)
+			if !apiequality.Semantic.DeepEqual(tt.args.pod, original) {
+				t.Fatal("PostFilter mutated the framework pod")
+			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("SlurmBridge.PostFilter() got = %v, want %v", got, tt.want)
 			}
