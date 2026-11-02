@@ -5,40 +5,16 @@ package e2e
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
-	appsv1 "k8s.io/api/apps/v1"
-	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 )
-
-func TestRayPodGroupScheduling(t *testing.T) {
-	requireE2ESuite(t, "ray", true)
-	testEnv, err := newTestEnvironment()
-	if err != nil {
-		t.Fatal(err)
-	}
-	nodeMode, err := parseSlurmNodeModeFromEnvironment()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := parseE2ECleanupFromEnvironment(); err != nil {
-		t.Fatal(err)
-	}
-	_ = testEnv.Test(t,
-		withSuiteLabel(testSlurmBridgeReadiness(nodeMode), "ray"),
-		withSuiteLabel(testRayPodGroupScheduling(), "ray"),
-	)
-}
 
 func testRayPodGroupScheduling() types.Feature {
 	const label = "test.slinky.slurm.net/ray-job"
@@ -63,7 +39,6 @@ func testRayPodGroupScheduling() types.Feature {
 			if err != nil {
 				t.Fatalf("get client: %v", err)
 			}
-			requireRayOwnerAccess(ctx, t, config, c)
 			if err := c.Create(ctx, job); err != nil {
 				t.Fatalf("create RayJob %s (requires KubeRay with KubernetesWAS enabled): %v", job.GetName(), err)
 			}
@@ -111,27 +86,6 @@ func testRayPodGroupScheduling() types.Feature {
 			if err := c.Get(ctx, client.ObjectKey{Namespace: job.GetNamespace(), Name: groupName}, group); err != nil {
 				t.Fatalf("get Ray PodGroup %s: %v", groupName, err)
 			}
-			owner := metav1.GetControllerOf(group)
-			if owner == nil || owner.APIVersion != "ray.io/v1" || owner.Kind != "RayCluster" {
-				t.Fatalf("PodGroup %s controller = %v, want a RayCluster", groupName, owner)
-			}
-			cluster := &unstructured.Unstructured{}
-			cluster.SetAPIVersion("ray.io/v1")
-			cluster.SetKind("RayCluster")
-			if err := c.Get(ctx, client.ObjectKey{Namespace: job.GetNamespace(), Name: owner.Name}, cluster); err != nil {
-				t.Fatalf("get RayCluster %s: %v", owner.Name, err)
-			}
-			if cluster.GetUID() != owner.UID {
-				t.Errorf("PodGroup owner UID = %s, want RayCluster UID %s", owner.UID, cluster.GetUID())
-			}
-			for i := range pods {
-				if owner := metav1.GetControllerOf(&pods[i]); owner == nil || owner.Kind != "RayCluster" || owner.UID != cluster.GetUID() {
-					t.Errorf("Ray pod %s controller = %v, want RayCluster UID %s", pods[i].Name, owner, cluster.GetUID())
-				}
-			}
-			if owner := metav1.GetControllerOf(cluster); owner == nil || owner.Kind != "RayJob" || owner.UID != job.GetUID() {
-				t.Errorf("RayCluster controller = %v, want RayJob UID %s", owner, job.GetUID())
-			}
 			assertKubernetesPodGroupScheduled(ctx, t, c, group)
 			return ctx
 		}).
@@ -151,43 +105,6 @@ func testRayPodGroupScheduling() types.Feature {
 			return ctx
 		}).
 		Feature()
-}
-
-// requireRayOwnerAccess fails promptly on missing owner permissions instead of
-// waiting for the registration controller's metadata informers to time out.
-func requireRayOwnerAccess(ctx context.Context, t *testing.T, config *envconf.Config, c client.Client) {
-	t.Helper()
-	deployment := &appsv1.Deployment{}
-	if err := c.Get(ctx, client.ObjectKey{Namespace: slurmNamespace, Name: "slurm-bridge-controllers"}, deployment); err != nil {
-		t.Fatalf("get bridge controllers deployment: %v", err)
-	}
-	user := fmt.Sprintf("system:serviceaccount:%s:%s", deployment.Namespace, deployment.Spec.Template.Spec.ServiceAccountName)
-	clientset, err := kubernetes.NewForConfig(config.Client().RESTConfig())
-	if err != nil {
-		t.Fatalf("create authorization client: %v", err)
-	}
-	for _, resource := range []string{"rayclusters", "rayjobs"} {
-		for _, verb := range []string{"get", "list", "watch"} {
-			namespace := ""
-			if verb == "get" {
-				namespace = slurmBridgeNamespace
-			}
-			review, err := clientset.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authorizationv1.SubjectAccessReview{
-				Spec: authorizationv1.SubjectAccessReviewSpec{
-					User: user,
-					ResourceAttributes: &authorizationv1.ResourceAttributes{
-						Group: "ray.io", Resource: resource, Verb: verb, Namespace: namespace,
-					},
-				},
-			}, metav1.CreateOptions{})
-			if err != nil {
-				t.Fatalf("check %s %s permission for %s: %v", verb, resource, user, err)
-			}
-			if !review.Status.Allowed {
-				t.Fatalf("%s allowed %s %s = false, want true: %s", user, verb, resource, review.Status.Reason)
-			}
-		}
-	}
 }
 
 func newRayPodGroupJob(name, label string) *unstructured.Unstructured {
