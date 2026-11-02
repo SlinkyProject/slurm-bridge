@@ -33,6 +33,7 @@ import (
 	"k8s.io/utils/ptr"
 	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -167,6 +168,13 @@ type SlurmBridge struct {
 	allocationObserver *allocationObserver
 	mu                 sync.Mutex
 	pending            map[groupAllocation]*groupProgress
+
+	// Hold releases outlive the scheduling cycle that starts them.
+	releaseCtx    context.Context
+	releaseOnce   sync.Once
+	releaseEvents chan event.TypedGenericEvent[groupAllocation]
+	holdReleases  map[groupAllocation]*releaseWork
+	releases      sync.WaitGroup // queued releases, so tests can wait for them
 
 	resourceSlices resourcelisters.ResourceSliceLister
 }
@@ -341,6 +349,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		handle:        handle,
 		draRegistry:   draRegistry,
 		workloadAPI:   workloadAPI,
+		releaseCtx:    ctx,
 	}
 	plugin.resourceSlices = handle.SharedInformerFactory().Resource().V1().ResourceSlices().Lister()
 	plugin.kubeNodeIndex, err = newKubeNodeNameIndex(handle.SharedInformerFactory().Core().V1().Nodes().Informer())
@@ -683,6 +692,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 		return nil, status
 	}
 
+	var progress *groupProgress
 	if s.slurmJobIR.IsHetJob() && externalJob.Pending {
 		sb.mu.Lock()
 		allocation := groupAllocation{uid: s.slurmJobIR.RootPOM.UID, jobID: s.allocation[0].AllocationID()}
@@ -695,7 +705,7 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 				delete(sb.pending, uid)
 			}
 		}
-		progress := sb.pending[allocation]
+		progress = sb.pending[allocation]
 		if progress == nil {
 			progress = &groupProgress{components: make(map[types.NamespacedName][]string)}
 			sb.pending[allocation] = progress
@@ -719,25 +729,17 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 
 		progress.updating = true
 		externalJob.Held = progress.held
-
-		defer func() {
-			sb.mu.Lock()
-			progress.updating = false
-			sb.mu.Unlock()
-		}()
-
 		sb.mu.Unlock()
 	}
 
+	key := groupAllocation{uid: s.slurmJobIR.RootPOM.UID, jobID: s.allocation[0].AllocationID()}
 	if externalJob.Pending {
-		if status := sb.updateExternalJob(ctx, s, externalJob.Held); !status.IsSuccess() {
-			return nil, status
-		}
+		sb.releaseHold(logger, pod, s, externalJob.Held, key, progress)
+	} else {
+		sb.mu.Lock()
+		delete(sb.pending, key)
+		sb.mu.Unlock()
 	}
-
-	sb.mu.Lock()
-	delete(sb.pending, groupAllocation{uid: s.slurmJobIR.RootPOM.UID, jobID: s.allocation[0].AllocationID()})
-	sb.mu.Unlock()
 
 	// Successful PostFilter ends this attempt; it does not proceed to binding.
 	// Writes have been acknowledged without reading back the updated jobs, and

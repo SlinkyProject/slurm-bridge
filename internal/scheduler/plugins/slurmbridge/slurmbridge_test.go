@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -72,7 +74,14 @@ func slurmNode(name string, partitions ...string) api.V0044Node {
 }
 
 type activateRecorder struct {
+	mu   sync.Mutex
 	pods map[string]*corev1.Pod
+}
+
+func (r *activateRecorder) activated() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.pods) > 0
 }
 
 func mustRegisterTestWorkloadAPI(t *testing.T, scheme *runtime.Scheme, version string) *slurmjobir.WorkloadAPI {
@@ -85,6 +94,8 @@ func mustRegisterTestWorkloadAPI(t *testing.T, scheme *runtime.Scheme, version s
 }
 
 func (r *activateRecorder) Activate(_ klog.Logger, pods map[string]*corev1.Pod) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.pods = pods
 }
 
@@ -906,6 +917,7 @@ func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T)
 				}
 			}
 			_, status := sb.PodGroupPostFilter(ctx, groupState, groupInfo, nil)
+			sb.releases.Wait()
 			if !status.IsSuccess() || updates != 1 {
 				t.Fatalf("PodGroupPostFilter status = %v, updates = %d, want Success and one update", status, updates)
 			}
@@ -1530,7 +1542,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			wantActivate: false,
 		},
 		{
-			name: "Updating an external job fails",
+			name:         "Updating an external job fails",
+			wantActivate: true,
 			fields: fields{
 				Client: kubefake.NewFakeClient(
 					pod.DeepCopy(),
@@ -1582,7 +1595,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
 			want:  nil,
-			want1: fwk.NewStatus(fwk.Error, ErrorPodUpdateFailed.Error()),
+			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
 			name: "Updating an external job races with Slurm allocation",
@@ -1605,9 +1618,9 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
 			want:  nil,
-			want1: fwk.NewStatus(fwk.Unschedulable, "allocation changed while updating eligibility"),
+			want1: fwk.NewStatus(fwk.Success),
 
-			wantActivate: false,
+			wantActivate: true,
 		},
 		{
 			name: "Updating an external job races but Slurm has no allocated nodes",
@@ -1630,8 +1643,8 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 				}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)),
 			},
 			want:         nil,
-			want1:        fwk.NewStatus(fwk.Unschedulable, "allocation changed while updating eligibility"),
-			wantActivate: false,
+			want1:        fwk.NewStatus(fwk.Success),
+			wantActivate: true,
 		},
 		{
 			name: "Non-pending external job with no nodes skips update",
@@ -1692,13 +1705,16 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			activator.mu.Lock()
 			activator.pods = nil
+			activator.mu.Unlock()
 			sb := &SlurmBridge{
 				Client:        tt.fields.Client,
 				schedulerName: tt.fields.schedulerName,
 				slurmControl:  tt.fields.slurmControl,
 				handle:        tt.fields.handle,
 				draRegistry:   dra.DefaultRegistry(),
+				releaseCtx:    t.Context(),
 			}
 			sb.kubeNodeIndex = testKubeNodeIndex(t, sb.Client)
 			s := &stateData{}
@@ -1706,6 +1722,7 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			tt.args.state.Write(stateKey, s)
 			original := tt.args.pod.DeepCopy()
 			got, got1 := sb.PostFilter(tt.args.ctx, tt.args.state, tt.args.pod, tt.args.m)
+			sb.releases.Wait()
 			if !apiequality.Semantic.DeepEqual(tt.args.pod, original) {
 				t.Fatal("PostFilter mutated the framework pod")
 			}
@@ -1718,7 +1735,14 @@ func TestSlurmBridge_PostFilter(t *testing.T) {
 			if strings.Join(got1.Reasons(), "") != strings.Join(tt.want1.Reasons(), "") {
 				t.Errorf("SlurmBridge.PostFilter() got1.Reasons() = %v, want %v", got1.Reasons(), tt.want1.Reasons())
 			}
-			if gotActivate := len(activator.pods) > 0; gotActivate != tt.wantActivate {
+			// A failed hold release reactivates the pod from a timer.
+			if tt.wantActivate {
+				deadline := time.Now().Add(5 * time.Second)
+				for !activator.activated() && time.Now().Before(deadline) {
+					time.Sleep(10 * time.Millisecond)
+				}
+			}
+			if gotActivate := activator.activated(); gotActivate != tt.wantActivate {
 				t.Errorf("SlurmBridge.PostFilter() activated pod = %v, want %v", gotActivate, tt.wantActivate)
 			}
 			if tt.wantPodNode != "" {
@@ -2336,6 +2360,7 @@ func TestMissingAllocatedNodeRecomputesFeasibleNodes(t *testing.T) {
 	_, status = sb.PostFilter(ctx, state, fresh, framework.NewNodeToStatus(map[string]*fwk.Status{
 		"node2": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 	}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)))
+	sb.releases.Wait()
 	if !status.IsSuccess() {
 		t.Fatalf("retry PostFilter() = %v", status)
 	}

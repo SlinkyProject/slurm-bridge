@@ -299,6 +299,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 			if _, status := sb.PostFilter(ctx, state, pending, m); tt.wantSubmit && !status.IsSuccess() {
 				t.Fatalf("PostFilter: %v", status)
 			}
+			sb.releases.Wait()
 			wantCreates := 0
 
 			if creates != wantCreates {
@@ -321,6 +322,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				if _, status := sb.PostFilter(ctx, state, pending, m); !status.IsSuccess() {
 					t.Fatalf("pending update: %v", status)
 				}
+				sb.releases.Wait()
 				if creates != 0 || updates != 1 {
 					t.Errorf("want no submissions and one cached pending update, got %d/%d", creates, updates)
 				}
