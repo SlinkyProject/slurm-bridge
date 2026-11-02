@@ -45,40 +45,26 @@ Kubernetes: `>= 1.34.0-0`
 | admission.tls.caBundle | string | `""` | Base64 encoded PEM CA bundle that validates the serving certificate, written into both webhook configurations. |
 | admission.tls.existingSecret | string | `""` | Name of an existing `kubernetes.io/tls` Secret holding the webhook serving certificate. Requires `certManager.enabled` to be false. |
 | admission.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
-| controllers.affinity | object | `{}` | Set affinity for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity |
-| controllers.image | object | `{"pullPolicy":"IfNotPresent","repository":"ghcr.io/slinkyproject/slurm-bridge-controllers","tag":""}` | The image to use, `${repository}:${tag}`. Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names |
-| controllers.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| controllers.leaderElect | bool | `false` | Enables leader election. |
-| controllers.nodeSelector | map[string]string | `{}` | Node label selector for pod assignment. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector |
-| controllers.pdb | object | `{"enabled":false,"maxUnavailable":null,"minAvailable":1}` | PodDisruptionBudget for the controllers deployment |
-| controllers.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicas` is greater than 1, since a PDB over a single replica blocks node drains. |
-| controllers.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
-| controllers.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
-| controllers.podWorkers | int | `nil` | Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility. |
-| controllers.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
-| controllers.registrationWorkers | int | `nil` | Max concurrent allocation lifecycle workers. Unset keeps the default (10). |
-| controllers.replicas | int | `1` | Set the number of replicas to deploy. |
-| controllers.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
-| controllers.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
-| controllers.verbosity | integer | `nil` | Set the verbosity level of the controllers. |
 | fullnameOverride | string | `""` | Overrides the full name of the release. |
 | nameOverride | string | `""` | Overrides the name of the release. |
 | namespaceOverride | string | `""` | Overrides the namespace of the release. |
 | scheduler.affinity | object | `{}` | Set affinity for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity |
+| scheduler.controllers | list | `["node","registration"]` | Controllers to enable: node, registration, or [] to disable both. |
 | scheduler.featureGates | object | `{"CompositePodGroup":true,"DRAExtendedResource":true,"DynamicResourceAllocation":true,"GenericWorkload":true,"SchedulerPopFromBackoffQ":false,"TopologyAwareWorkloadScheduling":true}` | Scheduler feature gates. GenericWorkload enables native group scheduling and controller registration by default, requiring the built-in Workload and PodGroup APIs on Kubernetes 1.36 or newer. Automatically disabled on Kubernetes 1.35. CompositePodGroup and TopologyAwareWorkloadScheduling require Kubernetes 1.37 and are only enabled when GenericWorkload is enabled. |
 | scheduler.image | object | `{"pullPolicy":"IfNotPresent","repository":"ghcr.io/slinkyproject/slurm-bridge-scheduler","tag":""}` | The image to use, `${repository}:${tag}`. Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names |
 | scheduler.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
-| scheduler.leaderElect | bool | `false` | Enables leader election. |
 | scheduler.nodeSelector | map[string]string | `{}` | Node label selector for pod assignment. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector |
 | scheduler.pdb | object | `{"enabled":false,"maxUnavailable":null,"minAvailable":1}` | PodDisruptionBudget for the scheduler deployment |
 | scheduler.pdb.enabled | bool | `false` | Enable PodDisruptionBudget. Only rendered when `replicaCount` is greater than 1, since a PDB over a single replica blocks node drains. |
 | scheduler.pdb.maxUnavailable | string | `nil` | Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`. |
 | scheduler.pdb.minAvailable | int | `1` | Minimum pods that must remain available after eviction (int or quoted percent). |
+| scheduler.podWorkers | int | `nil` | Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility. |
 | scheduler.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
+| scheduler.registrationWorkers | int | `nil` | Max concurrent allocation lifecycle workers. Unset keeps the default (10). |
 | scheduler.replicaCount | int | `1` | Set the number of replicas to deploy. |
 | scheduler.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
 | scheduler.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
-| scheduler.verbosity | integer | `nil` | Set the verbosity level of the scheduler. |
+| scheduler.verbosity | string | `nil` | Set the scheduler log level (debug, info, error, or an integer). |
 | schedulerConfig.clientBurst | integer | `nil` | Set the scheduler plugin's own Kubernetes client Burst. Defaults to kube-scheduler's own client Burst (100) when unset. |
 | schedulerConfig.clientQPS | float | `nil` | Set the scheduler plugin's own Kubernetes client QPS. Defaults to kube-scheduler's own client QPS (50) when unset. |
 | schedulerConfig.mcsLabel | string | `"kubernetes"` | Set the Slurm MCS Label to use for external jobs. Ref: https://slurm.schedmd.com/sbatch.html#OPT_mcs-label |

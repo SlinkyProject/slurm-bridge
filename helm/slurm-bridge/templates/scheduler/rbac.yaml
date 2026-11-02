@@ -35,19 +35,6 @@ metadata:
 rules:
 - nonResourceURLs:
   - /metrics
+  - /metrics/scheduler
   verbs:
   - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: {{ include "slurm-bridge.scheduler.fullname" . }}::extension-apiserver-authentication-reader
-  namespace: kube-system
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: extension-apiserver-authentication-reader
-subjects:
-- kind: ServiceAccount
-  name: {{ include "slurm-bridge.scheduler.name" . }}
-  namespace: {{ include "slurm-bridge.namespace" . }}

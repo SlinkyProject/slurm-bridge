@@ -25,14 +25,12 @@ manifests should match snapshot:
       scheduler-config.yaml: |
         apiVersion: kubescheduler.config.k8s.io/v1
         kind: KubeSchedulerConfiguration
+        leaderElection:
+          resourceNamespace: test-namespace
         # Slurm needs all eligible partition nodes before allocation. With scoring
         # disabled, Kubernetes overrides this target to one feasible node; full scans
         # still depend on SlurmBridge.Filter rejecting every node until allocation.
         percentageOfNodesToScore: 100
-        leaderElection:
-          leaderElect: false
-          resourceNamespace: test-namespace
-          resourceName: slurm-bridge-scheduler
         profiles:
         - schedulerName: slurm-bridge-scheduler
           plugins:
@@ -102,7 +100,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 4c66f3f82b31e46a78b5d7b4fa22876f0395227f90b29ded4260606755a543e4
-            checksum/scheduler-config: bd91a7073173e14e3e8aaa6ae05608becb86cbea0f8a542def92ec75e73b337e
+            checksum/scheduler-config: db46a9b51e6e6a2698854d50e29c0e3aa011b5032dcefa0a811bcbbbfe7decf5
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release
@@ -113,8 +111,12 @@ manifests should match snapshot:
         spec:
           containers:
             - args:
-                - --config=/etc/kubernetes/scheduler-config.yaml
-                - --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
+                - --scheduler-config=/etc/kubernetes/scheduler-config.yaml
+                - --scheduler-feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
+                - --leader-elect=true
+                - --metrics-secure=true
+                - --controllers=node,registration
+                - --zap-log-level=info
               env:
                 - name: SLURM_JWT_FILE
                   value: /var/run/secrets/slurm/auth-token
@@ -123,15 +125,13 @@ manifests should match snapshot:
               livenessProbe:
                 httpGet:
                   path: /healthz
-                  port: 10259
-                  scheme: HTTPS
+                  port: 8081
                 initialDelaySeconds: 15
               name: scheduler
               readinessProbe:
                 httpGet:
-                  path: /healthz
-                  port: 10259
-                  scheme: HTTPS
+                  path: /readyz
+                  port: 8081
               securityContext:
                 privileged: false
               volumeMounts:
@@ -177,11 +177,26 @@ manifests should match snapshot:
           - ""
         resources:
           - namespaces
-          - nodes
         verbs:
           - get
           - list
           - watch
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - get
+          - list
+          - patch
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - nodes/status
+          - pods/status
+        verbs:
+          - patch
       - apiGroups:
           - ""
         resources:
@@ -197,6 +212,7 @@ manifests should match snapshot:
         resources:
           - pods
         verbs:
+          - delete
           - get
           - list
           - patch
@@ -211,9 +227,9 @@ manifests should match snapshot:
           - ""
         resources:
           - pods/finalizers
-          - pods/status
         verbs:
           - patch
+          - update
       - apiGroups:
           - ""
           - events.k8s.io
@@ -226,6 +242,8 @@ manifests should match snapshot:
       - apiGroups:
           - apps
         resources:
+          - daemonsets
+          - deployments
           - replicasets
           - statefulsets
         verbs:
@@ -250,6 +268,8 @@ manifests should match snapshot:
           - jobs
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - coordination.k8s.io
         resources:
@@ -273,18 +293,25 @@ manifests should match snapshot:
           - jobsets
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - leaderworkerset.x-k8s.io
         resources:
           - leaderworkersets
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - ray.io
         resources:
           - rayclusters
+          - rayjobs
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - resource.k8s.io
         resources:
@@ -317,6 +344,7 @@ manifests should match snapshot:
         resources:
           - compositepodgroups
           - podgroups
+          - workloads
         verbs:
           - get
           - list
@@ -330,17 +358,13 @@ manifests should match snapshot:
           - patch
           - update
       - apiGroups:
-          - scheduling.k8s.io
-        resources:
-          - workloads
-        verbs:
-          - get
-      - apiGroups:
           - scheduling.x-k8s.io
         resources:
           - podgroups
         verbs:
           - get
+          - list
+          - watch
       - apiGroups:
           - storage.k8s.io
         resources:
@@ -387,23 +411,10 @@ manifests should match snapshot:
     rules:
       - nonResourceURLs:
           - /metrics
+          - /metrics/scheduler
         verbs:
           - get
   7: |
-    apiVersion: rbac.authorization.k8s.io/v1
-    kind: RoleBinding
-    metadata:
-      name: test-release-slurm-bridge-scheduler::extension-apiserver-authentication-reader
-      namespace: kube-system
-    roleRef:
-      apiGroup: rbac.authorization.k8s.io
-      kind: Role
-      name: extension-apiserver-authentication-reader
-    subjects:
-      - kind: ServiceAccount
-        name: slurm-bridge-scheduler
-        namespace: test-namespace
-  8: |
     apiVersion: v1
     kind: Service
     metadata:
@@ -418,15 +429,19 @@ manifests should match snapshot:
       namespace: test-namespace
     spec:
       ports:
-        - name: https-metrics
-          port: 10259
+        - name: metrics
+          port: 8080
           protocol: TCP
-          targetPort: 10259
+          targetPort: 8080
+        - name: health
+          port: 8081
+          protocol: TCP
+          targetPort: 8081
       selector:
         app.kubernetes.io/instance: test-release
         app.kubernetes.io/name: slurm-bridge-scheduler
       type: ClusterIP
-  9: |
+  8: |
     apiVersion: v1
     kind: ServiceAccount
     metadata:

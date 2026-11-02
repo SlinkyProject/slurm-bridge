@@ -10,11 +10,45 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+func TestUpgradeDeploymentImages(t *testing.T) {
+	for _, components := range [][]string{
+		{"scheduler", "controllers", "admission"},
+		{"scheduler", "admission"},
+	} {
+		t.Run(strings.Join(components, ","), func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			require.NoError(t, appsv1.AddToScheme(scheme))
+			var objects []client.Object
+			want := make(map[string]string)
+			for _, component := range components {
+				image := "slurm-bridge-" + component + ":test"
+				want[component] = image
+				objects = append(objects, &appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{Name: "slurm-bridge-" + component, Namespace: slurmNamespace, Generation: 1},
+					Spec: appsv1.DeploymentSpec{
+						Replicas: ptr.To(int32(1)),
+						Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: component, Image: image}}}},
+					},
+					Status: appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1},
+				})
+			}
+			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+			require.Equal(t, want, upgradeDeploymentImages(t.Context(), t, cl, components...))
+		})
+	}
+}
 
 func TestE2ESuiteSelection(t *testing.T) {
 	for _, tc := range []struct {

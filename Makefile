@@ -357,13 +357,11 @@ BRIDGE_HELM_FILES ?= $(BRIDGE_CHART_DIR)/files
 
 .PHONY: manifests
 manifests: controller-gen yq-bin ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=scheduler-role paths=./cmd/scheduler/... paths=./internal/scheduler/... output:rbac:dir=config/rbac/scheduler
-	$(CONTROLLER_GEN) rbac:roleName=manager-role paths=./cmd/controllers/... paths=./internal/controller/... output:rbac:dir=config/rbac/manager
+	$(CONTROLLER_GEN) rbac:roleName=scheduler-role paths=./cmd/scheduler/... paths=./internal/controller/... paths=./internal/scheduler/... output:rbac:dir=config/rbac/scheduler
 	$(CONTROLLER_GEN) rbac:roleName=webhook-role webhook paths=./cmd/admission/... paths=./internal/admission/... output:rbac:dir=config/rbac/webhook output:webhook:dir=./config/webhook
 
 	mkdir -p $(BRIDGE_HELM_FILES)
 	$(YQ) '{"rules": .rules}' config/rbac/scheduler/role.yaml > $(BRIDGE_HELM_FILES)/scheduler_rbac_rules.yaml
-	$(YQ) '{"rules": .rules}' config/rbac/manager/role.yaml > $(BRIDGE_HELM_FILES)/controllers_rbac_rules.yaml
 	$(YQ) '{"rules": .rules}' config/rbac/webhook/role.yaml > $(BRIDGE_HELM_FILES)/admission_rbac_rules.yaml
 
 .PHONY: generate-docs
