@@ -9,6 +9,21 @@ Create a development cluster and deploy the complete bridge stack:
 make kind-start
 ```
 
+Kind 0.33.0 is required. The script selects a digest-pinned Kubernetes 1.35 node
+image and the matching Kind configuration, independently of Kind's default
+image. Inspect the selected image without creating a cluster:
+
+```sh
+make kind-image
+```
+
+`KUBERNETES_VERSION` accepts a minor selector such as `v1.35` or a patch
+selector such as `v1.35.0`; both select the pinned image for that minor. Use
+`KIND_NODE_IMAGE` to select a specific image and `KIND_CONFIG` (or `--config`)
+to override the configuration. Other Kubernetes minors require both overrides.
+Image selection only affects newly created clusters; use a new cluster name or
+`--recreate` to replace an existing cluster (which deletes its workloads).
+
 Use `make deploy` for a one-time rebuild. Delete the cluster with:
 
 ```sh
