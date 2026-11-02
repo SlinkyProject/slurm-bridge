@@ -352,11 +352,15 @@ with an additional feature: a bare count such as `rack1*2`, and an OR outside
 parentheses mixed with parentheses or brackets such as `(a&b)|(c&d)`. Rewrite
 these with a single level of grouping, for example `[a&b|c&d]`.
 
-Annotations can update a Slurm job while it is pending. Slurm validates each
-change. If it rejects an update, the previous Slurm job value remains in effect.
-The `account` and `exclusive` annotations apply only at submission, so later
-edits to them do not change the Slurm job. Once Slurm allocates the job, treat
-its annotations and Pod membership as fixed.
+The `user-id`, `group-id`, `account`, and `exclusive` annotations apply only at
+submission. Changing them does not modify an existing Slurm job; submit a new
+workload to use different values. Bridge preserves the submitted ownership and
+isolation when updating the job through its privileged Slurm identity.
+
+Other annotations can update a Slurm job while it is pending. Slurm validates
+each change, but a failed update can still have partially applied changes.
+Removing an annotation does not necessarily reset the stored Slurm value. Once
+Slurm allocates the job, treat its annotations and Pod membership as fixed.
 
 ### Scheduler-managed Pod metadata
 
