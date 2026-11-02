@@ -5,6 +5,7 @@ package slurmcontrol
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -35,7 +36,25 @@ func testNodeNUMAResourceSlice(nodeName string) *resourcev1.ResourceSlice {
 }
 
 func TestNUMARegistrationBindsGRESToCores(t *testing.T) {
-	info := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*testNodeNUMAResourceSlice("worker")})
+	for _, subNUMA := range []bool{false, true} {
+		t.Run(fmt.Sprintf("subNUMA=%v", subNUMA), func(t *testing.T) {
+			testNUMARegistrationBindsGRESToCores(t, subNUMA)
+		})
+	}
+}
+
+func testNUMARegistrationBindsGRESToCores(t *testing.T, subNUMA bool) {
+	slice := testNodeNUMAResourceSlice("worker")
+	if subNUMA {
+		for i := range slice.Spec.Devices {
+			slice.Spec.Devices[i].Attributes[nodeinfo.DraDriverCpu_SocketID] = resourcev1.DeviceAttribute{IntValue: ptr.To[int64](0)}
+		}
+	}
+	info := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*slice})
+	geometry, err := desiredNodeCPUConfig(&corev1.Node{}, info)
+	if err != nil || geometry.sockets != 2 || geometry.coresPerSocket != 2 || geometry.threadsPerCore != 1 {
+		t.Fatalf("CPU registration = %+v, %v; want 2/2/1", geometry, err)
+	}
 	gpu0 := structured.MakeDeviceID("gpu.example.com", "pool-a", "gpu-0")
 	gpu1 := structured.MakeDeviceID("gpu.example.com", "pool-a", "gpu-1")
 	inventory := []dra.GRESInventory{{
