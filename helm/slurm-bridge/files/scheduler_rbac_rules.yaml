@@ -3,11 +3,26 @@ rules:
       - ""
     resources:
       - namespaces
-      - nodes
     verbs:
       - get
       - list
       - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/status
+      - pods/status
+    verbs:
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -23,6 +38,7 @@ rules:
     resources:
       - pods
     verbs:
+      - delete
       - get
       - list
       - patch
@@ -37,9 +53,9 @@ rules:
       - ""
     resources:
       - pods/finalizers
-      - pods/status
     verbs:
       - patch
+      - update
   - apiGroups:
       - ""
       - events.k8s.io
@@ -52,6 +68,8 @@ rules:
   - apiGroups:
       - apps
     resources:
+      - daemonsets
+      - deployments
       - replicasets
       - statefulsets
     verbs:
@@ -76,6 +94,8 @@ rules:
       - jobs
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -99,18 +119,25 @@ rules:
       - jobsets
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - leaderworkerset.x-k8s.io
     resources:
       - leaderworkersets
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - ray.io
     resources:
       - rayclusters
+      - rayjobs
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - resource.k8s.io
     resources:
@@ -143,6 +170,7 @@ rules:
     resources:
       - compositepodgroups
       - podgroups
+      - workloads
     verbs:
       - get
       - list
@@ -156,17 +184,13 @@ rules:
       - patch
       - update
   - apiGroups:
-      - scheduling.k8s.io
-    resources:
-      - workloads
-    verbs:
-      - get
-  - apiGroups:
       - scheduling.x-k8s.io
     resources:
       - podgroups
     verbs:
       - get
+      - list
+      - watch
   - apiGroups:
       - storage.k8s.io
     resources:

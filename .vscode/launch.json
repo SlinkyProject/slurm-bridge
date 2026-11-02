@@ -2,22 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Launch Controllers",
-      "type": "go",
-      "request": "launch",
-      "mode": "auto",
-      "program": "${workspaceRoot}/cmd/controllers/main.go",
-      "args": [
-        "--zap-log-level=5",
-        "--config", "/tmp/config.yaml.debug"
-      ],
-      "preLaunchTask": "Setup Controllers",
-      "envFile": "/tmp/slurm-bridge.env",
-      "env": {
-        "SLURM_JWT_FILE": "/tmp/slurm-bridge.env"
-      }
-    },
-    {
       "name": "Launch Admission",
       "type": "go",
       "request": "launch",
@@ -35,12 +19,13 @@
       "type": "go",
       "request": "launch",
       "mode": "auto",
-      "program": "${workspaceRoot}/cmd/scheduler/main.go",
+      "program": "${workspaceRoot}/cmd/scheduler",
       "args": [
-        "--v=5",
-        "--feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false",
-        "--config", "/tmp/scheduler-config.yaml.debug",
-        "--slurm-bridge-config", "/tmp/config.yaml.debug"
+        "--zap-log-level=5",
+        "--leader-elect=false",
+        "--scheduler-feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,SchedulerPopFromBackoffQ=false",
+        "--scheduler-config", "/tmp/scheduler-config.yaml.debug",
+        "--config", "/tmp/config.yaml.debug"
       ],
       "preLaunchTask": "Setup Scheduler",
       "envFile": "/tmp/slurm-bridge.env",
@@ -55,17 +40,6 @@
       "mode": "remote",
       "host": "127.0.0.1",
       "port": 40000,
-      "substitutePath": [
-        { "from": "${workspaceFolder}", "to": "/workspace" }
-      ]
-    },
-    {
-      "name": "Debug Controllers",
-      "type": "go",
-      "request": "attach",
-      "mode": "remote",
-      "host": "127.0.0.1",
-      "port": 40001,
       "substitutePath": [
         { "from": "${workspaceFolder}", "to": "/workspace" }
       ]
