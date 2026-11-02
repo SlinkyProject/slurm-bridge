@@ -15,7 +15,7 @@ SLURM_NODE_MODE_HYBRID="hybrid"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
 
-MIN_KIND_VERSION="0.32.0"
+KIND_VERSION="0.33.0"
 MIN_SKAFFOLD_VERSION="2.18.0"
 
 function tool::version_ge() {
@@ -40,22 +40,27 @@ function tool::version() {
 	esac
 }
 
-function tool::require_min_version() {
+function tool::require_version() {
 	local name="$1"
-	local min_version="$2"
+	local required_version="$2"
 	local url="$3"
+	local match="${4:-minimum}"
 	if ! command -v "$name" >/dev/null 2>&1; then
 		echo "'$name' is required: $url" >&2
 		return 1
 	fi
 	local have
-	have="$(tool::version "$name")"
-	if [ -z "$have" ]; then
+	if ! have="$(tool::version "$name")" || [ -z "$have" ]; then
 		echo "Could not determine '$name' version." >&2
 		return 1
 	fi
-	if ! tool::version_ge "$have" "$min_version"; then
-		echo "'$name' $have is too old (need >= $min_version): $url" >&2
+	if [ "$match" = exact ]; then
+		if [ "$have" != "$required_version" ]; then
+			echo "'$name' $have is unsupported (need exactly $required_version): $url" >&2
+			return 1
+		fi
+	elif ! tool::version_ge "$have" "$required_version"; then
+		echo "'$name' $have is too old (need >= $required_version): $url" >&2
 		return 1
 	fi
 }
@@ -64,7 +69,6 @@ function tool::require_min_version() {
 # and have needed installed base software
 
 function sys::check() {
-	local require_kind="${1:-true}"
 	local fail=false
 	if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1; then
 		echo "'docker' or 'podman' is required:"
@@ -80,10 +84,7 @@ function sys::check() {
 		echo "'helm' is required: https://helm.sh/"
 		fail=true
 	fi
-	if $require_kind && ! tool::require_min_version kind "$MIN_KIND_VERSION" "https://kind.sigs.k8s.io/"; then
-		fail=true
-	fi
-	if ! tool::require_min_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
+	if ! tool::require_version skaffold "$MIN_SKAFFOLD_VERSION" "https://skaffold.dev/"; then
 		fail=true
 	fi
 	if ! command -v kubectl >/dev/null 2>&1; then
@@ -123,6 +124,23 @@ function sys::check() {
 	fi
 }
 
+function kind::defaults() {
+	export KUBERNETES_VERSION="${KUBERNETES_VERSION:-v1.35}"
+	# CI node image pins for Kind v0.33.0. Update these with KIND_VERSION.
+	case "$KUBERNETES_VERSION" in
+	v1.35 | v1.35.*)
+		KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0}"
+		OPT_CONFIG="${OPT_CONFIG:-$SCRIPT_DIR/kind.yaml}"
+		;;
+	*)
+		if [ -z "${KIND_NODE_IMAGE:-}" ] || [ -z "$OPT_CONFIG" ]; then
+			echo "Unsupported KUBERNETES_VERSION '$KUBERNETES_VERSION'; select v1.35, or set KIND_NODE_IMAGE and KIND_CONFIG." >&2
+			return 1
+		fi
+		;;
+	esac
+}
+
 function kind::start() {
 	sys::check
 	local cluster_name="${1:-"kind"}"
@@ -130,7 +148,7 @@ function kind::start() {
 	local clusters
 	clusters="$(kind get clusters)" || return $?
 	if ! grep -Fxq -- "$cluster_name" <<<"$clusters"; then
-		kind create cluster --name "$cluster_name" --config "$kind_config"
+		kind create cluster --name "$cluster_name" --config "$kind_config" --image "$KIND_NODE_IMAGE"
 	fi
 	kubectl config use-context kind-"$cluster_name"
 	slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
@@ -144,7 +162,7 @@ function kind::delete() {
 }
 
 function cluster::use_existing() {
-	sys::check false
+	sys::check
 	echo "[cluster] Using current kubectl context: $(kubectl config current-context)"
 	if [ -z "$OPT_REGISTRY" ]; then
 		echo "[cluster] WARNING: no --registry or SKAFFOLD_DEFAULT_REPO was provided; local images will only be available if Skaffold can load them into a kind context." >&2
@@ -553,10 +571,14 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--dra-example-driver] [--dra-driver-cpu]
 	        [--slurm-node-mode=MODE]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
-	        [-h|--help] [--debug] [KIND_CLUSTER_NAME]
+	        [--print-image] [-h|--help] [--debug] [KIND_CLUSTER_NAME]
 
 KIND OPTIONS:
 	--config=PATH       Use the specified kind config when creating.
+	                    Can also be set with KIND_CONFIG.
+	--print-image       Print the selected node image and exit without creating a cluster.
+	                    KUBERNETES_VERSION selects v1.35 (default).
+	                    Set KIND_NODE_IMAGE to override the node image for all nodes.
 	--existing-cluster  Use the current kubectl context instead of creating or switching to a kind cluster.
 	--registry=REPO     Push locally built images to REPO with Skaffold before deploying.
 	                    Can also be set with SKAFFOLD_DEFAULT_REPO.
@@ -604,6 +626,15 @@ function main() {
 		set -x
 	fi
 	main::validate_options
+	if $OPT_PRINT_IMAGE; then
+		kind::defaults
+		printf '%s\n' "$KIND_NODE_IMAGE"
+		return
+	fi
+	if ! $OPT_EXISTING_CLUSTER && ! $OPT_DELETE; then
+		tool::require_version kind "$KIND_VERSION" "https://kind.sigs.k8s.io/" exact
+		kind::defaults
+	fi
 	local cluster_name="${1:-"kind"}"
 	if $OPT_DELETE || $OPT_RECREATE; then
 		kind::delete "$cluster_name"
@@ -633,7 +664,8 @@ function main() {
 
 OPT_DEBUG=false
 OPT_RECREATE=false
-OPT_CONFIG="$SCRIPT_DIR/kind.yaml"
+OPT_CONFIG="${KIND_CONFIG:-}"
+OPT_PRINT_IMAGE=false
 OPT_DELETE=false
 OPT_EXISTING_CLUSTER=false
 OPT_CORE=false
@@ -647,7 +679,7 @@ OPT_SLURM_OPERATOR_REF="${SLURM_OPERATOR_REF:-release-1.1}"
 OPT_SLURM_NODE_MODE="$SLURM_NODE_MODE_EXTERNAL"
 
 SHORT="+h"
-LONG="all,recreate,config:,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
+LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -663,6 +695,10 @@ while :; do
 	--config)
 		OPT_CONFIG="$2"
 		shift 2
+		;;
+	--print-image)
+		OPT_PRINT_IMAGE=true
+		shift
 		;;
 	--delete)
 		OPT_DELETE=true
