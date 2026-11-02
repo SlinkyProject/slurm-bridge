@@ -671,3 +671,49 @@ func TestLifecycleWaitsForSlurmCompleting(t *testing.T) {
 		t.Fatalf("waiting=%t error=%v", waiting, err)
 	}
 }
+
+func TestLifecycleReleaseReadsGroupMembersFromIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		liveOnly    *corev1.Pod // a running group member the cache has not seen
+		wantRelease bool
+	}{
+		{name: "finished members", wantRelease: true},
+		{name: "published member missing from cache", liveOnly: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{wellknown.LabelExternalJobId: "100"}}}},
+		{name: "unpublished member missing from cache", liveOnly: &corev1.Pod{}, wantRelease: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			f.r.Client = fake.NewClientBuilder().WithScheme(f.kube.Scheme()).WithObjects(f.group, f.pod).
+				WithIndex(&corev1.Pod{}, podGroupMemberIndex, nativePodGroupKeys).WithIndex(&corev1.Pod{}, publishedJobIndex, publishedJobKeys).Build()
+			f.r.membersIndexed = true
+			if tc.liveOnly != nil {
+				pod := tc.liveOnly
+				pod.Namespace, pod.Name, pod.UID = "ns", "late-running", "late-running-uid"
+				pod.Spec = corev1.PodSpec{SchedulerName: schedulerName, SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To("gang")}}
+				pod.Status.Phase = corev1.PodRunning
+				if err := f.kube.Create(t.Context(), pod); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.r.apiReader = kubeinterceptor.NewClient(f.kube.(client.WithWatch), kubeinterceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*corev1.PodList); ok && (&client.ListOptions{}).ApplyOptions(opts).LabelSelector == nil {
+					t.Fatal("release listed every Pod in the namespace live")
+				}
+				return c.List(ctx, list, opts...)
+			}})
+
+			released, err := f.r.releaseComponent(t.Context(), f.jobs[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wantCancellations []int32
+			if tc.wantRelease {
+				wantCancellations = []int32{100}
+			}
+			if released != tc.wantRelease || !slices.Equal(f.cancellations, wantCancellations) {
+				t.Fatalf("released=%t, cancellations=%v; want %t", released, f.cancellations, tc.wantRelease)
+			}
+		})
+	}
+}
