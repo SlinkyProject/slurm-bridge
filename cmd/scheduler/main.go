@@ -126,7 +126,7 @@ func main() {
 	bindFlags(&flags, flag.CommandLine)
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	klog.SetLogger(ctrl.Log.WithName("scheduler"))
+	klog.SetLoggerWithOptions(ctrl.Log.WithName("scheduler"), klog.ContextualLogger(true))
 	ctx := ctrl.SetupSignalHandler()
 	enabled, err := parseControllers(flags.controllers)
 	if err != nil {
