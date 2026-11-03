@@ -87,6 +87,9 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: kubeconfig
+          configMap:
+            name: {{ $name }}-kubeconfig
       {{- with .Values.upgradeHook.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}
