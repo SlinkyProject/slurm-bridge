@@ -784,18 +784,16 @@ function dranet::install() {
 	local version="v1.5.0"
 	local chart="oci://registry.k8s.io/networking/charts/dranet"
 	local config_dir="$SCRIPT_DIR/dranet"
-	local feature_gate="--feature-gates=DRAListTypeAttributes=true"
+	local feature_gates="PersistentResourceSliceAttributes=true"
+	if dra::list_type_attributes_enabled; then
+		feature_gates+=",DRAListTypeAttributes=true"
+	fi
 
 	helm upgrade --install dranet "$chart" \
 		--version "$version" \
 		--namespace kube-system \
-		--values "$config_dir/values.yaml"
-	# The chart does not expose DRANET feature gates.
-	if dra::list_type_attributes_enabled &&
-		[[ "$(kubectl -n kube-system get daemonset dranet -o jsonpath='{.spec.template.spec.containers[0].args}')" != *"$feature_gate"* ]]; then
-		kubectl -n kube-system patch daemonset dranet --type=json \
-			-p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"$feature_gate\"}]"
-	fi
+		--values "$config_dir/values.yaml" \
+		--set-literal "args.featureGates=$feature_gates"
 	if $MOCK_NVML; then
 		dra::patch_daemonset_once kube-system dranet mock-pci-devices "$config_dir/mock-numa-patch.yaml"
 	fi
