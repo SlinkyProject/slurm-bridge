@@ -242,7 +242,7 @@ func appendIndexedGRESRequests(requests []resourcev1.DeviceRequest, allocations 
 	return requests, allocations
 }
 
-func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation deviceProfileRequest, requestName string) (dra.DeviceProfile, error) {
+func (sb *SlurmBridge) verifyDeviceProfileRequest(claim *resourcev1.ResourceClaim, allocation deviceProfileRequest, requestName string, deviceClasses map[string]*resourcev1.DeviceClass) (dra.DeviceProfile, error) {
 	var claimRequest *resourcev1.DeviceRequest
 	for i := range claim.Spec.Devices.Requests {
 		request := &claim.Spec.Devices.Requests[i]
@@ -258,9 +258,9 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 		return dra.DeviceProfile{}, fmt.Errorf("ResourceClaim DeviceProfile request %q has count %d, expected exactly %d", requestName, claimRequest.Exactly.Count, allocation.Count)
 	}
 
-	deviceClass := &resourcev1.DeviceClass{}
-	if err := sb.Get(ctx, client.ObjectKey{Name: allocation.DeviceClassName}, deviceClass); err != nil {
-		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q while binding: %w", allocation.DeviceClassName, err)
+	deviceClass, ok := deviceClasses[allocation.DeviceClassName]
+	if !ok {
+		return dra.DeviceProfile{}, fmt.Errorf("DeviceClass %q was not resolved while binding", allocation.DeviceClassName)
 	}
 	profile, err := sb.registry().MatchDeviceClass(deviceClass)
 	if err != nil {
@@ -272,7 +272,7 @@ func (sb *SlurmBridge) verifyDeviceProfileRequest(ctx context.Context, claim *re
 	return profile, nil
 }
 
-func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *coreBitmapAllocation) error {
+func (sb *SlurmBridge) verifyCoreBitmapRequest(claim *resourcev1.ResourceClaim, allocation *coreBitmapAllocation, deviceClasses map[string]*resourcev1.DeviceClass) error {
 	if allocation.CPU == nil {
 		return fmt.Errorf("missing socket CPU allocation")
 	}
@@ -285,7 +285,7 @@ func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resou
 		if !matches {
 			return fmt.Errorf("CPU socket request %q differs from the applied allocation", request.Name)
 		}
-		profile, err := sb.verifyDeviceProfileRequest(ctx, claim, effectiveRequest, request.Name)
+		profile, err := sb.verifyDeviceProfileRequest(claim, effectiveRequest, request.Name, deviceClasses)
 		if err != nil {
 			return err
 		}
@@ -305,7 +305,7 @@ func (sb *SlurmBridge) verifyCoreBitmapRequest(ctx context.Context, claim *resou
 	return nil
 }
 
-func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *resourcev1.ResourceClaim, allocation *claimAllocation) ([]resourcev1.DeviceRequestAllocationResult, error) {
+func (sb *SlurmBridge) indexedGRESAllocationResults(claim *resourcev1.ResourceClaim, allocation *claimAllocation, deviceClasses map[string]*resourcev1.DeviceClass) ([]resourcev1.DeviceRequestAllocationResult, error) {
 	if len(allocation.IndexedGRESAllocations) == 0 {
 		return nil, nil
 	}
@@ -316,7 +316,7 @@ func (sb *SlurmBridge) indexedGRESAllocationResults(ctx context.Context, claim *
 
 	var results []resourcev1.DeviceRequestAllocationResult
 	for _, profileAllocation := range allocation.IndexedGRESAllocations {
-		profile, err := sb.verifyDeviceProfileRequest(ctx, claim, profileAllocation.deviceProfileRequest, profileAllocation.RequestName)
+		profile, err := sb.verifyDeviceProfileRequest(claim, profileAllocation.deviceProfileRequest, profileAllocation.RequestName, deviceClasses)
 		if err != nil {
 			return nil, err
 		}
