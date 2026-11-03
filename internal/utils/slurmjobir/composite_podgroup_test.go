@@ -627,3 +627,29 @@ func TestPreFilterCompositePodGroupConfirmsLiveQuorum(t *testing.T) {
 		})
 	}
 }
+
+func TestTraverseParentChain(t *testing.T) {
+	groups := map[string]compositePodGroupInfo{
+		"root":  {name: "root"},
+		"mid":   {name: "mid", parentName: "root"},
+		"leaf":  {name: "leaf", parentName: "mid"},
+		"basic": {name: "basic", parentName: "root", schedulingPolicy: schedulingv1beta1.CompositePodGroupSchedulingPolicy{Basic: &schedulingv1beta1.CompositeBasicSchedulingPolicy{}}},
+		"under": {name: "under", parentName: "basic"},
+		"a":     {name: "a", parentName: "b"},
+		"b":     {name: "b", parentName: "a"},
+	}
+	for _, tt := range []struct {
+		parent string
+		want   bool
+	}{
+		{"leaf", true},
+		{"mid", true},
+		{"under", false},
+		{"missing", false},
+		{"a", false},
+	} {
+		if got := traverseParentChain(tt.parent, "root", groups); got != tt.want {
+			t.Errorf("traverseParentChain(%q, root) = %v, want %v", tt.parent, got, tt.want)
+		}
+	}
+}

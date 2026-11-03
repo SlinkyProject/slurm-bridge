@@ -208,6 +208,12 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 		return nil, err
 
 	}
+	// Every PodGroup in the namespace walks its parent chain, so look parents up by name.
+	// TODO: Get parents by namespace/name once the scheduler client reads from the cache.
+	byName := make(map[string]compositePodGroupInfo, len(compositePodGroups))
+	for _, cpg := range compositePodGroups {
+		byName[cpg.name] = cpg
+	}
 
 	slurmJobIR := new(SlurmJobIR)
 
@@ -223,7 +229,7 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 		if pg.Spec.ParentCompositePodGroupName != nil {
 
 			if *pg.Spec.ParentCompositePodGroupName != rootPOM.GetName() {
-				if found := t.traverseParentChain(*pg.Spec.ParentCompositePodGroupName, rootPOM.Name, compositePodGroups, 0); !found {
+				if found := traverseParentChain(*pg.Spec.ParentCompositePodGroupName, rootPOM.Name, byName); !found {
 					continue
 				}
 			}
@@ -254,15 +260,11 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 
 // traverseParentChain follows each CompositePodGroup's parent up until it reaches the root
 // object, then returns the name of that object
-func (t *translator) traverseParentChain(parentName string, targetName string, compositePodGroups []compositePodGroupInfo, depth int) bool {
-	if depth == len(compositePodGroups) {
-		return false
-	}
-	for _, compositePodGroup := range compositePodGroups {
-		if compositePodGroup.name != parentName {
-			continue
-		}
-		if compositePodGroup.schedulingPolicy.Basic != nil {
+func traverseParentChain(parentName string, targetName string, compositePodGroups map[string]compositePodGroupInfo) bool {
+	// A chain longer than the namespace has a cycle.
+	for range len(compositePodGroups) {
+		compositePodGroup, ok := compositePodGroups[parentName]
+		if !ok || compositePodGroup.schedulingPolicy.Basic != nil {
 			return false
 		}
 		if compositePodGroup.parentName == targetName {
@@ -271,7 +273,7 @@ func (t *translator) traverseParentChain(parentName string, targetName string, c
 		if compositePodGroup.parentName == "" {
 			return false
 		}
-		return t.traverseParentChain(compositePodGroup.parentName, targetName, compositePodGroups, depth+1)
+		parentName = compositePodGroup.parentName
 	}
 	return false
 }
