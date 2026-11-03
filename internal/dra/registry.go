@@ -202,9 +202,6 @@ func (r *Registry) MatchDeviceClass(deviceClass *resourcev1.DeviceClass) (Device
 	if deviceClass == nil {
 		return DeviceProfile{}, fmt.Errorf("device class must not be nil")
 	}
-	if len(deviceClass.Spec.Config) != 0 {
-		return DeviceProfile{}, fmt.Errorf("device class %q configuration is not supported", deviceClass.Name)
-	}
 	if len(deviceClass.Spec.Selectors) != 1 {
 		return DeviceProfile{}, fmt.Errorf("device class %q must have exactly one selector", deviceClass.Name)
 	}

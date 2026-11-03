@@ -216,9 +216,17 @@ func (sb *SlurmBridge) bindClaim(
 	if resources == nil || resources.NodeResources == nil {
 		return errors.New("expected claim allocation resources")
 	}
+	deviceClasses, err := sb.deviceClassesForClaim(ctx, claim)
+	if err != nil {
+		return err
+	}
+	configs, err := deviceClassAllocationConfigs(claim, deviceClasses)
+	if err != nil {
+		return err
+	}
 	var devices []resourcev1.DeviceRequestAllocationResult
 	if resources.CoreBitmapAllocation != nil {
-		if err := sb.verifyCoreBitmapRequest(ctx, claim, resources.CoreBitmapAllocation); err != nil {
+		if err := sb.verifyCoreBitmapRequest(claim, resources.CoreBitmapAllocation, deviceClasses); err != nil {
 			return err
 		}
 		devices = append(devices, resources.CoreBitmapAllocation.CPU.Results...)
@@ -228,7 +236,7 @@ func (sb *SlurmBridge) bindClaim(
 		return err
 	}
 	devices = append(devices, legacyDevices...)
-	indexedGRESDevices, err := sb.indexedGRESAllocationResults(ctx, claim, resources)
+	indexedGRESDevices, err := sb.indexedGRESAllocationResults(claim, resources, deviceClasses)
 	if err != nil {
 		return err
 	}
@@ -245,6 +253,7 @@ func (sb *SlurmBridge) bindClaim(
 		},
 		Devices: resourcev1.DeviceAllocationResult{
 			Results: devices,
+			Config:  configs,
 		},
 		NodeSelector: &corev1.NodeSelector{
 			NodeSelectorTerms: []corev1.NodeSelectorTerm{
@@ -277,6 +286,63 @@ func (sb *SlurmBridge) bindClaim(
 	}
 
 	return nil
+}
+
+func (sb *SlurmBridge) deviceClassesForClaim(ctx context.Context, claim *resourcev1.ResourceClaim) (map[string]*resourcev1.DeviceClass, error) {
+	deviceClasses := make(map[string]*resourcev1.DeviceClass)
+	for _, request := range claim.Spec.Devices.Requests {
+		if request.Exactly == nil {
+			return nil, fmt.Errorf("ResourceClaim request %q is not an exact device request", request.Name)
+		}
+		className := request.Exactly.DeviceClassName
+		if _, resolved := deviceClasses[className]; resolved {
+			continue
+		}
+		deviceClass := &resourcev1.DeviceClass{}
+		if err := sb.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
+			return nil, fmt.Errorf("get DeviceClass %q while binding: %w", className, err)
+		}
+		deviceClasses[className] = deviceClass
+	}
+	return deviceClasses, nil
+}
+
+func deviceClassAllocationConfigs(claim *resourcev1.ResourceClaim, deviceClasses map[string]*resourcev1.DeviceClass) ([]resourcev1.DeviceAllocationConfiguration, error) {
+	type configRange struct {
+		start int
+		end   int
+	}
+
+	configRanges := make(map[string]configRange)
+	var configs []resourcev1.DeviceAllocationConfiguration
+	for _, request := range claim.Spec.Devices.Requests {
+		if request.Exactly == nil {
+			return nil, fmt.Errorf("ResourceClaim request %q is not an exact device request", request.Name)
+		}
+		className := request.Exactly.DeviceClassName
+		if existing, added := configRanges[className]; added {
+			for i := existing.start; i < existing.end; i++ {
+				configs[i].Requests = append(configs[i].Requests, request.Name)
+			}
+			continue
+		}
+
+		deviceClass, ok := deviceClasses[className]
+		if !ok {
+			return nil, fmt.Errorf("DeviceClass %q was not resolved while binding", className)
+		}
+		start := len(configs)
+		for i := range deviceClass.Spec.Config {
+			configuration := deviceClass.Spec.Config[i].DeviceConfiguration.DeepCopy()
+			configs = append(configs, resourcev1.DeviceAllocationConfiguration{
+				Source:              resourcev1.AllocationConfigSourceClass,
+				Requests:            []string{request.Name},
+				DeviceConfiguration: *configuration,
+			})
+		}
+		configRanges[className] = configRange{start: start, end: len(configs)}
+	}
+	return configs, nil
 }
 
 func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results []resourcev1.DeviceRequestAllocationResult) error {

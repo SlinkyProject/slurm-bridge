@@ -16,6 +16,7 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
@@ -946,6 +947,14 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 			Selectors: []resourcev1.DeviceSelector{{
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
 			}},
+			Config: []resourcev1.DeviceClassConfiguration{{
+				DeviceConfiguration: resourcev1.DeviceConfiguration{
+					Opaque: &resourcev1.OpaqueDeviceConfiguration{
+						Driver:     "gpu.example.com",
+						Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)},
+					},
+				},
+			}},
 		},
 	}
 	resources := &slurmcontrol.NodeResources{
@@ -990,6 +999,14 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 	}
 	if got := claim.Status.Allocation.Devices.Results; !apiequality.Semantic.DeepEqual(got, wantResults) {
 		t.Fatalf("claim allocation results = %#v, want %#v", got, wantResults)
+	}
+	wantConfigs := []resourcev1.DeviceAllocationConfiguration{{
+		Source:              resourcev1.AllocationConfigSourceClass,
+		Requests:            []string{"gpu"},
+		DeviceConfiguration: *deviceClass.Spec.Config[0].DeviceConfiguration.DeepCopy(),
+	}}
+	if got := claim.Status.Allocation.Devices.Config; !apiequality.Semantic.DeepEqual(got, wantConfigs) {
+		t.Fatalf("claim allocation configs = %#v, want %#v", got, wantConfigs)
 	}
 
 	updatedPod := &corev1.Pod{}
@@ -1525,6 +1542,151 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 			}
 			if tt.wantErr {
 				t.Fatal("patchPodExtendedResourceClaimStatus() succeeded unexpectedly")
+			}
+		})
+	}
+}
+
+func TestDeviceClassAllocationConfigsScopesSharedClass(t *testing.T) {
+	claim := &resourcev1.ResourceClaim{
+		Spec: resourcev1.ResourceClaimSpec{
+			Devices: resourcev1.DeviceClaim{
+				Requests: []resourcev1.DeviceRequest{
+					{Name: "nic", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "sriov"}},
+					{Name: "nic-2", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "sriov"}},
+					{Name: "gpu", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "gpu"}},
+				},
+			},
+		},
+	}
+	sriovConfig := resourcev1.DeviceConfiguration{
+		Opaque: &resourcev1.OpaqueDeviceConfiguration{
+			Driver:     "sriovnetwork.k8snetworkplumbingwg.io",
+			Parameters: runtime.RawExtension{Raw: []byte(`{"kind":"VfConfig"}`)},
+		},
+	}
+	gpuConfig := resourcev1.DeviceConfiguration{
+		Opaque: &resourcev1.OpaqueDeviceConfiguration{
+			Driver:     "gpu.example.com",
+			Parameters: runtime.RawExtension{Raw: []byte(`{"kind":"GpuConfig"}`)},
+		},
+	}
+	deviceClasses := map[string]*resourcev1.DeviceClass{
+		"sriov": {Spec: resourcev1.DeviceClassSpec{Config: []resourcev1.DeviceClassConfiguration{{DeviceConfiguration: sriovConfig}}}},
+		"gpu":   {Spec: resourcev1.DeviceClassSpec{Config: []resourcev1.DeviceClassConfiguration{{DeviceConfiguration: gpuConfig}}}},
+	}
+
+	got, err := deviceClassAllocationConfigs(claim, deviceClasses)
+	if err != nil {
+		t.Fatalf("deviceClassAllocationConfigs() error = %v", err)
+	}
+	want := []resourcev1.DeviceAllocationConfiguration{
+		{
+			Source:              resourcev1.AllocationConfigSourceClass,
+			Requests:            []string{"nic", "nic-2"},
+			DeviceConfiguration: sriovConfig,
+		},
+		{
+			Source:              resourcev1.AllocationConfigSourceClass,
+			Requests:            []string{"gpu"},
+			DeviceConfiguration: gpuConfig,
+		},
+	}
+	if !apiequality.Semantic.DeepEqual(got, want) {
+		t.Fatalf("deviceClassAllocationConfigs() = %#v, want %#v", got, want)
+	}
+
+	deviceClasses["sriov"].Spec.Config[0].Opaque.Parameters.Raw[0] = 'X'
+	if string(got[0].Opaque.Parameters.Raw) != `{"kind":"VfConfig"}` {
+		t.Fatalf("deviceClassAllocationConfigs() did not deep-copy opaque config: %q", got[0].Opaque.Parameters.Raw)
+	}
+}
+
+func TestBindClaimPreservesClassAndClaimConfiguration(t *testing.T) {
+	ctx := context.Background()
+	registry := testutils.DRARegistryWithExampleGPU()
+	profile, _ := registry.LookupByName("gpu.example.com")
+	classConfig := resourcev1.DeviceConfiguration{Opaque: &resourcev1.OpaqueDeviceConfiguration{
+		Driver: "gpu.example.com", Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)},
+	}}
+	claimConfig := resourcev1.DeviceConfiguration{Opaque: &resourcev1.OpaqueDeviceConfiguration{
+		Driver: "gpu.example.com", Parameters: runtime.RawExtension{Raw: []byte(`{"mode":"fast"}`)},
+	}}
+	class := exampleGPUDeviceClass("example-gpus")
+	class.Spec.Config = []resourcev1.DeviceClassConfiguration{{DeviceConfiguration: classConfig}}
+	claim := &resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim", Namespace: "default"},
+		Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
+			Requests: []resourcev1.DeviceRequest{
+				{Name: "gpu-a", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: class.Name, Count: 1}},
+				{Name: "gpu-b", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: class.Name, Count: 1}},
+			},
+			Config: []resourcev1.DeviceClaimConfiguration{{Requests: []string{"gpu-b"}, DeviceConfiguration: claimConfig}},
+		}},
+	}
+	classReads := 0
+	kclient := fake.NewClientBuilder().WithObjects(class, claim).WithStatusSubresource(claim).
+		WithInterceptorFuncs(interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*resourcev1.DeviceClass); ok {
+				classReads++
+				if classReads > 1 {
+					t.Fatal("binding fetched the same DeviceClass more than once")
+				}
+			}
+			return c.Get(ctx, key, obj, opts...)
+		}}).Build()
+	sb := &SlurmBridge{Client: kclient, draRegistry: registry}
+	allocation := &claimAllocation{
+		NodeResources: &slurmcontrol.NodeResources{
+			Node:      "node1",
+			NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":0,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1"]}}}`,
+		},
+		IndexedGRESAllocations: []indexedGRESAllocation{
+			{deviceProfileRequest: deviceProfileRequest{DeviceClassName: class.Name, Profile: profile, Count: 1}, RequestName: "gpu-a", Indexes: []int{0}},
+			{deviceProfileRequest: deviceProfileRequest{DeviceClassName: class.Name, Profile: profile, Count: 1}, RequestName: "gpu-b", Indexes: []int{1}},
+		},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod", UID: "pod-uid"}}
+	if err := sb.bindClaim(ctx, claim, pod, "node1", allocation); err != nil {
+		t.Fatal(err)
+	}
+	want := []resourcev1.DeviceAllocationConfiguration{
+		{Source: resourcev1.AllocationConfigSourceClass, Requests: []string{"gpu-a", "gpu-b"}, DeviceConfiguration: classConfig},
+		{Source: resourcev1.AllocationConfigSourceClaim, Requests: []string{"gpu-b"}, DeviceConfiguration: claimConfig},
+	}
+	if got := claim.Status.Allocation.Devices.Config; !apiequality.Semantic.DeepEqual(got, want) {
+		t.Fatalf("allocation config = %#v, want %#v", got, want)
+	}
+	if classReads != 1 {
+		t.Fatalf("DeviceClass reads = %d, want 1", classReads)
+	}
+}
+
+func TestBindClaimRejectsUnresolvedDeviceClasses(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		request resourcev1.DeviceRequest
+		wantErr string
+	}{
+		{name: "missing class", request: resourcev1.DeviceRequest{Name: "gpu", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "missing", Count: 1}}, wantErr: `get DeviceClass "missing" while binding`},
+		{name: "non-exact request", request: resourcev1.DeviceRequest{Name: "gpu"}, wantErr: `request "gpu" is not an exact device request`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			claim := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "claim", Namespace: "default"},
+				Spec:       resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{tt.request}}},
+			}
+			c := fake.NewClientBuilder().WithObjects(claim).WithStatusSubresource(claim).Build()
+			sb := &SlurmBridge{Client: c}
+			err := sb.bindClaim(context.Background(), claim, &corev1.Pod{}, "node1", &claimAllocation{NodeResources: &slurmcontrol.NodeResources{}})
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("bindClaim() error = %v, want %q", err, tt.wantErr)
+			}
+			if err := c.Get(context.Background(), client.ObjectKeyFromObject(claim), claim); err != nil {
+				t.Fatal(err)
+			}
+			if claim.Status.Allocation != nil {
+				t.Fatal("published an allocation without resolving its DeviceClass")
 			}
 		})
 	}

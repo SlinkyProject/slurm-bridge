@@ -593,6 +593,14 @@ func TestTranslatorParseDeviceResourcesUsesConfiguredDeviceProfile(t *testing.T)
 			Selectors: []resourcev1.DeviceSelector{{
 				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'accelerator.example.com'`},
 			}},
+			Config: []resourcev1.DeviceClassConfiguration{{
+				DeviceConfiguration: resourcev1.DeviceConfiguration{
+					Opaque: &resourcev1.OpaqueDeviceConfiguration{
+						Driver:     "accelerator.example.com",
+						Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)},
+					},
+				},
+			}},
 		},
 	}
 	registry, err := dra.NewRegistry([]dra.DeviceProfile{{
