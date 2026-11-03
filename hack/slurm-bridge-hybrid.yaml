@@ -7,6 +7,8 @@ configFiles:
     Name=nic Type=dranet0 File=/dev/null Count=1
     # TPU CDI injects the devices; these files give Slurm stable fixture indices.
     Name=tpu Type=tpu.google.com File=/dev/tty[30-33] Count=4
+    # SR-IOV uses a synthetic VF and PTP; reserve a distinct NIC fixture index.
+    Name=nic Type=sriov-vf File=/dev/zero Count=1
 controller:
   extraConfMap:
     GresTypes:
@@ -32,7 +34,7 @@ nodesets:
         repository: docker.io/library/alpine
         tag: latest
       resources: {}
-    extraConf: Gres=gpu:gpu.example.com:4,gpu:gpu.nvidia.com:8,nic:dranet0:1,tpu:tpu.google.com:4
+    extraConf: Gres=gpu:gpu.example.com:4,gpu:gpu.nvidia.com:8,nic:dranet0:1,tpu:tpu.google.com:4,nic:sriov-vf:1
     partition:
       enabled: true
     podSpec:

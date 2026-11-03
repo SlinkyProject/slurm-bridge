@@ -1,0 +1,34 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Kind-only workload for the synthetic SR-IOV fixture in setup.yaml.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-sriov
+  namespace: slurm-bridge
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: job-sriov
+spec:
+  template:
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      restartPolicy: Never
+      containers:
+        - name: network
+          image: busybox:stable
+          command: [ip, address, show, sriovkind0]
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          resources:
+            requests:
+              cpu: '1'
+              memory: 16Mi
+              deviceclass.resource.kubernetes.io/sriov-vf: '1'
+            limits:
+              cpu: '1'
+              memory: 16Mi
+              deviceclass.resource.kubernetes.io/sriov-vf: '1'

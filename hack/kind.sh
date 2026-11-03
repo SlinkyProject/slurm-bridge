@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 # https://kind.sigs.k8s.io/docs/user/quick-start/
@@ -13,6 +14,7 @@ trap 'rm -rf "$SLURM_BRIDGE_TMP"' EXIT
 SLURM_NODE_MODE_EXTERNAL="external"
 SLURM_NODE_MODE_HYBRID="hybrid"
 DRANET_INTERFACE_NAME="dranet0"
+SRIOV_FAKE_SYS_PATH="/var/lib/sriov-dra/fake-sys"
 BRIDGE_CHART="oci://ghcr.io/slinkyproject/charts/slurm-bridge"
 LOCAL_PATH_PROVISIONER_CHART="oci://ghcr.io/rancher/local-path-provisioner/charts/local-path-provisioner"
 LOCAL_PATH_PROVISIONER_VERSION="0.0.34"
@@ -173,6 +175,9 @@ function kind::start() {
 	if $OPT_DRA_DRIVER_GOOGLE_TPU; then
 		kind::configure_tpu_devices
 	fi
+	if $OPT_DRA_DRIVER_SRIOV; then
+		kind::configure_sriov_devices
+	fi
 	kubectl cluster-info --context kind-"$cluster_name"
 }
 
@@ -257,6 +262,42 @@ function kind::configure_dranet_interfaces() {
 			docker exec "$bridge_node" ip link add "$DRANET_INTERFACE_NAME" type dummy
 		fi
 		docker exec "$bridge_node" ip link set dev "$DRANET_INTERFACE_NAME" up
+	done
+}
+
+function kind::configure_sriov_devices() {
+	local bridge_nodes
+	local bridge_node
+
+	bridge_nodes="$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		-o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)"
+	for bridge_node in $bridge_nodes; do
+		if ! docker exec "$bridge_node" test -x /opt/cni/bin/ptp; then
+			echo "[sriov] Kind node $bridge_node does not contain the PTP CNI plugin." >&2
+			exit 1
+		fi
+
+		# Kind has no PCI VFs. Create the minimum sysfs shape needed for the
+		# upstream SR-IOV DRA driver's discovery path. The driver pod mounts this
+		# PCI and network subtrees over sysfs; no host kernel device is created. Update in place
+		# so reruns do not temporarily remove devices from a running driver.
+		docker exec "$bridge_node" sh -ceu '
+			fake_sys="$1"
+			mkdir -p \
+				"$fake_sys/bus/pci/devices/0000:01:00.0/net/fakepf0" \
+				"$fake_sys/bus/pci/devices/0000:01:00.1" \
+				"$fake_sys/bus/pci/drivers" \
+				"$fake_sys/class/net/fakepf0" \
+				"$fake_sys/class/infiniband"
+			printf "%s\n" "pci:v00008086d00001572sv00008086sd00000000bc02sc00i00" >"$fake_sys/bus/pci/devices/0000:01:00.0/modalias"
+			printf "%s\n" "0" >"$fake_sys/bus/pci/devices/0000:01:00.0/numa_node"
+			printf "%s\n" "pci:v00008086d0000154Csv00008086sd00000000bc02sc00i00" >"$fake_sys/bus/pci/devices/0000:01:00.1/modalias"
+			printf "%s\n" "0x154c" >"$fake_sys/bus/pci/devices/0000:01:00.1/device"
+			printf "%s\n" "0" >"$fake_sys/bus/pci/devices/0000:01:00.1/numa_node"
+			printf "%s\n" "1" >"$fake_sys/class/net/fakepf0/type"
+			ln -sfn "../0000:01:00.1" "$fake_sys/bus/pci/devices/0000:01:00.0/virtfn0"
+			ln -sfn "../0000:01:00.0" "$fake_sys/bus/pci/devices/0000:01:00.1/physfn"
+		' sh "$SRIOV_FAKE_SYS_PATH"
 	done
 }
 
@@ -882,6 +923,40 @@ function nvml-mock::uninstall() {
 		--wait --timeout=180s
 }
 
+function dra-driver-sriov::install() {
+	local version="0.0.0-6c3982c"
+	local chart="oci://ghcr.io/k8snetworkplumbingwg/dra-driver-sriov-chart"
+	local config_dir="$SCRIPT_DIR/dra-driver-sriov"
+
+	kubectl apply -f "$config_dir/network-attachment-definition-crd.yaml"
+	kubectl wait --for=condition=Established \
+		crd/network-attachment-definitions.k8s.cni.cncf.io --timeout=60s
+
+	helm upgrade --install dra-driver-sriov "$chart" \
+		--version "$version" \
+		--namespace dra-driver-sriov \
+		--create-namespace \
+		--values "$config_dir/values.yaml" \
+		--wait --timeout=120s
+
+	# Existing clusters use their real host sysfs. The synthetic sysfs overlay is
+	# only needed for the Kind fixture configured by kind::configure_sriov_devices.
+	if $OPT_EXISTING_CLUSTER; then
+		return
+	fi
+
+	# The pinned upstream chart does not expose arbitrary pod volumes or env.
+	# Shadow only PCI and network discovery paths in the plugin so it sees the Kind
+	# fixture while runtime hooks retain access to host DMI and other sysfs paths.
+	local daemonset="dra-driver-sriov-dra-driver-sriov-chart-kubeletplugin"
+	kubectl patch daemonset "$daemonset" \
+		--namespace dra-driver-sriov \
+		--type strategic \
+		--patch-file "$config_dir/kind-fake-sys-patch.yaml"
+	kubectl rollout status daemonset/"$daemonset" \
+		--namespace dra-driver-sriov --timeout=120s
+}
+
 function dranet::install() {
 	local version="v1.5.0"
 	local chart="oci://registry.k8s.io/networking/charts/dranet"
@@ -929,7 +1004,7 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
 	        [--dra-example-driver] [--dra-driver-cpu] [--dra-driver-google-tpu]
-	        [--dra-driver-nvidia-gpu] [--dranet] [--kuberay] [--kwok] [--metrics]
+	        [--dra-driver-sriov] [--dra-driver-nvidia-gpu] [--dranet] [--kuberay] [--kwok] [--metrics]
 	        [--slurm-node-mode=MODE] [--bridge-version=VERSION]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [--print-image] [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -959,6 +1034,7 @@ HELM OPTIONS:
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
 	                    It also mocks a two-NUMA-node GPU and DRANET topology, and
 	                    the CPU topology for external Slurm nodes.
+	--dra-driver-sriov  Install SR-IOV DRA; Kind also gets synthetic VF/PTP fixtures.
 	--dranet            Install DRA driver: DRANET
 	--kuberay           Install KubeRay, enabling native PodGroups when available.
 	                    Kubernetes 1.37 builds a pinned upstream operator image.
@@ -1050,6 +1126,9 @@ function main() {
 		fi
 		dra-driver-nvidia-gpu::install
 	fi
+	if $OPT_DRA_DRIVER_SRIOV; then
+		dra-driver-sriov::install
+	fi
 	if $OPT_DRANET; then
 		dranet::install
 	fi
@@ -1058,8 +1137,11 @@ function main() {
 	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
-	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET || $OPT_DRA_DRIVER_GOOGLE_TPU; then
+	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET || $OPT_DRA_DRIVER_GOOGLE_TPU || { $OPT_DRA_DRIVER_SRIOV && ! $OPT_EXISTING_CLUSTER; }; then
 		slurm-bridge::configure_e2e_device_profiles
+	fi
+	if $OPT_DRA_DRIVER_SRIOV && ! $OPT_EXISTING_CLUSTER; then
+		kubectl apply -f "$SCRIPT_DIR/examples/dra/sriov/setup.yaml"
 	fi
 	if $OPT_METRICS; then
 		metrics::install
@@ -1079,6 +1161,7 @@ OPT_EXTRAS=false
 OPT_KUBERAY=false
 OPT_DRA_DRIVER_CPU=false
 OPT_DRA_DRIVER_GOOGLE_TPU=false
+OPT_DRA_DRIVER_SRIOV=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
 MOCK_NVML="${MOCK_NVML:-false}"
@@ -1099,7 +1182,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,kuberay,dra-driver-cpu,dra-driver-google-tpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
+LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,kuberay,dra-driver-cpu,dra-driver-google-tpu,dra-driver-sriov,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -1196,6 +1279,10 @@ while :; do
 		OPT_DRA_DRIVER_GOOGLE_TPU=true
 		shift
 		;;
+	--dra-driver-sriov)
+		OPT_DRA_DRIVER_SRIOV=true
+		shift
+		;;
 	--dra-example-driver)
 		OPT_DRA_EXAMPLE_DRIVER=true
 		shift
@@ -1239,6 +1326,7 @@ done
 
 if $OPT_EXTRAS; then
 	OPT_DRA_DRIVER_GOOGLE_TPU=true
+	OPT_DRA_DRIVER_SRIOV=true
 	OPT_KUBERAY=true
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
