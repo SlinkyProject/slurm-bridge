@@ -13,6 +13,8 @@ namespaceOverride: ""
 upgradeHook:
   # -- Enable the pre-upgrade shutdown hook. If disabled, stop the bridge manually before upgrading.
   enabled: true
+  # -- Skip the pending Pod check while retaining coordinated shutdown. Pending workloads across upgrades remain unsupported; verify the queue manually before bypassing this check.
+  skipPendingCheck: false
   image:
     # -- Kubectl image for the upgrade hook.
     repository: registry.k8s.io/kubectl

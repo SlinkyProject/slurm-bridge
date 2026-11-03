@@ -143,3 +143,17 @@ func TestUpgradeDeployUsesSelectedContext(t *testing.T) {
 		t.Fatalf("deployment did not use the selected cluster and checkout: %q", output)
 	}
 }
+
+func TestUpgradeCommandReportsFailure(t *testing.T) {
+	dir := t.TempDir()
+	command := "#!/bin/sh\nprintf 'upgrade output\\n'\nprintf 'hook failed\\n' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "helm"), []byte(command), 0o700); err != nil { //nolint:gosec // Executable test stub isolated in t.TempDir.
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(e2eKubeContextEnvironment, "upgrade-cluster")
+	output, err := tryUpgradeCommand(context.Background(), t, "helm", "upgrade")
+	if err == nil || !strings.Contains(err.Error(), "hook failed") || string(output) != "upgrade output\n" {
+		t.Fatalf("expected command failure with diagnostics, got output=%q, error=%v", output, err)
+	}
+}

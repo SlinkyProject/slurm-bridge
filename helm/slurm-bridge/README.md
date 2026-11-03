@@ -94,5 +94,6 @@ Kubernetes: `>= 1.34.0-0`
 | upgradeHook.image.tag | string | `"v1.36.0"` | Kubectl image tag. Use a version compatible with the Kubernetes API server. |
 | upgradeHook.nodeSelector | object | `{}` | Node selector for the upgrade hook. |
 | upgradeHook.resources | object | `{}` | Resource requests and limits for the upgrade hook. |
+| upgradeHook.skipPendingCheck | bool | `false` | Skip the pending Pod check while retaining coordinated shutdown. Pending workloads across upgrades remain unsupported; verify the queue manually before bypassing this check. |
 | upgradeHook.tolerations | list | `[]` | Tolerations for the upgrade hook. |
 

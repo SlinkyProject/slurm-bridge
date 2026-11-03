@@ -42,6 +42,22 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       initContainers:
+        {{- if not .Values.upgradeHook.skipPendingCheck }}
+        # A zero timeout checks once: an empty selection succeeds, while any
+        # remaining Pod or API error fails before any Deployment is scaled down.
+        # This only reads Pods; --for=delete does not delete them.
+        - name: check-pending-workloads
+          {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
+          args:
+            - wait
+            - pods
+            - --all-namespaces
+            - --for=delete
+            - --timeout=0s
+            - --request-timeout=30s
+            - {{ printf "--field-selector=spec.schedulerName=%s,status.phase=Pending" (include "slurm-bridge.scheduler.name" .) | quote }}
+            - --cache-dir=/tmp/kubectl-cache
+        {{- end }}
         - name: scale-down
           {{- include "slurm-bridge.upgrade.container" . | nindent 10 }}
           args:
