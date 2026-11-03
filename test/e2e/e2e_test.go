@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+// SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package e2e
@@ -50,6 +51,7 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeDRANETResourceScheduling(),
 		testRayScheduling(true),
 		testLWSTPUAlias(),
+		testSlurmBridgeSRIOVResourceScheduling(),
 	}
 	for _, api := range []kubernetesPodGroupAPI{podGroupV1Beta1, podGroupV1Alpha2} {
 		testFeatures = append(testFeatures,
