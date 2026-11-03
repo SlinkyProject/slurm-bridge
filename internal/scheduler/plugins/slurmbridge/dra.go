@@ -529,9 +529,5 @@ func (sb *SlurmBridge) patchPodExtendedResourceClaimStatus(
 		return fmt.Errorf("failed to update pod %s ExtendedResourceClaimStatus: %w", klog.KObj(pod), err)
 	}
 
-	if err := sb.Get(ctx, client.ObjectKeyFromObject(toUpdate), toUpdate); err != nil {
-		return fmt.Errorf("failed to get pod %s: %w", klog.KObj(pod), err)
-	}
-
 	return nil
 }

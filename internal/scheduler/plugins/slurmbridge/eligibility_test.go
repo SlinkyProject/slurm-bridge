@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -379,6 +380,9 @@ func TestPostFilterAllocatedGangHandoff(t *testing.T) {
 		{name: "terminating pod can release resources even with a live job", jobState: api.V0044JobInfoJobStateRUNNING, mutate: func(_ *corev1.Node, occupant, _ *corev1.Pod) {
 			occupant.DeletionTimestamp = ptr.To(metav1.Now())
 		}},
+		{name: "pod stuck terminating is still a rejection", jobState: api.V0044JobInfoJobStateRUNNING, mutate: func(_ *corev1.Node, occupant, _ *corev1.Pod) {
+			occupant.DeletionTimestamp = ptr.To(metav1.NewTime(time.Now().Add(-2 * stuckTerminatingGrace)))
+		}, wantDelete: true},
 		{name: "succeeded pod can release resources even with a live job", jobState: api.V0044JobInfoJobStateRUNNING, mutate: func(_ *corev1.Node, occupant, _ *corev1.Pod) {
 			occupant.Status.Phase = corev1.PodSucceeded
 		}},

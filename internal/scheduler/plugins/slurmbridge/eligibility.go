@@ -5,6 +5,7 @@ package slurmbridge
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -16,6 +17,16 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+// stuckTerminatingGrace is how long a pod may stay Terminating past its deletion
+// deadline before its node stops counting as about to free up.
+const stuckTerminatingGrace = 5 * time.Minute
+
+// stuckTerminating reports a pod whose kubelet has not finished deleting it. Its
+// resources may never return, so Slurm must not queue work behind it.
+func stuckTerminating(pod *corev1.Pod) bool {
+	return pod.DeletionTimestamp != nil && time.Since(pod.DeletionTimestamp.Time) > stuckTerminatingGrace
+}
 
 func eligibleFilterStatus(status *fwk.Status) bool {
 	return status.IsSuccess() || (status.Code() == fwk.Unschedulable && status.Plugin() == Name)
@@ -44,7 +55,7 @@ func (sb *SlurmBridge) nodeEligibleForSlurm(ctx context.Context, state fwk.Cycle
 	for _, occupant := range node.GetPods() {
 		p := occupant.GetPod()
 		occupantAllocationID := podAllocationID(p)
-		if p.Spec.SchedulerName != sb.schedulerName || occupantAllocationID == 0 || occupantAllocationID == allocationID {
+		if p.Spec.SchedulerName != sb.schedulerName || occupantAllocationID == 0 || occupantAllocationID == allocationID || stuckTerminating(p) {
 			continue
 		}
 		if canRelease != nil && !canRelease(p) {
