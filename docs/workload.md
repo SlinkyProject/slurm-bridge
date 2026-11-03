@@ -148,6 +148,24 @@ The default `dranet-rdma` profile maps PCI-backed devices with DRANET's `rdma`
 attribute set to the Slurm `nic` GRES. It includes InfiniBand, RoCE, and iWARP
 devices; it does not imply an InfiniBand link layer.
 
+Enable DRANET's `PersistentResourceSliceAttributes` feature gate to retain
+allocated devices and their attributes in ResourceSlices. It is alpha and
+disabled by default in DRANET v1.5.0; `hack/kind.sh --dranet` enables it
+automatically. For the DRANET v1.5.0 Helm chart, set:
+
+```yaml
+args:
+  featureGates: PersistentResourceSliceAttributes=true
+```
+
+Append any other enabled DRANET gates to the same comma-separated value. Without
+persistence, moving a NIC into a Pod can remove the device or its
+profile-matching attributes from ResourceSlices. The bridge then drains the
+external Slurm node for re-registration: `scontrol show node <node>` shows
+`DRAIN` and a reason containing `removing external node`, while unrelated jobs
+remain pending despite free CPUs. If this coincides with NIC allocation and
+clears on release, check the DRANET feature gate and ResourceSlice inventory.
+
 The [Kind e2e device profiles](../hack/e2e-device-profiles.yaml) explicitly add
 the example GPU driver and a fixture-only `dranet0` profile alongside the
 built-in profiles. The `dranet0` profile selects the dummy network interface
