@@ -170,6 +170,10 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 				}
 				t.Logf("%s image: %s -> %s", component, baselineImages[component], image)
 			}
+			err := crClient.Get(ctx, client.ObjectKey{Namespace: slurmNamespace, Name: "slurm-bridge-controllers"}, &appsv1.Deployment{})
+			if err == nil || client.IgnoreNotFound(err) != nil {
+				t.Fatalf("expected the controllers Deployment to be removed, got err=%v", err)
+			}
 			return ctx
 		}).
 		Assess("running allocation survives and pending work resumes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
