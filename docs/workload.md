@@ -39,13 +39,13 @@ to control which resources are scheduled using the `slurm-bridge-scheduler`. The
 `slurm-bridge-scheduler` is designed as a non-primary scheduler and is not
 intended to replace the default
 [kube-scheduler](https://kubernetes.io/docs/concepts/architecture/#kube-scheduler).
-The `slurm-bridge` admission controller only schedules pods that request
-`slurm-bridge` as their scheduler or are in a configured namespace. By default,
-the `slurm-bridge` admission controller is configured to automatically use
-`slurm-bridge` as the scheduler for all pods in the configured namespaces.
+The `slurm-bridge-scheduler` only schedules pods that request `slurm-bridge` as
+their scheduler or are in a configured namespace. By default, the `slurm-bridge`
+admission controller is configured to automatically use `slurm-bridge` as the
+scheduler for all pods in the configured namespaces.
 
 Alternatively, a pod can specify `Pod.Spec.schedulerName=slurm-bridge-scheduler`
-from any namespace to indicate that it should be scheduler using the
+from any namespace to indicate that it should be scheduled using the
 `slurm-bridge-scheduler`.
 
 Please review [`slurm-bridge` admission controller](./admission.md) to learn
