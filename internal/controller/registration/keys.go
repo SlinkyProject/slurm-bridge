@@ -101,7 +101,7 @@ func (r *Reconciler) members(ctx context.Context, key Request) ([]corev1.Pod, sl
 
 func (r *Reconciler) membersFrom(ctx context.Context, reader client.Reader, key Request) ([]corev1.Pod, slurmjob.AllocationIdentity, error) {
 	identity := slurmjob.AllocationIdentity{Index: slurmjob.GroupJobIndex, Key: key.groupIdentity().Key()}
-	if key.Kind == "Pod" {
+	if key.APIGroup == "" && key.Kind == "Pod" {
 		identity.Index, identity.Key = slurmjob.PodJobIndex, key.podKey()
 		pod := &corev1.Pod{}
 		err := reader.Get(ctx, key.objectKey(), pod)

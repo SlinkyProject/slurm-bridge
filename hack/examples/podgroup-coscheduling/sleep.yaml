@@ -4,14 +4,14 @@ kind: PodGroup
 metadata:
   name: podgroup-sleep
   namespace: slurm-bridge
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: podgroup-sleep
 spec:
   minMember: 2
 ---
 apiVersion: v1
 kind: Pod
 metadata:
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: podgroup-sleep
   name: sleep1
   namespace: slurm-bridge
   labels:
@@ -35,6 +35,8 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
+  annotations:
+    slurmjob.slinky.slurm.net/job-name: podgroup-sleep
   name: sleep2
   namespace: slurm-bridge
   labels:

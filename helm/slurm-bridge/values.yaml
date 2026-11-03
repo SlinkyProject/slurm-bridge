@@ -185,6 +185,8 @@ admission:
   # If this is set, managedNamespaces will be ignored.
   # Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
   managedNamespaceSelector: {}
+  # -- Action on creation for deprecated top-level Slurm workload annotations in managed namespaces: Warn or Deny.
+  workloadAnnotationAction: Warn
 
 # Configurations shared among all components.
 sharedConfig:

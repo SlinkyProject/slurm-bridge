@@ -7,9 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,7 +17,6 @@ import (
 	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -60,47 +59,28 @@ func ValidatePodGroupSupport(api *WorkloadAPI, pod *corev1.Pod) error {
 	return nil
 }
 
-// parsePodGroupSlurmAnnotations merges Slurm annotations from the PodGroup,
-// selected controller, and Workload. Only one controller source is applied.
-// Ref: https://kubernetes.io/docs/concepts/workloads/podgroup-api/
-func (t *translator) parsePodGroupSlurmAnnotations(
-	slurmJobComponent *SlurmJobComponent,
-	pg *PodGroup,
-	controllerPOM *metav1.PartialObjectMetadata,
-) error {
+// podGroupSlurmAnnotations preserves legacy owner -> PodGroup -> Workload
+// precedence. Pod annotations are applied over these defaults by the caller.
+func (t *translator) podGroupSlurmAnnotations(ctx context.Context, pg *PodGroup, controllerPOM *metav1.PartialObjectMetadata) (map[string]string, error) {
+	annotations := make(map[string]string)
 	if controllerPOM != nil {
-		ann := controllerPOM.GetAnnotations()
-		if controllerPOM.Kind == "Job" {
-			job := &batchv1.Job{}
-			if err := t.Get(t.ctx, client.ObjectKeyFromObject(controllerPOM), job); err == nil {
-				ann = job.GetAnnotations()
-			}
-		} else if controllerPOM.TypeMeta == jobSet_v1alpha2 {
-			jobSet := &jobset.JobSet{}
-			if err := t.Get(t.ctx, client.ObjectKeyFromObject(controllerPOM), jobSet); err == nil {
-				ann = jobSet.GetAnnotations()
-			}
-		}
-		if err := parseUserAnnotations(slurmJobComponent, ann); err != nil {
-			return err
-		}
+		maps.Copy(annotations, controllerPOM.Annotations)
 	}
-	if err := parseUserAnnotations(slurmJobComponent, pg.GetAnnotations()); err != nil {
-		return err
-	}
+	maps.Copy(annotations, pg.Annotations)
 	workloadName := pg.workloadName()
 	if workloadName == "" {
-		return nil
+		return annotations, nil
 	}
-	key := client.ObjectKey{Namespace: pg.GetNamespace(), Name: workloadName}
+	key := client.ObjectKey{Namespace: pg.Namespace, Name: workloadName}
 	wl := &Workload{TypeMeta: metav1.TypeMeta{APIVersion: t.workloadAPI.PodGroupTypeMeta.APIVersion, Kind: "Workload"}}
-	if err := t.Get(t.ctx, key, wl); err != nil {
+	if err := t.Get(ctx, key, wl); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return annotations, nil
 		}
-		return err
+		return nil, err
 	}
-	return parseUserAnnotations(slurmJobComponent, wl.GetAnnotations())
+	maps.Copy(annotations, wl.Annotations)
+	return annotations, nil
 }
 
 func schedulingGroupsMatch(a, b *corev1.PodSchedulingGroup) bool {

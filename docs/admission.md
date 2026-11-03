@@ -9,6 +9,7 @@
   - [Overview](#overview)
   - [Design](#design)
     - [Sequence Diagram](#sequence-diagram)
+  - [Workload annotation deprecation](#workload-annotation-deprecation)
 
 <!-- mdformat-toc end -->
 
@@ -110,6 +111,26 @@ sequenceDiagram
   end
   SBA-->>KAPI: Admission response with patch or rejection
 ```
+
+## Workload annotation deprecation
+
+By default, a ValidatingAdmissionPolicy warns about top-level
+`slurmjob.slinky.slurm.net/*` annotations on Jobs, JobSets, LeaderWorkerSets,
+PodGroups, CompositePodGroups, and Workloads when they are created. Requests
+remain allowed. Move annotations to Pod templates;
+[Pod annotations take precedence](workload.md#resolution-rules) during the
+transition. To reject these annotations instead, install or upgrade with
+`--set admission.workloadAnnotationAction=Deny`. Set it to `Warn` (the default)
+to allow requests with a warning. The policy only checks CREATE requests in both
+modes; updates to existing workloads remain allowed.
+
+The planned transition is warnings, then denial by default, then removal of
+legacy annotation support. Release timing will depend on deprecation feedback.
+
+The policy uses `admission.managedNamespaces` or
+`admission.managedNamespaceSelector`, excluding `kube-system` and the bridge
+installation namespace. Pod and Pod template annotations are allowed in both
+modes. Disabling admission or clearing both namespace settings omits the policy.
 
 <!-- Links -->
 
