@@ -4,7 +4,6 @@
 package slurmbridge
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -126,11 +125,11 @@ func TestVerifyIndexedGRESDeviceProfileRequestRejectsChangedCount(t *testing.T) 
 			},
 		}},
 	}}}
-	_, err := sb.verifyDeviceProfileRequest(context.Background(), claim, deviceProfileRequest{
+	_, err := sb.verifyDeviceProfileRequest(claim, deviceProfileRequest{
 		DeviceClassName: "example-gpus",
 		Profile:         profile,
 		Count:           1,
-	}, "gpu")
+	}, "gpu", nil)
 	if err == nil || !strings.Contains(err.Error(), "has count 4, expected exactly 1") {
 		t.Fatalf("verifyDeviceProfileRequest() error = %v, want changed count error", err)
 	}
@@ -143,7 +142,7 @@ func TestVerifyCoreBitmapRequestUsesSocketCount(t *testing.T) {
 	requests := []resourcev1.DeviceRequest{{Name: "cpu-socket-0", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: "my-cpus", Count: 1}}}
 	claim := &resourcev1.ResourceClaim{Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: requests}}}
 	allocation := &coreBitmapAllocation{deviceProfileRequest: deviceProfileRequest{DeviceClassName: "my-cpus", Profile: profile, Count: 3}, AllocatedCount: 4, CPU: &nodeinfo.CPUAllocation{Requests: requests, CPUCount: 4}}
-	if err := sb.verifyCoreBitmapRequest(context.Background(), claim, allocation); err != nil {
+	if err := sb.verifyCoreBitmapRequest(claim, allocation, map[string]*resourcev1.DeviceClass{class.Name: class}); err != nil {
 		t.Fatal(err)
 	}
 }

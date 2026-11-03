@@ -1357,8 +1357,8 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			deviceResource: resource.MustParse("1"),
 		}
 		warnings, err := newAdmission(class).ValidateCreate(context.Background(), pod)
-		if err == nil || !strings.Contains(err.Error(), "configuration is not supported") {
-			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want unsupported configuration error", err)
+		if err != nil {
+			t.Fatalf("PodAdmission.ValidateCreate() error = %v", err)
 		}
 		if len(warnings) != 0 {
 			t.Fatalf("PodAdmission.ValidateCreate() warnings = %v, want none", warnings)

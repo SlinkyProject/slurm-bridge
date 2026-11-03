@@ -11,6 +11,7 @@ import (
 
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func TestDefaultRegistry(t *testing.T) {
@@ -402,6 +403,24 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 		}
 	})
 
+	t.Run("class configuration does not change profile matching", func(t *testing.T) {
+		class := valid()
+		want, err := registry.MatchDeviceClass(class)
+		if err != nil {
+			t.Fatal(err)
+		}
+		class.Spec.Config = []resourcev1.DeviceClassConfiguration{{DeviceConfiguration: resourcev1.DeviceConfiguration{
+			Opaque: &resourcev1.OpaqueDeviceConfiguration{Driver: "gpu.example.com", Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)}},
+		}}}
+		got, err := registry.MatchDeviceClass(class)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	})
+
 	tests := []struct {
 		name    string
 		class   func() *resourcev1.DeviceClass
@@ -411,15 +430,6 @@ func TestRegistryMatchDeviceClass(t *testing.T) {
 			name:    "nil class",
 			class:   func() *resourcev1.DeviceClass { return nil },
 			wantErr: "must not be nil",
-		},
-		{
-			name: "configuration",
-			class: func() *resourcev1.DeviceClass {
-				class := valid()
-				class.Spec.Config = []resourcev1.DeviceClassConfiguration{{}}
-				return class
-			},
-			wantErr: "configuration is not supported",
 		},
 		{
 			name: "no selectors",
