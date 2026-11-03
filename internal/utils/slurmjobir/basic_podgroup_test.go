@@ -75,7 +75,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					job.Spec.ActiveDeadlineSeconds = ptr.To[int64](120)
 					pod := podWithJobOwner(podWithSchedulingGroup("default", "pending", pg.Name), job.Name)
 					pod.Labels = map[string]string{batchv1.JobNameLabel: job.Name, "job-name": job.Name}
-					pod.Annotations = map[string]string{wellknown.AnnotationWckey: "ignored-pod-wckey"}
+					pod.Annotations = map[string]string{wellknown.AnnotationWckey: "pod-wckey"}
 					sibling := pod.DeepCopy()
 					sibling.Name = "previous"
 					sibling.Status.Phase = tt.siblingPhase
@@ -114,7 +114,7 @@ func TestTranslateToSlurmJobIR_BasicPodGroupJobs(t *testing.T) {
 					if ptr.Deref(component.JobInfo.TimeLimit, 0) != 2 {
 						t.Errorf("TimeLimit = %v, want Job deadline translated to 2 minutes", component.JobInfo.TimeLimit)
 					}
-					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != "group-partition" || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || component.JobInfo.Wckey != nil {
+					if ptr.Deref(component.JobInfo.Account, "") != "group-account" || ptr.Deref(component.JobInfo.Partition, "") != "group-partition" || ptr.Deref(component.JobInfo.QOS, "") != "workload-qos" || ptr.Deref(component.JobInfo.Wckey, "") != "pod-wckey" {
 						t.Errorf("annotation precedence changed: %#v", component.JobInfo)
 					}
 					if status := PreFilter(cl, dra.DefaultRegistry(), handle, api, ctx, pod, ir); !status.IsSuccess() {
@@ -157,7 +157,6 @@ func TestTranslateToSlurmJobIR_BasicPodGroupOwnerScheduling(t *testing.T) {
 						pod.OwnerReferences = []metav1.OwnerReference{controllerOwner(owner.APIVersion, owner.Kind, owner.Name)}
 						objects = append(objects, owner)
 						wantRoot, wantPods, wantMaxNodes = lws_v1, 2, 2
-						wantPartition = "lws-partition"
 					}
 					sibling := pod.DeepCopy()
 					sibling.Name = "p2"

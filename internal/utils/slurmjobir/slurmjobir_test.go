@@ -5,7 +5,6 @@ package slurmjobir
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -13,8 +12,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -201,7 +200,7 @@ func TestTranslateToSlurmJobIR(t *testing.T) {
 	}
 }
 
-func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *testing.T) {
+func TestTranslateToSlurmJobIRDoesNotReadUnsupportedController(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	unsupportedGVK := schema.FromAPIVersionAndKind("example.com/v1", "ExampleController")
@@ -243,11 +242,7 @@ func TestTranslateToSlurmJobIRFallsBackFromForbiddenUnsupportedController(t *tes
 		WithInterceptorFuncs(interceptor.Funcs{
 			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 				if key.Name == unsupportedName {
-					return apierrors.NewForbidden(
-						unsupportedGVK.GroupVersion().WithResource("examplecontrollers").GroupResource(),
-						unsupportedName,
-						errors.New("access denied"),
-					)
+					t.Fatalf("unexpected lookup of unsupported controller: %s", key)
 				}
 				return c.Get(ctx, key, obj, opts...)
 			},
@@ -957,6 +952,59 @@ func TestSlurmJobIR_ValidatePreservesTasksPerNode(t *testing.T) {
 			}
 			if got := ir.Components[0].JobInfo.TasksPerNode; !apiequality.Semantic.DeepEqual(got, tt.tasksPerNode) {
 				t.Errorf("Validate() TasksPerNode = %v, want unchanged %v", got, tt.tasksPerNode)
+			}
+		})
+	}
+}
+
+func TestRayPodsDoNotReadRayOwners(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standalone", true: "native gang"}[native], func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+			head := st.MakePod().Namespace("default").Name("head").Obj()
+			var objects []client.Object
+			wantRoot, wantPods := pod_v1, 1
+			if native {
+				head = podWithSchedulingGroup("default", "head", "ray-group")
+				pg := newPodGroup("ray-group", "default", schedulingv1beta1.PodGroupSchedulingPolicy{
+					Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
+				})
+				pg.Spec.WorkloadRef = &WorkloadReference{WorkloadName: "ray-workload", TemplateName: "ray-group"}
+				workload := &Workload{TypeMeta: metav1.TypeMeta{APIVersion: api.PodGroupTypeMeta.APIVersion, Kind: "Workload"},
+					ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "ray-workload", OwnerReferences: []metav1.OwnerReference{controllerOwner("ray.io/v1", "RayJob", "job")}}}
+				objects = append(objects, pg, workload)
+				wantRoot, wantPods = api.PodGroupTypeMeta, 2
+			}
+			head.OwnerReferences = []metav1.OwnerReference{controllerOwner("ray.io/v1", "RayCluster", "cluster")}
+			head.Annotations = map[string]string{wellknown.AnnotationAccount: "ray-account"}
+			worker := head.DeepCopy()
+			worker.Name = "worker"
+			objects = append(objects, head, worker)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if obj.GetObjectKind().GroupVersionKind().Group == "ray.io" {
+						t.Fatalf("unexpected Ray owner lookup: %T %s", obj, key)
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).Build()
+			for _, pod := range []*corev1.Pod{head, worker} {
+				ir, err := TranslateToSlurmJobIR(c, dra.DefaultRegistry(), api, t.Context(), pod)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantName := pod.Name
+				if native {
+					wantName = "ray-group"
+				}
+				if ir.RootPOM.TypeMeta != wantRoot || ir.RootPOM.Name != wantName || len(ir.Components) != 1 || len(ir.AllPods()) != wantPods {
+					t.Fatalf("Ray allocation changed: %+v", ir)
+				}
+				if ptr.Deref(ir.Components[0].JobInfo.Account, "") != "ray-account" {
+					t.Fatalf("Pod annotations were lost: %+v", ir.Components[0].JobInfo)
+				}
 			}
 		})
 	}

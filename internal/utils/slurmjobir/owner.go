@@ -5,92 +5,59 @@ package slurmjobir
 
 import (
 	"context"
-	"fmt"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
-const maxControllerOwnerDepth = 32
-
-func getRootOwnerMetadata(c client.Client, ctx context.Context, obj client.Object) (*metav1.PartialObjectMetadata, error) {
-	return resolveRootOwnerMetadata(c, ctx, obj, false, 0, nil)
+// Allowed paths from the Pod's owner outward, including ordinal and hash-based
+// LeaderWorkerSet intermediates. Other controller references are ignored.
+var workloadOwnerPaths = [][]metav1.TypeMeta{
+	{job_v1, jobSet_v1alpha2},
+	{lws_v1},
+	{{APIVersion: "apps/v1", Kind: "StatefulSet"}, lws_v1},
+	{pod_v1, lws_v1},
+	{{APIVersion: "apps/v1", Kind: "StatefulSet"}, pod_v1, lws_v1},
+	{{APIVersion: "apps/v1", Kind: "StatefulSet"}, pod_v1, {APIVersion: "apps/v1", Kind: "StatefulSet"}, lws_v1},
 }
 
-func resolveRootOwnerMetadata(
-	c client.Client,
-	ctx context.Context,
-	obj client.Object,
-	controllerResolved bool,
-	depth int,
-	supportedRoot *metav1.PartialObjectMetadata,
-) (*metav1.PartialObjectMetadata, error) {
-	namespace := obj.GetNamespace()
-	objGVK, err := apiutil.GVKForObject(obj, c.Scheme())
-	if err != nil {
-		return nil, err
-	}
-	metadata := obj.(metav1.ObjectMetaAccessor).GetObjectMeta()
-	currentPOM := &metav1.PartialObjectMetadata{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       objGVK.Kind,
-			APIVersion: objGVK.GroupVersion().String(),
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: metadata.GetNamespace(),
-			Name:      metadata.GetName(),
-		},
-	}
-	if controllerResolved && isSupportedWorkload(objGVK) {
-		supportedRoot = currentPOM
-	}
-
-	owner := getNextControllerOwner(obj)
-	if owner == nil {
-		if supportedRoot != nil {
-			return supportedRoot, nil
+func getRootOwnerMetadata(c client.Reader, ctx context.Context, pod *corev1.Pod) (*metav1.PartialObjectMetadata, error) {
+	root := &metav1.PartialObjectMetadata{TypeMeta: pod_v1, ObjectMeta: *pod.ObjectMeta.DeepCopy()}
+	var obj client.Object = pod
+	paths := workloadOwnerPaths
+	for depth := 0; len(paths) > 0; depth++ {
+		owner := getNextControllerOwner(obj)
+		if owner == nil {
+			break
 		}
-		return currentPOM, nil
-	}
-	if depth >= maxControllerOwnerDepth {
-		return nil, fmt.Errorf("controller owner chain exceeds maximum depth of %d at %s %s/%s", maxControllerOwnerDepth, objGVK.String(), namespace, obj.GetName())
-	}
-	ownerPOM := &metav1.PartialObjectMetadata{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: namespace,
-			Name:      owner.Name,
-		},
-	}
-	ownerGVK := schema.FromAPIVersionAndKind(owner.APIVersion, owner.Kind)
-	ownerPOM.SetGroupVersionKind(ownerGVK)
-
-	key := client.ObjectKey{Namespace: namespace, Name: owner.Name}
-	if err := c.Get(ctx, key, ownerPOM); err != nil {
-		// Fall back only when RBAC forbids access to an unsupported higher
-		// controller. Prefer the highest supported workload already resolved;
-		// otherwise use the highest readable controller. Missing owners and
-		// supported workloads indicate broken owner chains or RBAC and must
-		// remain scheduling errors. The Pod itself is not a controller fallback,
-		// so its direct owner must be readable.
-		if controllerResolved && apierrors.IsForbidden(err) && !isSupportedWorkload(ownerGVK) {
-			if supportedRoot != nil {
-				return supportedRoot, nil
+		kind := metav1.TypeMeta{APIVersion: owner.APIVersion, Kind: owner.Kind}
+		var matching [][]metav1.TypeMeta
+		for _, path := range paths {
+			if depth < len(path) && path[depth] == kind {
+				matching = append(matching, path)
 			}
-			return currentPOM, nil
 		}
-		return nil, err
+		if len(matching) == 0 {
+			break
+		}
+		metadata := &metav1.PartialObjectMetadata{TypeMeta: kind}
+		key := client.ObjectKey{Namespace: obj.GetNamespace(), Name: owner.Name}
+		if err := c.Get(ctx, key, metadata); err != nil {
+			return nil, err
+		}
+		switch kind {
+		case job_v1, jobSet_v1alpha2, lws_v1:
+			root = metadata
+		}
+		obj, paths = metadata, matching
 	}
-
-	return resolveRootOwnerMetadata(c, ctx, ownerPOM, true, depth+1, supportedRoot)
+	return root, nil
 }
 
 func getNextControllerOwner(obj client.Object) *metav1.OwnerReference {
-	owners := obj.GetOwnerReferences()
-	for _, owner := range owners {
+	for _, owner := range obj.GetOwnerReferences() {
 		if ptr.Deref(owner.Controller, false) {
 			return &owner
 		}

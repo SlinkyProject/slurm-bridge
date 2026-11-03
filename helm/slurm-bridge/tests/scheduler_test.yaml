@@ -485,11 +485,11 @@ tests:
             apiGroups: [""]
             resources: [pods/binding]
             verbs: [create]
-  - it: scheduler can read Ray owners when registering native PodGroups
+  - it: scheduler does not need Ray owner permissions
     template: scheduler/rbac.yaml
     documentIndex: 0
     asserts:
-      - contains:
+      - notContains:
           path: rules
           content:
             apiGroups:
