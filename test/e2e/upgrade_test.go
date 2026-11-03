@@ -68,12 +68,16 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 		[]string{"sh", "-c", "sleep 3600"})
 	pending := slurmTestPod(slurmBridgeNamespace, envconf.RandomName("upgrade-pending", 40),
 		[]string{"sh", "-c", "sleep 3600"})
+	addUpgradeGPURequest(running)
+	addUpgradeGPURequest(pending)
 	occupants := []*corev1.Pod{running}
 	var before, target upgradeMetadata
 	var crClient client.Client
 	var baselineImages map[string]string
+	var gpuAllocation upgradeGPUAllocation
+	var fresh *corev1.Pod
 
-	return features.New("Bridge upgrade preserves running and pending workloads").
+	return features.New("Bridge upgrade preserves GPU DRA workloads").
 		WithLabel("suite", "upgrade").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			// Cleanup must also run when baseline preparation fails.
@@ -82,7 +86,11 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 				if crClient != nil && e2eCleanupEnabled(t) {
 					cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*slurmCleanupTimeout)
 					defer cancel()
-					deletePodsAndAssertCleanup(cleanupCtx, t, config, crClient, append(occupants, pending)...)
+					pods := append(slices.Clone(occupants), pending)
+					if fresh != nil {
+						pods = append(pods, fresh)
+					}
+					deletePodsAndAssertCleanup(cleanupCtx, t, config, crClient, pods...)
 				}
 			})
 			var err error
@@ -139,6 +147,7 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 				occupants[i] = observed
 			}
 			running = occupants[0]
+			gpuAllocation = observeUpgradeGPU(ctx, t, config, crClient, running)
 			pending.Annotations = map[string]string{wellknown.AnnotationExclusive: "true"}
 			if err := crClient.Create(ctx, pending); err != nil {
 				t.Fatalf("create pending workload: %v", err)
@@ -172,7 +181,7 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 			}
 			return ctx
 		}).
-		Assess("running allocation survives and pending work resumes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("running GPU allocation survives and pending GPU work resumes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			observed := &corev1.Pod{}
 			for _, pod := range occupants {
 				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), observed); err != nil {
@@ -180,6 +189,12 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 				}
 				if err := upgradePodPreserved(pod, observed); err != nil {
 					t.Fatalf("running workload %s: %v", pod.Name, err)
+				}
+				if pod == running {
+					after := observeUpgradeGPU(ctx, t, config, crClient, observed)
+					if gpuAllocation != after {
+						t.Fatalf("running GPU allocation changed: before=%+v, after=%+v", gpuAllocation, after)
+					}
 				}
 				output, err := querySlurmJob(ctx, config, crClient, pod.Labels[slurmJobIDLabel])
 				if err != nil {
@@ -214,7 +229,32 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 			}
 			pending = observed
 			assertBridgePod(t, ctx, crClient, pending)
+			observeUpgradeGPU(ctx, t, config, crClient, pending)
 			deletePodAndAssertCleanup(ctx, t, config, crClient, pending)
+			return ctx
+		}).
+		Assess("new GPU work schedules after the upgrade", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			if t.Failed() {
+				return ctx
+			}
+			fresh = slurmTestPod(slurmBridgeNamespace, envconf.RandomName("upgrade-new-gpu", 40),
+				[]string{"sh", "-c", "sleep 3600"})
+			fresh.Annotations = map[string]string{wellknown.AnnotationExclusive: "true"}
+			addUpgradeGPURequest(fresh)
+			if err := crClient.Create(ctx, fresh); err != nil {
+				t.Fatalf("create post-upgrade GPU workload: %v", err)
+			}
+			observed, err := waitForPod(ctx, crClient, client.ObjectKeyFromObject(fresh), upgradePodRunning)
+			if err != nil {
+				t.Fatalf("new GPU workload did not run after upgrade: %v", err)
+			}
+			fresh = observed
+			assertBridgePod(t, ctx, crClient, fresh)
+			if fresh.Spec.NodeName != running.Spec.NodeName {
+				t.Fatal("new GPU workload did not use the released node")
+			}
+			observeUpgradeGPU(ctx, t, config, crClient, fresh)
+			deletePodAndAssertCleanup(ctx, t, config, crClient, fresh)
 			return ctx
 		}).Feature()
 }
