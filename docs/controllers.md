@@ -21,9 +21,7 @@ The scheduler process runs two controllers:
 - **Registration Controller** - Creates Slurm allocations, publishes Pod
   registration metadata, and cleans up completed workloads.
 
-Both are enabled by default. Use `scheduler.controllers` in Helm or
-`--controllers` to select a subset. Set `--enable-scheduler=false` to run only
-the controllers.
+Both are enabled by default.
 
 When upgrading from separate deployments, move `controllers` resource,
 placement, and `registrationWorkers` overrides to `scheduler`. The Helm
@@ -34,9 +32,8 @@ The chart always enables leader election. Standalone binaries use
 `--leader-elect`; `KubeSchedulerConfiguration.leaderElection.leaderElect` and
 the old `scheduler.leaderElect` Helm value are ignored. The lease uses
 `leaderElection.resourceNamespace` from the scheduler configuration (default:
-`kube-system`). Override it with `--leader-election-namespace`, which is also
-required for controllers-only mode outside a pod. In-cluster controllers-only
-mode defaults to the pod's namespace. Helm uses the release namespace.
+`kube-system`). Override it with `--leader-election-namespace`. Helm uses the
+release namespace.
 
 ## Node Controller
 
