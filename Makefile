@@ -162,6 +162,14 @@ E2E_RUN ?=
 E2E_LABELS ?=
 E2E_KUBE_CONTEXT ?= kind-$(KIND_CLUSTER_NAME)
 export E2E_UPGRADE_FROM_VERSION
+# Workload defaults and environment overrides live in hack/benchmark/*.yaml.
+BENCHMARK_CONFIG_DIR ?= hack/benchmark
+BENCHMARK_WORKLOAD ?=
+BENCHMARK_ARTIFACTS_DIR ?= $(CURDIR)/benchmark-artifacts
+BENCHMARK_TIMEOUT ?= 40m
+BENCHMARK_SPEEDUP ?= 60
+KNAVIGATOR_VERSION ?= v0.1.1-0.20261029142133-a41ac8b7b399
+KNAVIGATOR ?= $(LOCALBIN)/knavigator-$(KNAVIGATOR_VERSION)
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -540,6 +548,18 @@ test: fmt vet envtest ## Run tests.
 			echo "Total test coverage ($${percentage}%) is less than the coverage threshold ($(CODECOV_PERCENT)%)."; \
 			exit 1; \
 		fi
+
+.PHONY: benchmark
+
+$(KNAVIGATOR): | $(LOCALBIN)
+	GOBIN=$(LOCALBIN) go install github.com/NVIDIA/knavigator/cmd/knavigator@$(KNAVIGATOR_VERSION)
+	mv $(LOCALBIN)/knavigator $(KNAVIGATOR)
+
+benchmark: $(KNAVIGATOR) ## Run the KWOK benchmark; see docs/testing.md.
+	CONTEXT="$(E2E_KUBE_CONTEXT)" CONFIG_DIR="$(BENCHMARK_CONFIG_DIR)" WORKLOAD="$(BENCHMARK_WORKLOAD)" ARTIFACTS_ROOT="$(BENCHMARK_ARTIFACTS_DIR)" \
+		SPEEDUP="$(BENCHMARK_SPEEDUP)" TIMEOUT="$(BENCHMARK_TIMEOUT)" \
+		KNAVIGATOR="$(KNAVIGATOR)" KNAVIGATOR_VERSION="$(KNAVIGATOR_VERSION)" \
+		hack/benchmark/run.sh
 
 .PHONY: test-e2e
 test-e2e: $(GOTESTSUM) ## Run end-to-end tests against the E2E_KUBE_CONTEXT Kubernetes context.

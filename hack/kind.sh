@@ -572,6 +572,10 @@ function slurm::install_from_source() {
 function slurm::configure_for_bridge() {
 	local chart="$1"
 	local chartName="slurm"
+	local values_args=()
+	if [[ -n ${SLURM_VALUES:-} ]]; then
+		values_args+=(--values "$SLURM_VALUES")
+	fi
 
 	echo "[slurm] Configuring Slurm for slurm-bridge..."
 	case "$OPT_SLURM_NODE_MODE" in
@@ -581,7 +585,8 @@ function slurm::configure_for_bridge() {
 			--reuse-values \
 			--wait \
 			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
-			--values "$SCRIPT_DIR/slurm-bridge-external.yaml"
+			--values "$SCRIPT_DIR/slurm-bridge-external.yaml" \
+			"${values_args[@]}"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
 		# Apply controller configuration before creating the NodeSet. Otherwise,
@@ -592,6 +597,7 @@ function slurm::configure_for_bridge() {
 			--wait \
 			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
 			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
+			"${values_args[@]}" \
 			--set nodesets.slurm-bridge.enabled=false
 		helm upgrade "$chartName" "$chart" \
 			--namespace slurm --create-namespace \
@@ -862,6 +868,7 @@ HELM OPTIONS:
 	--metrics           Install metrics collection for Slurm Bridge.
 
 SLURM OPTIONS:
+	SLURM_VALUES        Optional Helm values file applied after the bridge defaults.
 	--slurm-node-mode=MODE
 	                    Configure Slurm nodes as external or hybrid. Default: $OPT_SLURM_NODE_MODE.
 	--slurm-operator-repo=URL

@@ -200,3 +200,33 @@ Optional system diagnostics remain a direct command:
 ```sh
 sudo ./hack/sysctl.sh
 ```
+
+## Scale benchmark
+
+The knavigator benchmark defaults to 64 KWOK nodes, 800 mixed workloads, and 60×
+speed. Use a dedicated Kubernetes 1.37 cluster:
+
+```sh
+./hack/kind.sh --core --kwok slinky-benchmark
+export E2E_KUBE_CONTEXT=kind-slinky-benchmark
+make benchmark
+```
+
+Workflow YAML settings accept `${ENV_VAR:-default}`, for example
+`BENCHMARK_INFERENCE_JOBS=60 BENCHMARK_TRAINING_JOBS=20 make benchmark`. Set
+`BENCHMARK_CONFIG_DIR` to a checked-out configuration bundle (including from the
+CI repo): `nodes.yaml`, `workload.yaml`, `composite.yaml.tmpl`, and
+`kwok-stage.yaml`. `BENCHMARK_WORKLOAD=/path/to/workload.yaml` replaces only the
+workload. Its RegisterObj task uses `${BENCHMARK_TEMPLATE}` for the copied pod
+template; `${BENCHMARK_NAMESPACE}` is assigned per run. The default fleet uses
+the existing two-rack Slurm topology. The script forwards referenced environment
+values through knavigator’s native `-var` option and saves them with the YAML.
+
+`BENCHMARK_SPEEDUP` scales arrivals and pod runtime together. KWOK completes
+pods; knavigator collects results. Completed Jobs stay until run cleanup so the
+one-minute reports retain their counts. Each run writes to
+`benchmark-artifacts/<run-id>/`; tail its `benchmark.log` for one-minute GPU
+occupancy and gang progress reports. `summary.txt` contains the final headline
+stats; `results.json` and `timeline.csv` contain the details. CI retains the
+same artifacts. Set `SLURM_VALUES=/path/to/values.yaml` during cluster setup to
+apply extra Slurm Helm values, including CI-owned configuration.
