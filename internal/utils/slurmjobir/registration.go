@@ -36,6 +36,10 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 	if err != nil {
 		return false, "", err
 	}
+	byName := make(map[string]compositePodGroupInfo, len(groups))
+	for _, g := range groups {
+		byName[g.name] = g
+	}
 	leaves := &PodGroupList{TypeMeta: metav1.TypeMeta{APIVersion: api.PodGroupTypeMeta.APIVersion, Kind: "PodGroupList"}}
 	if err := c.List(ctx, leaves, client.InNamespace(pod.Namespace)); err != nil {
 		return false, "", err
@@ -69,6 +73,9 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 				children++
 			}
 		}
+		// Translation skips leaves below a basic boundary: their Pods are separate allocations,
+		// so count those from the live list.
+		translated := name == ir.RootPOM.Name || traverseParentChain(name, ir.RootPOM.Name, byName)
 		for _, leaf := range leaves.Items {
 			if ptr.Deref(leaf.Spec.ParentCompositePodGroupName, "") != name {
 				continue
@@ -76,9 +83,17 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 			if err := validatePodGroupSpec(&leaf); err != nil {
 				return false, err
 			}
+			pods := members[leaf.Name]
+			if !translated {
+				live, err := t.podsForPodGroup(leaf.Namespace, leaf.Name)
+				if err != nil {
+					return false, err
+				}
+				pods = live.Items
+			}
 			minCount := ptr.Deref(leaf.gangMinCount(), 1)
 			count := int32(0)
-			for _, p := range members[leaf.Name] {
+			for _, p := range pods {
 				if p.DeletionTimestamp == nil && p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
 					count++
 				}

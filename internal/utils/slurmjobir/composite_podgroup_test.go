@@ -691,3 +691,38 @@ func TestRegistrationReadyCountsTranslatedMembers(t *testing.T) {
 		})
 	}
 }
+
+func TestRegistrationReadyCountsBasicSubtreeLive(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+	root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+		"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+	})
+	basic := newSchedulingV1Alpha3Object("CompositePodGroup", "basic", map[string]any{
+		"parentCompositePodGroupName": "root",
+		"schedulingPolicy":            map[string]any{"basic": map[string]any{}},
+	})
+	gang := newPodGroup("gang", ns, schedulingv1beta1.PodGroupSchedulingPolicy{
+		Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 1},
+	})
+	gang.Spec.ParentCompositePodGroupName = ptr.To("root")
+	single := newPodGroup("single", ns, schedulingv1beta1.PodGroupSchedulingPolicy{Basic: &schedulingv1beta1.BasicSchedulingPolicy{}})
+	single.Spec.ParentCompositePodGroupName = ptr.To("basic")
+	gangPod := podWithSchedulingGroup(ns, "gang-0", "gang")
+	singlePod := podWithSchedulingGroup(ns, "single-0", "single")
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(root, basic, gang, single, gangPod, singlePod).Build()
+	// Translation of root leaves out "single": its Pods are their own allocations.
+	ir := &SlurmJobIR{
+		RootPOM: metav1.PartialObjectMetadata{TypeMeta: compositePodGroupV1Alpha3, ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}},
+		Components: []SlurmJobComponent{{
+			ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "gang", Namespace: ns}},
+			Pods:       corev1.PodList{Items: []corev1.Pod{*gangPod}},
+		}},
+	}
+	got, msg, err := RegistrationReady(cl, nil, api, context.Background(), gangPod, ir)
+	if err != nil || !got {
+		t.Errorf("RegistrationReady() = %v, %q, %v, want true", got, msg, err)
+	}
+}
