@@ -124,7 +124,11 @@ func (t *translator) PreFilterPodGroup(pod *corev1.Pod, slurmJobIR *SlurmJobIR) 
 	if minCount == nil {
 		return fwk.NewStatus(fwk.Success)
 	}
-	return gangQuorum(pod, slurmJobIR.AllPods(), int(*minCount))
+	pods := slurmJobIR.AllPods()
+	if len(pods) >= int(*minCount) {
+		return fwk.NewStatus(fwk.Success)
+	}
+	return gangQuorum(pod, pods, int(*minCount))
 }
 
 // gangQuorum counts group membership, not label progress, since siblings are labeled one at a time.
