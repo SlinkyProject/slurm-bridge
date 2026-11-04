@@ -1,0 +1,44 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Completes a benchmark pod once it has run for its annotated runtime.
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: Stage
+metadata:
+  name: benchmark-pod-complete
+spec:
+  resourceRef:
+    apiGroup: v1
+    kind: Pod
+  selector:
+    matchLabels:
+      app.kubernetes.io/managed-by: knavigator
+    matchExpressions:
+      - key: .metadata.deletionTimestamp
+        operator: DoesNotExist
+      - key: .status.phase
+        operator: In
+        values: [Running]
+  delay:
+    durationFrom:
+      expressionFrom: .metadata.annotations["benchmark.slinky.slurm.net/runtime"]
+  next:
+    statusTemplate: |
+      {{ $now := Now }}
+      {{ $root := . }}
+      containerStatuses:
+      {{ range $index, $item := .spec.containers }}
+      {{ $origin := index $root.status.containerStatuses $index }}
+      - image: {{ $item.image | Quote }}
+        name: {{ $item.name | Quote }}
+        ready: false
+        restartCount: 0
+        started: false
+        state:
+          terminated:
+            exitCode: 0
+            reason: Completed
+            startedAt: {{ $origin.state.running.startedAt | Quote }}
+            finishedAt: {{ $now | Quote }}
+      {{ end }}
+      phase: Succeeded

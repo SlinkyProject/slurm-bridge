@@ -28,6 +28,7 @@ govulncheck-commit-message.txt
 cover.html
 cover.out.tmp
 e2e-artifacts/
+benchmark-artifacts/
 
 # Dependency directories (remove the comment below to include it)
 !vendor/**/zz_generated.*

@@ -1,0 +1,35 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Use the existing Slurm topology: two racks, s1 and s2.
+name: nodes
+tasks:
+  - id: nodes
+    type: Configure
+    params:
+      timeout: 20m
+      nodes:
+        - type: h100
+          count: ${BENCHMARK_NODES:-64}
+          racks: ${BENCHMARK_RACKS:-2}
+          # slurmctld otherwise resolves each node name through DNS and stalls.
+          address: 127.0.0.1
+          gpus:
+            count: ${BENCHMARK_GPUS_PER_NODE:-8}
+            product: NVIDIA-H100-80GB-HBM3
+          resources:
+            cpu: ${BENCHMARK_CPUS_PER_NODE:-96}
+            memory: ${BENCHMARK_MEMORY_PER_NODE:-1024Gi}
+            pods: 256
+          annotations:
+            scheduler.slinky.slurm.net/external-node-partitions: slurm-bridge
+            topology.slinky.slurm.net/spec: topo-switch:s{{ .rack }}
+          labels:
+            benchmark.slinky.slurm.net/fleet: 'true'
+            app.kubernetes.io/managed-by: slurm-bridge-kwok
+            scheduler.slinky.slurm.net/external-node: 'true'
+            scheduler.slinky.slurm.net/slurm-bridge: worker
+          taints:
+            - key: slinky.slurm.net/managed-node
+              value: slurm-bridge-scheduler
+              effect: NoExecute

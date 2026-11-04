@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# One trace job as a gang: a composite PodGroup with one child PodGroup that
+# holds every pod of an Indexed Job. knavigator fills in the parameters.
+apiVersion: scheduling.k8s.io/v1beta1
+kind: Workload
+metadata:
+  name: '{{._NAME_}}'
+  namespace: '{{.namespace}}'
+  labels:
+    app.kubernetes.io/managed-by: knavigator
+    benchmark.slinky.slurm.net/class: '{{.class}}'
+spec:
+  compositePodGroupTemplates:
+    - name: all
+      schedulingPolicy:
+        gang:
+          minGroupCount: 1
+      podGroupTemplates:
+        - name: workers
+          schedulingPolicy:
+            gang:
+              minCount: {{.gangSize}}
+---
+apiVersion: scheduling.k8s.io/v1alpha3
+kind: CompositePodGroup
+metadata:
+  name: '{{._NAME_}}'
+  namespace: '{{.namespace}}'
+  labels:
+    app.kubernetes.io/managed-by: knavigator
+spec:
+  workloadRef:
+    workloadName: '{{._NAME_}}'
+    templateName: all
+  schedulingPolicy:
+    gang:
+      minGroupCount: 1
+---
+apiVersion: scheduling.k8s.io/v1beta1
+kind: PodGroup
+metadata:
+  name: '{{._NAME_}}-workers'
+  namespace: '{{.namespace}}'
+  labels:
+    app.kubernetes.io/managed-by: knavigator
+  annotations:
+    slurmjob.slinky.slurm.net/exclusive: '{{.exclusive}}'
+    slurmjob.slinky.slurm.net/account: '{{.account}}'
+    slurmjob.slinky.slurm.net/timelimit: '{{.timeLimitMinutes}}'
+    slurmjob.slinky.slurm.net/priority: '{{.priority}}'
+spec:
+  parentCompositePodGroupName: '{{._NAME_}}'
+  workloadRef:
+    workloadName: '{{._NAME_}}'
+    templateName: workers
+  schedulingPolicy:
+    gang:
+      minCount: {{.gangSize}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: '{{._NAME_}}'
+  namespace: '{{.namespace}}'
+  labels:
+    app.kubernetes.io/managed-by: knavigator
+    benchmark.slinky.slurm.net/class: '{{.class}}'
+spec:
+  completionMode: Indexed
+  parallelism: {{.gangSize}}
+  completions: {{.gangSize}}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: knavigator
+      annotations:
+        slurmjob.slinky.slurm.net/exclusive: '{{.exclusive}}'
+        slurmjob.slinky.slurm.net/account: '{{.account}}'
+        slurmjob.slinky.slurm.net/timelimit: '{{.timeLimitMinutes}}'
+        slurmjob.slinky.slurm.net/priority: '{{.priority}}'
+        benchmark.slinky.slurm.net/runtime: '{{.runtime}}'
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      schedulingGroup:
+        podGroupName: '{{._NAME_}}-workers'
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 0
+      nodeSelector:
+        type: kwok
+        scheduler.slinky.slurm.net/external-node: 'true'
+      tolerations:
+        - key: kwok.x-k8s.io/node
+          value: fake
+          effect: NoSchedule
+        - key: slinky.slurm.net/managed-node
+          value: slurm-bridge-scheduler
+          operator: Equal
+          effect: NoExecute
+      containers:
+        - name: work
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: '{{.cpus}}'
+              memory: {{.memory}}
+              nvidia.com/gpu: '{{.gpus}}'
+            limits:
+              memory: {{.memory}}
+              nvidia.com/gpu: '{{.gpus}}'

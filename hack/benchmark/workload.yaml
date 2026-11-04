@@ -1,0 +1,54 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Scale benchmark: 800 mixed inference and training jobs.
+name: benchmark
+tasks:
+  - id: job
+    type: RegisterObj
+    params:
+      template: ${BENCHMARK_TEMPLATE}
+      nameFormat: bench-{{.jobId}}
+      # Indexed Job pods are <job>-<index>-<suffix>.
+      podNameFormat: '{{._NAME_}}-[0-9]+-[a-z0-9]+'
+      podCount: '{{.gangSize}}'
+  # Inference is numerous, short and high priority. Training is rarer, longer and often
+  # gangs whole nodes; gang sizes of 16 and 48 are a quarter and three quarters of the fleet.
+  - id: trace
+    type: SubmitTrace
+    params:
+      refTaskId: job
+      seed: ${BENCHMARK_SEED:-0}
+      timeLimitFactor: ${BENCHMARK_TIMELIMIT_FACTOR:-2}
+      params:
+        namespace: ${BENCHMARK_NAMESPACE}
+        exclusive: ${BENCHMARK_EXCLUSIVE:-false}
+        cpus: ${BENCHMARK_POD_CPUS:-1}
+        memory: ${BENCHMARK_POD_MEMORY:-8Gi}
+      classes:
+        - name: inference
+          jobs: ${BENCHMARK_INFERENCE_JOBS:-600}
+          arrivalInterval: ${BENCHMARK_INFERENCE_ARRIVAL_INTERVAL:-24}
+          runtime:
+            mu: ${BENCHMARK_INFERENCE_RUNTIME_MU:-5.0}
+            sigma: ${BENCHMARK_INFERENCE_RUNTIME_SIGMA:-0.9}
+            max: ${BENCHMARK_INFERENCE_RUNTIME_MAX:-1200}
+          gpus: ${BENCHMARK_INFERENCE_GPUS:-[1]}
+          priorities: ${BENCHMARK_INFERENCE_PRIORITIES:-[100, 100, 500]}
+          accounts:
+            - {name: inference, weight: 1}
+        - name: training
+          jobs: ${BENCHMARK_TRAINING_JOBS:-200}
+          arrivalInterval: ${BENCHMARK_TRAINING_ARRIVAL_INTERVAL:-160}
+          runtime:
+            mu: ${BENCHMARK_TRAINING_RUNTIME_MU:-8.4}
+            sigma: ${BENCHMARK_TRAINING_RUNTIME_SIGMA:-1.1}
+            max: ${BENCHMARK_TRAINING_RUNTIME_MAX:-14400}
+          gpus: ${BENCHMARK_TRAINING_GPUS:-[2, 4, 8]}
+          gangFraction: ${BENCHMARK_TRAINING_FRACTION:-0.225}
+          gangSizes: ${BENCHMARK_TRAINING_SIZES:-[2, 2, 4, 8, 16, 48]}
+          gangGpus: ${BENCHMARK_TRAINING_GANG_GPUS:-8}
+          priorities: ${BENCHMARK_TRAINING_PRIORITIES:-[50]}
+          accounts:
+            - {name: research, weight: 0.6}
+            - {name: trading, weight: 0.4}
