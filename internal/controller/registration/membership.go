@@ -5,12 +5,8 @@ package registration
 
 import (
 	"context"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -34,14 +30,10 @@ func publishedJobKeys(obj client.Object) []string {
 	return nil
 }
 
-var compositePodGroupKind = schema.GroupKind{Group: "scheduling.k8s.io", Kind: "CompositePodGroup"}
-
-// indexedMembershipClient serves translation's namespace-wide reads from the cache. Without it,
-// each reconcile listed every Pod in the namespace and fetched every CompositePodGroup from the
-// apiserver, because the default client does not cache unstructured objects.
+// indexedMembershipClient serves translation's namespace-wide Pod reads from field indexes, so
+// a reconcile does not copy every Pod in the namespace.
 type indexedMembershipClient struct {
 	client.Client
-	cache client.Reader // nil leaves CompositePodGroups uncached
 }
 
 func (r indexedMembershipClient) ListPodGroupMembers(ctx context.Context, namespace, name string) (corev1.PodList, error) {
@@ -50,32 +42,7 @@ func (r indexedMembershipClient) ListPodGroupMembers(ctx context.Context, namesp
 	return pods, err
 }
 
-func (r indexedMembershipClient) compositePodGroup(obj runtime.Object) bool {
-	var gvk schema.GroupVersionKind
-	switch o := obj.(type) {
-	case *unstructured.Unstructured:
-		gvk = o.GroupVersionKind()
-	case *unstructured.UnstructuredList:
-		gvk = o.GroupVersionKind()
-		gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
-	default:
-		return false
-	}
-	return r.cache != nil && gvk.GroupKind() == compositePodGroupKind
-}
-
-func (r indexedMembershipClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if r.compositePodGroup(obj) {
-		return r.cache.Get(ctx, key, obj, opts...)
-	}
-	return r.Client.Get(ctx, key, obj, opts...)
-}
-
 func (r indexedMembershipClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	if r.compositePodGroup(list) {
-		// Translation only decodes CompositePodGroups, so it reads them in place instead of copying the namespace.
-		return r.cache.List(ctx, list, append(opts, client.UnsafeDisableDeepCopy)...)
-	}
 	options := (&client.ListOptions{}).ApplyOptions(opts)
 	if _, ok := list.(*corev1.PodList); ok && options.LabelSelector != nil {
 		if id, exact := options.LabelSelector.RequiresExactMatch(wellknown.LabelExternalJobId); exact {
@@ -109,7 +76,7 @@ func (r *Reconciler) liveMembers() client.Reader {
 // cachedMembers returns the client for translation and membership reads.
 func (r *Reconciler) cachedMembers() client.Client {
 	if r.membersIndexed {
-		return indexedMembershipClient{Client: r.Client, cache: r.cache}
+		return indexedMembershipClient{Client: r.Client}
 	}
 	return r.Client
 }

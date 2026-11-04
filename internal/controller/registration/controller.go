@@ -48,7 +48,6 @@ func init() {
 type Reconciler struct {
 	client.Client
 	apiReader      client.Reader
-	cache          client.Reader
 	membersIndexed bool
 	jobIndex       *slurmjob.PodIndex
 	slurmControl   slurmcontrol.SlurmControlInterface
@@ -84,7 +83,6 @@ func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName s
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.apiReader = mgr.GetAPIReader()
-	r.cache = mgr.GetCache()
 	for name, extract := range map[string]client.IndexerFunc{podGroupMemberIndex: nativePodGroupKeys, publishedJobIndex: publishedJobKeys} {
 		if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, name, extract); err != nil {
 			return err
