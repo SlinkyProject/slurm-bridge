@@ -16,6 +16,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
@@ -101,7 +102,11 @@ func (r *Reconciler) componentMembers(ctx context.Context, reader client.Reader,
 	if err := reader.List(ctx, labeled, client.MatchingLabels{wellknown.LabelExternalJobId: strconv.Itoa(int(job.JobId))}); err != nil {
 		return nil, err
 	}
-	add(labeled.Items)
+	for _, pod := range labeled.Items {
+		if !podReadyForCleanup(&pod) {
+			add([]corev1.Pod{pod})
+		}
+	}
 	result := make([]corev1.Pod, 0, len(members))
 	for _, pod := range members {
 		result = append(result, pod)
@@ -116,6 +121,19 @@ func needsAllocation(pods []corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+// releasable reports whether an allocation can be released. LWS recreates the
+// whole group when one of its pods is lost (RecreateGroupOnPodRestart, the only
+// policy admitted), so a lost LWS member releases the allocation without
+// waiting for the surviving members to terminate.
+func releasable(pods []corev1.Pod) bool {
+	if !needsAllocation(pods) {
+		return true
+	}
+	return slices.ContainsFunc(pods, func(p corev1.Pod) bool {
+		return p.Labels[lwsv1.SetNameLabelKey] != "" && podReadyForCleanup(&p)
+	})
 }
 
 // liveJob is used only at destructive boundaries. Missing jobs are released;
@@ -162,7 +180,7 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 		return false, fmt.Errorf("ownership changed for job %d", cached.JobId)
 	}
 	members, err := r.componentMembers(ctx, r.apiReader, cached)
-	if err != nil || needsAllocation(members) {
+	if err != nil || !releasable(members) {
 		return false, err
 	}
 	if live.HetJobId != 0 && (live.Pending || live.HetJobOffset == 0) {
@@ -183,7 +201,7 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 				return false, err
 			}
 			pods, err := r.componentMembers(ctx, r.apiReader, sibling)
-			if err != nil || needsAllocation(pods) {
+			if err != nil || !releasable(pods) {
 				return false, err
 			}
 		}
@@ -246,14 +264,14 @@ func (r *Reconciler) reconcileLifecycle(ctx context.Context, key Request, pods [
 			released[job.JobId] = true
 			continue
 		}
-		if needsAllocation(current) && !job.Finished {
+		if !releasable(current) && !job.Finished {
 			continue
 		}
 		released[job.JobId], err = r.releaseComponent(ctx, job)
 		if err != nil {
 			return false, err
 		}
-		if !released[job.JobId] && !needsAllocation(current) {
+		if !released[job.JobId] && releasable(current) {
 			waiting = true
 		}
 	}

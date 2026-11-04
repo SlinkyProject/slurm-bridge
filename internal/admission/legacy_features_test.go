@@ -9,10 +9,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/featuregate"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -46,7 +49,13 @@ func TestPodAdmission_LegacyFeatureGates(t *testing.T) {
 			if tt.disable != "" {
 				featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, tt.disable, false)
 			}
-			r := &PodAdmission{SchedulerName: SchedulerName}
+			scheme := runtime.NewScheme()
+			utilruntime.Must(corev1.AddToScheme(scheme))
+			utilruntime.Must(lwsv1.AddToScheme(scheme))
+			lws := &lwsv1.LeaderWorkerSet{ObjectMeta: metav1.ObjectMeta{Name: "workload"}, Spec: lwsv1.LeaderWorkerSetSpec{
+				LeaderWorkerTemplate: lwsv1.LeaderWorkerTemplate{Size: ptr.To[int32](2), RestartPolicy: lwsv1.RecreateGroupOnPodRestart},
+			}}
+			r := &PodAdmission{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(lws).Build(), SchedulerName: SchedulerName}
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{tt.label: "workload"}},
 				Spec:       corev1.PodSpec{SchedulerName: SchedulerName},

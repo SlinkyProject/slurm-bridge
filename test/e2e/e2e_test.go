@@ -39,6 +39,7 @@ func TestScheduling(t *testing.T) {
 		testSchedulerPluginsPodGroupScheduling(),
 		testRayPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),
+		testLeaderWorkerSetWorkerFailure(),
 		testSlurmJobRoundTrip(),
 		testKubernetesCancellation(),
 		testSlurmCancellation(),
