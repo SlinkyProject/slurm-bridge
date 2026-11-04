@@ -102,7 +102,7 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 			if before.Chart != "slurm-bridge" || before.Version != fromVersion || before.Status != "deployed" {
 				t.Fatalf("expected deployed slurm-bridge %s, got %+v", fromVersion, before)
 			}
-			baselineImages = upgradeDeploymentImages(ctx, t, crClient)
+			baselineImages = upgradeDeploymentImages(ctx, t, crClient, "scheduler", "controllers", "admission")
 			output := runUpgradeHelm(ctx, t, "show", "chart", chart)
 			if err := yaml.Unmarshal(output, &target); err != nil {
 				t.Fatalf("decode target chart: %v", err)
@@ -173,11 +173,15 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 				after.Revision != before.Revision+1 || after.Status != "deployed" {
 				t.Fatalf("unexpected upgraded release: %+v", after)
 			}
-			for component, image := range upgradeDeploymentImages(ctx, t, crClient) {
+			for component, image := range upgradeDeploymentImages(ctx, t, crClient, "scheduler", "admission") {
 				if image == baselineImages[component] {
 					t.Fatalf("%s still uses the baseline image %s; target values must select the new binaries", component, image)
 				}
 				t.Logf("%s image: %s -> %s", component, baselineImages[component], image)
+			}
+			err := crClient.Get(ctx, client.ObjectKey{Namespace: slurmNamespace, Name: "slurm-bridge-controllers"}, &appsv1.Deployment{})
+			if err == nil || client.IgnoreNotFound(err) != nil {
+				t.Fatalf("expected the controllers Deployment to be removed, got err=%v", err)
 			}
 			return ctx
 		}).
@@ -328,10 +332,10 @@ func runUpgradeCommand(ctx context.Context, t *testing.T, name string, args ...s
 	return output
 }
 
-func upgradeDeploymentImages(ctx context.Context, t *testing.T, crClient client.Client) map[string]string {
+func upgradeDeploymentImages(ctx context.Context, t *testing.T, crClient client.Client, components ...string) map[string]string {
 	t.Helper()
 	images := map[string]string{}
-	for _, component := range []string{"scheduler", "controllers", "admission"} {
+	for _, component := range components {
 		deployment := &appsv1.Deployment{}
 		key := client.ObjectKey{Namespace: slurmNamespace, Name: "slurm-bridge-" + component}
 		if err := wait.For(func(ctx context.Context) (bool, error) {

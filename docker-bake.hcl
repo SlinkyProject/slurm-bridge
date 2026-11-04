@@ -46,7 +46,6 @@ target "_multiarch" {
 group "default" {
   targets = [
     "scheduler",
-    "controllers",
     "admission",
   ]
 }
@@ -68,26 +67,6 @@ target "scheduler" {
   }
   tags = [
     format_tag(REGISTRY, "slurm-bridge-scheduler", VERSION),
-  ]
-}
-
-################################################################################
-
-target "controllers" {
-  inherits = ["_common", "_multiarch"]
-  dockerfile = "Dockerfile"
-  target = "controllers"
-  labels = {
-    # Ref: https://github.com/opencontainers/image-spec/blob/v1.0/annotations.md
-    "org.opencontainers.image.title" = "Slurm Bridge Controllers"
-    "org.opencontainers.image.description" = "Slurm Bridge Controllers"
-    # Ref: https://docs.redhat.com/en/documentation/red_hat_software_certification/2025/html/red_hat_openshift_software_certification_policy_guide/assembly-requirements-for-container-images_openshift-sw-cert-policy-introduction#con-image-metadata-requirements_openshift-sw-cert-policy-container-images
-    "name" = "Slurm Bridge Controllers"
-    "summary" = "Slurm Bridge Controllers"
-    "description" = "Slurm Bridge Controllers"
-  }
-  tags = [
-    format_tag(REGISTRY, "slurm-bridge-controllers", VERSION),
   ]
 }
 

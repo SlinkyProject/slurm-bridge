@@ -3,6 +3,18 @@ SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 SPDX-License-Identifier: Apache-2.0
 */}}
 
+{{- $controllers := list "node" "registration" }}
+{{- if hasKey .Values.scheduler "controllers" }}
+{{- $controllers = .Values.scheduler.controllers }}
+{{- end }}
+{{- $logLevel := .Values.scheduler.verbosity | default "info" | toString }}
+
+{{- range $controllers }}
+{{- if not (has . (list "node" "registration")) }}
+{{- fail (printf "unknown controller %q: supported controllers are node,registration" .) }}
+{{- end }}
+{{- end }}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,10 +41,17 @@ spec:
       serviceAccountName: {{ include "slurm-bridge.scheduler.name" . }}
       containers:
       - args:
-        - --config=/etc/kubernetes/scheduler-config.yaml
-        - --feature-gates={{ include "slurm-bridge.scheduler.featureGates" . }}
-        {{- with .Values.scheduler.verbosity }}
-        - --v={{ . }}
+        - --scheduler-config=/etc/kubernetes/scheduler-config.yaml
+        - --scheduler-feature-gates={{ include "slurm-bridge.scheduler.featureGates" . }}
+        - --leader-elect=true
+        - --metrics-secure=true
+        - --controllers={{ join "," $controllers }}
+        - --zap-log-level={{ ternary "info" $logLevel (eq $logLevel "0") }}
+        {{- with .Values.scheduler.registrationWorkers }}
+        - --registration-workers={{ . }}
+        {{- end }}
+        {{- with .Values.scheduler.podWorkers }}
+        - --pod-workers={{ . }}
         {{- end }}
         env:
         - name: SLURM_JWT_FILE
@@ -42,15 +61,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 10259
-            scheme: HTTPS
+            port: 8081
           initialDelaySeconds: 15
         name: scheduler
         readinessProbe:
           httpGet:
-            path: /healthz
-            port: 10259
-            scheme: HTTPS
+            path: /readyz
+            port: 8081
         {{- with .Values.scheduler.resources }}
         resources: {{- toYaml . | nindent 10 }}
         {{- end }}

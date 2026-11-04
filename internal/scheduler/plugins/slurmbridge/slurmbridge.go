@@ -125,10 +125,6 @@ func isJobNotPendingError(err error) bool {
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch;update
 // +kubebuilder:rbac:groups=extensions,resources=replicasets,verbs=get;list;watch
 
-// Delegated Auth RBAC
-// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
-// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
-
 // RBAC for VolumeBinding Scheduler Plugin
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;update;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumes,verbs=get;list;update;watch
@@ -218,8 +214,7 @@ const (
 	stateKey fwk.StateKey = Name
 )
 
-// ConfigFile is the path to the slurm-bridge config file read by New, overridable via
-// cmd/scheduler/main.go's "--slurm-bridge-config" flag.
+// ConfigFile is the path to the slurm-bridge config file read by New.
 var ConfigFile = config.ConfigFile
 
 // Name returns name of the plugin. It is used in logs, etc.

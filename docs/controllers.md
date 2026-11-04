@@ -15,31 +15,30 @@
 
 ## Overview
 
-[The Kubernetes documentation](https://kubernetes.io/docs/concepts/architecture/controller/)
-defines controllers as:
+The scheduler process runs two controllers:
 
-> control loops that watch the state of your cluster, then make or request
-> changes where needed. Each controller tries to move the current cluster state
-> closer to the desired state.
+- **Node Controller** - Registers and taints managed Kubernetes nodes.
+- **Registration Controller** - Creates Slurm allocations, publishes Pod
+  registration metadata, and cleans up completed workloads.
 
-Within `slurm-bridge`, there are multiple controllers that manage the state of
-different bridge components:
+Both are enabled by default.
 
-- **Node Controller** - Responsible for tainting the Kubernetes nodes that are
-  managed by `slurm-bridge`
-- **Registration Controller** - Prepares held Slurm allocations and publishes
-  registration metadata to their Pods
-- **Workload Controller** - Responsible for synchronizing Slurm and Kubernetes
-  workloads on the nodes that are managed by `slurm-bridge`
+When upgrading from separate deployments, move `controllers` resource,
+placement, and `registrationWorkers` overrides to `scheduler`. The Helm
+pre-upgrade hook stops the old components; if `upgradeHook.enabled=false`, stop
+them manually before upgrading.
+
+The chart always enables leader election. Standalone binaries use
+`--leader-elect`; `KubeSchedulerConfiguration.leaderElection.leaderElect` and
+the old `scheduler.leaderElect` Helm value are ignored. The lease uses
+`leaderElection.resourceNamespace` from the scheduler configuration (default:
+`kube-system`). Override it with `--leader-election-namespace`. Helm uses the
+release namespace.
 
 ## Node Controller
 
-The node controller is responsible for tainting the managed nodes so the
-scheduler component is fully in control of all workload that is bound to those
-nodes.
-
-Additionally, this controller will reconcile certain node states for scheduling
-purposes. Slurm becomes the source of truth for scheduling among managed nodes.
+The node controller taints managed nodes and synchronizes their scheduling state
+with Slurm.
 
 A managed node is a Kubernetes node with a corresponding Slurm node. This
 includes both [external and hybrid nodes](config.md#nodes); only hybrid nodes
@@ -90,7 +89,7 @@ sequenceDiagram
   autonumber
 
   participant KAPI as Kubernetes API
-  participant SWC as Slurm Workload Controller
+  participant SWC as Node Controller
   participant SAPI as Slurm REST API
 
   loop Reconcile Loop
@@ -117,10 +116,9 @@ sequenceDiagram
 
 ## Registration Controller
 
-The registration controller owns allocation registration, metadata repair,
-cleanup, and Pod finalization on one queue keyed by allocation identity. It
-creates held Slurm allocations and removes registration gates once allocation
-metadata is published.
+The registration controller creates held Slurm allocations and removes Pod
+registration gates once allocation metadata is published. It also repairs
+metadata and cleans up completed allocations.
 
 Cleanup uses current Kubernetes group membership, including late members, as
 well as the Pod identities recorded in Slurm. Before cancellation it confirms
@@ -132,13 +130,9 @@ pending heterogeneous jobs are retained while any member needs the allocation.
 Bound Pods whose jobs stop running are deleted after a live Slurm check. Claims
 and scheduler finalizers are removed only after Slurm reports the allocation
 finished or absent; a cancellation acknowledgement alone does not release them.
-The Slurm informer reconstructs cleanup work after restarts. The separate Pod
-controller and dangling-job sweep are no longer used.
 
-Configure concurrency with `controllers.registrationWorkers` in Helm or
-`--registration-workers` on the controllers binary. The default is 10 workers.
-The Node controller also defaults to 10 workers, configurable with
-`--node-workers`. `controllers.podWorkers` and `--pod-workers` remain accepted
-for compatibility but have no effect. Cache reads retain the existing Slurm
-client refresh waits. This ownership change does not alter allocation formation
-for late composite components.
+Configure concurrency with `scheduler.registrationWorkers` in Helm or
+`--registration-workers` on the combined scheduler binary. The default is 10
+workers. The Node controller also defaults to 10 workers, configurable with
+`--node-workers`. `scheduler.podWorkers` and `--pod-workers` remain accepted for
+compatibility but have no effect.

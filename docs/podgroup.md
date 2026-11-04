@@ -40,14 +40,14 @@ newer. Cluster components must also enable `GenericWorkload` and serve the API
 version shown in the Kind configurations above.
 
 Standalone binaries on clusters without these APIs, including Kubernetes
-**1.35**, must opt out with `--feature-gates=GenericWorkload=false`. Helm
-disables this gate automatically on Kubernetes 1.35; on other clusters it can be
-disabled with `scheduler.featureGates.GenericWorkload=false`. The scheduler then
-skips Workload discovery and registration. Pods that reference a built-in
-PodGroup through `spec.schedulingGroup.podGroupName` are rejected with a clear
-scheduling failure before Slurm operations. Ordinary Pods, Jobs, JobSets,
-LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing behavior
-when they do not reference a built-in PodGroup.
+**1.35**, must opt out with `--scheduler-feature-gates=GenericWorkload=false`.
+Helm disables this gate automatically on Kubernetes 1.35; on other clusters it
+can be disabled with `scheduler.featureGates.GenericWorkload=false`. The
+scheduler then skips Workload discovery and registration. Pods that reference a
+built-in PodGroup through `spec.schedulingGroup.podGroupName` are rejected with
+a clear scheduling failure before Slurm operations. Ordinary Pods, Jobs,
+JobSets, LeaderWorkerSets, and scheduler-plugins PodGroups retain their existing
+behavior when they do not reference a built-in PodGroup.
 
 For local Kubernetes 1.35 testing, use the `kubernetes-1-35` Skaffold profile.
 The CI matrix's `KUBERNETES_VERSION=v1.35.x` environment setting activates this
@@ -184,11 +184,10 @@ again.
 1. Upgrade the cluster. Enable `scheduling.k8s.io/v1beta1` and the
    `GenericWorkload` gate, as in [`hack/kind.yaml`](../hack/kind.yaml).
 
-1. Restart the scheduler and controllers so both discover `v1beta1`:
+1. Restart the scheduler so it discovers `v1beta1`:
 
    ```sh
-   kubectl --namespace slurm rollout restart \
-     deployment/slurm-bridge-scheduler deployment/slurm-bridge-controllers
+   kubectl --namespace slurm rollout restart deployment/slurm-bridge-scheduler
    ```
 
 1. Convert the saved objects and apply them with the same names and namespaces.

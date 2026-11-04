@@ -40,7 +40,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(up{service=\"slurm-bridge-scheduler\"})",
+          "expr": "sum(up{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\"})",
           "instant": true
         }
       ],
@@ -91,7 +91,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "expr": "sum(rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
           "legendFormat": "{{cluster}} {{instance}} e2e"
         },
         {
@@ -99,7 +99,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(scheduler_pod_scheduling_sli_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "expr": "sum(rate(scheduler_pod_scheduling_sli_duration_seconds_count{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
           "legendFormat": "{{instance}} pod scheduling SLI"
         },
         {
@@ -107,7 +107,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(scheduler_scheduling_algorithm_duration_seconds_count{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
+          "expr": "sum(rate(scheduler_scheduling_algorithm_duration_seconds_count{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\"}[$__rate_interval])) by (instance)",
           "legendFormat": "{{cluster}} {{instance}} scheduling algorithm"
         }
       ],
@@ -158,7 +158,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
           "legendFormat": "{{cluster}} {{instance}} e2e"
         },
         {
@@ -166,7 +166,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
           "legendFormat": "{{cluster}} {{instance}} binding"
         },
         {
@@ -174,7 +174,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
+          "expr": "histogram_quantile(0.99, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])) by (instance, le))",
           "legendFormat": "{{cluster}} {{instance}} scheduling algorithm"
         }
       ],
@@ -225,7 +225,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"2..\"}[$__rate_interval]))",
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\",code=~\"2..\"}[$__rate_interval]))",
           "legendFormat": "2xx"
         },
         {
@@ -233,7 +233,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"3..\"}[$__rate_interval]))",
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\",code=~\"3..\"}[$__rate_interval]))",
           "legendFormat": "3xx"
         },
         {
@@ -241,7 +241,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"4..\"}[$__rate_interval]))",
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\",code=~\"4..\"}[$__rate_interval]))",
           "legendFormat": "4xx"
         },
         {
@@ -249,7 +249,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\",code=~\"5..\"}[$__rate_interval]))",
+          "expr": "sum(rate(rest_client_requests_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\",code=~\"5..\"}[$__rate_interval]))",
           "legendFormat": "5xx"
         }
       ],
@@ -300,7 +300,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\", instance=~\"$instance\", verb=\"POST\"}[$__rate_interval])) by (verb, le))",
+          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\", verb=\"POST\"}[$__rate_interval])) by (verb, le))",
           "legendFormat": "{{verb}}"
         }
       ],
@@ -351,7 +351,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\", instance=~\"$instance\", verb=\"GET\"}[$__rate_interval])) by (verb, le))",
+          "expr": "histogram_quantile(0.99, sum(rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\", verb=\"GET\"}[$__rate_interval])) by (verb, le))",
           "legendFormat": "{{verb}}"
         }
       ],
@@ -402,7 +402,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "process_resident_memory_bytes{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}",
+          "expr": "process_resident_memory_bytes{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\"}",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -453,7 +453,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(process_cpu_seconds_total{service=\"slurm-bridge-scheduler\", instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(process_cpu_seconds_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\", instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -504,7 +504,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "go_goroutines{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "expr": "go_goroutines{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}",
           "legendFormat": "{{instance}}"
         }
       ],
@@ -556,7 +556,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "scheduler_pending_pods{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "expr": "scheduler_pending_pods{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}",
           "legendFormat": "{{queue}}",
           "range": true,
           "refId": "A"
@@ -611,7 +611,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "scheduler_unschedulable_pods{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "expr": "scheduler_unschedulable_pods{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}",
           "legendFormat": "{{plugin}}",
           "range": true,
           "refId": "A"
@@ -666,7 +666,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "scheduler_cache_size{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "expr": "scheduler_cache_size{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}",
           "legendFormat": "{{type}}",
           "range": true,
           "refId": "A"
@@ -721,7 +721,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (result) (rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
+          "expr": "sum by (result) (rate(scheduler_scheduling_attempt_duration_seconds_count{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "{{result}}",
           "range": true,
           "refId": "A"
@@ -776,7 +776,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (extension_point) (rate(scheduler_plugin_evaluation_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval]))",
+          "expr": "sum by (extension_point) (rate(scheduler_plugin_evaluation_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval]))",
           "legendFormat": "{{extension_point}}",
           "range": true,
           "refId": "A"
@@ -831,7 +831,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(scheduler_preemption_attempts_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(scheduler_preemption_attempts_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
@@ -886,7 +886,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
           "legendFormat": "p50 {{extension_point}} / {{status}}",
           "range": true,
           "refId": "A"
@@ -897,7 +897,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.90, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.90, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
           "legendFormat": "p90 {{extension_point}} / {{status}}",
           "range": true,
           "refId": "B"
@@ -908,7 +908,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_plugin_execution_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\",plugin=\"SlurmBridge\"}[$__rate_interval])))",
           "legendFormat": "p99 {{extension_point}} / {{status}}",
           "range": true,
           "refId": "C"
@@ -963,7 +963,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_framework_extension_point_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (extension_point, status, le) (rate(scheduler_framework_extension_point_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "{{extension_point}} / {{status}}",
           "range": true,
           "refId": "A"
@@ -1018,7 +1018,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "range": true,
           "refId": "A"
@@ -1029,7 +1029,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.90, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "p90",
           "range": true,
           "refId": "B"
@@ -1040,7 +1040,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(scheduler_pod_scheduling_attempts_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "range": true,
           "refId": "C"
@@ -1095,7 +1095,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (queue, event) (rate(scheduler_queue_incoming_pods_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
+          "expr": "sum by (queue, event) (rate(scheduler_queue_incoming_pods_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "{{queue}} / {{event}}",
           "range": true,
           "refId": "A"
@@ -1150,7 +1150,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "workqueue_depth{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}",
+          "expr": "workqueue_depth{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}",
           "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
@@ -1205,7 +1205,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(workqueue_retries_total{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(workqueue_retries_total{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])",
           "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
@@ -1260,7 +1260,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (verb, le) (rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (verb, le) (rate(rest_client_request_duration_seconds_bucket{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\",instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "{{verb}}",
           "range": true,
           "refId": "A"
@@ -1303,10 +1303,10 @@
         "includeAll": true,
         "label": "instance",
         "name": "instance",
-        "query": "label_values(up{service=\"slurm-bridge-scheduler\"}, instance)",
+        "query": "label_values(up{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\"}, instance)",
         "refresh": 2,
         "type": "query",
-        "definition": "label_values(up{service=\"slurm-bridge-scheduler\"}, instance)",
+        "definition": "label_values(up{service=\"slurm-bridge-scheduler\",endpoint=\"scheduler\"}, instance)",
         "current": {
           "selected": true,
           "text": "All",

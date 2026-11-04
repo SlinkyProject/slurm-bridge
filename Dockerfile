@@ -33,15 +33,6 @@ ENTRYPOINT ["/scheduler"]
 ################################################################################
 
 # Ref: https://github.com/GoogleContainerTools/distroless
-FROM gcr.io/distroless/static:nonroot AS controllers
-WORKDIR /
-COPY --from=builder /workspace/controllers .
-USER 65532:65532
-ENTRYPOINT ["/controllers"]
-
-################################################################################
-
-# Ref: https://github.com/GoogleContainerTools/distroless
 FROM gcr.io/distroless/static:nonroot AS admission
 WORKDIR /
 COPY --from=builder /workspace/admission .

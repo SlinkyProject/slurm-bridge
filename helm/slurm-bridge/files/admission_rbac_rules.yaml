@@ -8,6 +8,14 @@ rules:
       - list
       - watch
   - apiGroups:
+      - leaderworkerset.x-k8s.io
+    resources:
+      - leaderworkersets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - resource.k8s.io
     resources:
       - deviceclasses

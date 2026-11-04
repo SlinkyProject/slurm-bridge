@@ -21,7 +21,6 @@ spec:
         operator: In
         values:
           - admission
-          - controllers
       - key: app.kubernetes.io/instance
         operator: In
         values:
@@ -37,10 +36,20 @@ spec:
     - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       interval: 15s
       path: /metrics
-      port: https-metrics
+      port: metrics
       scheme: https
       tlsConfig:
         insecureSkipVerify: true
+    - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      interval: 15s
+      path: /metrics/scheduler
+      port: metrics
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+      relabelings:
+        - targetLabel: endpoint
+          replacement: scheduler
   namespaceSelector:
     matchNames:
       - slurm

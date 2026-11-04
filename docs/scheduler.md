@@ -26,6 +26,12 @@ eligible pods onto nodes that are managed by `slurm-bridge`. In doing so, the
 allocations for its workloads. In `slurm-bridge`, `slurmctld` serves as the
 source of truth for scheduling decisions.
 
+The scheduler and controllers share the Kubernetes connection configured by
+`KubeSchedulerConfiguration.clientConnection`. An explicit `--kubeconfig`
+overrides `clientConnection.kubeconfig` for both. Controllers-only mode
+(`--enable-scheduler=false`) uses the standard controller-runtime kubeconfig
+loading rules.
+
 ## Design
 
 This scheduler is designed to be a non-primary scheduler (e.g. should not
@@ -47,7 +53,8 @@ refreshes defer scheduling.
 
 Native group scheduling and bridge Workload support share the default-enabled
 `GenericWorkload` gate. Helm automatically disables it on Kubernetes 1.35;
-standalone binaries on 1.35 must pass `--feature-gates=GenericWorkload=false`.
+standalone binaries on 1.35 must pass
+`--scheduler-feature-gates=GenericWorkload=false`.
 
 Within a native PodGroup scheduling attempt, members share one workload
 translation, membership snapshot, and allocation observation from the allocation
