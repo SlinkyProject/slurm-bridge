@@ -4,12 +4,12 @@
 suite: test scheduler
 templates:
   - scheduler/deployment.yaml
-  - scheduler/configmap.yaml
   - scheduler/poddisruptionbudget.yaml
   - scheduler/rbac.yaml
   - scheduler/service.yaml
   - scheduler/serviceaccount.yaml
   - configmap.yaml
+  - scheduler/configmap.yaml
 release:
   name: test-release
   namespace: test-namespace
@@ -20,6 +20,12 @@ capabilities:
   majorVersion: 1
   minorVersion: 37
 tests:
+  - it: keeps the leader election lease in the release namespace
+    template: scheduler/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: '(?s)leaderElection:.*resourceNamespace: test-namespace'
   - it: prioritizes ready Slurm allocations
     template: scheduler/configmap.yaml
     asserts:
@@ -54,6 +60,35 @@ tests:
       - matchRegex:
           path: spec.template.metadata.annotations["checksum/scheduler-config"]
           pattern: ^[0-9a-f]{64}$
+  - it: renders user-supplied DRA device profiles into shared configuration
+    template: configmap.yaml
+    set:
+      sharedConfig:
+        deviceProfiles:
+          - name: custom-accelerator
+            driver: accelerator.example.com
+            selector: device.driver == 'accelerator.example.com'
+            backend:
+              type: indexed-gres
+              gresName: accelerator
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?s)deviceProfiles:.*gresName: accelerator.*driver: accelerator.example.com.*name: custom-accelerator'
+  - it: renders a null registry by default so components use built-in profiles
+    template: configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*deviceProfiles:\s*null\s*$'
+  - it: preserves an explicitly empty DRA device profile registry
+    template: configmap.yaml
+    set:
+      sharedConfig.deviceProfiles: []
+    asserts:
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: '(?m)^\s*deviceProfiles:\s*\[\]\s*$'
   - it: image pull policy is configurable
     template: scheduler/deployment.yaml
     set:
@@ -67,14 +102,14 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
+          content: --scheduler-feature-gates=CompositePodGroup=true,DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false,TopologyAwareWorkloadScheduling=true
   - it: disables native scheduling and hierarchy together
     set:
       scheduler.featureGates.GenericWorkload: false
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
+          content: --scheduler-feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
         template: scheduler/deployment.yaml
       - notMatchRegex:
           path: data["scheduler-config.yaml"]
@@ -87,7 +122,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false
+          content: --scheduler-feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=true,SchedulerPopFromBackoffQ=false
         template: scheduler/deployment.yaml
       - matchRegex:
           path: data["scheduler-config.yaml"]
@@ -100,7 +135,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
+          content: --scheduler-feature-gates=DRAExtendedResource=true,DynamicResourceAllocation=true,GenericWorkload=false,SchedulerPopFromBackoffQ=false
         template: scheduler/deployment.yaml
       - notMatchRegex:
           path: data["scheduler-config.yaml"]
@@ -115,7 +150,7 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=GenericWorkload=false
+          content: --scheduler-feature-gates=GenericWorkload=false
         template: scheduler/deployment.yaml
       - notMatchRegex:
           path: data["scheduler-config.yaml"]
@@ -130,51 +165,31 @@ tests:
     asserts:
       - contains:
           path: spec.template.spec.containers[0].args
-          content: --feature-gates=GenericWorkload=true
+          content: --scheduler-feature-gates=GenericWorkload=true
         template: scheduler/deployment.yaml
       - matchRegex:
           path: data["scheduler-config.yaml"]
           pattern: "(?s)GangScheduling.*podGroupPostFilter:.*SlurmBridge"
         template: scheduler/configmap.yaml
-  - it: exposes authenticated metrics over HTTPS
+  - it: preserves the allocated ClusterIP when upgrading
     template: scheduler/service.yaml
     asserts:
-      - contains:
-          path: spec.ports
-          content:
-            name: https-metrics
-            protocol: TCP
-            port: 10259
-            targetPort: 10259
-  - it: provides a metrics reader role without binding it
-    template: scheduler/rbac.yaml
-    documentSelector:
-      path: metadata.name
-      value: test-release-slurm-bridge-metrics-reader
-    asserts:
       - equal:
-          path: kind
-          value: ClusterRole
-      - contains:
-          path: rules
-          content:
-            nonResourceURLs:
-              - /metrics
-            verbs:
-              - get
-  - it: the scheduler ClusterRole is named after the release, not after the scheduler
+          path: spec.type
+          value: ClusterIP
+      - notExists:
+          path: spec.clusterIP
+      - notExists:
+          path: spec.clusterIPs
+  - it: the scheduler ClusterRole is release-scoped and carries no namespace
     template: scheduler/rbac.yaml
     documentIndex: 0
-    set:
-      schedulerConfig:
-        schedulerName: my-scheduler
     asserts:
-      - equal:
-          path: kind
-          value: ClusterRole
       - equal:
           path: metadata.name
           value: test-release-slurm-bridge-scheduler
+      - notExists:
+          path: metadata.namespace
       - equal:
           path: metadata.labels["app.kubernetes.io/component"]
           value: scheduler
@@ -193,21 +208,6 @@ tests:
       - equal:
           path: subjects[0].name
           value: slurm-bridge-scheduler
-      - equal:
-          path: metadata.labels["app.kubernetes.io/component"]
-          value: scheduler
-  - it: the kube-system authentication reader binding is release-scoped
-    template: scheduler/rbac.yaml
-    documentSelector:
-      path: kind
-      value: RoleBinding
-    asserts:
-      - equal:
-          path: metadata.name
-          value: test-release-slurm-bridge-scheduler::extension-apiserver-authentication-reader
-      - equal:
-          path: metadata.namespace
-          value: kube-system
   - it: scheduler can update its leader election lease
     template: scheduler/rbac.yaml
     documentIndex: 0
@@ -224,24 +224,75 @@ tests:
               - get
               - list
               - update
-  - it: scheduler name is configurable
+  - it: scheduler can record leader election events
+    template: scheduler/rbac.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - ""
+              - events.k8s.io
+            resources:
+              - events
+            verbs:
+              - create
+              - patch
+              - update
+  - it: applies the scheduler resources to the scheduler container
     template: scheduler/deployment.yaml
     set:
-      schedulerConfig:
-        schedulerName: my-scheduler
+      scheduler.resources:
+        requests:
+          cpu: 1
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources
+          value:
+            requests:
+              cpu: 1
+              memory: 1Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+  - it: does not apply the admission resources to the scheduler container
+    template: scheduler/deployment.yaml
+    set:
+      admission.resources:
+        limits:
+          cpu: 9
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].resources
+  - it: scheduler name is configurable
+    set:
+      schedulerConfig.schedulerName: my-scheduler
     asserts:
       - equal:
           path: metadata.name
           value: my-scheduler
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: 'schedulerName: my-scheduler'
+        template: scheduler/configmap.yaml
   - it: an empty scheduler name falls back to the default
-    template: scheduler/deployment.yaml
     set:
-      schedulerConfig:
-        schedulerName: ""
+      schedulerConfig.schedulerName: ""
     asserts:
       - equal:
           path: metadata.name
           value: slurm-bridge-scheduler
+        template: scheduler/deployment.yaml
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: 'schedulerName: slurm-bridge-scheduler'
+        template: scheduler/configmap.yaml
   - it: pdb is not rendered for a single replica, which would block node drains
     template: scheduler/poddisruptionbudget.yaml
     set:
@@ -361,3 +412,118 @@ tests:
       - equal:
           path: spec.template.spec.volumes[2].secret.items[0].key
           value: SLURM_JWT
+  - it: can run just the node controller alongside scheduling
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.controllers: [node]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --controllers=node
+  - it: can run scheduling with no reconcilers
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.controllers: []
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --controllers=
+  - it: rejects unknown controllers
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.controllers: [unknown]
+    asserts:
+      - failedTemplate:
+          errorMessage: 'unknown controller "unknown": supported controllers are node,registration'
+  - it: accepts old values while keeping leader election and both controllers enabled
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.replicaCount: 2
+      scheduler.leaderElect: false
+      scheduler.controllers: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-elect=true
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --controllers=node,registration
+  - it: accepts quoted zero verbosity
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.verbosity: "0"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --zap-log-level=info
+  - it: preserves zero replicas to pause scheduling and reconciliation
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.replicaCount: 0
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 0
+  - it: scales replicas with leader election enabled by default
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-elect=true
+  - it: grants the manager permission to bind scheduled pods
+    template: scheduler/rbac.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups: [""]
+            resources: [pods/binding]
+            verbs: [create]
+  - it: scheduler can read Ray owners when registering native PodGroups
+    template: scheduler/rbac.yaml
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - ray.io
+            resources:
+              - rayclusters
+              - rayjobs
+            verbs:
+              - get
+              - list
+              - watch
+  - it: runs registration alongside node reconciliation by default
+    template: scheduler/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --controllers=node,registration
+  - it: configures allocation lifecycle workers in the combined process
+    template: scheduler/deployment.yaml
+    set:
+      scheduler.registrationWorkers: 4
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --registration-workers=4
+  - it: retains the full eligible-node scan target
+    template: scheduler/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: 'percentageOfNodesToScore: 100'
+  - it: honors registration gates before gang enqueue
+    template: scheduler/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?s)preEnqueue:.*SchedulingGates.*GangScheduling"

@@ -57,23 +57,6 @@
       ]
     },
     {
-      "label": "Setup Controllers",
-      "type": "shell",
-      "command": [
-        "cat /tmp/config.yaml.debug &&",
-        "cat /tmp/slurm-bridge.env"
-      ],
-      "presentation": {
-        "reveal": "never",
-        "panel": "shared"
-      },
-      "dependsOrder": "sequence",
-      "dependsOn": [
-        "Populate Config",
-        "Fetch SLURM_JWT"
-      ]
-    },
-    {
       "label": "Setup Scheduler",
       "type": "shell",
       "command": [

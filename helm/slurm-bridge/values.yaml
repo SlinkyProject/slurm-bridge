@@ -31,6 +31,12 @@ upgradeHook:
 
 # Default values for slurm-bridge.
 scheduler:
+  # -- Controllers to enable: node, registration, or [] to disable both.
+  controllers: [node, registration]
+  # -- (int) Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility.
+  podWorkers: null
+  # -- (int) Max concurrent allocation lifecycle workers. Unset keeps the default (10).
+  registrationWorkers: null
   # -- The image to use, `${repository}:${tag}`.
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:
@@ -49,8 +55,6 @@ scheduler:
     minAvailable: 1
     # -- Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`.
     maxUnavailable:
-  # -- Enables leader election.
-  leaderElect: false
   # -- Scheduler feature gates. GenericWorkload enables native group scheduling
   # and controller registration by default, requiring the built-in Workload and
   # PodGroup APIs on Kubernetes 1.36 or newer. Automatically disabled on Kubernetes 1.35.
@@ -84,7 +88,7 @@ scheduler:
   # -- Configure pod tolerations.
   # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
   tolerations: []
-  # -- (integer) Set the verbosity level of the scheduler.
+  # -- Set the scheduler log level (debug, info, error, or an integer).
   verbosity: null
 
 # Configuration settings for the scheduler.
@@ -181,56 +185,6 @@ admission:
   # If this is set, managedNamespaces will be ignored.
   # Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors
   managedNamespaceSelector: {}
-
-# Configuration settings for the controllers.
-controllers:
-  # -- The image to use, `${repository}:${tag}`.
-  # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
-  image:
-    repository: ghcr.io/slinkyproject/slurm-bridge-controllers
-    tag: ""
-    # -- Image pull policy.
-    pullPolicy: IfNotPresent
-  # -- Set the number of replicas to deploy.
-  replicas: 1
-  # -- Enables leader election.
-  leaderElect: false
-  # -- (int) Deprecated; allocation lifecycle uses registrationWorkers. Accepted for compatibility.
-  podWorkers: null
-  # -- (int) Max concurrent allocation lifecycle workers. Unset keeps the default (10).
-  registrationWorkers: null
-  # -- PodDisruptionBudget for the controllers deployment
-  pdb:
-    # -- Enable PodDisruptionBudget. Only rendered when `replicas` is greater
-    # than 1, since a PDB over a single replica blocks node drains.
-    enabled: false
-     # -- Minimum pods that must remain available after eviction (int or quoted percent).
-    minAvailable: 1
-    # -- Maximum pods that may be unavailable (int or quoted percent). Rendered only when set, and takes precedence over `minAvailable`.
-    maxUnavailable: null
-  # -- Set the priority class to use.
-  # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass
-  priorityClassName: ""
-  # -- Set container resource requests and limits for Kubernetes Pod scheduling.
-  # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container
-  resources: {}
-    # requests:
-    #   cpu: 1
-    #   memory: 1Gi
-    # limits:
-    #   cpu: 2
-    #   memory: 4Gi
-  # -- (map[string]string) Node label selector for pod assignment.
-  # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector
-  nodeSelector: {}
-  # -- Set affinity for Kubernetes Pod scheduling.
-  # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#affinity-and-anti-affinity
-  affinity: {}
-  # -- Configure pod tolerations.
-  # Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
-  tolerations: []
-  # -- (integer) Set the verbosity level of the controllers.
-  verbosity: null
 
 # Configurations shared among all components.
 sharedConfig:

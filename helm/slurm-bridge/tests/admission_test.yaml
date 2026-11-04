@@ -98,11 +98,11 @@ tests:
             limits:
               cpu: 2
               memory: 4Gi
-  - it: does not apply the controllers resources to the admission container
+  - it: does not apply the scheduler resources to the admission container
     template: admission/deployment.yaml
     set:
       admission.enabled: true
-      controllers.resources:
+      scheduler.resources:
         limits:
           cpu: 9
     asserts:

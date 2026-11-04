@@ -15,7 +15,11 @@ spec:
   selector:
     {{- include "slurm-bridge.scheduler.selectorLabels" . | nindent 4 }}
   ports:
-    - name: https-metrics
+    - name: metrics
       protocol: TCP
-      port: 10259
-      targetPort: 10259
+      port: 8080
+      targetPort: 8080
+    - name: health
+      protocol: TCP
+      port: 8081
+      targetPort: 8081

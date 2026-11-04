@@ -161,7 +161,6 @@ Your output should be similar to:
 ```console
 NAME                                        READY   STATUS    RESTARTS      AGE
 slurm-bridge-admission-85f89cf884-8c9jt     1/1     Running   0             1m0s
-slurm-bridge-controllers-757f64b875-bsfnf   1/1     Running   0             1m0s
 slurm-bridge-scheduler-5484467f55-wtspk     1/1     Running   0             1m0s
 ```
 

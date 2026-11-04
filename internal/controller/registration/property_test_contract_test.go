@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	"pgregory.net/rapid"
+	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 
@@ -32,7 +33,9 @@ import (
 // must still register its unbound members. If a bound member's job is canceled,
 // convergence cannot require resubmission: the controller must refuse it and this
 // world does not perform the Pod controller's cleanup. Missing members are not
-// replaced. Intent records preserve the original component membership.
+// replaced. An LWS replica that loses a member no longer needs its allocation:
+// LWS recreates the whole group (RecreateGroupOnPodRestart). Intent records
+// preserve the original component membership.
 // Safety uses committed effects and authoritative records, never the current cache.
 var registrationContract = controllercheck.Contract[registrationState]{
 	Always: []controllercheck.Rule[registrationState]{
@@ -240,6 +243,7 @@ func allocationNeededAtEffect(e registrationEffect, key string, allocations []wo
 	if e.BeforePods == nil {
 		return true
 	} // Synthetic duplicate-policy fixtures.
+	needed := false
 	for _, allocation := range allocations {
 		if allocation.Key != key {
 			continue
@@ -250,13 +254,17 @@ func allocationNeededAtEffect(e registrationEffect, key string, allocations []wo
 					continue
 				}
 				if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed || pod.DeletionTimestamp != nil && pod.Spec.NodeName == "" {
+					// A lost LWS member releases its whole replica group.
+					if pod.Labels[lwsv1.SetNameLabelKey] != "" {
+						return false
+					}
 					continue
 				}
-				return true
+				needed = true
 			}
 		}
 	}
-	return false
+	return needed
 }
 
 func worldJobByID(jobs []api.V0044JobInfo, id int32) (api.V0044JobInfo, error) {
