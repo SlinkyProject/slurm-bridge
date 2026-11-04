@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -187,7 +188,11 @@ func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodLis
 	if indexed, ok := t.Reader.(interface {
 		ListPodGroupMembers(context.Context, string, string) (corev1.PodList, error)
 	}); ok {
-		return indexed.ListPodGroupMembers(t.ctx, namespace, groupName)
+		pods, err := indexed.ListPodGroupMembers(t.ctx, namespace, groupName)
+		if err == nil && !t.includeTerminalPods {
+			pods.Items = slices.DeleteFunc(pods.Items, func(p corev1.Pod) bool { return podv1.IsPodTerminal(&p) })
+		}
+		return pods, err
 	}
 	if t.podsByGroup == nil {
 		var allPods corev1.PodList
