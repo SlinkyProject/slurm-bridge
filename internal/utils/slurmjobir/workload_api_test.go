@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
+	schedulingv1alpha3 "k8s.io/api/scheduling/v1alpha3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -212,15 +213,17 @@ func TestListCompositePodGroup(t *testing.T) {
 	})
 	inNamespace.SetNamespace("target")
 	otherNamespace := newSchedulingV1Alpha3Object("CompositePodGroup", "other", nil)
-	reader := fake.NewClientBuilder().WithScheme(runtime.NewScheme()).WithObjects(inNamespace, otherNamespace).Build()
+	scheme := runtime.NewScheme()
+	mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+	reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(inNamespace, otherNamespace).Build()
 	tr := &translator{Reader: reader, ctx: context.Background()}
 
 	got, err := tr.listCompositePodGroup("target")
 	if err != nil {
 		t.Fatalf("listCompositePodGroup(target) error = %v, want nil", err)
 	}
-	want := []compositePodGroupInfo{{name: "matching", parentName: "parent", templateName: "template", workloadName: "workload", schedulingPolicy: schedulingv1beta1.CompositePodGroupSchedulingPolicy{
-		Gang: &schedulingv1beta1.CompositeGangSchedulingPolicy{MinGroupCount: 2},
+	want := []compositePodGroupInfo{{name: "matching", parentName: "parent", templateName: "template", workloadName: "workload", schedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{
+		Gang: &schedulingv1alpha3.CompositeGangSchedulingPolicy{MinGroupCount: 2},
 	}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("listCompositePodGroup(target) = %v, want %v", got, want)
@@ -233,16 +236,10 @@ func TestDecodeCompositePodGroupSchedulingPolicy(t *testing.T) {
 		policy    any
 		wantBasic bool
 		wantGang  bool
-		wantErr   bool
 	}{
 		{name: "basic", policy: map[string]any{"basic": map[string]any{}}, wantBasic: true},
 		{name: "gang", policy: map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}}, wantGang: true},
 		{name: "absent"},
-		{name: "malformed policy", policy: "basic", wantErr: true},
-		{name: "malformed basic", policy: map[string]any{"basic": "basic"}, wantErr: true},
-		{name: "malformed gang", policy: map[string]any{"gang": "gang"}, wantErr: true},
-		{name: "missing minGroupCount", policy: map[string]any{"gang": map[string]any{}}, wantErr: true},
-		{name: "malformed minGroupCount", policy: map[string]any{"gang": map[string]any{"minGroupCount": "2"}}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,24 +247,27 @@ func TestDecodeCompositePodGroupSchedulingPolicy(t *testing.T) {
 			if tt.policy != nil {
 				spec["schedulingPolicy"] = tt.policy
 			}
-			info, err := decodeCompositePodGroup(newSchedulingV1Alpha3Object("CompositePodGroup", "test", spec))
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("decodeCompositePodGroup(%v) error = %v, wantErr %v", tt.policy, err, tt.wantErr)
-			}
-			if err != nil {
-				return
-			}
+			info := newCompositePodGroupInfo(typedCompositePodGroup(t, newSchedulingV1Alpha3Object("CompositePodGroup", "test", spec)))
 			if got := info.schedulingPolicy.Basic != nil; got != tt.wantBasic {
-				t.Errorf("decodeCompositePodGroup(%v) basic = %v, want %v", tt.policy, got, tt.wantBasic)
+				t.Errorf("newCompositePodGroupInfo(%v) basic = %v, want %v", tt.policy, got, tt.wantBasic)
 			}
 			if got := info.schedulingPolicy.Gang != nil; got != tt.wantGang {
-				t.Errorf("decodeCompositePodGroup(%v) gang = %v, want %v", tt.policy, got, tt.wantGang)
+				t.Errorf("newCompositePodGroupInfo(%v) gang = %v, want %v", tt.policy, got, tt.wantGang)
 			}
 			if tt.wantGang && info.schedulingPolicy.Gang.MinGroupCount != 2 {
-				t.Errorf("decodeCompositePodGroup(%v) minGroupCount = %v, want 2", tt.policy, info.schedulingPolicy.Gang.MinGroupCount)
+				t.Errorf("newCompositePodGroupInfo(%v) minGroupCount = %v, want 2", tt.policy, info.schedulingPolicy.Gang.MinGroupCount)
 			}
 		})
 	}
+}
+
+func typedCompositePodGroup(t *testing.T, obj *unstructured.Unstructured) *schedulingv1alpha3.CompositePodGroup {
+	t.Helper()
+	typed := &schedulingv1alpha3.CompositePodGroup{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, typed); err != nil {
+		t.Fatal(err)
+	}
+	return typed
 }
 
 func TestValidateCompositePodGroup(t *testing.T) {
@@ -311,8 +311,7 @@ func TestValidateCompositePodGroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			obj := newSchedulingV1Alpha3Object("CompositePodGroup", "test", tt.spec)
-			err := validateCompositePodGroup(obj)
+			err := validateCompositePodGroup(typedCompositePodGroup(t, newSchedulingV1Alpha3Object("CompositePodGroup", "test", tt.spec)))
 			if gotErr, wantErr := err != nil, tt.wantField != ""; gotErr != wantErr {
 				t.Fatalf("validateCompositePodGroup(%v) error = %v, want error presence = %t", tt.spec, err, wantErr)
 			}

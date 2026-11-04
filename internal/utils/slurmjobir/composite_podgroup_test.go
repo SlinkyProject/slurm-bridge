@@ -593,8 +593,11 @@ func TestPreFilterCompositePodGroupConfirmsLiveQuorum(t *testing.T) {
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 					kind := list.GetObjectKind().GroupVersionKind().Kind
-					if _, ok := list.(*corev1.PodList); ok {
+					switch list.(type) {
+					case *corev1.PodList:
 						kind = "PodList"
+					case *schedulingv1alpha3.CompositePodGroupList:
+						kind = "CompositePodGroupList"
 					}
 					if tt.failKind != "" && kind == tt.failKind {
 						return readErr
@@ -633,7 +636,7 @@ func TestTraverseParentChain(t *testing.T) {
 		"root":  {name: "root"},
 		"mid":   {name: "mid", parentName: "root"},
 		"leaf":  {name: "leaf", parentName: "mid"},
-		"basic": {name: "basic", parentName: "root", schedulingPolicy: schedulingv1beta1.CompositePodGroupSchedulingPolicy{Basic: &schedulingv1beta1.CompositeBasicSchedulingPolicy{}}},
+		"basic": {name: "basic", parentName: "root", schedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{Basic: &schedulingv1alpha3.CompositeBasicSchedulingPolicy{}}},
 		"under": {name: "under", parentName: "basic"},
 		"a":     {name: "a", parentName: "b"},
 		"b":     {name: "b", parentName: "a"},
