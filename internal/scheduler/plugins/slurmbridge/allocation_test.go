@@ -45,7 +45,10 @@ func schedulerAllocation() (*slurmjobir.SlurmJobIR, []api.V0044JobInfo) {
 			Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "node"}}}
 		component := slurmjobir.SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{pod}},
 			ObjectMeta: metav1.PartialObjectMetadata{TypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1beta1", Kind: "PodGroup"}, ObjectMeta: pod.ObjectMeta},
-			JobInfo:    slurmjobir.SlurmJobIRJobInfo{Priority: ptr.To(int32(50))}}
+			JobInfo: slurmjobir.SlurmJobIRJobInfo{
+				Priority: ptr.To(int32(50)), UserId: ptr.To("1001"), GroupId: ptr.To("1002"),
+				Account: ptr.To("research"), Exclusive: ptr.To(false),
+			}}
 		ir.Components = append(ir.Components, component)
 		info := slurmcontrol.ExternalJobInfoFor(ir.RootPOM, component)
 		jobs = append(jobs, api.V0044JobInfo{JobId: ptr.To(id), AdminComment: ptr.To(info.ToString()),
@@ -81,6 +84,9 @@ func TestSchedulerReleaseOrdering(t *testing.T) {
 			c := fake.NewClientBuilder().WithObjects(&jobs[0], &jobs[1]).WithInterceptorFuncs(interceptor.Funcs{
 				Update: func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
 					desc := req.(api.V0044JobDescMsg)
+					if desc.UserId != nil || desc.GroupId != nil || desc.Account != nil || desc.Shared != nil || desc.McsLabel != nil || desc.CurrentWorkingDirectory != nil || desc.Flags != nil {
+						t.Fatal("update or release replays submission-only fields")
+					}
 					operation := "update"
 					switch {
 					case desc.Hold != nil:

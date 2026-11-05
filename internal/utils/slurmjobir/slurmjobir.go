@@ -52,7 +52,6 @@ func (s SlurmJobComponent) GetNamespacedName() types.NamespacedName {
 }
 
 type SlurmJobIRJobInfo struct {
-	Hold         *bool
 	Account      *string
 	CpuPerTask   *int32
 	Constraints  *string

@@ -230,14 +230,10 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	jobID := int32(jobIDValue)
 
 	job := new(api.V0044JobInfo)
-	jobDesc, err := r.buildJobDesc(slurmJobIR.RootPOM, component, true)
+	jobDesc, err := r.buildJobUpdate(slurmJobIR.RootPOM, component)
 	if err != nil {
 		return 0, err
 	}
-	jobSubmit := api.V0044JobSubmitReq{
-		Job: ptr.To(jobDesc),
-	}
-
 	if last, ok := r.lastUpdate.Get(jobID); ok && reflect.DeepEqual(last, jobDesc) {
 		logger.V(4).Info("external job unchanged, skipping update", "jobId", jobID)
 		return jobID, nil
@@ -246,7 +242,7 @@ func (r *realSlurmControl) UpdateJob(ctx context.Context, pod *corev1.Pod, slurm
 	job.JobId = ptr.To(jobID)
 	// PostFilter ends this scheduling attempt after updating eligibility. The
 	// allocation observer retries when Slurm assigns nodes; no readback is needed.
-	if err := r.Update(ctx, job, *jobSubmit.Job, &client.UpdateOptions{SkipReadAfterUpdate: true}); err != nil {
+	if err := r.Update(ctx, job, jobDesc, &client.UpdateOptions{SkipReadAfterUpdate: true}); err != nil {
 		// Slurm may have applied the update before the error; don't trust the old entry.
 		r.lastUpdate.Remove(jobID)
 		logger.Error(err, "could not update external job", "pod", klog.KObj(pod))
@@ -266,8 +262,7 @@ func (r *realSlurmControl) RegisterJob(ctx context.Context, ir *slurmjobir.Slurm
 	var req api.V0044JobSubmitReq
 	var descriptions []api.V0044JobDescMsg
 	for _, component := range ir.Components {
-		component.JobInfo.Hold = ptr.To(true)
-		desc, err := r.buildJobDesc(ir.RootPOM, component, false)
+		desc, err := r.buildJobSubmission(ir.RootPOM, component)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %w", ErrRegistrationNotSubmitted, err)
 		}
@@ -321,57 +316,67 @@ func ExternalJobInfoFor(root metav1.PartialObjectMetadata, component slurmjobir.
 	return extInfo
 }
 
-func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobComponent slurmjobir.SlurmJobComponent, update bool) (api.V0044JobDescMsg, error) {
+func (r *realSlurmControl) buildJobSubmission(root metav1.PartialObjectMetadata, component slurmjobir.SlurmJobComponent) (api.V0044JobDescMsg, error) {
+	desc, err := r.buildJobDesc(root, component)
+	if err != nil {
+		return api.V0044JobDescMsg{}, err
+	}
+	// Ownership and allocation setup belong only to submission. In an update,
+	// user_id impersonates the owner, account triggers association lookup, and
+	// shared has different semantics that can clear MCS isolation.
+	desc.UserId = component.JobInfo.UserId
+	desc.GroupId = component.JobInfo.GroupId
+	desc.Account = component.JobInfo.Account
+	desc.Shared = sharedFromExclusiveAnnotation(&component)
+	desc.McsLabel = ptr.To(r.mcsLabel)
+	desc.CurrentWorkingDirectory = ptr.To("/tmp")
+	desc.Flags = &[]api.V0044JobDescMsgFlags{api.V0044JobDescMsgFlagsEXTERNALJOB}
+	// Register every component held. ReleaseJob applies priority separately
+	// after all components' eligibility updates succeed.
+	desc.Hold = ptr.To(true)
+	desc.Priority = nil
+	if len(component.JobInfo.ExcNodes) > 0 {
+		excluded := append(api.V0044CsvString{}, component.JobInfo.ExcNodes...)
+		desc.ExcludedNodes = &excluded
+	}
+	return desc, nil
+}
+
+func (r *realSlurmControl) buildJobUpdate(root metav1.PartialObjectMetadata, component slurmjobir.SlurmJobComponent) (api.V0044JobDescMsg, error) {
+	desc, err := r.buildJobDesc(root, component)
+	if err != nil {
+		return api.V0044JobDescMsg{}, err
+	}
+	// An empty list must be sent explicitly to clear previous exclusions.
+	excluded := append(api.V0044CsvString{}, component.JobInfo.ExcNodes...)
+	desc.ExcludedNodes = &excluded
+	return desc, nil
+}
+
+// buildJobDesc contains only fields that support pending-job updates. Keep
+// submission-only fields in buildJobSubmission and release in ReleaseJob.
+func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobComponent slurmjobir.SlurmJobComponent) (api.V0044JobDescMsg, error) {
 	extInfo := ExternalJobInfoFor(root, jobComponent)
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {
 		return api.V0044JobDescMsg{}, err
 	}
-	excludedNodes := append(api.V0044CsvString{}, jobComponent.JobInfo.ExcNodes...)
-
 	jobDesc := api.V0044JobDescMsg{
-		Hold:                    jobComponent.JobInfo.Hold,
-		Account:                 jobComponent.JobInfo.Account,
-		AdminComment:            ptr.To(extInfo.ToString()),
-		CpusPerTask:             jobComponent.JobInfo.CpuPerTask,
-		Constraints:             constraints,
-		CurrentWorkingDirectory: ptr.To("/tmp"),
-		Flags: &[]api.V0044JobDescMsgFlags{
-			api.V0044JobDescMsgFlagsEXTERNALJOB,
-		},
-		GroupId:       jobComponent.JobInfo.GroupId,
+		AdminComment:  ptr.To(extInfo.ToString()),
+		CpusPerTask:   jobComponent.JobInfo.CpuPerTask,
+		Constraints:   constraints,
 		Licenses:      jobComponent.JobInfo.Licenses,
 		MaximumNodes:  jobComponent.JobInfo.MaxNodes,
-		McsLabel:      ptr.To(r.mcsLabel),
 		MemoryPerNode: &api.V0044Uint64NoValStruct{Set: ptr.To(false)},
 		MinimumNodes:  jobComponent.JobInfo.MinNodes,
 		Name:          jobComponent.JobInfo.JobName,
 		Nodes:         ptr.To(strconv.Itoa(len(jobComponent.Pods.Items))),
-		Priority:      &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
 		Qos:           jobComponent.JobInfo.QOS,
 		Reservation:   jobComponent.JobInfo.Reservation,
 		TasksPerNode:  jobComponent.JobInfo.TasksPerNode,
 		TimeLimit:     &api.V0044Uint32NoValStruct{Set: ptr.To(false)},
 		TresPerNode:   jobComponent.JobInfo.Gres,
-		UserId:        jobComponent.JobInfo.UserId,
 		Wckey:         jobComponent.JobInfo.Wckey,
-	}
-
-	// Set sharing only at submission. Slurm treats nonzero shared updates as
-	// oversubscribe and clears whole_node, including the MCS isolation flag.
-	// Omitting shared preserves the existing allocation's sharing mode.
-	// Set the account only at submission too. Without slurmdbd, Slurm's account
-	// lookup on update finds no association and fails with a stale errno.
-	if !update {
-		jobDesc.Shared = sharedFromExclusiveAnnotation(&jobComponent)
-	} else {
-		jobDesc.Account = nil
-	}
-
-	if len(excludedNodes) == 0 && !update {
-		jobDesc.ExcludedNodes = nil
-	} else {
-		jobDesc.ExcludedNodes = &excludedNodes
 	}
 
 	if jobComponent.JobInfo.MemPerNode != nil {
@@ -388,10 +393,6 @@ func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobCo
 			Number:   jobComponent.JobInfo.Priority,
 			Set:      ptr.To(true),
 		}
-	}
-
-	if jobDesc.Hold != nil || (update && jobComponent.JobInfo.Priority == nil) {
-		jobDesc.Priority = nil
 	}
 
 	if jobComponent.JobInfo.Partition == nil {
