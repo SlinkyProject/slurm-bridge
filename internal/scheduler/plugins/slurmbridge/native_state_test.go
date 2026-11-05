@@ -551,6 +551,7 @@ func TestNativeCompositeSharesSnapshotAndReleasesAfterAllComponents(t *testing.T
 			if _, status := sb.PodGroupPostFilter(t.Context(), rootState, info, nil); !status.IsSuccess() {
 				t.Fatalf("PostFilter: %v", status)
 			}
+			sb.releases.Wait()
 			if lists.Load() != 1 {
 				t.Fatalf("membership lists=%d, want 1", lists.Load())
 			}
