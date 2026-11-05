@@ -17,6 +17,19 @@ type Backend interface {
 	fmt.Stringer
 }
 
+// NewBackend constructs a backend from its stable type name. gresName is used
+// only by indexed-gres backends. NewRegistry validates the resulting profile.
+func NewBackend(typeName, gresName string) (Backend, error) {
+	switch typeName {
+	case (CoreBitmapBackend{}).String():
+		return CoreBitmapBackend{}, nil
+	case (IndexedGRESBackend{}).String():
+		return IndexedGRESBackend{GRESName: gresName}, nil
+	default:
+		return nil, fmt.Errorf("unsupported backend type %q", typeName)
+	}
+}
+
 // CoreBitmapBackend represents devices allocated through Slurm's CPU bitmap.
 type CoreBitmapBackend struct{}
 

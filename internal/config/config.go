@@ -95,14 +95,9 @@ func (c *Config) DRARegistry() (*dra.Registry, error) {
 
 	profiles := make([]dra.DeviceProfile, 0, len(c.DeviceProfiles))
 	for _, configured := range c.DeviceProfiles {
-		var backend dra.Backend
-		switch configured.Backend.Type {
-		case "core-bitmap":
-			backend = dra.CoreBitmapBackend{}
-		case "indexed-gres":
-			backend = dra.IndexedGRESBackend{GRESName: configured.Backend.GRESName}
-		default:
-			return nil, fmt.Errorf("device profile %q has unsupported backend type %q", configured.Name, configured.Backend.Type)
+		backend, err := dra.NewBackend(configured.Backend.Type, configured.Backend.GRESName)
+		if err != nil {
+			return nil, fmt.Errorf("device profile %q has %w", configured.Name, err)
 		}
 		profiles = append(profiles, dra.DeviceProfile{
 			Name:     configured.Name,
