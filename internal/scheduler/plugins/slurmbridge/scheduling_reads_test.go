@@ -76,6 +76,7 @@ func TestSchedulingDiscoveryUsesCache(t *testing.T) {
 			_, status = sb.PostFilter(t.Context(), state, pod, framework.NewNodeToStatus(map[string]*fwk.Status{
 				"node1": fwk.NewStatus(fwk.Unschedulable).WithPlugin(Name),
 			}, fwk.NewStatus(fwk.UnschedulableAndUnresolvable)))
+			sb.releases.Wait()
 			if !status.IsSuccess() || reads != 0 {
 				t.Fatalf("PostFilter=%v, live reads=%d", status, reads)
 			}
