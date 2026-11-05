@@ -6,12 +6,13 @@ package slurmjobir
 import (
 	"fmt"
 
+	schedulingv1alpha3 "k8s.io/api/scheduling/v1alpha3"
 	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,7 +46,7 @@ type compositePodGroupInfo struct {
 	parentName       string
 	templateName     string
 	workloadName     string
-	schedulingPolicy schedulingv1beta1.CompositePodGroupSchedulingPolicy
+	schedulingPolicy schedulingv1alpha3.CompositePodGroupSchedulingPolicy
 }
 
 // PodGroup is the common wire shape used by the v1alpha2 and v1beta1 APIs.
@@ -205,6 +206,9 @@ func RegisterWorkloadAPIVersion(scheme *runtime.Scheme, version string) (*Worklo
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("PodGroupList"), &PodGroupList{})
 	scheme.AddKnownTypeWithName(groupVersion.WithKind("Workload"), &Workload{})
 	metav1.AddToGroupVersion(scheme, groupVersion)
+	// Only the CompositePodGroup kinds: the rest of v1alpha3 would collide with the selected PodGroup version.
+	scheme.AddKnownTypes(schedulingv1alpha3.SchemeGroupVersion, &schedulingv1alpha3.CompositePodGroup{}, &schedulingv1alpha3.CompositePodGroupList{})
+	metav1.AddToGroupVersion(scheme, schedulingv1alpha3.SchemeGroupVersion)
 	return api, nil
 }
 
@@ -243,92 +247,50 @@ func (pg *PodGroup) workloadName() string {
 }
 
 func (t *translator) listCompositePodGroup(namespace string) ([]compositePodGroupInfo, error) {
-	list := &unstructured.UnstructuredList{}
-	list.SetAPIVersion(compositePodGroupV1Alpha3.APIVersion)
-	list.SetKind("CompositePodGroupList")
-	if err := t.List(t.ctx, list, client.InNamespace(namespace)); err != nil {
+	list := &schedulingv1alpha3.CompositePodGroupList{}
+	// Translation only reads CompositePodGroups, so a cached reader can skip copying the namespace.
+	if err := t.List(t.ctx, list, client.InNamespace(namespace), client.UnsafeDisableDeepCopy); err != nil {
 		return nil, fmt.Errorf("list CompositePodGroups in namespace %s: %w", namespace, err)
 	}
 	infos := make([]compositePodGroupInfo, 0, len(list.Items))
 	for i := range list.Items {
-		info, err := decodeCompositePodGroup(&list.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		infos = append(infos, info)
+		infos = append(infos, newCompositePodGroupInfo(&list.Items[i]))
 	}
 	return infos, nil
 }
 
 func (t *translator) getCompositePodGroup(key client.ObjectKey) (compositePodGroupInfo, error) {
-	obj, err := t.getUnstructuredObject(compositePodGroupV1Alpha3, key)
-	if err != nil {
-		return compositePodGroupInfo{}, err
+	obj := &schedulingv1alpha3.CompositePodGroup{}
+	if err := t.Get(t.ctx, key, obj); err != nil {
+		return compositePodGroupInfo{}, fmt.Errorf("get CompositePodGroup %s/%s: %w", key.Namespace, key.Name, err)
 	}
 	if err := validateCompositePodGroup(obj); err != nil {
 		return compositePodGroupInfo{}, err
 	}
-	return decodeCompositePodGroup(obj)
+	return newCompositePodGroupInfo(obj), nil
 }
 
-func decodeCompositePodGroup(obj *unstructured.Unstructured) (compositePodGroupInfo, error) {
-	key := client.ObjectKeyFromObject(obj)
-	var err error
-	info := compositePodGroupInfo{name: obj.GetName()}
-	info.parentName, _, err = unstructured.NestedString(obj.Object, "spec", "parentCompositePodGroupName")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s parent name: %w", key.Namespace, key.Name, err)
+func newCompositePodGroupInfo(obj *schedulingv1alpha3.CompositePodGroup) compositePodGroupInfo {
+	info := compositePodGroupInfo{
+		name:             obj.Name,
+		parentName:       ptr.Deref(obj.Spec.ParentCompositePodGroupName, ""),
+		schedulingPolicy: obj.Spec.SchedulingPolicy,
 	}
-	info.templateName, _, err = unstructured.NestedString(obj.Object, "spec", "workloadRef", "templateName")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s template name: %w", key.Namespace, key.Name, err)
+	if ref := obj.Spec.WorkloadRef; ref != nil {
+		info.templateName, info.workloadName = ref.TemplateName, ref.WorkloadName
 	}
-	info.workloadName, _, err = unstructured.NestedString(obj.Object, "spec", "workloadRef", "workloadName")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s workload name: %w", key.Namespace, key.Name, err)
-	}
-
-	policy, _, err := unstructured.NestedMap(obj.Object, "spec", "schedulingPolicy")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s scheduling policy: %w", key.Namespace, key.Name, err)
-	}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(policy, &info.schedulingPolicy); err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s scheduling policy: %w", key.Namespace, key.Name, err)
-	}
-
-	gang, found, err := unstructured.NestedMap(policy, "gang")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s gang policy: %w", key.Namespace, key.Name, err)
-	}
-	if !found {
-		return info, nil
-	}
-
-	_, found, err = unstructured.NestedInt64(gang, "minGroupCount")
-	if err != nil {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s minGroupCount: %w", key.Namespace, key.Name, err)
-	}
-	if !found {
-		return compositePodGroupInfo{}, fmt.Errorf("decode CompositePodGroup %s/%s: gang policy has no minGroupCount", key.Namespace, key.Name)
-	}
-	return info, nil
+	return info
 }
 
-func validateCompositePodGroup(obj *unstructured.Unstructured) error {
-	if val, _, err := unstructured.NestedString(
-		obj.Object, "spec", "priorityClassName",
-	); err == nil && val != "" {
+func validateCompositePodGroup(obj *schedulingv1alpha3.CompositePodGroup) error {
+	if obj.Spec.PriorityClassName != "" {
 		return fmt.Errorf("%w: CompositePodGroup %s/%s sets unsupported field spec.priorityClassName",
-			ErrorCompositePodGroupUnsupported, obj.GetNamespace(), obj.GetName())
+			ErrorCompositePodGroupUnsupported, obj.Namespace, obj.Name)
 	}
-
-	if val, _, err := unstructured.NestedSlice(
-		obj.Object, "spec", "schedulingConstraints", "topology",
-	); err == nil && len(val) > 0 {
+	if c := obj.Spec.SchedulingConstraints; c != nil && len(c.Topology) > 0 {
 		return fmt.Errorf("%w: CompositePodGroup %s/%s sets unsupported field spec.schedulingConstraints.topology",
-			ErrorCompositePodGroupUnsupported, obj.GetNamespace(), obj.GetName())
+			ErrorCompositePodGroupUnsupported, obj.Namespace, obj.Name)
 	}
-
 	return nil
 }
 
@@ -352,14 +314,4 @@ func (t *translator) compositePodGroupRootName(namespace, name string) (string, 
 		name = info.parentName
 	}
 	return "", fmt.Errorf("CompositePodGroup parent chain exceeds maximum depth of %d at %s/%s", maxCompositePodGroupTreeDepth, namespace, name)
-}
-
-func (t *translator) getUnstructuredObject(typeMeta metav1.TypeMeta, key client.ObjectKey) (*unstructured.Unstructured, error) {
-	obj := &unstructured.Unstructured{}
-	obj.SetAPIVersion(typeMeta.APIVersion)
-	obj.SetKind(typeMeta.Kind)
-	if err := t.Get(t.ctx, key, obj); err != nil {
-		return nil, fmt.Errorf("get %s %s/%s: %w", typeMeta.Kind, key.Namespace, key.Name, err)
-	}
-	return obj, nil
 }

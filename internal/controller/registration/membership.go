@@ -30,27 +30,53 @@ func publishedJobKeys(obj client.Object) []string {
 	return nil
 }
 
-type indexedMembershipReader struct{ client.Reader }
+// indexedMembershipClient serves translation's namespace-wide Pod reads from field indexes, so
+// a reconcile does not copy every Pod in the namespace.
+type indexedMembershipClient struct {
+	client.Client
+}
 
-func (r indexedMembershipReader) ListPodGroupMembers(ctx context.Context, namespace, name string) (corev1.PodList, error) {
+func (r indexedMembershipClient) ListPodGroupMembers(ctx context.Context, namespace, name string) (corev1.PodList, error) {
 	pods := corev1.PodList{}
-	err := r.Reader.List(ctx, &pods, client.InNamespace(namespace), client.MatchingFields{podGroupMemberIndex: name})
+	err := r.Client.List(ctx, &pods, client.InNamespace(namespace), client.MatchingFields{podGroupMemberIndex: name})
 	return pods, err
 }
 
-func (r indexedMembershipReader) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+func (r indexedMembershipClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
 	options := (&client.ListOptions{}).ApplyOptions(opts)
 	if _, ok := list.(*corev1.PodList); ok && options.LabelSelector != nil {
 		if id, exact := options.LabelSelector.RequiresExactMatch(wellknown.LabelExternalJobId); exact {
 			opts = append(opts, client.MatchingFields{publishedJobIndex: id})
 		}
 	}
-	return r.Reader.List(ctx, list, opts...)
+	return r.Client.List(ctx, list, opts...)
 }
 
-func (r *Reconciler) cachedMembers() client.Reader {
+// liveMembershipReader keeps lifecycle reads live except PodGroup membership, which
+// comes from the cache index instead of a live List of every Pod in the namespace.
+// componentMembers re-reads every Pod published to the job live, so the cache only
+// supplies unpublished members, which cannot hold the allocation.
+type liveMembershipReader struct {
+	client.Reader
+	members indexedMembershipClient
+}
+
+func (r liveMembershipReader) ListPodGroupMembers(ctx context.Context, namespace, name string) (corev1.PodList, error) {
+	return r.members.ListPodGroupMembers(ctx, namespace, name)
+}
+
+// liveMembers returns the reader for release decisions.
+func (r *Reconciler) liveMembers() client.Reader {
 	if r.membersIndexed {
-		return indexedMembershipReader{Reader: r.Client}
+		return liveMembershipReader{Reader: r.apiReader, members: indexedMembershipClient{Client: r.Client}}
+	}
+	return r.apiReader
+}
+
+// cachedMembers returns the client for translation and membership reads.
+func (r *Reconciler) cachedMembers() client.Client {
+	if r.membersIndexed {
+		return indexedMembershipClient{Client: r.Client}
 	}
 	return r.Client
 }
