@@ -49,8 +49,8 @@ func TestRegisterJob(t *testing.T) {
 				ir.Components = append(ir.Components, slurmjobir.SlurmJobComponent{
 					Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: fmt.Sprintf("pod-%d", i)}}}},
 					JobInfo: slurmjobir.SlurmJobIRJobInfo{
-						Hold: ptr.To(false), Priority: ptr.To(int32(50)),
-						UserId: ptr.To("1001"), GroupId: ptr.To("1002"),
+						Priority: ptr.To(int32(50)),
+						UserId:   ptr.To("1001"), GroupId: ptr.To("1002"),
 						Account: ptr.To("research"), Exclusive: ptr.To(false),
 					},
 				})

@@ -657,7 +657,6 @@ func Test_realSlurmControl_UpdateJobPreservesSubmissionFields(t *testing.T) {
 						UserId:       ptr.To("1001"),
 						GroupId:      ptr.To("1002"),
 						Account:      ptr.To("research"),
-						Hold:         ptr.To(true),
 						Exclusive:    tt.exclusive,
 						CpuPerTask:   ptr.To(int32(2)),
 						MemPerNode:   ptr.To(int64(200)),
