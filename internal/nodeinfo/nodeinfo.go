@@ -80,17 +80,16 @@ func NewNodeInfoFromResourceSlices(nodeName string, resourceSlices []resourcev1.
 			return nil, err
 		}
 		for _, device := range nodeInfo.CPUDevices {
-			socket := cpuDeviceGroupOf(device).socket
 			siblings, err := decodeSMTLayout(*device.Attributes[DraDriverCpu_SMTLayout].StringValue)
 			if err != nil {
 				return nil, err
 			}
 			for _, info := range cpuInfos {
-				if info.SocketID != socket {
+				if info.Name != device.Name {
 					continue
 				}
-				if other, ok := nodeInfo.CpuMap.CPUInfoMap[siblings[info.CpuID]]; ok && other.SocketID != socket {
-					return nil, fmt.Errorf("CPU %d has a sibling on another socket", info.CpuID)
+				if other, ok := nodeInfo.CpuMap.CPUInfoMap[siblings[info.CpuID]]; ok && other.Name != device.Name {
+					return nil, fmt.Errorf("CPU %d has a sibling in another socket or NUMA device", info.CpuID)
 				}
 			}
 		}
@@ -153,27 +152,20 @@ func (n *NodeInfo) sortedCPUDeviceNames() []string {
 }
 
 // NUMACores returns the Slurm cores of each NUMA node, or nil unless the CPU
-// inventory is grouped by NUMA node. Slurm binds GRES only to whole sockets,
-// so NUMA nodes sharing a socket are omitted.
+// inventory is grouped by NUMA node. Each NUMA domain is a whole Slurm socket.
 func (n *NodeInfo) NUMACores() map[int][]int {
 	if n == nil {
 		return nil
 	}
-	numaPerSocket := make(map[int]int)
 	for _, device := range n.CPUDevices {
 		group := cpuDeviceGroupOf(device)
 		if group.numaNode < 0 {
 			return nil
 		}
-		numaPerSocket[group.socket]++
 	}
 	var cores map[int][]int
 	for _, device := range n.CPUDevices {
 		group := cpuDeviceGroupOf(device)
-		// TODO: Register NUMA nodes as Slurm sockets for sub-NUMA clustering.
-		if numaPerSocket[group.socket] != 1 {
-			continue
-		}
 		cpus, err := parseCPUSet(ptr.Deref(device.Attributes[DraDriverCpu_CPUIDs].StringValue, ""))
 		if err != nil {
 			return nil

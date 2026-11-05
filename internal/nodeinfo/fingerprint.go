@@ -15,12 +15,13 @@ import (
 )
 
 // Geometry returns socket, core, and thread counts after excluding reserved CPUs.
+// NUMA-grouped devices are Slurm sockets, including domains sharing a package.
 // Sockets must have equal core counts, and cores must have equal thread counts.
 func (n *NodeInfo) Geometry() (sockets, coresPerSocket, threadsPerCore int, err error) {
 	if n == nil || len(n.CpuMap.AbstractToMachine) == 0 {
 		return 0, 0, 0, nil
 	}
-	cores := make(map[int]int)
+	cores := make(map[cpuDeviceGroup]int)
 	for _, cpus := range n.CpuMap.AbstractToMachine {
 		if threadsPerCore == 0 {
 			threadsPerCore = cpus.Size()
@@ -28,7 +29,7 @@ func (n *NodeInfo) Geometry() (sockets, coresPerSocket, threadsPerCore int, err 
 		if cpus.Size() != threadsPerCore {
 			return 0, 0, 0, fmt.Errorf("non-uniform threads per core")
 		}
-		socket := n.CpuMap.CPUInfoMap[cpus.List()[0]].SocketID
+		socket := n.CpuMap.CPUInfoMap[cpus.List()[0]].deviceGroup()
 		cores[socket]++
 	}
 	for _, count := range cores {
@@ -39,9 +40,9 @@ func (n *NodeInfo) Geometry() (sockets, coresPerSocket, threadsPerCore int, err 
 			return 0, 0, 0, fmt.Errorf("non-uniform cores per socket after CPU reservations")
 		}
 	}
-	deviceSockets := make(map[int]struct{})
+	deviceSockets := make(map[cpuDeviceGroup]struct{})
 	for _, device := range n.CPUDevices {
-		deviceSockets[cpuDeviceGroupOf(device).socket] = struct{}{}
+		deviceSockets[cpuDeviceGroupOf(device)] = struct{}{}
 	}
 	if len(cores) != len(deviceSockets) {
 		return 0, 0, 0, fmt.Errorf("CPU device inventory does not match CPU mapping")

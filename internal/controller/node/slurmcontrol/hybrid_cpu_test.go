@@ -46,6 +46,11 @@ func TestHybridCPURegistration(t *testing.T) {
 	second.Attributes[nodeinfo.DraDriverCpu_SocketID] = resourcev1.DeviceAttribute{IntValue: ptr.To[int64](1)}
 	multi.Spec.Devices = append(multi.Spec.Devices, *second)
 	multiInfo := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*multi})
+	subNUMA := testNodeNUMAResourceSlice("worker")
+	for i := range subNUMA.Spec.Devices {
+		subNUMA.Spec.Devices[i].Attributes[nodeinfo.DraDriverCpu_SocketID] = resourcev1.DeviceAttribute{IntValue: ptr.To[int64](0)}
+	}
+	subNUMAInfo := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*subNUMA})
 
 	for _, tc := range []struct {
 		name       string
@@ -57,6 +62,8 @@ func TestHybridCPURegistration(t *testing.T) {
 	}{
 		{name: "first registration", info: info},
 		{name: "multiple sockets", info: multiInfo, changeNode: func(n *api.V0044Node) { n.Sockets = ptr.To[int32](2); n.Cpus = ptr.To[int32](8) }},
+		{name: "sub-NUMA requires matching slurmd geometry", info: subNUMAInfo, changeNode: func(n *api.V0044Node) { n.Cores = ptr.To[int32](4); n.Threads = ptr.To[int32](1) }, wantErr: true},
+		{name: "sub-NUMA with numa_node_as_socket", info: subNUMAInfo, changeNode: func(n *api.V0044Node) { n.Sockets = ptr.To[int32](2); n.Threads = ptr.To[int32](1) }},
 		{name: "adds CPU fingerprint to GRES registration", info: info, extra: gres},
 		{name: "matching map while jobs run", info: info, extra: applied, state: []api.V0044NodeState{api.V0044NodeStateMIXED}},
 		{name: "first registration waits for idle", info: info, state: []api.V0044NodeState{api.V0044NodeStateALLOCATED}, wantErr: true},
