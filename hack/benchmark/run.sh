@@ -10,7 +10,10 @@ for input in CONTEXT CONFIG_DIR ARTIFACTS_ROOT SPEEDUP TIMEOUT KNAVIGATOR KNAVIG
 		exit 2
 	}
 done
-command -v jq >/dev/null
+command -v jq >/dev/null || {
+	echo 'error: jq is required' >&2
+	exit 2
+}
 run_id="${BENCHMARK_RUN_ID:-$(date -u +%Y%m%d-%H%M%S)-${RANDOM}}"
 namespace="benchmark-${run_id}"
 [[ $namespace =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ && ${#namespace} -le 63 ]] || {
@@ -159,7 +162,12 @@ kube get deployment kwok-controller -n kube-system >/dev/null
 kube get --raw /apis/scheduling.k8s.io/v1beta1 | jq -e '.resources[] | select(.name == "podgroups")' >/dev/null
 # The shared virtual-nodes Helm release requires exclusive ownership of a
 # dedicated benchmark cluster. A second invocation fails without deleting work.
-kube create namespace slurm-bridge-benchmark-lock
+kube create namespace slurm-bridge-benchmark-lock || {
+	lock_run="$(kube get namespace slurm-bridge-benchmark-lock -o jsonpath='{.metadata.annotations.benchmark\.slinky\.slurm\.net/run}' || true)"
+	echo "error: could not acquire benchmark lock on $CONTEXT (holding run: ${lock_run:-unknown})" >&2
+	echo 'If that run is gone, delete namespace slurm-bridge-benchmark-lock in that context before retrying.' >&2
+	exit 2
+}
 locked=true
 kube annotate namespace slurm-bridge-benchmark-lock "benchmark.slinky.slurm.net/run=$run_id"
 kube get nodes -l benchmark.slinky.slurm.net/fleet=true -o json | jq '[.items[].metadata.name] | sort' >"$artifacts/fleet-names.json"
