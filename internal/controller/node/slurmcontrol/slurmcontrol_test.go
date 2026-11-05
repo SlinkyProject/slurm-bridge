@@ -1526,7 +1526,8 @@ func Test_realSlurmControl_AddNode_addsGRESCompatibilityFeatureToExistingExterna
 	if featureUpdate == nil || featureUpdate.Features == nil || featureUpdate.FeaturesAct == nil {
 		t.Fatalf("AddNode() feature update = %#v, want available and active features", featureUpdate)
 	}
-	want := api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}
+	// The annotations are the authority for external nodes, so admin-feature is replaced.
+	want := api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}
 	if !slices.Equal(*featureUpdate.Features, want) {
 		t.Errorf("available features = %v, want %v", *featureUpdate.Features, want)
 	}
@@ -1685,6 +1686,67 @@ func Test_realSlurmControl_UpdateHybridNode_reconcilesGRESCompatibilityFeature(t
 	}
 }
 
+func Test_realSlurmControl_updateNodeFeatures_noPartitionsAnnotationSkipsUpdate(t *testing.T) {
+	updates := 0
+	f := interceptor.Funcs{
+		Update: func(_ context.Context, _ object.Object, _ any, _ ...slurmclient.UpdateOption) error {
+			updates++
+			return nil
+		},
+	}
+	slurmNode := &api.V0044Node{
+		Name:           ptr.To("test-node"),
+		Features:       ptr.To(api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
+		ActiveFeatures: ptr.To(api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
+		Partitions:     ptr.To(api.V0044CsvString{"slurm-bridge"}),
+	}
+	r := &realSlurmControl{Client: fake.NewClientBuilder().
+		WithObjects(slurmNode).
+		WithInterceptorFuncs(f).
+		Build()}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+
+	if err := r.updateNodeFeatures(context.Background(), node, slurmNode); err != nil {
+		t.Fatalf("updateNodeFeatures() error = %v", err)
+	}
+	if updates != 0 {
+		t.Errorf("updateNodeFeatures() made %d update calls, want 0", updates)
+	}
+}
+
+func Test_realSlurmControl_updateNodeFeatures_dropsRemovedPartitionFeature(t *testing.T) {
+	var updates []api.V0044UpdateNodeMsg
+	f := interceptor.Funcs{
+		Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			updates = append(updates, req.(api.V0044UpdateNodeMsg))
+			return nil
+		},
+	}
+	partition := &api.V0044PartitionInfo{Name: ptr.To("a")}
+	features := api.V0044CsvString{"admin", "a", "b"}
+	slurmNode := &api.V0044Node{
+		Name:           ptr.To("test-node"),
+		Features:       ptr.To(features),
+		ActiveFeatures: ptr.To(features),
+	}
+	r := &realSlurmControl{Client: fake.NewClientBuilder().
+		WithObjects(partition, slurmNode).
+		WithInterceptorFuncs(f).
+		Build()}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        "test-node",
+		Annotations: map[string]string{wellknown.AnnotationExternalNodePartitions: "a"},
+	}}
+
+	if err := r.updateNodeFeatures(context.Background(), node, slurmNode); err != nil {
+		t.Fatalf("updateNodeFeatures() error = %v", err)
+	}
+	want := api.V0044CsvString{"a", wellknown.SlurmFeatureGRESCompatible}
+	if len(updates) != 1 || !slices.Equal(*updates[0].Features, want) {
+		t.Errorf("updates = %#v, want one update with features %v", updates, want)
+	}
+}
+
 func Test_realSlurmControl_AddNode_rejectsIncompatibleHybridGRES(t *testing.T) {
 	slurmNode := &api.V0044Node{
 		Name: ptr.To("test-node"),
@@ -1832,6 +1894,7 @@ func Test_realSlurmControl_AddNode_updatesExistingNodeTopology(t *testing.T) {
 	}
 	existingNode := &api.V0044Node{
 		Name:     ptr.To("test-node"),
+		State:    ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 		Topology: ptr.To("topo-switch:s1"),
 	}
 	r := &realSlurmControl{
@@ -1859,6 +1922,40 @@ func Test_realSlurmControl_AddNode_updatesExistingNodeTopology(t *testing.T) {
 	}
 }
 
+func Test_realSlurmControl_AddNode_leavesHybridNodeFeaturesAndTopology(t *testing.T) {
+	var updates []api.V0044UpdateNodeMsg
+	f := interceptor.Funcs{
+		Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+			updates = append(updates, req.(api.V0044UpdateNodeMsg))
+			return nil
+		},
+	}
+	features := api.V0044CsvString{"admin-feature", wellknown.SlurmFeatureGRESCompatible}
+	existingNode := &api.V0044Node{
+		Name:           ptr.To("test-node"),
+		State:          ptr.To([]api.V0044NodeState{api.V0044NodeStateIDLE}),
+		Features:       ptr.To(features),
+		ActiveFeatures: ptr.To(features),
+		Topology:       ptr.To("topo-switch:s1"),
+	}
+	r := &realSlurmControl{
+		Client: fake.NewClientBuilder().WithObjects(existingNode).WithInterceptorFuncs(f).Build(),
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name: "test-node",
+		Annotations: map[string]string{
+			wellknown.AnnotationNodeTopologySpec: "topo-switch:s2",
+			wellknown.AnnotationNodeFeaturesSpec: "bar",
+		},
+	}}
+	if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+		t.Fatalf("AddNode: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Errorf("AddNode() on a hybrid node sent updates: %#v", updates)
+	}
+}
+
 func Test_realSlurmControl_AddNode_clearsExistingNodeTopology(t *testing.T) {
 	gotTopology := "unset"
 	f := interceptor.Funcs{
@@ -1871,6 +1968,7 @@ func Test_realSlurmControl_AddNode_clearsExistingNodeTopology(t *testing.T) {
 	}
 	existingNode := &api.V0044Node{
 		Name:     ptr.To("test-node"),
+		State:    ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
 		Topology: ptr.To("topo-switch:s1"),
 	}
 	r := &realSlurmControl{
@@ -1891,4 +1989,145 @@ func Test_realSlurmControl_AddNode_clearsExistingNodeTopology(t *testing.T) {
 	if gotTopology != "" {
 		t.Errorf("TopologyStr = %q, want empty string", gotTopology)
 	}
+}
+
+func Test_realSlurmControl_AddNode_syncsExternalNodeFeatures(t *testing.T) {
+	compat := wellknown.SlurmFeatureGRESCompatible
+
+	t.Run("existing external node", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			annotations map[string]string
+			current     []string
+			want        []string
+		}{
+			{
+				name:        "adds feature and drops features not in the annotations",
+				annotations: map[string]string{wellknown.AnnotationNodeFeaturesSpec: "bar"},
+				current:     []string{"slinky", compat},
+				want:        []string{"bar", compat},
+			},
+			{
+				name:        "multiple values, trimmed and de-duplicated",
+				annotations: map[string]string{wellknown.AnnotationNodeFeaturesSpec: "foo, bar,foo"},
+				current:     []string{"slinky", compat},
+				want:        []string{"bar", "foo", compat},
+			},
+			{
+				name: "merges partitions with the features annotation",
+				annotations: map[string]string{
+					wellknown.AnnotationExternalNodePartitions: "a",
+					wellknown.AnnotationNodeFeaturesSpec:       "bar",
+				},
+				current: []string{compat},
+				want:    []string{"a", "bar", compat},
+			},
+			{
+				name:        "removed partition drops its feature",
+				annotations: map[string]string{wellknown.AnnotationExternalNodePartitions: "a"},
+				current:     []string{"a", "b", compat},
+				want:        []string{"a", compat},
+			},
+			{
+				name:    "removed annotations leave only the bridge feature",
+				current: []string{"bar", "slinky", compat},
+				want:    []string{compat},
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var update *api.V0044UpdateNodeMsg
+				f := interceptor.Funcs{
+					Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+						if u, ok := req.(api.V0044UpdateNodeMsg); ok && (u.Features != nil || u.FeaturesAct != nil) {
+							update = &u
+						}
+						return nil
+					},
+				}
+				existing := &api.V0044Node{
+					Name:           ptr.To("test-node"),
+					State:          ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+					Features:       ptr.To(api.V0044CsvString(tt.current)),
+					ActiveFeatures: ptr.To(api.V0044CsvString(tt.current)),
+				}
+				partition := &api.V0044PartitionInfo{Name: ptr.To("a")}
+				r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(partition, existing).WithInterceptorFuncs(f).Build()}
+				node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node", Annotations: tt.annotations}}
+
+				if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+					t.Fatalf("AddNode: %v", err)
+				}
+				if update == nil {
+					t.Fatalf("AddNode() sent no feature update, want available and active = %v", tt.want)
+				}
+				if got := []string(ptr.Deref(update.Features, nil)); !slices.Equal(got, tt.want) {
+					t.Errorf("available features = %v, want %v", got, tt.want)
+				}
+				if got := []string(ptr.Deref(update.FeaturesAct, nil)); !slices.Equal(got, tt.want) {
+					t.Errorf("active features = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("existing node already in sync sends no update", func(t *testing.T) {
+		updated := false
+		f := interceptor.Funcs{
+			Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+				if u, ok := req.(api.V0044UpdateNodeMsg); ok && (u.Features != nil || u.FeaturesAct != nil) {
+					updated = true
+				}
+				return nil
+			},
+		}
+		synced := api.V0044CsvString{"bar", compat}
+		existing := &api.V0044Node{
+			Name:           ptr.To("test-node"),
+			State:          ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+			Features:       ptr.To(synced),
+			ActiveFeatures: ptr.To(synced),
+		}
+		r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(existing).WithInterceptorFuncs(f).Build()}
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: map[string]string{wellknown.AnnotationNodeFeaturesSpec: "bar"},
+		}}
+		if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+			t.Fatalf("AddNode: %v", err)
+		}
+		if updated {
+			t.Error("AddNode() sent a feature update for a node already in sync")
+		}
+	})
+
+	t.Run("new node", func(t *testing.T) {
+		var nodeConf string
+		f := interceptor.Funcs{
+			Create: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.CreateOption) error {
+				if r, ok := req.(api.V0044OpenapiCreateNodeReq); ok {
+					nodeConf = r.NodeConf
+				}
+				return nil
+			},
+		}
+		r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build()}
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-node",
+				Annotations: map[string]string{wellknown.AnnotationNodeFeaturesSpec: "bar"},
+			},
+			Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("8Gi"),
+			}},
+		}
+		if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+			t.Fatalf("AddNode: %v", err)
+		}
+		want := "Feature=bar," + compat + " "
+		if !strings.Contains(nodeConf, want) {
+			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
+		}
+	})
 }

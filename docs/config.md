@@ -65,10 +65,11 @@ metadata:
 
 The `scheduler.slinky.slurm.net/external-node-partitions` annotation is a
 comma-separated list of Slurm partitions. The bridge validates that each
-partition exists, then registers the Slurm node with matching features. Slurm
-`Nodeset` configuration can then map those features into partitions:
+partition exists, then registers the Slurm node with matching features. Removing
+a partition from the annotation removes its feature. Slurm `Nodeset`
+configuration can then map those features into partitions:
 
-```text
+```conf
 Nodeset=slurm-bridge Feature=slurm-bridge
 PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
 ```

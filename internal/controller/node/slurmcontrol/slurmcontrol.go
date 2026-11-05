@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
+	"k8s.io/utils/set"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -25,6 +26,7 @@ import (
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/structutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -336,16 +338,11 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	}
 
 	annotations := node.GetAnnotations()
-	features := []string{wellknown.SlurmFeatureGRESCompatible}
-	if partitionsAnno, ok := annotations[wellknown.AnnotationExternalNodePartitions]; ok && partitionsAnno != "" {
-		partitions := splitPartitionList(partitionsAnno)
-		for _, partition := range partitions {
-			if err := r.validatePartitionExists(ctx, partition); err != nil {
-				return fmt.Errorf("could not validate partition %q: %w", partition, err)
-			}
-		}
-		features = append(features, partitions...)
+	desiredFeatures, err := r.desiredNodeFeatures(ctx, annotations)
+	if err != nil {
+		return err
 	}
+	features := strings.Join(structutils.SortedDedup(structutils.MergeList(desiredFeatures, []string{wellknown.SlurmFeatureGRESCompatible})), ",")
 
 	// Create node configuration string
 	// Format: NodeName=<name> CPUs=<cpus> RealMemory=<memory_mb> State=External [Feature=<features>] [Gres=<gres>] [GresConf=<gresconf>]
@@ -356,7 +353,7 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 	if addr := nodeInternalIP(node); addr != "" {
 		nodeConf += fmt.Sprintf(" NodeAddr=%s", addr)
 	}
-	nodeConf += fmt.Sprintf(" Feature=%s", strings.Join(features, ","))
+	nodeConf += fmt.Sprintf(" Feature=%s", features)
 	if topologySpec, ok := annotations[wellknown.AnnotationNodeTopologySpec]; ok && topologySpec != "" {
 		nodeConf += fmt.Sprintf(" Topology=%s", topologySpec)
 	}
@@ -538,10 +535,7 @@ func (r *realSlurmControl) updateExistingNode(
 	gresConfig nodeGRESConfig,
 ) error {
 	if !slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
-		if err := r.reconcileHybridNode(ctx, slurmNode, nodeInfo, gresConfig); err != nil {
-			return err
-		}
-		return r.updateNodeTopology(ctx, node, slurmNode)
+		return r.reconcileHybridNode(ctx, slurmNode, nodeInfo, gresConfig)
 	}
 	if err := r.updateNodeFeatures(ctx, node, slurmNode); err != nil {
 		return err
@@ -729,47 +723,37 @@ func (r *realSlurmControl) updateNodeTopology(ctx context.Context, node *corev1.
 	return nil
 }
 
-// updateNodeFeatures updates an existing external Slurm node so its features
-// include GRES compatibility and, when configured, match the partitions
-// annotation.
+// updateNodeFeatures updates an existing Slurm node so its features match the
+// partition and feature annotations.
 func (r *realSlurmControl) updateNodeFeatures(ctx context.Context, node *corev1.Node, slurmNode *api.V0044Node) error {
 	logger := log.FromContext(ctx)
 
 	annotations := node.GetAnnotations()
-	partitionsAnno, hasPartitions := annotations[wellknown.AnnotationExternalNodePartitions]
-	partitions := splitPartitionList(partitionsAnno)
-	if hasPartitions && partitionsAnno != "" {
-		for _, partition := range partitions {
-			if err := r.validatePartitionExists(ctx, partition); err != nil {
-				return fmt.Errorf("could not validate partition %q: %w", partition, err)
-			}
-		}
+	partitions := splitAnnotationList(annotations[wellknown.AnnotationExternalNodePartitions])
+	desiredFeatures, err := r.desiredNodeFeatures(ctx, annotations)
+	if err != nil {
+		return err
 	}
+	desiredFeatures = append(desiredFeatures, wellknown.SlurmFeatureGRESCompatible)
 
-	features := ptr.Deref(slurmNode.Features, api.V0044CsvString{})
-	activeFeatures := ptr.Deref(slurmNode.ActiveFeatures, api.V0044CsvString{})
-	if hasPartitions && partitionsAnno != "" {
-		features = partitions
-		activeFeatures = partitions
-	}
-	features = updateFeatureList(features, wellknown.SlurmFeatureGRESCompatible, true)
-	activeFeatures = updateFeatureList(activeFeatures, wellknown.SlurmFeatureGRESCompatible, true)
-	partitionsMatch := !hasPartitions || partitionsAnno == "" || featuresEqual(slurmNode.Partitions, partitions)
-	if featuresEqual(slurmNode.Features, features) &&
-		featuresEqual(slurmNode.ActiveFeatures, activeFeatures) &&
-		partitionsMatch {
+	desired := structutils.SortedDedup(desiredFeatures)
+	curAvailable := ptr.Deref(slurmNode.Features, api.V0044CsvString{})
+	curActive := ptr.Deref(slurmNode.ActiveFeatures, api.V0044CsvString{})
+
+	inSync := set.New(desired...).Equal(set.New(curAvailable...)) &&
+		set.New(desired...).Equal(set.New(curActive...))
+	partitionsMatch := len(partitions) == 0 || featuresEqual(slurmNode.Partitions, partitions)
+	if inSync && partitionsMatch {
 		return nil
 	}
-	featuresCsv := api.V0044CsvString(features)
-	activeFeaturesCsv := api.V0044CsvString(activeFeatures)
 	req := api.V0044UpdateNodeMsg{
-		Features:    ptr.To(featuresCsv),
-		FeaturesAct: ptr.To(activeFeaturesCsv),
+		Features:    ptr.To(api.V0044CsvString(desired)),
+		FeaturesAct: ptr.To(api.V0044CsvString(desired)),
 	}
-	logger.Info("Updating Slurm external node features", "node", klog.KObj(node),
-		"slurmNode", slurmNode.GetKey(), "features", features)
+	logger.Info("Updating Slurm node features to match annotation", "node", klog.KObj(node),
+		"slurmNode", slurmNode.GetKey(), "features", desired)
 	if err := r.Update(ctx, slurmNode, req); err != nil {
-		return fmt.Errorf("could not update node features: %w", err)
+		return fmt.Errorf("could not update node features on node %v: %w", ptr.Deref(slurmNode.Name, "name not found"), err)
 	}
 
 	return nil
@@ -800,6 +784,20 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 	}
 
 	return nil
+}
+
+// desiredNodeFeatures computes the ordered, de-duplicated list of Slurm node
+// features to write to UpdateNode.Features.
+func (r *realSlurmControl) desiredNodeFeatures(ctx context.Context, annotations map[string]string) ([]string, error) {
+	partitionFeatures := splitAnnotationList(annotations[wellknown.AnnotationExternalNodePartitions])
+	for _, partition := range partitionFeatures {
+		if err := r.validatePartitionExists(ctx, partition); err != nil {
+			return nil, fmt.Errorf("could not validate partition %q: %w", partition, err)
+		}
+	}
+	specFeatures := splitAnnotationList(annotations[wellknown.AnnotationNodeFeaturesSpec])
+
+	return structutils.SortedDedup(structutils.MergeList(partitionFeatures, specFeatures)), nil
 }
 
 // validatePartitionExists checks if a Slurm partition exists using the GetPartitionInfo API.
@@ -839,8 +837,8 @@ func featuresEqual(current *api.V0044CsvString, desired []string) bool {
 	return true
 }
 
-// splitPartitionList splits a comma-separated annotation value into partition names (trimmed, non-empty).
-func splitPartitionList(value string) []string {
+// splitAnnotationList splits a comma-separated annotation value into a slice of strings.
+func splitAnnotationList(value string) []string {
 	if value == "" {
 		return nil
 	}

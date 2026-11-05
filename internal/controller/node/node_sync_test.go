@@ -806,8 +806,13 @@ var _ = Describe("syncNodeRegistration() hybrid nodes", func() {
 		_, err = r.syncNodeRegistration(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: node.Name}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(slurmClient.Get(ctx, object.ObjectKey(node.Name), slurmNode)).To(Succeed())
-		Expect(*slurmNode.Features).To(ConsistOf("admin-feature", wellknown.SlurmFeatureGRESCompatible))
-		Expect(*slurmNode.ActiveFeatures).To(ConsistOf("admin-feature", wellknown.SlurmFeatureGRESCompatible))
+		// External nodes take their features from the annotations, so the admin feature goes.
+		wantFeatures := []string{"admin-feature", wellknown.SlurmFeatureGRESCompatible}
+		if external {
+			wantFeatures = []string{wellknown.SlurmFeatureGRESCompatible}
+		}
+		Expect(*slurmNode.Features).To(ConsistOf(wantFeatures))
+		Expect(*slurmNode.ActiveFeatures).To(ConsistOf(wantFeatures))
 		Expect(kubeClient.Get(ctx, client.ObjectKeyFromObject(node), updatedNode)).To(Succeed())
 		condition = findNodeCondition(updatedNode.Status.Conditions, wellknown.NodeConditionSlurmGRESCompatible)
 		if labeled {
