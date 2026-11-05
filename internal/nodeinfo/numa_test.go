@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	resourcev1 "k8s.io/api/resource/v1"
@@ -17,7 +16,6 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/bitmaputil"
@@ -108,27 +106,6 @@ func TestNUMAInterleavedCPUs(t *testing.T) {
 		if info.SocketID != 7 {
 			t.Fatal("lost physical socket identity")
 		}
-	}
-}
-
-func TestNUMAFingerprintRejectsPhysicalSocketRegistration(t *testing.T) {
-	n, err := nodeinfo.NewNodeInfoFromResourceSlices("node", []resourcev1.ResourceSlice{cpuSlice("node",
-		numaDevice(0, 0, "0-1", "0-3"), numaDevice(0, 1, "2-3", "0-3"))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	extra, err := n.EncodeApplied("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := dra.AppliedCPUFingerprint(extra)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// v1 hashed the same devices and core order, but registered one socket.
-	old := strings.Replace(extra, fingerprint, strings.Replace(fingerprint, "v2:", "v1:", 1), 1)
-	if err := n.ValidateCPUFingerprint(old); err == nil {
-		t.Fatal("accepted the old physical-socket registration")
 	}
 }
 

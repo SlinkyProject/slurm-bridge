@@ -113,3 +113,45 @@ func TestGRESEqualIgnoresSocketAffinity(t *testing.T) {
 		t.Fatal("different GRES counts compared equal")
 	}
 }
+
+func TestNUMARegistrationTwoSocketsSubNUMA(t *testing.T) {
+	// Two sockets with two NUMA domains each (SNC2): every domain is a Slurm socket.
+	slice := testNodeCPUResourceSlice("worker")
+	device := func(socket, numa int64, cpus string) resourcev1.Device {
+		return resourcev1.Device{Name: fmt.Sprintf("cpudevnuma%d", numa), AllowMultipleAllocations: ptr.To(true), Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+			nodeinfo.DraDriverCpu_SocketID: {IntValue: ptr.To(socket)}, nodeinfo.DraDriverCpu_NUMANodeID: {IntValue: ptr.To(numa)},
+			nodeinfo.DraDriverCpu_SMTEnabled: {BoolValue: ptr.To(false)}, nodeinfo.DraDriverCpu_CPUIDs: {StringValue: ptr.To(cpus)},
+			nodeinfo.DraDriverCpu_SMTLayout: {StringValue: ptr.To("0-7")},
+		}, Capacity: map[resourcev1.QualifiedName]resourcev1.DeviceCapacity{nodeinfo.DraDriverCpu_Capacity: {Value: resource.MustParse("2")}}}
+	}
+	slice.Spec.Devices = []resourcev1.Device{device(1, 3, "6-7"), device(0, 0, "0-1"), device(1, 2, "4-5"), device(0, 1, "2-3")}
+	info := testNodeInfoFromResourceSlices(t, "worker", []resourcev1.ResourceSlice{*slice})
+	geometry, err := desiredNodeCPUConfig(&corev1.Node{}, info)
+	if err != nil || geometry.sockets != 4 || geometry.coresPerSocket != 2 || geometry.threadsPerCore != 1 {
+		t.Fatalf("CPU registration = %+v, %v; want 4/2/1", geometry, err)
+	}
+	gpus := make([]dra.DeviceIdentity, 4)
+	numa := make(map[dra.DeviceIdentity][]int, 4)
+	for i := range gpus {
+		gpus[i] = structured.MakeDeviceID("gpu.example.com", "pool-a", fmt.Sprintf("gpu-%d", i))
+		numa[gpus[i]] = []int{i}
+	}
+	// A device local to both domains of socket 1 binds to both of its Slurm sockets.
+	nic := structured.MakeDeviceID("nic.example.com", "pool-a", "nic-0")
+	inventory := []dra.GRESInventory{
+		{GRES: dra.GRES{Name: "gpu", Type: "gpu.example.com"}, Devices: gpus, NUMANodes: numa},
+		{GRES: dra.GRES{Name: "nic", Type: "nic.example.com"}, Devices: []dra.DeviceIdentity{nic}, NUMANodes: map[dra.DeviceIdentity][]int{nic: {2, 3}}},
+	}
+	got, err := buildNodeGRESConfig(inventory, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-0,cpus=0-1+" +
+		"count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-1,cpus=2-3+" +
+		"count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-2,cpus=4-5+" +
+		"count=1,name=gpu,type=gpu.example.com,file=/dra/gpu.example.com/pool-a/gpu-3,cpus=6-7+" +
+		"count=1,name=nic,type=nic.example.com,file=/dra/nic.example.com/pool-a/nic-0,cpus=4-7"
+	if got.gresConf != want {
+		t.Fatalf("GresConf = %q,\nwant %q", got.gresConf, want)
+	}
+}

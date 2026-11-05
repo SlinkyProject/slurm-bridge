@@ -245,10 +245,9 @@ NUMA domains share a physical socket, including sub-NUMA clustering. Abstract
 Slurm cores are ordered by physical socket, NUMA domain, and then core; each
 domain occupies a contiguous range.
 
-Upgrading from physical-socket registration changes the CPU topology
-fingerprint. Drain nodes and wait for claims to be unprepared before upgrading.
-External nodes are re-registered with the new geometry before accepting bridge
-jobs.
+When changing from physical-socket registration to NUMA domains as sockets,
+drain nodes and wait for claims to be unprepared. External nodes are
+re-registered with the new geometry before accepting bridge jobs.
 
 Hybrid nodes are aligned only when the site's `gres.conf` describes the same
 topology; `slurm-bridge` does not write it, and the `SlinkySlurmGRESCompatible`
