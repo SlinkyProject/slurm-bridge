@@ -204,7 +204,8 @@ sudo ./hack/sysctl.sh
 ## Scale benchmark
 
 The knavigator benchmark defaults to 64 KWOK nodes, 800 mixed workloads, and 60×
-speed. Use a dedicated Kubernetes 1.37 cluster:
+speed. Each trace job uses one PodGroup to gang-schedule the pods of an Indexed
+Job. Use a dedicated Kubernetes 1.37 cluster:
 
 ```sh
 ./hack/kind.sh --core --kwok slinky-benchmark
@@ -215,7 +216,7 @@ make benchmark
 Workflow YAML settings accept `${ENV_VAR:-default}`, for example
 `BENCHMARK_INFERENCE_JOBS=60 BENCHMARK_TRAINING_JOBS=20 make benchmark`. Set
 `BENCHMARK_CONFIG_DIR` to a checked-out configuration bundle (including from the
-CI repo): `nodes.yaml`, `workload.yaml`, `composite.yaml.tmpl`, and
+CI repo): `nodes.yaml`, `workload.yaml`, `podgroup.yaml.tmpl`, and
 `kwok-stage.yaml`. `BENCHMARK_WORKLOAD=/path/to/workload.yaml` replaces only the
 workload. Its RegisterObj task uses `${BENCHMARK_TEMPLATE}` for the copied pod
 template; `${BENCHMARK_NAMESPACE}` is assigned per run. The default fleet uses

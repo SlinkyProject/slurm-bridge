@@ -1,42 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-# One trace job as a gang: a composite PodGroup with one child PodGroup that
-# holds every pod of an Indexed Job. knavigator fills in the parameters.
-apiVersion: scheduling.k8s.io/v1beta1
-kind: Workload
-metadata:
-  name: '{{._NAME_}}'
-  namespace: '{{.namespace}}'
-  labels:
-    app.kubernetes.io/managed-by: knavigator
-    benchmark.slinky.slurm.net/class: '{{.class}}'
-spec:
-  compositePodGroupTemplates:
-    - name: all
-      schedulingPolicy:
-        gang:
-          minGroupCount: 1
-      podGroupTemplates:
-        - name: workers
-          schedulingPolicy:
-            gang:
-              minCount: {{.gangSize}}
----
-apiVersion: scheduling.k8s.io/v1alpha3
-kind: CompositePodGroup
-metadata:
-  name: '{{._NAME_}}'
-  namespace: '{{.namespace}}'
-  labels:
-    app.kubernetes.io/managed-by: knavigator
-spec:
-  workloadRef:
-    workloadName: '{{._NAME_}}'
-    templateName: all
-  schedulingPolicy:
-    gang:
-      minGroupCount: 1
----
+# One trace job as a gang: a PodGroup holds every pod of an Indexed Job.
+# knavigator fills in the parameters.
 apiVersion: scheduling.k8s.io/v1beta1
 kind: PodGroup
 metadata:
@@ -50,10 +15,6 @@ metadata:
     slurmjob.slinky.slurm.net/timelimit: '{{.timeLimitMinutes}}'
     slurmjob.slinky.slurm.net/priority: '{{.priority}}'
 spec:
-  parentCompositePodGroupName: '{{._NAME_}}'
-  workloadRef:
-    workloadName: '{{._NAME_}}'
-    templateName: workers
   schedulingPolicy:
     gang:
       minCount: {{.gangSize}}

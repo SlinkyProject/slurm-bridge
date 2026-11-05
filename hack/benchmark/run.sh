@@ -20,7 +20,7 @@ namespace="benchmark-${run_id}"
 artifacts="${ARTIFACTS_ROOT}/${run_id}"
 mkdir -p "$ARTIFACTS_ROOT"
 mkdir "$artifacts" # Refuse to overwrite a previous run.
-for file in nodes.yaml composite.yaml.tmpl kwok-stage.yaml; do
+for file in nodes.yaml podgroup.yaml.tmpl kwok-stage.yaml; do
 	cp "$CONFIG_DIR/$file" "$artifacts/$file"
 done
 cp "${WORKLOAD:-$CONFIG_DIR/workload.yaml}" "$artifacts/workload.yaml"
@@ -30,7 +30,7 @@ echo "Run $run_id on $CONTEXT; artifacts: $artifacts"
 
 export BENCHMARK_NAMESPACE="$namespace"
 # Native -var expansion inserts YAML, so quote the absolute template path.
-BENCHMARK_TEMPLATE="$(jq -Rn --arg path "$artifacts/composite.yaml.tmpl" '$path | tojson' -r)"
+BENCHMARK_TEMPLATE="$(jq -Rn --arg path "$artifacts/podgroup.yaml.tmpl" '$path | tojson' -r)"
 export BENCHMARK_TEMPLATE
 locked=false
 namespace_owned=false
@@ -156,7 +156,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 kube get deployment kwok-controller -n kube-system >/dev/null
-kube get --raw /apis/scheduling.k8s.io/v1alpha3 | jq -e '.resources[] | select(.name == "compositepodgroups")' >/dev/null
+kube get --raw /apis/scheduling.k8s.io/v1beta1 | jq -e '.resources[] | select(.name == "podgroups")' >/dev/null
 # The shared virtual-nodes Helm release requires exclusive ownership of a
 # dedicated benchmark cluster. A second invocation fails without deleting work.
 kube create namespace slurm-bridge-benchmark-lock
