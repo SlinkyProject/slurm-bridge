@@ -179,7 +179,7 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 	if live.AllocationID() != cached.AllocationID() || live.HetJobOffset != cached.HetJobOffset || !reflect.DeepEqual(info, cached.Ownership()) {
 		return false, fmt.Errorf("ownership changed for job %d", cached.JobId)
 	}
-	members, err := r.componentMembers(ctx, r.apiReader, cached)
+	members, err := r.componentMembers(ctx, r.liveMembers(), cached)
 	if err != nil || !releasable(members) {
 		return false, err
 	}
@@ -200,7 +200,7 @@ func (r *Reconciler) releaseComponent(ctx context.Context, cached slurmjob.Regis
 			if err != nil {
 				return false, err
 			}
-			pods, err := r.componentMembers(ctx, r.apiReader, sibling)
+			pods, err := r.componentMembers(ctx, r.liveMembers(), sibling)
 			if err != nil || !releasable(pods) {
 				return false, err
 			}

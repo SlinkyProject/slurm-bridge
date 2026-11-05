@@ -655,3 +655,28 @@ func TestValidatePodGroupSpecRejectsUnsupportedFields(t *testing.T) {
 		})
 	}
 }
+
+type memberLister struct {
+	client.Client
+	pods corev1.PodList
+}
+
+func (m memberLister) ListPodGroupMembers(context.Context, string, string) (corev1.PodList, error) {
+	return *m.pods.DeepCopy(), nil
+}
+
+func TestPodsForPodGroupIndexedFiltersTerminal(t *testing.T) {
+	done := podWithSchedulingGroup("ns", "done", "pg")
+	done.Status.Phase = corev1.PodSucceeded
+	reader := memberLister{pods: corev1.PodList{Items: []corev1.Pod{*podWithSchedulingGroup("ns", "live", "pg"), *done}}}
+	for include, want := range map[bool]int{false: 1, true: 2} {
+		tr := translator{Reader: reader, ctx: context.Background(), includeTerminalPods: include}
+		pods, err := tr.podsForPodGroup("ns", "pg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pods.Items) != want {
+			t.Errorf("includeTerminalPods=%v: got %d pods, want %d", include, len(pods.Items), want)
+		}
+	}
+}
