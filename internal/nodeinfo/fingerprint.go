@@ -84,8 +84,7 @@ func (n *NodeInfo) cpuFingerprint() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// v2 registers NUMA domains as sockets even when core ordering is unchanged.
-	return fmt.Sprintf("v2:%x", sha256.Sum256(data)), nil
+	return fmt.Sprintf("v1:%x", sha256.Sum256(data)), nil
 }
 
 // EncodeApplied adds the CPU fingerprint to the GRES inventory in Extra.
