@@ -204,5 +204,25 @@ wait "$knavigator_pid"
 knavigator_pid=""
 report_progress_best_effort
 jq -e '([.jobs_by_gang_size[].complete] | add) == .jobs' "$artifacts/results.json"
+# Pod observations can finish before the Job controller records its outcome.
+deadline=$((SECONDS + 60))
+while true; do
+	kube get jobs -n "$namespace" -l app.kubernetes.io/managed-by=knavigator -o json >"$artifacts/jobs-live.json"
+	if jq -e 'any(.items[].status.conditions[]?; (.type == "Failed" or .type == "FailureTarget") and .status == "True")' "$artifacts/jobs-live.json" >/dev/null; then
+		jq -r '.items[] | select(any(.status.conditions[]?; (.type == "Failed" or .type == "FailureTarget") and .status == "True")) | "FAIL: Job \(.metadata.name) failed"' "$artifacts/jobs-live.json" >&2
+		exit 1
+	fi
+	if jq -e --slurpfile results "$artifacts/results.json" '
+  (.items | length) == $results[0].jobs and
+  all(.items[]; any(.status.conditions[]?; .type == "Complete" and .status == "True"))
+ ' "$artifacts/jobs-live.json" >/dev/null; then
+		break
+	fi
+	if ((SECONDS >= deadline)); then
+		echo 'FAIL: timed out waiting for successful Job conditions' >&2
+		exit 1
+	fi
+	sleep 2
+done
 echo 'PASS: all benchmark workloads completed'
 # EXIT captures diagnostics and verifies cleanup releases every Slurm allocation.
