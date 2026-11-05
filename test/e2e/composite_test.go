@@ -123,8 +123,8 @@ func testCompositePodGroupScheduling(t *testing.T, basic bool) {
 				if err := crClient.Create(ctx, pod); err != nil {
 					t.Fatalf("create Pod %s: %v", pod.Name, err)
 				}
-				if !slices.Contains(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration}) {
-					t.Fatalf("Pod %s was admitted without the registration gate", pod.Name)
+				if slices.Contains(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration}) {
+					t.Fatalf("native PodGroup member %s was admitted with the registration gate", pod.Name)
 				}
 			}
 			return ctx
