@@ -40,7 +40,7 @@ slurm() { kube exec -n slurm slurm-controller-0 -c slurmctld -- "$@"; }
 run_workflow() {
 	local workflow="$1" entry
 	shift
-	local args=()
+	local args=(-kubectx "$CONTEXT" -workflow "$workflow")
 	jq -n --rawfile yaml "$workflow" '
   [$yaml | scan("\\$\\{([A-Za-z_][A-Za-z0-9_]*)") | .[0]] | unique |
   map(. as $name | select(env[$name] != null and env[$name] != "") |
@@ -49,11 +49,11 @@ run_workflow() {
 	while IFS= read -r -d "" entry; do args+=(-var "$entry"); done < <(
 		jq -j 'to_entries[] | .key + "=" + .value + "\u0000"' "${workflow%.yaml}.vars.json"
 	)
-	exec "$KNAVIGATOR" -kubectx "$CONTEXT" -workflow "$workflow" "${args[@]}" "$@"
+	exec "$KNAVIGATOR" "${args[@]}" "$@"
 }
 report_progress() {
-	kube get jobs -n "$namespace" -l app.kubernetes.io/managed-by=knavigator -o json >"$artifacts/jobs-live.json"
-	kube get pods -n "$namespace" -l app.kubernetes.io/managed-by=knavigator -o json >"$artifacts/pods-live.json"
+	kube get jobs -n "$namespace" -l app.kubernetes.io/managed-by=knavigator -o json >"$artifacts/jobs-live.json" || return
+	kube get pods -n "$namespace" -l app.kubernetes.io/managed-by=knavigator -o json >"$artifacts/pods-live.json" || return
 	jq -n --argjson elapsed "$((SECONDS - started))" --slurpfile jobs "$artifacts/jobs-live.json" \
 		--slurpfile pods "$artifacts/pods-live.json" --slurpfile fleet "$artifacts/fleet.json" '
   def counts: {waiting: map(select(.state == "waiting")) | length,
@@ -72,11 +72,24 @@ report_progress() {
    running_gpus: ([$occupied[] | select(.status.phase == "Running")] | gpus),
    busy_nodes: ([$occupied[].spec.nodeName] | unique | length), total_nodes: ($fleet[0].items | length),
    jobs_by_size: ($jobs | group_by(.size) | map({size: .[0].size} + counts))}
- ' >"$artifacts/progress.json"
+ ' >"$artifacts/progress.json" || return
 	jq -r '"Benchmark progress: elapsed=\(.elapsed_seconds)s submitted=\(.submitted) waiting=\(.waiting) active=\(.active) completed=\(.completed)",
   "  GPU occupancy: \(.occupied_gpus)/\(.total_gpus) (\(.gpu_occupancy_percent)%); running requests=\(.running_gpus); nodes busy=\(.busy_nodes)/\(.total_nodes)",
   (.jobs_by_size[] | "  \(.size)-pod jobs: waiting=\(.waiting) active=\(.active) completed=\(.completed)")
  ' "$artifacts/progress.json" | tee -a "$artifacts/progress.log"
+}
+report_progress_best_effort() {
+	local attempt
+	for attempt in 1 2 3; do
+		if report_progress; then
+			return 0
+		fi
+		echo "warning: progress report failed (attempt $attempt/3)" >&2
+		if ((attempt < 3)); then
+			sleep 2
+		fi
+	done
+	echo 'warning: skipping progress report after three failed attempts' >&2
 }
 wait_idle() {
 	local deadline=$((SECONDS + ${1:-1200}))
@@ -114,7 +127,10 @@ finish() {
 		diagnostics
 		if $namespace_owned; then
 			kube delete namespace "$namespace" --ignore-not-found --wait=true --timeout=300s || status=1
-			wait_idle "${BENCHMARK_CLEANUP_TIMEOUT_SECONDS:-300}" || status=1
+			wait_idle "${BENCHMARK_CLEANUP_TIMEOUT_SECONDS:-300}" || {
+				status=1
+				slurm scancel --partition=slurm-bridge --full || true
+			}
 		fi
 		kube delete namespace slurm-bridge-benchmark-lock --wait=false || status=1
 	fi
@@ -180,13 +196,13 @@ next_report=$SECONDS
 while kill -0 "$knavigator_pid" 2>/dev/null; do
 	if ((SECONDS >= next_report)); then
 		next_report=$((SECONDS + 60))
-		report_progress
+		report_progress_best_effort
 	fi
 	sleep 1
 done
 wait "$knavigator_pid"
 knavigator_pid=""
-report_progress
+report_progress_best_effort
 jq -e '([.jobs_by_gang_size[].complete] | add) == .jobs' "$artifacts/results.json"
 echo 'PASS: all benchmark workloads completed'
 # EXIT captures diagnostics and verifies cleanup releases every Slurm allocation.

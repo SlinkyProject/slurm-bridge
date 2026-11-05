@@ -572,7 +572,10 @@ function slurm::install_from_source() {
 function slurm::configure_for_bridge() {
 	local chart="$1"
 	local chartName="slurm"
-	local values_args=()
+	local values_args=(
+		--values "$SCRIPT_DIR/slurm-bridge-common.yaml"
+		--values "$SCRIPT_DIR/slurm-bridge-${OPT_SLURM_NODE_MODE}.yaml"
+	)
 	if [[ -n ${SLURM_VALUES:-} ]]; then
 		values_args+=(--values "$SLURM_VALUES")
 	fi
@@ -584,8 +587,6 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
-			--values "$SCRIPT_DIR/slurm-bridge-external.yaml" \
 			"${values_args[@]}"
 		;;
 	"$SLURM_NODE_MODE_HYBRID")
@@ -595,8 +596,6 @@ function slurm::configure_for_bridge() {
 			--namespace slurm --create-namespace \
 			--reuse-values \
 			--wait \
-			--values "$SCRIPT_DIR/slurm-bridge-common.yaml" \
-			--values "$SCRIPT_DIR/slurm-bridge-hybrid.yaml" \
 			"${values_args[@]}" \
 			--set nodesets.slurm-bridge.enabled=false
 		helm upgrade "$chartName" "$chart" \
