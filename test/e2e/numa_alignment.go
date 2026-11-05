@@ -5,8 +5,10 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +27,8 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
 
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
+
 	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -35,12 +39,13 @@ const draNvidiaGPUDriver = "gpu.nvidia.com"
 type numaTopology struct {
 	devices map[structured.DeviceID][]int64
 	cpus    map[int64]cpuset.CPUSet
+	sockets map[int64]int64
 }
 
 // nodeNUMATopology reads device NUMA nodes from one node's ResourceSlices. CPU
 // devices use their own NUMA node rather than the nodes local to them.
 func nodeNUMATopology(ctx context.Context, c client.Client, nodeName string) (numaTopology, error) {
-	topology := numaTopology{devices: make(map[structured.DeviceID][]int64), cpus: make(map[int64]cpuset.CPUSet)}
+	topology := numaTopology{devices: make(map[structured.DeviceID][]int64), cpus: make(map[int64]cpuset.CPUSet), sockets: make(map[int64]int64)}
 	resourceSlices := &resourcev1.ResourceSliceList{}
 	if err := c.List(ctx, resourceSlices); err != nil {
 		return topology, err
@@ -58,6 +63,11 @@ func nodeNUMATopology(ctx context.Context, c client.Client, nodeName string) (nu
 				}
 				topology.devices[id] = []int64{*numa.IntValue}
 				topology.cpus[*numa.IntValue] = cpus
+				socket := device.Attributes[nodeinfo.DraDriverCpu_SocketID].IntValue
+				if socket == nil {
+					return topology, fmt.Errorf("CPU device %s has no physical socket", id)
+				}
+				topology.sockets[*numa.IntValue] = *socket
 			} else if numa, ok := device.Attributes[deviceattribute.StandardDeviceAttributeNUMANode]; ok {
 				topology.devices[id] = numa.IntValues
 				if numa.IntValue != nil {
@@ -67,6 +77,53 @@ func nodeNUMATopology(ctx context.Context, c client.Client, nodeName string) (nu
 		}
 	}
 	return topology, nil
+}
+
+// verifyNUMARegistration checks Slurm's topology before submitting a workload.
+// An accidentally local allocation must not hide missing GRES core bindings.
+func verifyNUMARegistration(ctx context.Context, config *envconf.Config, c client.Client, node *corev1.Node, mock bool) error {
+	topology, err := nodeNUMATopology(ctx, c, node.Name)
+	if err != nil {
+		return err
+	}
+	if mock {
+		if len(topology.cpus) != 2 || topology.sockets[0] != 0 || topology.sockets[1] != 0 ||
+			!topology.cpus[0].Equals(cpuset.New(0, 1, 2, 3)) || !topology.cpus[1].Equals(cpuset.New(4, 5, 6, 7)) {
+			return fmt.Errorf("expected two NUMA domains on physical socket 0: sockets=%v CPUs=%v", topology.sockets, topology.cpus)
+		}
+	}
+	controller, err := getSlurmControllerPod(ctx, c)
+	if err != nil {
+		return err
+	}
+	name := nodeutils.GetSlurmNodeName(node)
+	output, err := execInPod(ctx, config, controller, "scontrol", "show", "node", name, "--json=v0.0.44")
+	if err != nil {
+		return err
+	}
+	var response api.V0044OpenapiNodesResp
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		return err
+	}
+	for _, registered := range response.Nodes {
+		if ptr.Deref(registered.Name, "") != name {
+			continue
+		}
+		if int(ptr.Deref(registered.Sockets, 0)) != len(topology.cpus) {
+			return fmt.Errorf("registered %d Slurm sockets for %d NUMA domains", ptr.Deref(registered.Sockets, 0), len(topology.cpus))
+		}
+		if mock {
+			if ptr.Deref(registered.Cores, 0) != 4 || ptr.Deref(registered.Threads, 0) != 1 || ptr.Deref(registered.Cpus, 0) != 8 {
+				return fmt.Errorf("expected Slurm geometry 2/4/1 with 8 CPUs, got %+v", registered)
+			}
+			gres := ptr.Deref(registered.Gres, "")
+			if !strings.Contains(gres, "gpu:gpu.nvidia.com:8(S:0-1)") || !strings.Contains(gres, "nic:dranet0:1(S:1)") {
+				return fmt.Errorf("missing mocked GPU/NIC socket affinity in Slurm GRES: %s", gres)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("missing Slurm node %s", name)
 }
 
 // requireNUMAAlignment returns a worker with NUMA-grouped CPUs and NUMA-local
@@ -146,6 +203,13 @@ func testNUMAAlignment(required bool) types.Feature {
 				t.Fatalf("failed to get client: %v", err)
 			}
 			node = requireNUMAAlignment(ctx, t, config, crClient, required)
+			var registrationErr error
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				registrationErr = verifyNUMARegistration(ctx, config, crClient, node, required)
+				return registrationErr == nil, nil
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmBridgeReadinessTimeout), wait.WithInterval(5*time.Second)); err != nil {
+				t.Fatalf("NUMA registration did not converge: %v; last check: %v", err, registrationErr)
+			}
 			controller, err := getSlurmControllerPod(ctx, crClient)
 			if err != nil {
 				t.Fatal(err)

@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Two sockets, each one NUMA node with four CPUs and no SMT, matching the
-# nvml-mock a100 PCIe layout.
+# One physical socket with two NUMA domains, each with four cores and no SMT.
+# This exercises sub-NUMA clustering with the nvml-mock a100 PCIe locality.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -48,29 +48,29 @@ data:
     /sys/devices/system/cpu/cpu3/cache/index3/id: "0\n"
     /sys/devices/system/cpu/cpu3/cache/index3/shared_cpu_list: "0-3\n"
     /sys/devices/system/cpu/cpu4/node1: ""
-    /sys/devices/system/cpu/cpu4/topology/physical_package_id: "1\n"
-    /sys/devices/system/cpu/cpu4/topology/core_id: "0\n"
+    /sys/devices/system/cpu/cpu4/topology/physical_package_id: "0\n"
+    /sys/devices/system/cpu/cpu4/topology/core_id: "4\n"
     /sys/devices/system/cpu/cpu4/topology/cluster_id: "0\n"
     /sys/devices/system/cpu/cpu4/cache/index3/level: "3\n"
     /sys/devices/system/cpu/cpu4/cache/index3/id: "1\n"
     /sys/devices/system/cpu/cpu4/cache/index3/shared_cpu_list: "4-7\n"
     /sys/devices/system/cpu/cpu5/node1: ""
-    /sys/devices/system/cpu/cpu5/topology/physical_package_id: "1\n"
-    /sys/devices/system/cpu/cpu5/topology/core_id: "1\n"
+    /sys/devices/system/cpu/cpu5/topology/physical_package_id: "0\n"
+    /sys/devices/system/cpu/cpu5/topology/core_id: "5\n"
     /sys/devices/system/cpu/cpu5/topology/cluster_id: "0\n"
     /sys/devices/system/cpu/cpu5/cache/index3/level: "3\n"
     /sys/devices/system/cpu/cpu5/cache/index3/id: "1\n"
     /sys/devices/system/cpu/cpu5/cache/index3/shared_cpu_list: "4-7\n"
     /sys/devices/system/cpu/cpu6/node1: ""
-    /sys/devices/system/cpu/cpu6/topology/physical_package_id: "1\n"
-    /sys/devices/system/cpu/cpu6/topology/core_id: "2\n"
+    /sys/devices/system/cpu/cpu6/topology/physical_package_id: "0\n"
+    /sys/devices/system/cpu/cpu6/topology/core_id: "6\n"
     /sys/devices/system/cpu/cpu6/topology/cluster_id: "0\n"
     /sys/devices/system/cpu/cpu6/cache/index3/level: "3\n"
     /sys/devices/system/cpu/cpu6/cache/index3/id: "1\n"
     /sys/devices/system/cpu/cpu6/cache/index3/shared_cpu_list: "4-7\n"
     /sys/devices/system/cpu/cpu7/node1: ""
-    /sys/devices/system/cpu/cpu7/topology/physical_package_id: "1\n"
-    /sys/devices/system/cpu/cpu7/topology/core_id: "3\n"
+    /sys/devices/system/cpu/cpu7/topology/physical_package_id: "0\n"
+    /sys/devices/system/cpu/cpu7/topology/core_id: "7\n"
     /sys/devices/system/cpu/cpu7/topology/cluster_id: "0\n"
     /sys/devices/system/cpu/cpu7/cache/index3/level: "3\n"
     /sys/devices/system/cpu/cpu7/cache/index3/id: "1\n"
