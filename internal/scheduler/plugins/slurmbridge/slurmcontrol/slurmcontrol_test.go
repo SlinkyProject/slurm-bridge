@@ -636,14 +636,16 @@ func Test_realSlurmControl_GetJob(t *testing.T) {
 	}
 }
 
-func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
+func Test_realSlurmControl_UpdateJobPreservesSubmissionFields(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
 		exclusive *bool
+		priority  *int32
 	}{
 		{name: "default exclusive"},
 		{name: "exclusive", exclusive: ptr.To(true)},
 		{name: "MCS", exclusive: ptr.To(false)},
+		{name: "explicit priority", priority: ptr.To(int32(50))},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := st.MakePod().Name("pending").Namespace("slurm-bridge").
@@ -652,11 +654,26 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 				Components: []slurmjobir.SlurmJobComponent{{
 					Pods: corev1.PodList{Items: []corev1.Pod{*pod}},
 					JobInfo: slurmjobir.SlurmJobIRJobInfo{
-						Exclusive:  tt.exclusive,
-						Account:    ptr.To("research"),
-						CpuPerTask: ptr.To(int32(2)),
-						MemPerNode: ptr.To(int64(200)),
-						ExcNodes:   []string{"node2"},
+						UserId:       ptr.To("1001"),
+						GroupId:      ptr.To("1002"),
+						Account:      ptr.To("research"),
+						Exclusive:    tt.exclusive,
+						CpuPerTask:   ptr.To(int32(2)),
+						MemPerNode:   ptr.To(int64(200)),
+						ExcNodes:     []string{"node2"},
+						JobName:      ptr.To("training"),
+						Constraints:  ptr.To("fast"),
+						Licenses:     ptr.To("solver:1"),
+						Partition:    ptr.To("compute"),
+						QOS:          ptr.To("normal"),
+						Reservation:  ptr.To("training-reservation"),
+						Wckey:        ptr.To("project"),
+						TimeLimit:    ptr.To(int32(30)),
+						Gres:         ptr.To("gres/gpu=1"),
+						MinNodes:     ptr.To(int32(1)),
+						MaxNodes:     ptr.To(int32(2)),
+						TasksPerNode: ptr.To(int32(1)),
+						Priority:     tt.priority,
 					},
 				}},
 			}
@@ -679,16 +696,39 @@ func Test_realSlurmControl_UpdateJobPreservesSharing(t *testing.T) {
 						if err := json.Unmarshal(payload, &fields); err != nil {
 							return err
 						}
-						// Slurm treats any nonzero shared update as oversubscribe,
-						// including MCS. Omit the field to preserve the submitted mode.
-						if shared, present := fields["shared"]; present {
-							t.Errorf("pending-job update sends shared=%s; want the field omitted to preserve isolation", shared)
+						// Check the wire payload: null or zero still differs from
+						// omitting fields with submission-only semantics in Slurm.
+						for _, key := range []string{"user_id", "group_id", "account", "shared", "mcs_label", "current_working_directory", "flags", "hold"} {
+							if value, present := fields[key]; present {
+								t.Errorf("pending-job update sends %s=%s; want omitted", key, value)
+							}
 						}
-						if account, present := fields["account"]; present {
-							t.Errorf("pending-job update sends account=%s; want it set only at submission", account)
+						if desc.AdminComment == nil {
+							t.Error("update lost administrative metadata")
 						}
-						if ptr.Deref(desc.McsLabel, "") != "kubernetes" {
-							t.Errorf("update lost the MCS label: %v", desc.McsLabel)
+						for key, want := range map[string]string{
+							"name": `"training"`, "licenses": `"solver:1"`,
+							"partition": `"compute"`, "qos": `"normal"`,
+							"reservation": `"training-reservation"`, "wckey": `"project"`,
+							"tres_per_node": `"gres/gpu=1"`, "minimum_nodes": "1",
+							"maximum_nodes": "2", "tasks_per_node": "1",
+						} {
+							if string(fields[key]) != want {
+								t.Errorf("update %s = %s, want %s", key, fields[key], want)
+							}
+						}
+						if ptr.Deref(desc.Constraints, "") != wellknown.SlurmFeatureGRESCompatible+"&fast" {
+							t.Errorf("update lost constraints: %v", desc.Constraints)
+						}
+						if desc.TimeLimit == nil || !ptr.Deref(desc.TimeLimit.Set, false) || ptr.Deref(desc.TimeLimit.Number, 0) != 30 {
+							t.Errorf("update lost time limit: %v", desc.TimeLimit)
+						}
+						if tt.priority == nil {
+							if _, present := fields["priority"]; present {
+								t.Error("update sends an unspecified priority")
+							}
+						} else if desc.Priority == nil || !ptr.Deref(desc.Priority.Set, false) || !ptr.Equal(desc.Priority.Number, tt.priority) {
+							t.Errorf("update lost explicit priority: %v", desc.Priority)
 						}
 						if desc.ExcludedNodes == nil || !slices.Equal(*desc.ExcludedNodes, ir.Components[0].JobInfo.ExcNodes) {
 							t.Errorf("excluded nodes were not updated: %v", desc.ExcludedNodes)
