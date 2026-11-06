@@ -217,8 +217,6 @@ func main() {
 			setupLog.Error(err, "unable to create slurm client")
 			os.Exit(1)
 		}
-		go slurmClient.Start(ctx)
-
 		if enabled["node"] {
 			if err := nodeutils.SetupFieldIndexers(mgr); err != nil {
 				setupLog.Error(err, "unable to set up node field indexers")
@@ -241,6 +239,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
+		go slurmClient.Start(ctx)
 	}
 	// +kubebuilder:scaffold:builder
 	if schedulerRunnable != nil {
