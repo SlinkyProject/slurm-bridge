@@ -81,6 +81,13 @@ Kubernetes node labels:
   This will register the node with features `slurm-bridge,gpu`, allowing it to
   be assigned to those partitions in `slurm.conf` using NodeSet features.
 
+  For external nodes, the bridge owns the Slurm node's features: they are the
+  partitions above, plus the features in the `feature.slinky.slurm.net/spec`
+  annotation, plus the bridge's own compatibility feature. A feature removed
+  from either annotation is removed from the Slurm node, and features set
+  directly in Slurm are replaced. Hybrid nodes (those registered by their own
+  `slurmd`) keep the features and topology they registered with.
+
   **Note:** The controller will error if any specified partition does not exist
   in Slurm. Partitions must be pre-configured in Slurm's configuration.
 

@@ -18,6 +18,11 @@ const (
 	// AnnotationNodeTopologySpec indicates the Slurm dynamic topology line
 	// (e.g. "topo-switch:s2,topo-block:b2") for an external node.
 	AnnotationNodeTopologySpec = TopologyPrefix + "spec"
+
+	// AnnotationNodeFeaturesSpec specifies additional features to be applied to
+	// a Slurm node. The annotation value is a comma-separated list of features.
+	// names (e.g. "gpu,gb200").
+	AnnotationNodeFeaturesSpec = FeaturesPrefix + "spec"
 )
 
 const (
