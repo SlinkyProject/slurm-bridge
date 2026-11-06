@@ -806,7 +806,12 @@ func (r *realSlurmControl) RemoveNode(ctx context.Context, node *corev1.Node) er
 func (r *realSlurmControl) validatePartitionExists(ctx context.Context, partitionName string) error {
 	partition := &api.V0044PartitionInfo{}
 	key := slurmobject.ObjectKey(partitionName)
-	if err := r.Get(ctx, key, partition); err != nil {
+	opts := &slurmclient.GetOptions{}
+	if informer := r.GetInformer(partition.GetType()); informer != nil {
+		synced, err := informer.HasSynced()
+		opts.RefreshCache = !synced || err != nil
+	}
+	if err := r.Get(ctx, key, partition, opts); err != nil {
 		if errors.Is(err, slurmerrors.ErrNotFound) {
 			return fmt.Errorf("partition not found")
 		}
