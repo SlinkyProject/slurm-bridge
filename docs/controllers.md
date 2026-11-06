@@ -10,6 +10,7 @@
   - [Node Controller](#node-controller)
     - [Node Registration and Partition Assignment](#node-registration-and-partition-assignment)
   - [Registration Controller](#registration-controller)
+    - [Submission Failures](#submission-failures)
 
 <!-- mdformat-toc end -->
 
@@ -143,3 +144,17 @@ Configure concurrency with `scheduler.registrationWorkers` in Helm or
 workers. The Node controller also defaults to 10 workers, configurable with
 `--node-workers`. `scheduler.podWorkers` and `--pod-workers` remain accepted for
 compatibility but have no effect.
+
+### Submission Failures
+
+When Slurm refuses a submission, the Pods stay behind their registration gate.
+The controller records an Event with Slurm's message on the Pod or its group
+object, such as a PodGroup, and retries later:
+
+- `SlurmRegistrationRejected` (Warning): Slurm refused the request itself, such
+  as an invalid account, QOS, or GRES. Fix the workload or the Slurm
+  configuration.
+- `WaitingForSlurm` (Normal): a Slurm limit or partition state holds the job,
+  such as a submit limit or a down partition. The Pods wait until it clears.
+- `SlurmRegistrationFailed` (Warning): any other error, including an unreachable
+  Slurm.
