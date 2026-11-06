@@ -80,10 +80,17 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 	} else {
 		r.recent.Set(key, id, registrationCooldown)
 	}
-	if err != nil {
-		r.registrationEvent(key, corev1.EventTypeWarning, "SlurmRegistrationFailed", err.Error())
-	} else {
+	switch kind := classifyRejection(err); {
+	case err == nil:
 		r.clearRegistrationEvent(key)
+	case kind == rejectRequest:
+		r.registrationEvent(key, corev1.EventTypeWarning, "SlurmRegistrationRejected", err.Error())
+		return reconcile.Result{RequeueAfter: requestRetry}, nil
+	case kind == rejectLimit:
+		r.registrationEvent(key, corev1.EventTypeNormal, "WaitingForSlurm", err.Error())
+		return reconcile.Result{RequeueAfter: limitRetry}, nil
+	default:
+		r.registrationEvent(key, corev1.EventTypeWarning, "SlurmRegistrationFailed", err.Error())
 	}
 	return waiting, err
 }
