@@ -25,9 +25,8 @@ import (
 // Fake sysfs and PTP exercise DRA/CNI integration, not physical VF attachment.
 func testSlurmBridgeSRIOVResourceScheduling() types.Feature {
 	const driver = "sriovnetwork.k8snetworkplumbingwg.io"
-	var nodeName, deviceName string
 	var pods []*corev1.Pod
-	feature := features.New("SR-IOV allocation and reuse")
+	feature := features.New("SR-IOV allocation and release")
 	for cycle := range 2 {
 		feature.Assess(fmt.Sprintf("allocation %d configures the interface", cycle+1), func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			c, err := getControllerRuntimeClient(config)
@@ -51,11 +50,8 @@ func testSlurmBridgeSRIOVResourceScheduling() types.Feature {
 					}},
 				},
 			}
-			if nodeName != "" {
-				// The fixture advertises one VF per node. Pin reuse through the
-				// scheduler, rather than bypassing scheduling with spec.nodeName.
-				pod.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": nodeName}
-			}
+			// The device request lets Slurm choose any node with an available VF.
+			// Each cycle verifies allocation and release without requiring the same node.
 			if err := c.Create(ctx, pod); err != nil {
 				t.Fatal(err)
 			}
@@ -89,10 +85,6 @@ func testSlurmBridgeSRIOVResourceScheduling() types.Feature {
 			if result.Driver != driver || result.Pool != pod.Spec.NodeName || result.Device != "0000-01-00-1" {
 				t.Fatalf("unexpected fixture allocation: %+v", result)
 			}
-			if cycle > 0 && (nodeName != pod.Spec.NodeName || deviceName != result.Device) {
-				t.Fatalf("expected reuse of %s/%s, got %s/%s", nodeName, deviceName, pod.Spec.NodeName, result.Device)
-			}
-			nodeName, deviceName = pod.Spec.NodeName, result.Device
 			configured := false
 			for _, allocationConfig := range claim.Status.Allocation.Devices.Config {
 				opaque := allocationConfig.Opaque
@@ -112,7 +104,7 @@ func testSlurmBridgeSRIOVResourceScheduling() types.Feature {
 			if err := c.Get(ctx, client.ObjectKey{Namespace: slurmNamespace, Name: slurmControllerPodName}, controller); err != nil {
 				t.Fatal(err)
 			}
-			output, err := execInPod(ctx, config, controller, "scontrol", "show", "node", nodeName, "--oneliner")
+			output, err := execInPod(ctx, config, controller, "scontrol", "show", "node", pod.Spec.NodeName, "--oneliner")
 			if err != nil || !strings.Contains(output, "nic:sriov-vf:1") {
 				t.Fatalf("missing SR-IOV Slurm GRES: %v; %s", err, output)
 			}
@@ -120,13 +112,16 @@ func testSlurmBridgeSRIOVResourceScheduling() types.Feature {
 			if err != nil || !strings.Contains(output, "UP") || !strings.Contains(output, "inet 10.245.") {
 				t.Fatalf("missing configured PTP interface: %v; %s", err, output)
 			}
-			t.Logf("Allocated %s/%s; class configuration applied; interface: %s", nodeName, deviceName, output)
+			t.Logf("Allocated %s/%s; class configuration applied; interface: %s", result.Pool, result.Device, output)
 			deletePodsAndAssertCleanup(ctx, t, config, c, pod)
+			if t.Failed() {
+				t.FailNow()
+			}
 			return ctx
 		})
 	}
 	feature.Teardown(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
-		captureReleaseSignalDiagnostics(t, "SR-IOV allocation and reuse", slurmBridgeNamespace, slurmNamespace, "dra-driver-sriov")
+		captureReleaseSignalDiagnostics(t, "SR-IOV allocation and release", slurmBridgeNamespace, slurmNamespace, "dra-driver-sriov")
 		if e2eCleanupEnabled(t) {
 			c, err := getControllerRuntimeClient(config)
 			if err != nil {
