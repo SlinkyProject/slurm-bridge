@@ -27,6 +27,19 @@ Check the Slurm queue separately for pending allocations belonging to this
 Bridge installation. The Pod check cannot detect orphaned Slurm allocations.
 Unrelated native Slurm jobs do not need to be drained.
 
+For example, list pending jobs in the partitions used by this installation:
+
+```sh
+squeue --noheader --partition=slurm-bridge --states=PENDING \
+  --format='%.18i %.9P %.30j %.8u %.20R'
+```
+
+Replace `slurm-bridge` with a comma-separated list of all partitions used by
+Bridge workloads, including workload-specific partition overrides. A drained
+pending queue has no rows for Bridge-owned jobs; held jobs are included in
+`PENDING`. In shared partitions, identify which jobs belong to this installation
+before canceling anything. Running jobs may remain.
+
 The Helm chart's `pre-upgrade` hook first checks for pending Pods across all
 namespaces using `schedulerConfig.schedulerName`, including scheduling-gated
 Pods and bound Pods that have not started. Pending Pods or API errors fail the
