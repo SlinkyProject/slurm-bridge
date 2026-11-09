@@ -54,7 +54,6 @@ spec:
             - --all-namespaces
             - --for=delete
             - --timeout=0s
-            - --request-timeout=30s
             - {{ printf "--field-selector=spec.schedulerName=%s,status.phase=Pending" (include "slurm-bridge.scheduler.name" .) | quote }}
             - --cache-dir=/tmp/kubectl-cache
         {{- end }}
@@ -87,9 +86,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: kubeconfig
-          configMap:
-            name: {{ $name }}-kubeconfig
       {{- with .Values.upgradeHook.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

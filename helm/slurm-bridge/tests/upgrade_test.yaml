@@ -4,7 +4,6 @@
 suite: test upgrade shutdown
 templates:
   - upgrade/job.yaml
-  - upgrade/kubeconfig.yaml
   - upgrade/rbac.yaml
 release:
   name: test-release
@@ -39,20 +38,6 @@ tests:
       - equal:
           path: spec.template.spec.serviceAccountName
           value: test-release-slurm-bridge-pre-upgrade
-      - equal:
-          path: spec.template.spec.initContainers[0].env[0]
-          value:
-            name: KUBECONFIG
-            value: /etc/kubeconfig/config
-      - equal:
-          path: spec.template.spec.initContainers[0].volumeMounts[1]
-          value:
-            name: kubeconfig
-            mountPath: /etc/kubeconfig
-            readOnly: true
-      - equal:
-          path: spec.template.spec.volumes[1].configMap.name
-          value: test-release-slurm-bridge-pre-upgrade-kubeconfig
       - equal:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: pre-upgrade
@@ -240,7 +225,6 @@ tests:
             - --all-namespaces
             - --for=delete
             - --timeout=0s
-            - --request-timeout=30s
             - --field-selector=spec.schedulerName=slurm-bridge-scheduler,status.phase=Pending
             - --cache-dir=/tmp/kubectl-cache
   - it: checks the configured scheduler without requiring job labels
@@ -328,29 +312,3 @@ tests:
       - isKind:
           of: RoleBinding
         documentIndex: 2
-  - it: supplies projected service account credentials to every kubectl container
-    template: upgrade/kubeconfig.yaml
-    set:
-      namespaceOverride: custom-namespace
-    asserts:
-      - equal:
-          path: metadata.name
-          value: test-release-slurm-bridge-pre-upgrade-kubeconfig
-      - equal:
-          path: metadata.namespace
-          value: custom-namespace
-      - equal:
-          path: metadata.annotations["helm.sh/hook-weight"]
-          value: "-30"
-      - matchRegex:
-          path: data.config
-          pattern: 'server: https://kubernetes.default.svc'
-      - matchRegex:
-          path: data.config
-          pattern: 'certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt'
-      - matchRegex:
-          path: data.config
-          pattern: 'tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token'
-      - matchRegex:
-          path: data.config
-          pattern: 'namespace: custom-namespace'
