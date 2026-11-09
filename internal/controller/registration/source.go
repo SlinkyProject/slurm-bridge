@@ -7,11 +7,13 @@ import (
 	"context"
 	"time"
 
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmcache "github.com/SlinkyProject/slurm-client/pkg/cache"
+	slurmclient "github.com/SlinkyProject/slurm-client/pkg/client"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -29,13 +31,17 @@ func (s *jobSource) Start(ctx context.Context, queue workqueue.TypedRateLimiting
 	})
 	go func() {
 		defer r.informer.UnsetEventHandler()
+		if !cache.WaitForCacheSync(ctx.Done(), r.informer.HasStarted) {
+			return
+		}
 		ticker := time.NewTicker(config.SlurmCacheSyncPeriod)
 		defer ticker.Stop()
+		opts := &slurmclient.ListOptions{RefreshCache: true}
 		for {
 			// Reconstruct work from the cache on startup and periodically. This also
 			// recovers orphaned duplicates and events preceding handler installation.
 			jobs := &api.V0044JobInfoObjectList{}
-			if err := r.informer.List(ctx, jobs); err != nil {
+			if err := r.informer.List(ctx, jobs, opts); err != nil {
 				if ctx.Err() == nil {
 					log.FromContext(ctx).Error(err, "Rebuild allocation registration queue")
 				}
@@ -44,6 +50,7 @@ func (s *jobSource) Start(ctx context.Context, queue workqueue.TypedRateLimiting
 					enqueue(&jobs.Items[i])
 				}
 			}
+			opts.RefreshCache = false
 			select {
 			case <-ctx.Done():
 				return
