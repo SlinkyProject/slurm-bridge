@@ -3,8 +3,6 @@
   "tasks": [
     {
       "label": "Setup Admission Debugging",
-      "type": "shell",
-      "command": [],
       "presentation": {
         "reveal": "never",
         "panel": "shared"
@@ -45,8 +43,6 @@
     },
     {
       "label": "Revert Admission Debugging",
-      "type": "shell",
-      "command": [],
       "presentation": {
         "reveal": "never",
         "panel": "shared"
@@ -58,12 +54,6 @@
     },
     {
       "label": "Setup Scheduler",
-      "type": "shell",
-      "command": [
-        "cat /tmp/config.yaml.debug &&",
-        "cat /tmp/scheduler-config.yaml.debug &&",
-        "cat /tmp/slurm-bridge.env"
-      ],
       "presentation": {
           "reveal": "never",
           "panel": "shared"
@@ -77,86 +67,54 @@
     },
     {
       "label": "Populate Config",
-      "type": "shell",
-      "command": [
-        "cat <<EOF > /tmp/config.yaml.debug\n",
-        "schedulerName: slurm-bridge-scheduler\n",
-        "mcsLabel: kubernetes\n",
-        "slurmRestApi: http://localhost:6820\n",
-        "partition: slurm-bridge\n"
-      ],
+      "type": "process",
+      "command": "bash",
       "presentation": {
         "reveal": "never",
         "panel": "shared"
+      },
+      "args": [
+        "-e", "-o", "pipefail", "-c",
+        "umask 077\nmkdir -p .vscode/.debug\nkubectl -n slurm get configmap slurm-bridge-config -o 'jsonpath={.data.config\\.yaml}' | sed 's|^slurmRestApi:.*|slurmRestApi: http://127.0.0.1:6820|' > .vscode/.debug/config.yaml"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
       }
     },
     {
       "label": "Populate KubeSchedulerConfig",
-      "type": "shell",
-      "command": [
-        "cat <<EOF > /tmp/scheduler-config.yaml.debug\n",
-        "apiVersion: kubescheduler.config.k8s.io/v1\n",
-        "kind: KubeSchedulerConfiguration\n",
-        "clientConnection:\n",
-        "  kubeconfig: ${HOME}/.kube/config\n",
-        "leaderElection:\n",
-        "  leaderElect: false\n",
-        "  resourceNamespace: default\n",
-        "  resourceName: slurm-bridge-scheduler\n",
-        "profiles:\n",
-        "- schedulerName: slurm-bridge-scheduler\n",
-        "  plugins:\n",
-        "    queueSort:\n",
-        "      enabled:\n",
-        "      - name: 'PrioritySort'\n",
-        "    preEnqueue:\n",
-        "      enabled:\n",
-        "      - name: 'SlurmBridge'\n",
-        "    preFilter:\n",
-        "      enabled:\n",
-        "      - name: 'VolumeBinding'\n",
-        "      - name: 'NodeResourcesFit'\n",
-        "      - name: 'SlurmBridge'\n",
-        "    filter:\n",
-        "      enabled:\n",
-        "      - name: 'VolumeBinding'\n",
-        "      - name: 'TaintToleration'\n",
-        "      - name: 'NodeResourcesFit'\n",
-        "      - name: 'SlurmBridge'\n",
-        "    postFilter:\n",
-        "      enabled:\n",
-        "      - name: 'SlurmBridge'\n",
-        "    reserve:\n",
-        "      enabled:\n",
-        "      - name: 'VolumeBinding'\n",
-        "    preBind:\n",
-        "      enabled:\n",
-        "      - name: 'VolumeBinding'\n",
-        "      - name: 'SlurmBridge'\n",
-        "    bind:\n",
-        "      enabled:\n",
-        "      - name: 'DefaultBinder'\n",
-        "    multiPoint:\n",
-        "      disabled:\n",
-        "      - name: '*'\n",
-        "  pluginConfig:\n",
-        "  - name: SlurmBridge\n"
-      ],
+      "type": "process",
+      "command": "bash",
       "presentation": {
         "reveal": "never",
         "panel": "shared"
+      },
+      "args": [
+        "-e", "-o", "pipefail", "-c",
+        "umask 077\nmkdir -p .vscode/.debug\nkubectl -n slurm get configmap scheduler-config -o 'jsonpath={.data.scheduler-config\\.yaml}' > .vscode/.debug/scheduler-config.yaml"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
       }
     },
     {
       "label": "Fetch SLURM_JWT",
       "type": "shell",
       "command": [
-        "export SLURM_JWT=\"$(kubectl --namespace=slurm get secrets slurm-bridge-token -o jsonpath=\"{.data.auth-token}\" | base64 --decode)\" &&",
-        "echo \"SLURM_JWT=$SLURM_JWT\" >/tmp/slurm-bridge.env"
+        "umask 077 && mkdir -p .vscode/.debug &&",
+        "kubectl -n slurm get secret slurm-bridge-token -o 'jsonpath={.data.SLURM_JWT}' | base64 --decode > .vscode/.debug/slurm.jwt &&",
+        "test -s .vscode/.debug/slurm.jwt"
       ],
       "presentation": {
         "reveal": "never",
         "panel": "shared"
+      },
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "bash",
+          "args": ["-o", "pipefail", "-c"]
+        }
       }
     }
   ]
