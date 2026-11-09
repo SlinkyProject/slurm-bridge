@@ -87,7 +87,8 @@ For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
 ResourceClaim and records the allocated devices for the Pod. Additional indexed
 DeviceClasses are supported when they resolve to a configured device profile.
 Other DeviceClass extended resources are unsupported. Validation covers requests
-and limits in both init containers and regular containers.
+and limits in both init containers and regular containers. For NVIDIA GPUs and
+MIG devices, see [NVIDIA GPUs and MIG with DRA](nvidia-gpu-dra-mig.md).
 
 The bridge keeps `DRADeviceTaintRules` disabled by default because clusters
 older than Kubernetes 1.37 do not serve `resource.k8s.io/v1` DeviceTaintRules.
@@ -484,6 +485,8 @@ the chain was successfully resolved.
   and Kubernetes version upgrades.
 - [JobSets](jobset.md): per-Pod allocations, scaling restrictions, and recovery.
 - [LeaderWorkerSet](lws.md): group scheduling, replica scaling, and recovery.
+- [NVIDIA GPUs and MIG with DRA](nvidia-gpu-dra-mig.md): driver installation,
+  MIG device profiles, and allocation checks.
 - [PodGroup coscheduling](podgroup-coscheduling.md): legacy scheduler-plugins
   integration and migration to built-in PodGroups.
 
