@@ -1,0 +1,115 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/helm-unittest/helm-unittest/main/schema/helm-testsuite.json
+suite: test extra objects
+templates:
+  - extra.yaml
+release:
+  name: test-release
+  namespace: test-namespace
+tests:
+  - it: renders no objects by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a Slurm Operator Token with the bridge JWT secret settings
+    set:
+      extraObjects:
+        - apiVersion: slinky.slurm.net/v1beta1
+          kind: Token
+          metadata:
+            name: slurm-bridge-token
+            namespace: slurm
+          spec:
+            jwtKeyRef:
+              name: slurm-auth-jwt
+              key: jwt.key
+            secretRef:
+              name: "{{ .Values.sharedConfig.slurmJwtSecret.name }}"
+              key: "{{ .Values.sharedConfig.slurmJwtSecret.key }}"
+            username: slurm
+            refresh: true
+            lifetime: 8760h
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: apiVersion
+          value: slinky.slurm.net/v1beta1
+      - equal:
+          path: kind
+          value: Token
+      - equal:
+          path: metadata
+          value:
+            name: slurm-bridge-token
+            namespace: slurm
+      - equal:
+          path: spec
+          value:
+            jwtKeyRef:
+              name: slurm-auth-jwt
+              key: jwt.key
+            secretRef:
+              name: slurm-bridge-token
+              key: SLURM_JWT
+            username: slurm
+            refresh: true
+            lifetime: 8760h
+
+  - it: renders multiple objects as separate documents
+    set:
+      extraObjects:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: extra-config
+          data:
+            key: value
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: another-config
+          data:
+            key: another-value
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        equal:
+          path: kind
+          value: ConfigMap
+      - documentIndex: 0
+        equal:
+          path: data.key
+          value: value
+      - documentIndex: 1
+        equal:
+          path: kind
+          value: ConfigMap
+      - documentIndex: 1
+        equal:
+          path: data.key
+          value: another-value
+
+  - it: resolves release values and chart helpers in the root context
+    set:
+      namespaceOverride: custom-namespace
+      extraObjects:
+        - apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: "{{ .Release.Name }}-config"
+            namespace: '{{ include "slurm-bridge.namespace" . }}'
+          data:
+            namespace: "{{ .Release.Namespace }}"
+    asserts:
+      - equal:
+          path: metadata.name
+          value: test-release-config
+      - equal:
+          path: metadata.namespace
+          value: custom-namespace
+      - equal:
+          path: data.namespace
+          value: test-namespace
