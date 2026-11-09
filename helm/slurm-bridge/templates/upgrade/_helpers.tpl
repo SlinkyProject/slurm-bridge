@@ -7,9 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 image: {{ printf "%s:%s" .Values.upgradeHook.image.repository .Values.upgradeHook.image.tag | quote }}
 imagePullPolicy: {{ .Values.upgradeHook.image.pullPolicy }}
 command: [kubectl]
-env:
-  - name: KUBECONFIG
-    value: /etc/kubeconfig/config
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -18,9 +15,6 @@ securityContext:
 volumeMounts:
   - name: tmp
     mountPath: /tmp
-  - name: kubeconfig
-    mountPath: /etc/kubeconfig
-    readOnly: true
 {{- with .Values.upgradeHook.resources }}
 resources: {{- toYaml . | nindent 2 }}
 {{- end }}
