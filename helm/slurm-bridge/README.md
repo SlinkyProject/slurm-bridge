@@ -45,6 +45,7 @@ Kubernetes: `>= 1.34.0-0`
 | admission.tls.caBundle | string | `""` | Base64 encoded PEM CA bundle that validates the serving certificate, written into both webhook configurations. |
 | admission.tls.existingSecret | string | `""` | Name of an existing `kubernetes.io/tls` Secret holding the webhook serving certificate. Requires `certManager.enabled` to be false. |
 | admission.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
+| extraObjects | list | `[]` | Extra Kubernetes objects to deploy alongside the chart. Each entry is rendered as a standalone Kubernetes object. Supports Helm templating (e.g. {{ .Release.Namespace }}). |
 | fullnameOverride | string | `""` | Overrides the full name of the release. |
 | nameOverride | string | `""` | Overrides the name of the release. |
 | namespaceOverride | string | `""` | Overrides the namespace of the release. |
