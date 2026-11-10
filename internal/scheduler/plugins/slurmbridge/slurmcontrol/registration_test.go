@@ -62,8 +62,8 @@ func TestRegisterJob(t *testing.T) {
 			registrar := NewRegistrar(fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
 				Create: func(_ context.Context, obj object.Object, request any, opts ...client.CreateOption) error {
 					calls++
-					if !(&client.CreateOptions{}).ApplyOptions(opts).SkipReadAfterCreate {
-						t.Error("submission must return without reading the informer cache")
+					if (&client.CreateOptions{}).ApplyOptions(opts).SkipReadAfterCreate {
+						t.Error("accepted submission must populate the informer cache")
 					}
 					req := request.(api.V0044JobSubmitReq)
 					var descriptions []api.V0044JobDescMsg
