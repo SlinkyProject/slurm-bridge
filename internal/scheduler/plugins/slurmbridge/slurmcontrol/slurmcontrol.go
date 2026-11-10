@@ -273,7 +273,7 @@ func (r *realSlurmControl) RegisterJob(ctx context.Context, ir *slurmjobir.Slurm
 	} else {
 		req.Jobs = &descriptions
 	}
-	err := r.Create(ctx, job, req, &client.CreateOptions{SkipReadAfterCreate: true})
+	err := r.Create(ctx, job, req)
 	id := ptr.Deref(job.JobId, 0)
 	if err != nil {
 		return id, err
