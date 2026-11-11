@@ -724,7 +724,14 @@ func TestValidateDeviceClassRequestsRejectsMultipleContainers(t *testing.T) {
 			}},
 		},
 	}}}
-	if err := validateDeviceClassRequests(pod); err == nil || !strings.Contains(err.Error(), "requested by multiple containers") {
+	registry := dra.DefaultRegistry()
+	profile, _ := registry.LookupByName("gpu.nvidia.com")
+	class := &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRANVIDIADriver}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: profile.Selector}}}}}
+	requests, err := registry.ResolvePod(t.Context(), fake.NewClientBuilder().WithObjects(class).Build(), pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dra.ValidateRequestContainers(requests); err == nil || !strings.Contains(err.Error(), "requested by multiple containers") {
 		t.Fatalf("validateDeviceClassRequests() error = %v, want multiple containers error", err)
 	}
 }
@@ -922,109 +929,129 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 }
 
 func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *testing.T) {
-	ctx := context.Background()
-	const className = "example-gpus"
-	resourceName := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + className)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: metav1.NamespaceDefault,
-			Name:      "gpu-test",
-			UID:       "123",
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{
-				Name: "work",
-				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{resourceName: resource.MustParse("2")},
-					Limits:   corev1.ResourceList{resourceName: resource.MustParse("2")},
+	for _, resourceName := range []corev1.ResourceName{corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "example-gpus"), "example.com/gpu"} {
+		t.Run(string(resourceName), func(t *testing.T) {
+			ctx := context.Background()
+			const className = "example-gpus"
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: metav1.NamespaceDefault,
+					Name:      "gpu-test",
+					UID:       "123",
 				},
-			}},
-		},
-	}
-	deviceClass := &resourcev1.DeviceClass{
-		ObjectMeta: metav1.ObjectMeta{Name: className},
-		Spec: resourcev1.DeviceClassSpec{
-			Selectors: []resourcev1.DeviceSelector{{
-				CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
-			}},
-			Config: []resourcev1.DeviceClassConfiguration{{
-				DeviceConfiguration: resourcev1.DeviceConfiguration{
-					Opaque: &resourcev1.OpaqueDeviceConfiguration{
-						Driver:     "gpu.example.com",
-						Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)},
-					},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "work",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{resourceName: resource.MustParse("2")},
+							Limits:   corev1.ResourceList{resourceName: resource.MustParse("2")},
+						},
+					}},
 				},
-			}},
-		},
-	}
-	resources := &slurmcontrol.NodeResources{
-		Node:      "node1",
-		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
-		Gres: []slurmcontrol.GresLayout{{
-			Name:  "gpu",
-			Type:  "gpu.example.com",
-			Count: 2,
-			Index: "6,4",
-		}},
-	}
-	kclient := fake.NewClientBuilder().
-		WithObjects(pod, deviceClass).
-		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
-		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
+			}
+			deviceClass := &resourcev1.DeviceClass{
+				ObjectMeta: metav1.ObjectMeta{Name: className},
+				Spec: resourcev1.DeviceClassSpec{
+					ExtendedResourceName: ptr.To("example.com/gpu"),
+					Selectors: []resourcev1.DeviceSelector{{
+						CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == 'gpu.example.com'`},
+					}},
+					Config: []resourcev1.DeviceClassConfiguration{{
+						DeviceConfiguration: resourcev1.DeviceConfiguration{
+							Opaque: &resourcev1.OpaqueDeviceConfiguration{
+								Driver:     "gpu.example.com",
+								Parameters: runtime.RawExtension{Raw: []byte(`{"enabled":true}`)},
+							},
+						},
+					}},
+				},
+			}
+			resources := &slurmcontrol.NodeResources{
+				Node:      "node1",
+				NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.example.com":{"firstIndex":4,"devices":["/dra/gpu.example.com/pool-a/gpu-0","/dra/gpu.example.com/pool-a/gpu-1","/dra/gpu.example.com/pool-a/gpu-2"]}}}`,
+				Gres: []slurmcontrol.GresLayout{{
+					Name:  "gpu",
+					Type:  "gpu.example.com",
+					Count: 2,
+					Index: "6,4",
+				}},
+			}
+			kclient := fake.NewClientBuilder().
+				WithObjects(pod, deviceClass).
+				WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
+				Build()
+			sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
 
-	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
-		t.Fatalf("manageResourceClaim() error = %v", err)
+			if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
+				t.Fatalf("manageResourceClaim() error = %v", err)
+			}
+
+			claimList := &resourcev1.ResourceClaimList{}
+			if err := kclient.List(ctx, claimList, client.InNamespace(pod.Namespace)); err != nil {
+				t.Fatalf("list ResourceClaims: %v", err)
+			}
+			if len(claimList.Items) != 1 {
+				t.Fatalf("ResourceClaims = %d, want 1", len(claimList.Items))
+			}
+			claim := claimList.Items[0]
+			if len(claim.Spec.Devices.Requests) != 1 {
+				t.Fatalf("claim requests = %#v, want one", claim.Spec.Devices.Requests)
+			}
+			request := claim.Spec.Devices.Requests[0]
+			if request.Name != "gpu" || request.Exactly == nil || request.Exactly.DeviceClassName != className || request.Exactly.Count != 2 {
+				t.Fatalf("claim request = %#v, want request gpu for DeviceClass %q with count 2", request, className)
+			}
+
+			wantResults := []resourcev1.DeviceRequestAllocationResult{
+				{Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-2"},
+				{Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-0"},
+			}
+			if got := claim.Status.Allocation.Devices.Results; !apiequality.Semantic.DeepEqual(got, wantResults) {
+				t.Fatalf("claim allocation results = %#v, want %#v", got, wantResults)
+			}
+			wantConfigs := []resourcev1.DeviceAllocationConfiguration{{
+				Source:              resourcev1.AllocationConfigSourceClass,
+				Requests:            []string{"gpu"},
+				DeviceConfiguration: *deviceClass.Spec.Config[0].DeviceConfiguration.DeepCopy(),
+			}}
+			if got := claim.Status.Allocation.Devices.Config; !apiequality.Semantic.DeepEqual(got, wantConfigs) {
+				t.Fatalf("claim allocation configs = %#v, want %#v", got, wantConfigs)
+			}
+
+			updatedPod := &corev1.Pod{}
+			if err := kclient.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod); err != nil {
+				t.Fatalf("get Pod: %v", err)
+			}
+			wantMapping := corev1.ContainerExtendedResourceRequest{
+				ContainerName: "work",
+				RequestName:   "gpu",
+				ResourceName:  string(resourceName),
+			}
+			if updatedPod.Status.ExtendedResourceClaimStatus == nil ||
+				!hasContainerExtendedResourceRequest(updatedPod.Status.ExtendedResourceClaimStatus.RequestMappings, wantMapping) {
+				t.Fatalf("pod request mappings = %#v, want %#v", updatedPod.Status.ExtendedResourceClaimStatus, wantMapping)
+			}
+			if resources.Gres[0].Index != "6,4" || resources.Gres[0].Type != "gpu.example.com" {
+				t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres[0])
+			}
+			// Recovery must retain the concrete class and original Pod resource name.
+			if err := kclient.Delete(ctx, deviceClass); err != nil {
+				t.Fatal(err)
+			}
+			if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
+				t.Fatalf("recover after DeviceClass deletion: %v", err)
+			}
+			if err := kclient.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod); err != nil {
+				t.Fatal(err)
+			}
+			for _, mapping := range updatedPod.Status.ExtendedResourceClaimStatus.RequestMappings {
+				if mapping.ResourceName != string(resourceName) {
+					t.Fatalf("recovered resource name = %q, want %q", mapping.ResourceName, resourceName)
+				}
+			}
+		})
 	}
 
-	claimList := &resourcev1.ResourceClaimList{}
-	if err := kclient.List(ctx, claimList, client.InNamespace(pod.Namespace)); err != nil {
-		t.Fatalf("list ResourceClaims: %v", err)
-	}
-	if len(claimList.Items) != 1 {
-		t.Fatalf("ResourceClaims = %d, want 1", len(claimList.Items))
-	}
-	claim := claimList.Items[0]
-	if len(claim.Spec.Devices.Requests) != 1 {
-		t.Fatalf("claim requests = %#v, want one", claim.Spec.Devices.Requests)
-	}
-	request := claim.Spec.Devices.Requests[0]
-	if request.Name != "gpu" || request.Exactly == nil || request.Exactly.DeviceClassName != className || request.Exactly.Count != 2 {
-		t.Fatalf("claim request = %#v, want request gpu for DeviceClass %q with count 2", request, className)
-	}
-
-	wantResults := []resourcev1.DeviceRequestAllocationResult{
-		{Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-2"},
-		{Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-0"},
-	}
-	if got := claim.Status.Allocation.Devices.Results; !apiequality.Semantic.DeepEqual(got, wantResults) {
-		t.Fatalf("claim allocation results = %#v, want %#v", got, wantResults)
-	}
-	wantConfigs := []resourcev1.DeviceAllocationConfiguration{{
-		Source:              resourcev1.AllocationConfigSourceClass,
-		Requests:            []string{"gpu"},
-		DeviceConfiguration: *deviceClass.Spec.Config[0].DeviceConfiguration.DeepCopy(),
-	}}
-	if got := claim.Status.Allocation.Devices.Config; !apiequality.Semantic.DeepEqual(got, wantConfigs) {
-		t.Fatalf("claim allocation configs = %#v, want %#v", got, wantConfigs)
-	}
-
-	updatedPod := &corev1.Pod{}
-	if err := kclient.Get(ctx, client.ObjectKeyFromObject(pod), updatedPod); err != nil {
-		t.Fatalf("get Pod: %v", err)
-	}
-	wantMapping := corev1.ContainerExtendedResourceRequest{
-		ContainerName: "work",
-		RequestName:   "gpu",
-		ResourceName:  string(resourceName),
-	}
-	if updatedPod.Status.ExtendedResourceClaimStatus == nil ||
-		!hasContainerExtendedResourceRequest(updatedPod.Status.ExtendedResourceClaimStatus.RequestMappings, wantMapping) {
-		t.Fatalf("pod request mappings = %#v, want %#v", updatedPod.Status.ExtendedResourceClaimStatus, wantMapping)
-	}
-	if resources.Gres[0].Index != "6,4" || resources.Gres[0].Type != "gpu.example.com" {
-		t.Fatalf("input Slurm GRES mutated to %#v", resources.Gres[0])
-	}
 }
 
 func TestSlurmBridge_manageResourceClaimRequiresAppliedGPUInventory(t *testing.T) {

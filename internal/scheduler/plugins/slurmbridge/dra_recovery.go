@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -16,10 +17,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
+
+const requestMappingsAnnotation = "slinky.slurm.net/dra-request-mappings"
 
 const allocationIdentityAnnotation = "slinky.slurm.net/allocation-identity"
 
@@ -88,4 +92,28 @@ func validateCPUResults(allocation *nodeinfo.CPUAllocation, results []resourcev1
 		return fmt.Errorf("CPU socket allocation results are missing")
 	}
 	return nil
+}
+
+// Recover mappings without consulting DeviceClasses, which may have changed.
+func requestMappingsFromClaim(pod *corev1.Pod, claim *resourcev1.ResourceClaim) ([]corev1.ContainerExtendedResourceRequest, error) {
+	if raw := claim.Annotations[requestMappingsAnnotation]; raw != "" {
+		var mappings []corev1.ContainerExtendedResourceRequest
+		if err := json.Unmarshal([]byte(raw), &mappings); err != nil {
+			return nil, fmt.Errorf("decode request mappings for claim %q: %w", claim.Name, err)
+		}
+		return mappings, nil
+	}
+	// Claims predating alias support used only canonical names.
+	var requests []dra.ResourceRequest
+	for _, container := range slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers) {
+		for name, quantity := range container.Resources.Requests {
+			if class, ok := strings.CutPrefix(string(name), resourcev1.ResourceDeviceClassPrefix); ok && quantity.Sign() > 0 {
+				requests = append(requests, dra.ResourceRequest{ResourceName: name, ContainerName: container.Name, DeviceClassName: class})
+			}
+		}
+	}
+	slices.SortFunc(requests, func(a, b dra.ResourceRequest) int {
+		return strings.Compare(a.ContainerName+"/"+string(a.ResourceName), b.ContainerName+"/"+string(b.ResourceName))
+	})
+	return createContainerRequestMappings(requests, claim.Spec.Devices.Requests), nil
 }

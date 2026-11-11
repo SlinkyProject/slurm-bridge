@@ -4,9 +4,7 @@
 package slurmbridge
 
 import (
-	"context"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,8 +12,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
@@ -24,11 +20,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
-type deviceProfileRequest struct {
-	DeviceClassName string
-	Profile         dra.DeviceProfile
-	Count           int64
-}
+type deviceProfileRequest = dra.ResourceRequest
 
 type indexedGRESAllocation struct {
 	deviceProfileRequest
@@ -54,30 +46,6 @@ func (sb *SlurmBridge) registry() *dra.Registry {
 		return sb.draRegistry
 	}
 	return dra.DefaultRegistry()
-}
-
-func (sb *SlurmBridge) deviceProfileRequests(ctx context.Context, pod *corev1.Pod) ([]deviceProfileRequest, error) {
-	counts := deviceClassRequestCounts(pod)
-	requests := make([]deviceProfileRequest, 0, len(counts))
-	for _, className := range slices.Sorted(maps.Keys(counts)) {
-		deviceClass := &resourcev1.DeviceClass{}
-		if err := sb.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
-			if apierrors.IsNotFound(err) {
-				return nil, fmt.Errorf("DeviceClass %q was not found", className)
-			}
-			return nil, fmt.Errorf("get DeviceClass %q: %w", className, err)
-		}
-		profile, err := sb.registry().MatchDeviceClass(deviceClass)
-		if err != nil {
-			return nil, err
-		}
-		requests = append(requests, deviceProfileRequest{
-			DeviceClassName: className,
-			Profile:         profile,
-			Count:           counts[className],
-		})
-	}
-	return requests, nil
 }
 
 func profileRequestsWithoutLegacyAllocations(requests []deviceProfileRequest, resources []slurmcontrol.GresLayout) []deviceProfileRequest {

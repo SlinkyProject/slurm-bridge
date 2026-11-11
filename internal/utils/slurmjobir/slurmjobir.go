@@ -14,7 +14,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -85,7 +84,6 @@ type translator struct {
 	ctx                 context.Context
 	handle              fwk.Handle
 	draRegistry         *dra.Registry
-	deviceClassProfiles map[string]dra.DeviceProfile
 	workloadAPI         *WorkloadAPI
 	resourceSlices      ResourceSliceLister
 	numaCache           *dra.NUMASpanCache
@@ -384,16 +382,33 @@ func (t *translator) numaSpans(resources map[dra.GRES]resource.Quantity) map[str
 }
 
 func (t *translator) podDeviceResources(pod *corev1.Pod) (map[dra.GRES]resource.Quantity, resource.Quantity, error) {
-	resources := make(map[dra.GRES]resource.Quantity)
-	limits := resourcehelper.PodLimits(pod, resourcehelper.PodResourcesOptions{})
-	requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{})
-	coreRequest, err := t.coreBitmapQuantity(requests)
+	resolved, err := t.registry().ResolvePod(t.ctx, t.Reader, pod)
 	if err != nil {
 		return nil, resource.Quantity{}, err
 	}
-	coreLimit, err := t.coreBitmapQuantity(limits)
-	if err != nil {
-		return nil, resource.Quantity{}, err
+	resources := make(map[dra.GRES]resource.Quantity)
+	limits := resourcehelper.PodLimits(pod, resourcehelper.PodResourcesOptions{})
+	requests := resourcehelper.PodRequests(pod, resourcehelper.PodResourcesOptions{})
+	var coreRequest, coreLimit resource.Quantity
+	seen := make(map[corev1.ResourceName]bool)
+	for _, request := range resolved {
+		if seen[request.ResourceName] {
+			continue
+		}
+		seen[request.ResourceName] = true
+		if request.Profile.UsesCoreBitmap() {
+			coreRequest.Add(requests[request.ResourceName])
+			coreLimit.Add(limits[request.ResourceName])
+		} else {
+			gres, err := request.Profile.GRES()
+			if err != nil {
+				return nil, resource.Quantity{}, err
+			}
+			if quantity := limits[request.ResourceName]; quantity.Sign() > 0 {
+				addGRESQuantity(resources, gres, quantity)
+			}
+		}
+		delete(limits, request.ResourceName)
 	}
 	coreBitmapCPU := coreRequest
 	if coreLimit.Cmp(coreBitmapCPU) > 0 {
@@ -406,86 +421,12 @@ func (t *translator) podDeviceResources(pod *corev1.Pod) (map[dra.GRES]resource.
 	if nativeCPU.Sign() > 0 && coreBitmapCPU.Sign() > 0 {
 		return nil, resource.Quantity{}, fmt.Errorf("pod %s requests both native CPU and a core-bitmap DeviceProfile", pod.Name)
 	}
-
-	for resourceName, quantity := range limits {
-		if quantity.Sign() <= 0 {
-			continue
-		}
-		name := resourceName.String()
-		// Explicit GPU extended resources remain device-plugin requests.
-		// Only deviceclass.resource.kubernetes.io/<class> selects DRA and
-		// dispatches through the resolved DeviceProfile backend.
-		if resourceName == nvidiaDevicePlugin || resourceName == amdDevicePlugin {
+	for _, name := range []corev1.ResourceName{nvidiaDevicePlugin, amdDevicePlugin} {
+		if quantity := limits[name]; quantity.Sign() > 0 {
 			addGRESQuantity(resources, dra.GRES{Name: "gpu"}, quantity)
-			continue
 		}
-
-		className, ok := strings.CutPrefix(name, resourcev1.ResourceDeviceClassPrefix)
-		if !ok {
-			continue
-		}
-		profile, err := t.resolveDeviceClass(className)
-		if err != nil {
-			return nil, resource.Quantity{}, err
-		}
-		if profile.UsesCoreBitmap() {
-			continue
-		}
-		if !profile.UsesIndexedGRES() {
-			return nil, resource.Quantity{}, fmt.Errorf("DeviceClass %q resolves to unsupported backend %q", className, profile.Backend.String())
-		}
-		gres, err := profile.GRES()
-		if err != nil {
-			return nil, resource.Quantity{}, err
-		}
-		addGRESQuantity(resources, gres, quantity)
 	}
 	return resources, coreBitmapCPU, nil
-}
-
-func (t *translator) coreBitmapQuantity(resources corev1.ResourceList) (resource.Quantity, error) {
-	var total resource.Quantity
-	for resourceName, quantity := range resources {
-		if quantity.Sign() <= 0 {
-			continue
-		}
-		className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
-		if !ok {
-			continue
-		}
-		profile, err := t.resolveDeviceClass(className)
-		if err != nil {
-			return resource.Quantity{}, err
-		}
-		if profile.UsesCoreBitmap() {
-			total.Add(quantity)
-		}
-	}
-	return total, nil
-}
-
-func (t *translator) resolveDeviceClass(className string) (dra.DeviceProfile, error) {
-	if profile, ok := t.deviceClassProfiles[className]; ok {
-		return profile, nil
-	}
-	if t.deviceClassProfiles == nil {
-		t.deviceClassProfiles = make(map[string]dra.DeviceProfile)
-	}
-
-	deviceClass := &resourcev1.DeviceClass{}
-	if err := t.Get(t.ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
-		if apierrors.IsNotFound(err) {
-			return dra.DeviceProfile{}, fmt.Errorf("DeviceClass %q was not found", className)
-		}
-		return dra.DeviceProfile{}, fmt.Errorf("get DeviceClass %q: %w", className, err)
-	}
-
-	profile, err := t.registry().MatchDeviceClass(deviceClass)
-	if err != nil {
-		return dra.DeviceProfile{}, err
-	}
-	t.deviceClassProfiles[className] = profile
-	return profile, nil
 }
 
 func addGRESQuantity(resources map[dra.GRES]resource.Quantity, gres dra.GRES, quantity resource.Quantity) {

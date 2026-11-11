@@ -314,6 +314,9 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, fmt.Errorf("configure DRA device profiles: %w", err)
 	}
+	if err := draRegistry.WatchDeviceClasses(handle.SharedInformerFactory().Resource().V1().DeviceClasses().Informer()); err != nil {
+		return nil, err
+	}
 
 	clientScheme, err := newClientScheme()
 	if err != nil {
