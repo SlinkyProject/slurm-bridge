@@ -37,7 +37,7 @@ func TestPodWithMetadataPlacement(t *testing.T) {
 			if tc.bound {
 				pod.Spec.NodeName = "node1"
 			}
-			updated := PodWithMetadata(t.Context(), pod, tc.job, false)
+			updated := PodWithMetadata(t.Context(), pod, tc.job, "node1", false)
 			if got := updated.Annotations[wellknown.AnnotationExternalJobNode]; got != tc.wantNode {
 				t.Errorf("node annotation = %q, want %q", got, tc.wantNode)
 			}
