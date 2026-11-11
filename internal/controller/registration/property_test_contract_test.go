@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -449,8 +450,9 @@ func worldUnfinished(job api.V0044JobInfo) bool {
 
 func TestRegistrationContract(t *testing.T) {
 	completed := map[string]int{}
+	var completedMu sync.Mutex
 	t.Cleanup(func() { t.Logf("completed generated actions: %v", completed) })
-	controllercheck.Explore(t, registrationContract, func(rt *rapid.T) controllercheck.Campaign[registrationState] {
+	controllercheck.ExploreParallel(t, registrationContract, func(rt *rapid.T) controllercheck.Campaign[registrationState] {
 		w, err := newRegistrationWorld(rt.Context(), rapid.IntRange(1, 4).Draw(rt, "slots"))
 		if err != nil {
 			rt.Fatal(err)
@@ -500,7 +502,9 @@ func TestRegistrationContract(t *testing.T) {
 			campaign.Actions[name] = func(rt *rapid.T) error {
 				err := action(rt)
 				if err == nil {
+					completedMu.Lock()
 					completed[name]++
+					completedMu.Unlock()
 				}
 				return err
 			}
