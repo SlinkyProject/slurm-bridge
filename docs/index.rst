@@ -277,6 +277,7 @@ limitations under the License.
     jobset.md
     lws.md
     native-hybrid-nodes.md
+    nvidia-compute-domain-imex.md
     nvidia-gpu-dra-mig.md
     podgroup-coscheduling.md
     podgroup.md
