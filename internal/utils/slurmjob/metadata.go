@@ -19,7 +19,8 @@ import (
 )
 
 // PodWithMetadata returns a copy with job identity and placement metadata repaired.
-func PodWithMetadata(ctx context.Context, pod *corev1.Pod, job ExternalJob, adopt bool) *corev1.Pod {
+// slurmNode is the assigned Kubernetes node translated to its Slurm node name.
+func PodWithMetadata(ctx context.Context, pod *corev1.Pod, job ExternalJob, slurmNode string, adopt bool) *corev1.Pod {
 	logger := klog.FromContext(ctx)
 
 	toUpdate := pod.DeepCopy()
@@ -50,7 +51,7 @@ func PodWithMetadata(ctx context.Context, pod *corev1.Pod, job ExternalJob, adop
 	// A pending cache record may predate the scheduler's placement decision.
 	nodes, _ := hostlist.Expand(job.Nodes)
 	if pod.Spec.NodeName == "" && pod.Annotations[wellknown.AnnotationExternalJobNode] != "" &&
-		(job.Finished || !job.Pending && !slices.Contains(nodes, pod.Annotations[wellknown.AnnotationExternalJobNode])) {
+		(job.Finished || !job.Pending && !slices.Contains(nodes, slurmNode)) {
 		logger.V(3).Info("Pod node annotation does not match Slurm nodes", "pod", klog.KObj(pod),
 			"node annotation", pod.Annotations[wellknown.AnnotationExternalJobNode],
 			"slurm job id", job.JobId)

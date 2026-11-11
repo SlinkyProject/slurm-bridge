@@ -5,6 +5,7 @@ package registration
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,7 +14,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 // reconcilePodMetadata repairs existing job linkage before cleanup can act on it.
@@ -30,7 +33,14 @@ func (r *Reconciler) reconcilePodMetadata(ctx context.Context, req reconcile.Req
 		return false, err
 	}
 	job, ok := slurmjob.JobForPod(*candidates, pod)
-	if !ok || reflect.DeepEqual(pod, slurmjob.PodWithMetadata(ctx, pod, job, false)) {
+	if !ok {
+		return false, nil
+	}
+	proposed, err := r.podWithMetadata(ctx, pod, job, false)
+	if err != nil {
+		return false, err
+	}
+	if reflect.DeepEqual(pod, proposed) {
 		return false, nil
 	}
 	// An index miss is not authoritative. Only a proposed repair needs live
@@ -43,7 +53,10 @@ func (r *Reconciler) reconcilePodMetadata(ctx context.Context, req reconcile.Req
 	if !ok {
 		return false, nil
 	}
-	toUpdate := slurmjob.PodWithMetadata(ctx, pod, job, false)
+	toUpdate, err := r.podWithMetadata(ctx, pod, job, false)
+	if err != nil {
+		return false, err
+	}
 	if reflect.DeepEqual(pod, toUpdate) {
 		return false, nil
 	}
@@ -53,4 +66,18 @@ func (r *Reconciler) reconcilePodMetadata(ctx context.Context, req reconcile.Req
 	}
 	log.FromContext(ctx).V(3).Info("Repaired Pod metadata", "pod", req.NamespacedName, "jobId", job.JobId)
 	return true, nil
+}
+
+// Resolve placement in Slurm's naming scheme before validating allocation membership.
+func (r *Reconciler) podWithMetadata(ctx context.Context, pod *corev1.Pod, job slurmjob.ExternalJob, adopt bool) (*corev1.Pod, error) {
+	slurmNode := ""
+	if assigned := pod.Annotations[wellknown.AnnotationExternalJobNode]; assigned != "" &&
+		pod.Spec.NodeName == "" && !job.Pending && !job.Finished {
+		node := &corev1.Node{}
+		if err := r.Get(ctx, client.ObjectKey{Name: assigned}, node); err != nil {
+			return nil, fmt.Errorf("resolve assigned node %q for Slurm metadata: %w", assigned, err)
+		}
+		slurmNode = nodeutils.GetSlurmNodeName(node)
+	}
+	return slurmjob.PodWithMetadata(ctx, pod, job, slurmNode, adopt), nil
 }
