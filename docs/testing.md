@@ -160,12 +160,12 @@ Install all optional DRA and KubeRay Kind development fixtures:
 ./hack/kind.sh --extras slurm-bridge-dev
 ```
 
-This installs the CPU (Kubernetes 1.36+), example GPU, NVIDIA GPU, and DRANET
-DRA drivers, plus the KubeRay operator described above. Each driver can still be
-installed individually with `--dra-driver-cpu`, `--dra-example-driver`,
-`--dra-driver-nvidia-gpu`, or `--dranet`. The `--dranet` fixture creates a
-`dranet0` dummy interface on each managed Kind worker before installing the
-driver.
+This installs the CPU (Kubernetes 1.36+), example GPU, NVIDIA GPU, Google TPU,
+and DRANET DRA drivers, plus the KubeRay operator described above. Each driver
+can still be installed individually with `--dra-driver-cpu`,
+`--dra-example-driver`, `--dra-driver-nvidia-gpu`, `--dra-driver-google-tpu`, or
+`--dranet`. The `--dranet` fixture creates a `dranet0` dummy interface on each
+managed Kind worker before installing the driver.
 
 The CPU fixture builds the unmodified upstream revision pinned in
 [`hack/dra-driver-cpu/build.sh`](../hack/dra-driver-cpu/build.sh), loads it into
@@ -176,9 +176,10 @@ Hosts without usable NUMA sysfs need the driver's `sysfsOverlay` test fixture,
 which `MOCK_NVML=true` applies; synthetic topology does not validate physical
 socket or SMT discovery.
 
-The `--dra-example-driver` and `--dranet` flags also configure Slurm Bridge with
-the [e2e device profiles](../hack/e2e-device-profiles.yaml). This explicitly
-enables the example GPU and dummy network interface profiles alongside the
+The `--dra-example-driver`, `--dranet`, and `--dra-driver-google-tpu` flags also
+configure Slurm Bridge with the
+[e2e device profiles](../hack/e2e-device-profiles.yaml). This explicitly enables
+the example GPU, dummy network interface, and TPU profiles alongside the
 built-in profiles. The example GPU profile is disabled by default.
 
 NVIDIA GPU DRA normally requires GPU-equipped workers with the NVIDIA driver
@@ -246,6 +247,8 @@ make demo-stop
 ```
 
 The cluster remains available for development. Delete it with `make kind-stop`.
+
+For the fake TPU fixture and allocation/reuse test, see [TPU DRA](tpu.md).
 
 Optional system diagnostics remain a direct command:
 

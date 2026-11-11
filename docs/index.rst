@@ -282,6 +282,7 @@ limitations under the License.
     quickstart.md
     scheduler.md
     testing.md
+    tpu.md
     upgrades.md
     upgrading.md
     usermanagement.md

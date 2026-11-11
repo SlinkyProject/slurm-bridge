@@ -1,0 +1,30 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-tpu
+  namespace: slurm-bridge
+spec:
+  template:
+    spec:
+      schedulerName: slurm-bridge-scheduler
+      restartPolicy: Never
+      tolerations:
+        - key: google.com/tpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: tpu
+          image: busybox:stable
+          command: [sh, -ec, ls -l /dev/accel*; env | sort; sleep 300]
+          resources:
+            requests:
+              cpu: '1'
+              memory: 32Mi
+              deviceclass.resource.kubernetes.io/tpu.google.com: '4'
+            limits:
+              cpu: '1'
+              memory: 32Mi
+              deviceclass.resource.kubernetes.io/tpu.google.com: '4'
