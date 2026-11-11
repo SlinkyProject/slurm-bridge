@@ -192,8 +192,8 @@ MOCK_NVML=true make kind-start
 ```
 
 `MOCK_NVML=true` also mocks two NUMA domains sharing one physical socket for
-[NUMA alignment](workload.md#numa-alignment) tests: GPUs 0-3 and CPUs 0-3 on
-NUMA node 0, and GPUs 4-7, CPUs 4-7, and `dranet0` on NUMA node 1. The CPU
+[NUMA alignment](workload.md#numa-alignment) tests: GPUs 0-1 and CPUs 0-3 on
+NUMA node 0, and GPUs 2-3, CPUs 4-7, and `dranet0` on NUMA node 1. The CPU
 topology is mocked only for external Slurm nodes, which need at least eight
 CPUs, so the NUMA alignment test skips hybrid mode. The test verifies that the
 inventory represents sub-NUMA clustering, Slurm registers two sockets with four
@@ -205,6 +205,15 @@ Run this regression on the mocked Kubernetes 1.37+ cluster with:
 ```sh
 MOCK_NVML=true E2E_RUN=TestNUMAAlignment make test-e2e
 ```
+
+`MOCK_NVML=true` also enables NVIDIA ComputeDomains on the mocked GB200 NVLink
+fabric. The NVIDIA DRA driver's
+[mock values](../hack/dra-driver-nvidia-gpu/mock-values.yaml) enable them, Slurm
+lists the `imex` GRES type, and the e2e device profiles include `imex-channel`,
+so each mocked worker registers `imex:imex-channel:1`. All mocked workers share
+one NVLink clique. Create a ComputeDomain, its DeviceClass, and a workload as
+described in
+[NVIDIA ComputeDomains and IMEX with DRA](nvidia-compute-domain-imex.md).
 
 Examples remain individually selectable:
 

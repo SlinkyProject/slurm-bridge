@@ -791,6 +791,7 @@ function dra-driver-nvidia-gpu::install() {
 
 	if $MOCK_NVML; then
 		values_args+=(--values "$config_dir/mock-values.yaml")
+		nvml-mock::wait_imex
 	fi
 	if dra::list_type_attributes_enabled; then
 		values_args+=(--set featureGates.DRAListTypeAttributes=true)
@@ -810,21 +811,48 @@ function dra-driver-nvidia-gpu::install() {
 }
 
 function nvml-mock::install() {
-	local digest="sha256:99e0de7e7c3292e9f814e15841c6c7a5bec8f64ce07620dd9f5c05ccb68b516e"
-	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock@${digest}"
+	local version="0.6.0"
+	local chart="oci://ghcr.io/nvidia/k8s-test-infra/chart/nvml-mock"
 	local config_dir="$SCRIPT_DIR/nvml-mock"
 
-	# Upstream republishes the 0.3.0 chart tag from main, so its templates can
-	# get ahead of the 0.3.0 image pinned in values.yaml. Pin the original 0.3.0
-	# release chart so the chart and image remain compatible.
 	helm upgrade --install nvml-mock "$chart" \
+		--version "$version" \
 		--namespace nvml-mock \
 		--create-namespace \
 		--values "$config_dir/values.yaml" \
 		--wait --timeout=180s
+	# nvml-mock leaves nvidia.com/ labels to NFD and GFD, which Kind does not run.
+	kubectl label nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+		nvidia.com/gpu.present=true --overwrite
+}
+
+# The compute-domain kubelet plugin looks for IMEX only when it starts.
+function nvml-mock::wait_imex() {
+	local staged="/var/lib/nvml-mock/driver/usr/bin/nvidia-imex.real"
+	local deadline=$((SECONDS + 300))
+	local pod
+	local missing
+	while :; do
+		missing=""
+		for pod in $(kubectl -n nvml-mock get pods -l app.kubernetes.io/name=nvml-mock -o name); do
+			kubectl -n nvml-mock exec "$pod" -- test -f "$staged" 2>/dev/null || missing+=" $pod"
+		done
+		if [ -z "$missing" ]; then
+			return 0
+		fi
+		if ((SECONDS >= deadline)); then
+			echo "[nvml-mock] IMEX is not staged on:$missing" >&2
+			return 1
+		fi
+		sleep 5
+	done
 }
 
 function nvml-mock::uninstall() {
+	if helm::find nvml-mock; then
+		kubectl label nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker \
+			nvidia.com/gpu.present-
+	fi
 	helm uninstall nvml-mock \
 		--namespace nvml-mock \
 		--ignore-not-found \
@@ -905,7 +933,8 @@ HELM OPTIONS:
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
 	                    It also mocks a two-NUMA-node GPU and DRANET topology, and
-	                    the CPU topology for external Slurm nodes.
+	                    the CPU topology for external Slurm nodes, and enables
+	                    NVIDIA ComputeDomains on the mocked NVLink fabric.
 	--dranet            Install DRA driver: DRANET
 	--kuberay           Install KubeRay, enabling native PodGroups when available.
 	                    Kubernetes 1.37 builds a pinned upstream operator image.
@@ -1003,7 +1032,7 @@ function main() {
 	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
-	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET; then
+	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET || { $OPT_DRA_DRIVER_NVIDIA_GPU && $MOCK_NVML; }; then
 		slurm-bridge::configure_e2e_device_profiles
 	fi
 	if $OPT_METRICS; then

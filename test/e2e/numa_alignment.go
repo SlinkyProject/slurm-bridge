@@ -117,7 +117,7 @@ func verifyNUMARegistration(ctx context.Context, config *envconf.Config, c clien
 				return fmt.Errorf("expected Slurm geometry 2/4/1 with 8 CPUs, got %+v", registered)
 			}
 			gres := ptr.Deref(registered.Gres, "")
-			if !strings.Contains(gres, "gpu:gpu.nvidia.com:8(S:0-1)") || !strings.Contains(gres, "nic:dranet0:1(S:1)") {
+			if !strings.Contains(gres, "gpu:gpu.nvidia.com:4(S:0-1)") || !strings.Contains(gres, "nic:dranet0:1(S:1)") {
 				return fmt.Errorf("missing mocked GPU/NIC socket affinity in Slurm GRES: %s", gres)
 			}
 		}

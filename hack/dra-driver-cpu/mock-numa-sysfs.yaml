@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # One physical socket with two NUMA domains, each with four cores and no SMT.
-# This exercises sub-NUMA clustering with the nvml-mock a100 PCIe locality.
+# This exercises sub-NUMA clustering with the nvml-mock gb200 PCIe locality.
 apiVersion: v1
 kind: ConfigMap
 metadata:
