@@ -33,6 +33,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/controller/registration/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	schedulercontrol "github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/controllercheck"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
@@ -81,11 +82,12 @@ type registrationWorld struct {
 	slots, incarnation int
 	nextJob            int32
 	workloadAPI        *slurmjobir.WorkloadAPI
+	registry           *dra.Registry
 	allocations        []worldAllocation
 }
 
 func newRegistrationWorld(ctx context.Context, slots int) (*registrationWorld, error) {
-	w := &registrationWorld{ctx: ctx, slots: slots, nextJob: 100,
+	w := &registrationWorld{ctx: ctx, slots: slots, nextJob: 100, registry: dra.DefaultRegistry(),
 		clock: clocktesting.NewFakeClock(time.Unix(0, 0)), trace: &controllercheck.Trace{},
 		live: slurmfake.NewFakeClient(), cached: slurmfake.NewFakeClient()}
 	w.faults = &controllercheck.Faults{Trace: w.trace}
@@ -222,7 +224,7 @@ func (w *registrationWorld) restart(ctx context.Context) error {
 		},
 	})
 	w.reconciler = &Reconciler{Client: w.kube, apiReader: w.kube, slurmControl: worldLifecycleControl{SlurmControlInterface: slurmcontrol.NewControl(slurm), world: w}, slurmClient: slurm, informer: w.informer,
-		schedulerName: "slurm-bridge", workloadAPI: w.workloadAPI, submit: w, recent: cache.NewExpiringWithClock(w.clock), enqueue: w.queue.Add}
+		schedulerName: "slurm-bridge", workloadAPI: w.workloadAPI, registry: w.registry, submit: w, recent: cache.NewExpiringWithClock(w.clock), enqueue: w.queue.Add}
 	index, err := slurmjob.NewPodIndex(slurm, w.informer)
 	if err != nil {
 		return err
