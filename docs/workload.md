@@ -466,6 +466,7 @@ scheduling.
   alpha configuration for IMEX channels across NVLink-connected nodes.
 - [NVIDIA GPUs and MIG with DRA](nvidia-gpu-dra-mig.md): driver installation,
   MIG device profiles, and allocation checks.
+- [TPU DRA](tpu.md): per-Pod whole-host requests and a fake-device Kind check.
 - [PodGroup coscheduling](podgroup-coscheduling.md): legacy scheduler-plugins
   integration and migration to built-in PodGroups.
 

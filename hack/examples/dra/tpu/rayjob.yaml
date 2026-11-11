@@ -1,0 +1,71 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: tpu-alias
+  namespace: slurm-bridge
+  labels:
+    ray.io/gang-scheduling-enabled: 'true'
+spec:
+  submissionMode: HTTPMode
+  shutdownAfterJobFinishes: false
+  entrypoint: |
+    python -c '
+    import os, stat, ray
+    ray.init()
+    @ray.remote(resources={"TPU": 4})
+    def inspect():
+        devices = ["/dev/accel%d" % i for i in range(4)]
+        assert all(stat.S_ISBLK(os.stat(device).st_mode) for device in devices)
+        return {"devices": devices, "worker_id": os.environ["TPU_WORKER_ID"]}
+    print(ray.get(inspect.remote(), timeout=180), flush=True)
+    '
+  rayClusterSpec:
+    rayVersion: 2.52.0
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: '1'
+        object-store-memory: '100000000'
+      template:
+        spec:
+          schedulerName: slurm-bridge-scheduler
+          containers:
+            - name: ray-head
+              image: rayproject/ray:2.52.0
+              resources:
+                requests:
+                  cpu: '1'
+                  memory: 3Gi
+                limits:
+                  cpu: '1'
+                  memory: 3Gi
+    workerGroupSpecs:
+      - groupName: tpu
+        replicas: 1
+        minReplicas: 1
+        maxReplicas: 1
+        numOfHosts: 1
+        rayStartParams:
+          num-cpus: '1'
+          object-store-memory: '100000000'
+        template:
+          spec:
+            schedulerName: slurm-bridge-scheduler
+            tolerations:
+              - key: google.com/tpu
+                operator: Exists
+                effect: NoSchedule
+            containers:
+              - name: ray-worker
+                image: rayproject/ray:2.52.0
+                resources:
+                  requests:
+                    cpu: '1'
+                    memory: 1Gi
+                    google.com/tpu: '4'
+                  limits:
+                    cpu: '1'
+                    memory: 1Gi
+                    google.com/tpu: '4'

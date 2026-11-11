@@ -7,6 +7,7 @@ controller:
       - gpu
       - nic
       - imex
+      - tpu
     Nodeset:
       - slurm-bridge Feature=slurm-bridge
     PartitionName:
