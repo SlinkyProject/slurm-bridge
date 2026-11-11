@@ -464,8 +464,8 @@ devices to each job.
   devices than a node has cannot be satisfied. Slurm keeps such jobs pending
   with reason `BadConstraints`, and their Pods remain `Pending`. Check the Slurm
   job's reason when a GPU Pod does not start.
-- `DeviceClass.spec.extendedResourceName` aliases are not resolved. Use the
-  implicit `deviceclass.resource.kubernetes.io/<class>` resource names.
+- Use `deviceclass.resource.kubernetes.io/<class>` or the alias configured in
+  `DeviceClass.spec.extendedResourceName`.
 
 ## Troubleshooting
 

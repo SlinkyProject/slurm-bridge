@@ -715,7 +715,7 @@ func TestTranslatorParseDeviceResourcesUsesNVIDIADeviceProfile(t *testing.T) {
 	}
 }
 
-func TestTranslatorParseDeviceResourcesKeepsNVIDIADevicePluginSeparateFromDRAAlias(t *testing.T) {
+func TestTranslatorParseDeviceResourcesResolvesNVIDIAExtendedResourceAlias(t *testing.T) {
 	deviceClass := &resourcev1.DeviceClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu.nvidia.com"},
 		Spec: resourcev1.DeviceClassSpec{
@@ -737,8 +737,8 @@ func TestTranslatorParseDeviceResourcesKeepsNVIDIADevicePluginSeparateFromDRAAli
 	if err := translator.parseDeviceResources(component); err != nil {
 		t.Fatalf("translator.parseDeviceResources() error = %v", err)
 	}
-	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu=2" {
-		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu=2")
+	if component.JobInfo.Gres == nil || *component.JobInfo.Gres != "gres/gpu:gpu.nvidia.com=2" {
+		t.Fatalf("translator.parseDeviceResources() Gres = %v, want %q", component.JobInfo.Gres, "gres/gpu:gpu.nvidia.com=2")
 	}
 }
 
@@ -1007,5 +1007,23 @@ func TestRayPodsDoNotReadRayOwners(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTranslatorCoreBitmapExtendedResourceAlias(t *testing.T) {
+	class := &resourcev1.DeviceClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "cpus"},
+		Spec: resourcev1.DeviceClassSpec{
+			ExtendedResourceName: ptr.To("example.com/cpu"),
+			Selectors:            []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: `device.driver == "dra.cpu"`}}},
+		},
+	}
+	tx := translator{Reader: fake.NewClientBuilder().WithObjects(class).Build(), ctx: context.Background()}
+	component := &SlurmJobComponent{Pods: corev1.PodList{Items: []corev1.Pod{podWithGPU("example.com/cpu", "2")}}}
+	if err := tx.parseDeviceResources(component); err != nil {
+		t.Fatal(err)
+	}
+	if component.JobInfo.CpuPerTask == nil || *component.JobInfo.CpuPerTask != 2 || component.JobInfo.Gres != nil {
+		t.Fatalf("unexpected CPU alias translation: %+v", component.JobInfo)
 	}
 }

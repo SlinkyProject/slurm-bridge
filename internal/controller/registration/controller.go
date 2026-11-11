@@ -84,6 +84,16 @@ func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName s
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.apiReader = mgr.GetAPIReader()
+	if r.registry == nil {
+		r.registry = dra.DefaultRegistry()
+	}
+	informer, err := mgr.GetCache().GetInformer(context.Background(), &resourcev1.DeviceClass{})
+	if err != nil {
+		return err
+	}
+	if err := r.registry.WatchDeviceClasses(informer); err != nil {
+		return err
+	}
 	inventory, err := mgr.GetCache().GetInformer(context.Background(), &resourcev1.ResourceSlice{})
 	if err != nil {
 		return err
