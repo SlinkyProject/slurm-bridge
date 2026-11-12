@@ -160,6 +160,8 @@ func isJobNotPendingError(err error) bool {
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {
 	client.Client
+	claimMu            sync.Mutex
+	uncertainClaims    map[string]*resourcev1.ResourceClaim
 	schedulerName      string
 	slurmControl       slurmcontrol.SlurmControlInterface
 	handle             fwk.Handle
