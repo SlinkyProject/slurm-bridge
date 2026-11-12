@@ -62,6 +62,18 @@ type Campaign[S any] struct {
 // Use Go's -run flag to select a rule, and Rapid's flags for shrinking and replay.
 func Explore[S any](t *testing.T, contract Contract[S], factory func(*rapid.T) Campaign[S]) {
 	t.Helper()
+	explore(t, contract, factory, false)
+}
+
+// ExploreParallel runs independent rules concurrently. Factories must create
+// isolated worlds, including clients, caches, fault injection, and traces.
+func ExploreParallel[S any](t *testing.T, contract Contract[S], factory func(*rapid.T) Campaign[S]) {
+	t.Helper()
+	explore(t, contract, factory, true)
+}
+
+func explore[S any](t *testing.T, contract Contract[S], factory func(*rapid.T) Campaign[S], parallel bool) {
+	t.Helper()
 	if len(contract.Always)+len(contract.Eventually) == 0 {
 		t.Fatal("controller contract has no rules")
 	}
@@ -76,6 +88,9 @@ func Explore[S any](t *testing.T, contract Contract[S], factory func(*rapid.T) C
 			}
 			seen[rule.Name] = true
 			t.Run(group.name+"/"+rule.Name, func(t *testing.T) {
+				if parallel {
+					t.Parallel()
+				}
 				selected := Contract[S]{Always: []Rule[S]{rule}}
 				if group.name == "eventually" {
 					selected = Contract[S]{Eventually: []Rule[S]{rule}}
