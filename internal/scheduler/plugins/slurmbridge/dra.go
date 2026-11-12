@@ -27,6 +27,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -295,7 +296,7 @@ func (sb *SlurmBridge) bindClaim(
 		{Resource: "pods", Name: pod.Name, UID: pod.UID},
 	}
 
-	if err := sb.Status().Patch(ctx, toUpdate, client.StrategicMergeFrom(claim)); err != nil {
+	if err := sb.patchClaimAllocation(ctx, claim, toUpdate); err != nil {
 		return fmt.Errorf("failed to add reservation to claim %s status: %w", klog.KObj(claim), err)
 	}
 
@@ -537,12 +538,15 @@ func (sb *SlurmBridge) patchPodExtendedResourceClaimStatus(
 		return fmt.Errorf("nil or empty request mappings, no update of pod %s/%s ExtendedResourceClaimStatus", pod.Namespace, pod.Name)
 	}
 
-	toUpdate := pod.DeepCopy()
-	toUpdate.Status.ExtendedResourceClaimStatus = &corev1.PodExtendedResourceClaimStatus{
+	status := &corev1.PodExtendedResourceClaimStatus{
 		RequestMappings:   requestMappings,
 		ResourceClaimName: claim.Name,
 	}
-	if err := sb.Status().Patch(ctx, toUpdate, client.StrategicMergeFrom(pod)); err != nil {
+	patch, err := utils.FieldPatch("/status/extendedResourceClaimStatus", status, utils.WithUIDPrecondition(pod.UID))
+	if err != nil {
+		return fmt.Errorf("encode pod claim status patch: %w", err)
+	}
+	if err := sb.Status().Patch(ctx, pod.DeepCopy(), patch); err != nil {
 		return fmt.Errorf("failed to update pod %s ExtendedResourceClaimStatus: %w", klog.KObj(pod), err)
 	}
 

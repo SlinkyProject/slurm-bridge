@@ -61,7 +61,7 @@ func socketClaimFixture(t *testing.T, funcs interceptor.Funcs) (*SlurmBridge, *c
 	class := func(name, driver string) *resourcev1.DeviceClass {
 		return &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: fmt.Sprintf(`device.driver == %q`, driver)}}}}}
 	}
-	kclient := fake.NewClientBuilder().WithObjects(slice, pod, class("cpus", nodeinfo.DraDriverCpu), func() *resourcev1.DeviceClass {
+	kclient := fake.NewClientBuilder().WithGlobalResourceVersionCounter().WithObjects(slice, pod, class("cpus", nodeinfo.DraDriverCpu), func() *resourcev1.DeviceClass {
 		c := class("gpus", "gpu.example.com")
 		p, _ := testutils.DRARegistryWithExampleGPU().LookupByName("gpu.example.com")
 		c.Spec.Selectors[0].CEL.Expression = p.Selector
