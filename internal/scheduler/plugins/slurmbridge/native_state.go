@@ -105,7 +105,7 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 	allocation := group.allocations[key]
 	if allocation == nil {
 		ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
-			slurmjobir.WithResourceSlices(sb.resourceSlices))
+			slurmjobir.WithResourceSlices(sb.resourceSlices), slurmjobir.WithNUMASpans(sb.numaCache))
 		if err != nil {
 			if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
 				return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())

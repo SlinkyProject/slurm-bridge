@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	resourcev1 "k8s.io/api/resource/v1"
@@ -104,5 +105,49 @@ func TestNUMASpansUseCachedResourceSlices(t *testing.T) {
 				t.Fatalf("formatGRESResources() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+type snapshotSliceLister struct {
+	calls  int
+	slices []*resourcev1.ResourceSlice
+}
+
+func (s *snapshotSliceLister) List(labels.Selector) ([]*resourcev1.ResourceSlice, error) {
+	s.calls++
+	return s.slices, nil
+}
+
+func TestNUMAInventorySnapshotIsReadOnlyAndScopedToTranslation(t *testing.T) {
+	registry, err := dra.NewRegistry([]dra.DeviceProfile{{Name: "gpu", Driver: "gpu.example.com", Selector: `device.driver == 'gpu.example.com'`, Backend: dra.IndexedGRESBackend{GRESName: "gpu"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slice := &resourcev1.ResourceSlice{Spec: resourcev1.ResourceSliceSpec{NodeName: ptr.To("node"), Driver: "gpu.example.com", Devices: []resourcev1.Device{{Name: "gpu-0", Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{deviceattribute.StandardDeviceAttributeNUMANode: {IntValues: []int64{0}}}}}}}
+	before := slice.DeepCopy()
+	lister := &snapshotSliceLister{slices: []*resourcev1.ResourceSlice{slice}}
+	resources := map[dra.GRES]resource.Quantity{{Name: "gpu", Type: "gpu"}: resource.MustParse("1")}
+	tr := &translator{ctx: context.Background(), draRegistry: registry, resourceSlices: lister}
+	for range 2 {
+		if got := tr.numaSpans(resources)["gpu"]; got != 1 {
+			t.Fatalf("span = %v", got)
+		}
+	}
+	if lister.calls != 1 {
+		t.Fatalf("listed %d times for one translation", lister.calls)
+	}
+	if !reflect.DeepEqual(before, slice) {
+		t.Fatal("NUMA scan mutated shared inventory")
+	}
+	// An informer update replaces the object; a new translation observes it.
+	updated := slice.DeepCopy()
+	updated.Spec.Devices[0].Attributes[deviceattribute.StandardDeviceAttributeNUMANode] = resourcev1.DeviceAttribute{IntValues: []int64{0, 1}}
+	lister.slices = []*resourcev1.ResourceSlice{updated}
+	next := &translator{ctx: context.Background(), draRegistry: registry, resourceSlices: lister}
+	if got := next.numaSpans(resources)["gpu"]; got != 2 {
+		t.Fatalf("new translation has stale span: %v", got)
+	}
+	if got := tr.numaSpans(resources)["gpu"]; got != 1 {
+		t.Fatalf("old translation snapshot changed: %v", got)
 	}
 }
