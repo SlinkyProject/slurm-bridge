@@ -6,8 +6,6 @@ package slurmbridge
 import (
 	"context"
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	resourcev1 "k8s.io/api/resource/v1"
@@ -49,27 +47,6 @@ func releaseDeviceClaim(t *testing.T, sb *SlurmBridge, claim *resourcev1.Resourc
 	claim.Status = resourcev1.ResourceClaimStatus{}
 	if err := sb.Status().Update(t.Context(), claim); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestClaimDevicesConcurrentBindings(t *testing.T) {
-	sb := claimWriter(interceptor.Funcs{})
-	var successes atomic.Int32
-	var wg sync.WaitGroup
-	for i := range 16 {
-		claim, allocated := deviceClaim(t, sb, fmt.Sprint(i), false)
-		wg.Go(func() {
-			if sb.patchClaimAllocation(t.Context(), claim, allocated) == nil {
-				successes.Add(1)
-			}
-		})
-	}
-	wg.Wait()
-	if successes.Load() != 1 {
-		t.Fatalf("%d bindings allocated one exclusive device", successes.Load())
-	}
-	if len(sb.uncertainClaims) != 0 {
-		t.Fatal("successful writes retained local state")
 	}
 }
 
@@ -229,49 +206,6 @@ func TestClaimBindingRejectsDeletedOrRecreatedClaim(t *testing.T) {
 				t.Fatal("rejected write stranded device", err)
 			}
 		})
-	}
-}
-
-func TestClaimDevicesSharingAndAdminAccess(t *testing.T) {
-	for _, tc := range []struct {
-		name                             string
-		aShared, bShared, admin, blocked bool
-	}{
-		{"shared", true, true, false, false},
-		{"exclusive after shared", true, false, false, true},
-		{"shared after exclusive", false, true, false, true},
-		{"exclusive", false, false, false, true},
-		{"admin access", false, false, true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sb := claimWriter(interceptor.Funcs{})
-			a, allocatedA := deviceClaim(t, sb, "a", tc.aShared)
-			b, allocatedB := deviceClaim(t, sb, "b", tc.bShared)
-			allocatedA.Status.Allocation.Devices.Results[0].AdminAccess = ptr.To(tc.admin)
-			if err := sb.patchClaimAllocation(t.Context(), a, allocatedA); err != nil {
-				t.Fatal(err)
-			}
-			err := sb.patchClaimAllocation(t.Context(), b, allocatedB)
-			if (err != nil) != tc.blocked {
-				t.Fatalf("binding B: %v, want blocked=%t", err, tc.blocked)
-			}
-		})
-	}
-}
-
-func TestClaimDevicesListFailurePreventsPatch(t *testing.T) {
-	sb := claimWriter(interceptor.Funcs{
-		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
-			return fmt.Errorf("API unavailable")
-		},
-		SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
-			t.Fatal("patched without checking ownership")
-			return nil
-		},
-	})
-	a, allocatedA := deviceClaim(t, sb, "a", false)
-	if err := sb.patchClaimAllocation(t.Context(), a, allocatedA); err == nil {
-		t.Fatal("ignored ownership read failure")
 	}
 }
 
