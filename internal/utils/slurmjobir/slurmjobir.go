@@ -89,6 +89,9 @@ type translator struct {
 	deviceClassProfiles map[string]dra.DeviceProfile
 	workloadAPI         *WorkloadAPI
 	resourceSlices      ResourceSliceLister
+	numaCache           *dra.NUMASpanCache
+	numaSlices          []*resourcev1.ResourceSlice
+	numaSlicesLoaded    bool
 	podGroupStates      fwk.PodGroupStateLister
 	podsByGroup         map[string]corev1.PodList
 	includeTerminalPods bool // Membership discovery retains history; allocation translation does not.
@@ -167,7 +170,13 @@ func WithResourceSlices(lister ResourceSliceLister) TranslateOption {
 	}
 }
 
-// CachedResourceSlices lists ResourceSlices from a cached controller-runtime reader.
+// WithNUMASpans reuses derived topology until the inventory changes.
+func WithNUMASpans(cache *dra.NUMASpanCache) TranslateOption {
+	return func(t *translator) { t.numaCache = cache }
+}
+
+// CachedResourceSlices lists read-only ResourceSlices from a cached controller-runtime reader.
+// Callers must not mutate the returned cache objects.
 func CachedResourceSlices(ctx context.Context, reader client.Reader) ResourceSliceLister {
 	return cachedResourceSlices{ctx: ctx, reader: reader}
 }
@@ -179,7 +188,7 @@ type cachedResourceSlices struct {
 
 func (c cachedResourceSlices) List(selector labels.Selector) ([]*resourcev1.ResourceSlice, error) {
 	list := &resourcev1.ResourceSliceList{}
-	if err := c.reader.List(c.ctx, list, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+	if err := c.reader.List(c.ctx, list, client.MatchingLabelsSelector{Selector: selector}, client.UnsafeDisableDeepCopy); err != nil {
 		return nil, err
 	}
 	resourceSlices := make([]*resourcev1.ResourceSlice, len(list.Items))
@@ -354,12 +363,11 @@ func (t *translator) parseDeviceResources(slurmJobComponent *SlurmJobComponent) 
 // numaSpans returns the NUMA spread of each requested GRES type. Ordering is
 // best effort, so an unavailable cache falls back to name order.
 //
-// TODO: Cache per-node, per-profile NUMA coverage and refresh it on
-// ResourceSlice changes instead of scanning the cluster for every component.
-// Reuse the cached coverage across a translation, and derive GRES ordering
-// from eligible nodes before releasing the held Slurm job.
+// Informer-backed callers reuse derived coverage across translations.
+// Other callers reuse an inventory snapshot within this translation.
+// TODO: Derive ordering from eligible nodes before releasing the held Slurm job.
 func (t *translator) numaSpans(resources map[dra.GRES]resource.Quantity) map[string]float64 {
-	if t.resourceSlices == nil {
+	if t.resourceSlices == nil && t.numaCache == nil {
 		return nil
 	}
 	var profileNames []string
@@ -368,12 +376,21 @@ func (t *translator) numaSpans(resources map[dra.GRES]resource.Quantity) map[str
 			profileNames = append(profileNames, gres.Type)
 		}
 	}
-	resourceSlices, err := t.resourceSlices.List(labels.Everything())
-	if err != nil {
-		klog.FromContext(t.ctx).V(2).Info("Requesting GRES in name order; cached ResourceSlices are unavailable", "err", err)
-		return nil
+	if t.numaCache != nil {
+		return t.numaCache.Spans(t.ctx, profileNames)
 	}
-	return dra.NUMASpans(t.ctx, t.registry(), resourceSlices, profileNames)
+	if !t.numaSlicesLoaded {
+		// Cache objects are immutable. NUMASpans only reads them; reuse this
+		// snapshot across components without copying every device in the cluster.
+		t.numaSlicesLoaded = true
+		var err error
+		t.numaSlices, err = t.resourceSlices.List(labels.Everything())
+		if err != nil {
+			klog.FromContext(t.ctx).V(2).Info("Requesting GRES in name order; cached ResourceSlices are unavailable", "err", err)
+			return nil
+		}
+	}
+	return dra.NUMASpans(t.ctx, t.registry(), t.numaSlices, profileNames)
 }
 
 func (t *translator) podDeviceResources(pod *corev1.Pod) (map[dra.GRES]resource.Quantity, resource.Quantity, error) {

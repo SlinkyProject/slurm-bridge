@@ -12,8 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
@@ -139,5 +142,48 @@ func TestLegacyGPUAllocationResultsRejectsMissingDevice(t *testing.T) {
 	}})
 	if err == nil || !strings.Contains(err.Error(), "not found on node") {
 		t.Fatalf("legacyGPUAllocationResults() error = %v, want missing device", err)
+	}
+}
+
+func TestLegacyAllocationWithoutClassDoesNotReadInventory(t *testing.T) {
+	kubeClient := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			t.Fatal("profile-based allocation must not list legacy inventory without a legacy class")
+			return nil
+		},
+	}).Build()
+	got, err := legacyGPUAllocationResults(context.Background(), kubeClient, "node", []slurmcontrol.GresLayout{{Name: "gpu", Type: legacyDRANVIDIADriver, Count: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("unexpected legacy allocations: %v", got)
+	}
+}
+
+func TestLegacyAllocationUsesNodeAndPoolIndexes(t *testing.T) {
+	slice := func(node string) *resourcev1.ResourceSlice {
+		return &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: node}, Spec: resourcev1.ResourceSliceSpec{
+			NodeName: ptr.To(node), Driver: legacyDRANVIDIADriver, Pool: resourcev1.ResourcePool{Name: node},
+			Devices: []resourcev1.Device{{Name: "gpu-0"}},
+		}}
+	}
+	kubeClient := fake.NewClientBuilder().WithObjects(
+		&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: legacyDRANVIDIADriver}}, slice("selected"), slice("unrelated"),
+	).WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSliceNode, nodeutils.IndexResourceSliceByNode).
+		WithIndex(&resourcev1.ResourceSlice{}, nodeutils.IndexFieldResourceSlicePool, nodeutils.IndexResourceSliceByPool).
+		WithInterceptorFuncs(interceptor.Funcs{List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			options := (&client.ListOptions{}).ApplyOptions(opts)
+			if options.FieldSelector == nil || options.FieldSelector.Empty() {
+				t.Fatal("unexpected cluster-wide inventory list")
+			}
+			return c.List(ctx, list, opts...)
+		}}).Build()
+	got, err := legacyGPUAllocationResults(context.Background(), kubeClient, "selected", []slurmcontrol.GresLayout{{Name: "gpu", Type: legacyDRANVIDIADriver, Count: 1, Index: "0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Pool != "selected" || got[0].Device != "gpu-0" {
+		t.Fatalf("wrong allocation: %v", got)
 	}
 }

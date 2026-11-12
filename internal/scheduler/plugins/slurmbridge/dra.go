@@ -23,6 +23,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-client/pkg/hostlist"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
@@ -39,45 +40,69 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 	if pod.UID == "" {
 		return fmt.Errorf("pod UID is required for allocation recovery")
 	}
-	existing := &resourcev1.ResourceClaim{}
-	err := sb.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: allocationClaimName(pod)}, existing)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	if err == nil {
-		if err := validateClaimIdentity(existing, pod, nodeName, resources); err != nil {
+	claim, mappings, allocation, prepareErr := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
+	if prepareErr == nil && claim != nil {
+		// Deterministic names allow create-first; retries recover through a live GET.
+		if err := sb.Create(ctx, claim); err == nil {
+			return sb.allocateAndPublishClaim(ctx, claim, pod, nodeName, allocation, mappings)
+		} else if !apierrors.IsAlreadyExists(err) {
+			// Ambiguous writes are recovered on the next attempt.
 			return err
 		}
-		if existing.Status.Allocation != nil {
-			mappings, err := createContainerRequestMappings(pod, existing.Spec.Devices.Requests)
-			if err != nil {
-				return err
-			}
-			return sb.patchPodExtendedResourceClaimStatus(ctx, pod, existing, mappings)
-		}
 	}
-	claim, mappings, allocation, err := sb.createRequestsAndMappings(ctx, pod, nodeName, resources)
-	if err != nil {
+
+	// Recover existing allocations even if inventory or classes have changed.
+	existing := &resourcev1.ResourceClaim{}
+	if err := sb.Get(ctx, client.ObjectKey{Namespace: pod.Namespace, Name: allocationClaimName(pod)}, existing); err != nil {
+		if apierrors.IsNotFound(err) && (prepareErr != nil || claim == nil) {
+			return prepareErr
+		}
 		return err
 	}
-	if claim == nil {
-		return nil
-	}
-	if existing.Name != "" {
-		if !equality.Semantic.DeepEqual(existing.Spec, claim.Spec) {
-			return fmt.Errorf("existing claim %q differs from Slurm allocation", existing.Name)
-		}
-		claim = existing
-	} else if err := sb.Create(ctx, claim); err != nil {
-		// A concurrent attempt or an ambiguous API response is recovered on retry.
+	if err := validateClaimIdentity(existing, pod, nodeName, resources); err != nil {
 		return err
 	}
+	if existing.Status.Allocation != nil {
+		mappings, err := createContainerRequestMappings(pod, existing.Spec.Devices.Requests)
+		if err != nil {
+			return err
+		}
+		return sb.patchPodExtendedResourceClaimStatus(ctx, pod, existing, mappings)
+	}
+	if prepareErr != nil || claim == nil {
+		return prepareErr
+	}
+	if !equality.Semantic.DeepEqual(existing.Spec, claim.Spec) {
+		return fmt.Errorf("existing claim %q differs from Slurm allocation", existing.Name)
+	}
+	return sb.allocateAndPublishClaim(ctx, existing, pod, nodeName, allocation, mappings)
+}
+
+func (sb *SlurmBridge) allocateAndPublishClaim(ctx context.Context, claim *resourcev1.ResourceClaim, pod *corev1.Pod, nodeName string, allocation *claimAllocation, mappings []corev1.ContainerExtendedResourceRequest) error {
 	// Retain partial claims for retries. The Pod controller deletes them after
 	// completion or cancellation.
 	if err := sb.bindClaim(ctx, claim, pod, nodeName, allocation); err != nil {
 		return err
 	}
 	return sb.patchPodExtendedResourceClaimStatus(ctx, pod, claim, mappings)
+}
+
+func (sb *SlurmBridge) allocateCPUs(ctx context.Context, nodeName string, resources *slurmcontrol.NodeResources, className, allocationKey string) (*nodeinfo.CPUAllocation, error) {
+	if sb.cpuTopology != nil {
+		return sb.cpuTopology.AllocateCPUs(ctx, sb.Client, nodeName, resources, className, allocationKey)
+	}
+	slices, err := nodeutils.GetResourceSlicesForNode(ctx, sb.Client, nodeName)
+	if err != nil {
+		return nil, err
+	}
+	current, err := nodeinfo.NewNodeInfoFromResourceSlices(nodeName, slices)
+	if err != nil {
+		return nil, err
+	}
+	if err := current.ValidateCPUFingerprint(resources.NodeExtra); err != nil {
+		return nil, err
+	}
+	return current.AllocateCPUs(ctx, sb.Client, resources, className, allocationKey)
 }
 
 func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev1.Pod, nodeName string, resources *slurmcontrol.NodeResources) (*resourcev1.ResourceClaim, []corev1.ContainerExtendedResourceRequest, *claimAllocation, error) {
@@ -108,14 +133,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	}
 	var allocatedRequests []resourcev1.DeviceRequest
 	if coreBitmapAllocation != nil {
-		current, err := nodeinfo.NewNodeInfo(ctx, sb.Client, nodeName)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if err := current.ValidateCPUFingerprint(resources.NodeExtra); err != nil {
-			return nil, nil, nil, err
-		}
-		cpu, err := current.AllocateCPUs(ctx, sb.Client, &remainingResources, coreBitmapAllocation.DeviceClassName, allocationClaimName(pod))
+		cpu, err := sb.allocateCPUs(ctx, nodeName, &remainingResources, coreBitmapAllocation.DeviceClassName, allocationClaimName(pod))
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -281,9 +299,8 @@ func (sb *SlurmBridge) bindClaim(
 		return fmt.Errorf("failed to add reservation to claim %s status: %w", klog.KObj(claim), err)
 	}
 
-	if err := sb.Get(ctx, client.ObjectKeyFromObject(claim), claim); err != nil {
-		return fmt.Errorf("failed to get claim %s: %w", klog.KObj(claim), err)
-	}
+	// Patch returns the persisted claim; no readback is needed.
+	*claim = *toUpdate
 
 	return nil
 }

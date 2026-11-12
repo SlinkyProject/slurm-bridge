@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,6 +57,7 @@ type Reconciler struct {
 	schedulerName  string
 	submit         schedulercontrol.JobRegistrar
 	registry       *dra.Registry
+	numaCache      *dra.NUMASpanCache
 	workloadAPI    *slurmjobir.WorkloadAPI
 	recent         *cache.Expiring
 	eventRecorder  record.EventRecorder
@@ -83,13 +85,20 @@ func NewReconciler(kube client.Client, slurm slurmclient.Client, schedulerName s
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.apiReader = mgr.GetAPIReader()
+	inventory, err := mgr.GetCache().GetInformer(context.Background(), &resourcev1.ResourceSlice{})
+	if err != nil {
+		return err
+	}
+	r.numaCache, err = dra.NewNUMASpanCache(r.registry, inventory)
+	if err != nil {
+		return err
+	}
 	for name, extract := range map[string]client.IndexerFunc{podGroupMemberIndex: nativePodGroupKeys, publishedJobIndex: publishedJobKeys} {
 		if err := mgr.GetFieldIndexer().IndexField(context.Background(), &corev1.Pod{}, name, extract); err != nil {
 			return err
 		}
 	}
 	r.membersIndexed = true
-	var err error
 	r.jobIndex, err = slurmjob.NewPodIndex(r.slurmClient, r.informer)
 	if err != nil {
 		return err
@@ -176,7 +185,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 			continue
 		}
 		ir, err := slurmjobir.TranslateToSlurmJobIR(r.cachedMembers(), r.registry, r.workloadAPI, ctx, pod,
-			slurmjobir.WithResourceSlices(slurmjobir.CachedResourceSlices(ctx, r.Client)))
+			slurmjobir.WithResourceSlices(slurmjobir.CachedResourceSlices(ctx, r.Client)), slurmjobir.WithNUMASpans(r.numaCache))
 		if err != nil {
 			return r.registrationReadEvent(key, err)
 		}

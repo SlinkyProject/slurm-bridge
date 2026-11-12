@@ -47,6 +47,7 @@ import (
 	nodecontrollerutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
+	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -177,6 +178,8 @@ type SlurmBridge struct {
 	releases      sync.WaitGroup // queued releases, so tests can wait for them
 
 	resourceSlices resourcelisters.ResourceSliceLister
+	numaCache      *dra.NUMASpanCache
+	cpuTopology    *nodeinfo.CPUTopologyCache
 }
 
 type groupAllocation struct {
@@ -333,6 +336,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	if err != nil {
 		return nil, err
 	}
+	kubeClient = dra.WithCachedInventory(ctx, kubeClient)
 	clientConfig := &slurmclient.Config{
 		Server:        cfg.SlurmRestApi,
 		TokenProvider: slurmtoken.FileProvider{Path: os.Getenv("SLURM_JWT_FILE")},
@@ -352,6 +356,14 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		releaseCtx:    ctx,
 	}
 	plugin.resourceSlices = handle.SharedInformerFactory().Resource().V1().ResourceSlices().Lister()
+	plugin.numaCache, err = dra.NewNUMASpanCache(draRegistry, handle.SharedInformerFactory().Resource().V1().ResourceSlices().Informer())
+	if err != nil {
+		return nil, err
+	}
+	plugin.cpuTopology, err = nodeinfo.NewCPUTopologyCache(handle.SharedInformerFactory().Resource().V1().ResourceSlices().Informer())
+	if err != nil {
+		return nil, err
+	}
 	plugin.kubeNodeIndex, err = newKubeNodeNameIndex(handle.SharedInformerFactory().Core().V1().Nodes().Informer())
 	if err != nil {
 		return nil, err
@@ -454,7 +466,7 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 
 	// Construct an intermediate representation of the Slurm external job
 	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
-		slurmjobir.WithResourceSlices(sb.resourceSlices))
+		slurmjobir.WithResourceSlices(sb.resourceSlices), slurmjobir.WithNUMASpans(sb.numaCache))
 	if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
