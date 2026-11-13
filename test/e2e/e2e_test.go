@@ -46,6 +46,7 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgePodScheduling(),
 		testSlurmBridgeDRAResourceScheduling(false),
 		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
+		testSlurmBridgeComputeDomainScheduling(requireNvidiaGPU),
 		testSlurmBridgeDRANETResourceScheduling(),
 	}
 	for _, api := range []kubernetesPodGroupAPI{podGroupV1Beta1, podGroupV1Alpha2} {
