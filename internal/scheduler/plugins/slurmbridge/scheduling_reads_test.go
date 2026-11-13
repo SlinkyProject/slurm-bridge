@@ -115,7 +115,7 @@ func TestCachedPlacementRequiresLiveConfirmation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				sb := &SlurmBridge{Client: kc, slurmControl: control, handle: handle}
+				sb := &SlurmBridge{Client: kc, slurmControl: control, handle: handle, resourceClaims: emptyResourceClaimLister()}
 				ir := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}}}
 				state := framework.NewCycleState()
 				state.Write(stateKey, &stateData{slurmJobIR: ir, allocation: []slurmcontrol.ExternalJob{{JobId: 10, Nodes: "node1"}}})

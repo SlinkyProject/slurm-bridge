@@ -17,10 +17,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/informers"
 	clientsetfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
+	resourcelisters "k8s.io/client-go/listers/resource/v1"
+	"k8s.io/client-go/tools/cache"
 	fwk "k8s.io/kube-scheduler/framework"
 	internalcache "k8s.io/kubernetes/pkg/scheduler/backend/cache"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
@@ -688,8 +691,9 @@ func TestSlurmBridge_manageResourceClaim_retainsClaimOnError(t *testing.T) {
 			pod := newPod()
 			kclient := newClient(pod, tt.funcs)
 			sb := &SlurmBridge{
-				Client:      kclient,
-				draRegistry: testutils.DRARegistryWithExampleGPU(),
+				Client:         kclient,
+				draRegistry:    testutils.DRARegistryWithExampleGPU(),
+				resourceClaims: emptyResourceClaimLister(),
 			}
 
 			gotErr := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
@@ -879,7 +883,7 @@ func TestSlurmBridge_manageResourceClaimKeepsGPURequestNamesConsistent(t *testin
 		).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: emptyResourceClaimLister()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -971,7 +975,7 @@ func TestSlurmBridge_manageResourceClaimUsesAppliedDeviceProfileInventory(t *tes
 		WithObjects(pod, deviceClass).
 		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
 		Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: emptyResourceClaimLister()}
 
 	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
 		t.Fatalf("manageResourceClaim() error = %v", err)
@@ -1067,7 +1071,7 @@ func TestSlurmBridge_manageResourceClaimRequiresAppliedGPUInventory(t *testing.T
 				}
 				kclient := fake.NewClientBuilder().WithObjects(pod, deviceClass, slice).
 					WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).Build()
-				sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}
+				sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: emptyResourceClaimLister()}
 				resources := &slurmcontrol.NodeResources{
 					Node: "node1", NodeExtra: tt.extra,
 					Gres: []slurmcontrol.GresLayout{{Name: "gpu", Type: deviceClass.Name, Count: 1, Index: "0"}},
@@ -1396,8 +1400,9 @@ func TestSlurmBridge_bindClaim(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sb := &SlurmBridge{
-				Client:      tt.kclient,
-				draRegistry: testutils.DRARegistryWithExampleGPU(),
+				Client:         tt.kclient,
+				draRegistry:    testutils.DRARegistryWithExampleGPU(),
+				resourceClaims: emptyResourceClaimLister(),
 			}
 			if tt.coreBitmapAllocation != nil && !tt.wantErr {
 				n, err := nodeinfo.NewNodeInfo(context.Background(), sb.Client, tt.nodeName)
@@ -1635,7 +1640,7 @@ func TestBindClaimPreservesClassAndClaimConfiguration(t *testing.T) {
 			}
 			return c.Get(ctx, key, obj, opts...)
 		}}).Build()
-	sb := &SlurmBridge{Client: kclient, draRegistry: registry}
+	sb := &SlurmBridge{Client: kclient, draRegistry: registry, resourceClaims: emptyResourceClaimLister()}
 	allocation := &claimAllocation{
 		NodeResources: &slurmcontrol.NodeResources{
 			Node:      "node1",
@@ -1677,7 +1682,7 @@ func TestBindClaimRejectsUnresolvedDeviceClasses(t *testing.T) {
 				Spec:       resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{tt.request}}},
 			}
 			c := fake.NewClientBuilder().WithObjects(claim).WithStatusSubresource(claim).Build()
-			sb := &SlurmBridge{Client: c}
+			sb := &SlurmBridge{Client: c, resourceClaims: emptyResourceClaimLister()}
 			err := sb.bindClaim(context.Background(), claim, &corev1.Pod{}, "node1", &claimAllocation{NodeResources: &slurmcontrol.NodeResources{}})
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("bindClaim() error = %v, want %q", err, tt.wantErr)
@@ -1742,6 +1747,120 @@ func TestPatchPodExtendedResourceClaimStatusWithoutReadback(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(stored.Status.ExtendedResourceClaimStatus, wantStatus) {
 				t.Fatalf("stored claim status = %#v, want %#v", stored.Status.ExtendedResourceClaimStatus, wantStatus)
+			}
+		})
+	}
+}
+
+func emptyResourceClaimLister() resourcelisters.ResourceClaimLister {
+	return resourcelisters.NewResourceClaimLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{}))
+}
+
+func TestSlurmBridge_manageResourceClaimWaitsForHeldDevices(t *testing.T) {
+	ctx := context.Background()
+	gpuResource := corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + legacyDRANVIDIADriver)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: metav1.NamespaceDefault, Name: "new", UID: "new-uid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name:      "test",
+			Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{gpuResource: resource.MustParse("1")}},
+		}}},
+	}
+	resources := &slurmcontrol.NodeResources{
+		Node:      "node1",
+		NodeExtra: `slurm-bridge.dra-gres-map={"v":1,"profiles":{"gpu.nvidia.com":{"firstIndex":0,"devices":["/dra/gpu.nvidia.com/node1/gpu-0"]}}}`,
+		Gres:      []slurmcontrol.GresLayout{{Name: "gpu", Type: legacyDRANVIDIADriver, Count: 1, Index: "0"}},
+	}
+	// The claim of a pod whose Slurm job ended, but which is still in its grace period.
+	held := &resourcev1.ResourceClaim{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "old-claim", UID: "old-claim-uid"},
+		Status: resourcev1.ResourceClaimStatus{Allocation: &resourcev1.AllocationResult{
+			Devices: resourcev1.DeviceAllocationResult{Results: []resourcev1.DeviceRequestAllocationResult{{
+				Request: "gpu", Driver: legacyDRANVIDIADriver, Pool: "node1", Device: "gpu-0",
+			}}},
+		}},
+	}
+	kclient := fake.NewClientBuilder().
+		WithIndex(&resourcev1.ResourceSlice{}, "spec.nodeName", resourceSliceNodeIndex).
+		WithObjects(
+			pod,
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			nvidiaGPUDeviceClass(legacyDRANVIDIADriver),
+			&resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1-gpu"},
+				Spec: resourcev1.ResourceSliceSpec{
+					NodeName: ptr.To("node1"),
+					Pool:     resourcev1.ResourcePool{Name: "node1"},
+					Driver:   legacyDRANVIDIADriver,
+					Devices:  []resourcev1.Device{{Name: "gpu-0"}},
+				},
+			},
+		).
+		WithStatusSubresource(pod, &resourcev1.ResourceClaim{}).
+		Build()
+	claims := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	if err := claims.Add(held); err != nil {
+		t.Fatal(err)
+	}
+	sb := &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: resourcelisters.NewResourceClaimLister(claims)}
+
+	err := sb.manageResourceClaim(ctx, pod, resources.Node, resources)
+	if err == nil || !strings.Contains(err.Error(), "other/old-claim") {
+		t.Fatalf("manageResourceClaim() error = %v, want device held by other/old-claim", err)
+	}
+
+	held.Status.Allocation = nil
+	if err := claims.Update(held); err != nil {
+		t.Fatalf("release held claim: %v", err)
+	}
+	if err := sb.manageResourceClaim(ctx, pod, resources.Node, resources); err != nil {
+		t.Fatalf("manageResourceClaim() after release error = %v", err)
+	}
+	bound := &resourcev1.ResourceClaimList{}
+	if err := kclient.List(ctx, bound, client.InNamespace(pod.Namespace)); err != nil {
+		t.Fatalf("list ResourceClaims: %v", err)
+	}
+	if len(bound.Items) != 1 || bound.Items[0].Status.Allocation == nil {
+		t.Fatalf("claims = %#v, want one allocated claim", bound.Items)
+	}
+}
+
+func TestSlurmBridge_checkDevicesReleased(t *testing.T) {
+	gpu := resourcev1.DeviceRequestAllocationResult{Driver: legacyDRANVIDIADriver, Pool: "node1", Device: "gpu-0"}
+	adminGPU := gpu
+	adminGPU.AdminAccess = ptr.To(true)
+	socketShare := func(shareID types.UID) resourcev1.DeviceRequestAllocationResult {
+		return resourcev1.DeviceRequestAllocationResult{Driver: nodeinfo.DraDriverCpu, Pool: "node1", Device: "socket-0", ShareID: ptr.To(shareID)}
+	}
+	tests := []struct {
+		name    string
+		held    resourcev1.DeviceRequestAllocationResult
+		wanted  resourcev1.DeviceRequestAllocationResult
+		wantErr bool
+	}{
+		{name: "fails while another claim holds the device", held: gpu, wanted: gpu, wantErr: true},
+		{name: "passes when another claim holds a share of the device", held: socketShare("old-share"), wanted: socketShare("new-share")},
+		{name: "passes when another claim has admin access to the device", held: adminGPU, wanted: gpu},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claims := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			held := &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "old-claim", UID: "old-claim-uid"},
+				Status: resourcev1.ResourceClaimStatus{Allocation: &resourcev1.AllocationResult{
+					Devices: resourcev1.DeviceAllocationResult{Results: []resourcev1.DeviceRequestAllocationResult{tt.held}},
+				}},
+			}
+			if err := claims.Add(held); err != nil {
+				t.Fatal(err)
+			}
+			sb := &SlurmBridge{resourceClaims: resourcelisters.NewResourceClaimLister(claims)}
+			claim := &resourcev1.ResourceClaim{ObjectMeta: metav1.ObjectMeta{UID: "new-claim-uid"}}
+
+			err := sb.checkDevicesReleased(claim, []resourcev1.DeviceRequestAllocationResult{tt.wanted})
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkDevicesReleased() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

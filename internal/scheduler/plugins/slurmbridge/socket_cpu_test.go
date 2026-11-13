@@ -67,7 +67,7 @@ func socketClaimFixture(t *testing.T, funcs interceptor.Funcs) (*SlurmBridge, *c
 		c.Spec.Selectors[0].CEL.Expression = p.Selector
 		return c
 	}()).WithStatusSubresource(&resourcev1.ResourceClaim{}, &corev1.Pod{}).WithInterceptorFuncs(funcs).Build()
-	return &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU()}, pod, resources
+	return &SlurmBridge{Client: kclient, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: emptyResourceClaimLister()}, pod, resources
 }
 
 func TestSocketClaim128ThreadsWithGPUAndAPIValidation(t *testing.T) {
@@ -171,7 +171,7 @@ func TestSocketClaimRecoveryAfterAmbiguousWrites(t *testing.T) {
 				t.Fatal("failure was not injected")
 			}
 			// Retry with a new bridge instance and the persisted claim.
-			restarted := &SlurmBridge{Client: sb.Client, draRegistry: testutils.DRARegistryWithExampleGPU()}
+			restarted := &SlurmBridge{Client: sb.Client, draRegistry: testutils.DRARegistryWithExampleGPU(), resourceClaims: emptyResourceClaimLister()}
 			if err := restarted.manageResourceClaim(context.Background(), pod, "node", resources); err != nil {
 				t.Fatal(err)
 			}
