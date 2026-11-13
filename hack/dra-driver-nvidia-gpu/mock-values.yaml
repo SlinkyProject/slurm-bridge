@@ -4,6 +4,17 @@
 
 nvidiaDriverRoot: /var/lib/nvml-mock/driver
 
+# The gb200 mock has a multi-node NVLink fabric. This mirrors
+# https://github.com/NVIDIA/k8s-test-infra/blob/main/local/compute-domain/dra-driver.values.yaml
+resources:
+  computeDomains:
+    enabled: true
+
+# The node agent's substitute /proc/devices, which carries the
+# nvidia-caps-imex-channels major. The compute-domain kubelet plugin reads it at
+# startup and aborts without it.
+altProcDevices: /var/lib/nvml-mock/imex/proc-devices
+
 kubeletPlugin:
   # Kind workers have no physical PCI device for the chart's default affinity.
   affinity:

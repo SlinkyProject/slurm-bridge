@@ -2,14 +2,17 @@
 configFiles:
   gres.conf: |
     Name=gpu Type=gpu.example.com File=/dev/tty[10-13] Count=4
-    Name=gpu Type=gpu.nvidia.com File=/dev/tty[20-27] Count=8
+    Name=gpu Type=gpu.nvidia.com File=/dev/tty[20-23] Count=4
     # DRANET injects the interface; this file gives Slurm a stable fixture index.
     Name=nic Type=dranet0 File=/dev/null Count=1
+    # The NVIDIA driver injects the IMEX channel; this entry gives Slurm its index.
+    Name=imex Type=imex-channel File=/dev/null Count=1
 controller:
   extraConfMap:
     GresTypes:
       - gpu
       - nic
+      - imex
     MCSPlugin:
       - mcs/label
     MCSParameters:
@@ -29,7 +32,7 @@ nodesets:
         repository: docker.io/library/alpine
         tag: latest
       resources: {}
-    extraConf: Gres=gpu:gpu.example.com:4,gpu:gpu.nvidia.com:8,nic:dranet0:1
+    extraConf: Gres=gpu:gpu.example.com:4,gpu:gpu.nvidia.com:4,nic:dranet0:1,imex:imex-channel:1
     partition:
       enabled: true
     podSpec:

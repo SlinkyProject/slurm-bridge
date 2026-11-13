@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # A configured registry replaces the built-ins, so repeat them alongside the
-# example GPU and DRANET e2e fixture profiles. Kind's dummy network interface is
-# neither PCI-backed nor RDMA-capable.
+# example GPU, IMEX channel, and DRANET e2e fixture profiles. Kind's dummy network
+# interface is neither PCI-backed nor RDMA-capable.
 sharedConfig:
   deviceProfiles:
     - name: cpu
@@ -26,6 +26,15 @@ sharedConfig:
       backend:
         type: indexed-gres
         gresName: gpu
+    - name: imex-channel
+      driver: compute-domain.nvidia.com
+      selector: >-
+        device.driver == 'compute-domain.nvidia.com' &&
+        device.attributes['compute-domain.nvidia.com'].type == 'channel' &&
+        device.attributes['compute-domain.nvidia.com'].id == 0
+      backend:
+        type: indexed-gres
+        gresName: imex
     - name: dranet-rdma
       driver: dra.net
       selector: >-

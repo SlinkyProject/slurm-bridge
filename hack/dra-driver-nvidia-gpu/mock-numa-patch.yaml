@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Mounts the nvml-mock PCI tree (GPUs 0-3 on NUMA node 0, 4-7 on NUMA node 1)
-# for NVIDIA_DRA_SYSFS_ROOT in mock-values.yaml.
+# Mounts the nvml-mock PCI tree (GPUs 0-1 on NUMA node 0, 2-3 on NUMA node 1)
+# for NVIDIA_DRA_SYSFS_ROOT in mock-values.yaml. With ComputeDomains enabled, the
+# gpus container follows the compute-domains container.
   - op: add
     path: /spec/template/spec/volumes/-
     value:
@@ -12,7 +13,7 @@
         path: /var/lib/nvml-mock/sys
         type: Directory
   - op: add
-    path: /spec/template/spec/containers/0/volumeMounts/-
+    path: /spec/template/spec/containers/1/volumeMounts/-
     value:
       name: nvml-mock-sysfs
       mountPath: /nvml-mock-sysfs

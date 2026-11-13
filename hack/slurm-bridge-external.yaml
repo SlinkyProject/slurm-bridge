@@ -6,6 +6,7 @@ controller:
     GresTypes:
       - gpu
       - nic
+      - imex
     Nodeset:
       - slurm-bridge Feature=slurm-bridge
     PartitionName:

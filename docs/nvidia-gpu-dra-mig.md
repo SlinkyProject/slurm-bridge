@@ -126,6 +126,9 @@ The chart creates the `gpu.nvidia.com`, `mig.nvidia.com`, and
 `vfio.gpu.nvidia.com` DeviceClasses. `vfio.gpu.nvidia.com` has no matching
 device profile, so the admission controller rejects Pods that request it.
 
+To enable `resources.computeDomains` for IMEX across NVLink-connected nodes, see
+[NVIDIA ComputeDomains and IMEX with DRA](nvidia-compute-domain-imex.md).
+
 ## Verify the Device Inventory
 
 List the devices published for a GPU worker:
