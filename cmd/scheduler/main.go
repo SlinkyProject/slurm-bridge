@@ -28,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -206,6 +207,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	if enabled["node"] || schedulerRunnable != nil {
+		if err := nodeutils.SetupFieldIndexers(mgr); err != nil {
+			setupLog.Error(err, "unable to set up inventory field indexers")
+			os.Exit(1)
+		}
+	}
+	if schedulerRunnable != nil {
+		// Register before manager startup so its cache sync barrier covers inventory.
+		if _, err := mgr.GetCache().GetInformer(ctx, &resourcev1.DeviceClass{}, cache.BlockUntilSynced(false)); err != nil {
+			setupLog.Error(err, "unable to set up DeviceClass cache")
+			os.Exit(1)
+		}
+	}
+
 	if len(enabled) > 0 {
 		clientConfig := &slurmclient.Config{
 			Server:        cfg.SlurmRestApi,
@@ -218,10 +233,6 @@ func main() {
 			os.Exit(1)
 		}
 		if enabled["node"] {
-			if err := nodeutils.SetupFieldIndexers(mgr); err != nil {
-				setupLog.Error(err, "unable to set up node field indexers")
-				os.Exit(1)
-			}
 			nodeEventCh := make(chan event.GenericEvent, 100)
 			if err := node.NewReconciler(mgr.GetClient(), slurmClient, cfg.SchedulerName, nodeEventCh, draRegistry).SetupWithManager(mgr); err != nil {
 				setupLog.Error(err, "unable to create controller", "controller", "Node")

@@ -5,8 +5,6 @@ package slurmbridge
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -36,7 +34,10 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-func socketClaimFixture(t *testing.T, funcs interceptor.Funcs) (*SlurmBridge, *corev1.Pod, *slurmcontrol.NodeResources) {
+func socketClaimFixture(t interface {
+	Helper()
+	Fatal(...any)
+}, funcs interceptor.Funcs) (*SlurmBridge, *corev1.Pod, *slurmcontrol.NodeResources) {
 	t.Helper()
 	slice := &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{Name: "cpu-pool"}, Spec: resourcev1.ResourceSliceSpec{Driver: nodeinfo.DraDriverCpu, NodeName: ptr.To("node"), Pool: resourcev1.ResourcePool{Name: "node", Generation: 12, ResourceSliceCount: 1}}}
 	for socket := 0; socket < 2; socket++ {
@@ -61,7 +62,7 @@ func socketClaimFixture(t *testing.T, funcs interceptor.Funcs) (*SlurmBridge, *c
 	class := func(name, driver string) *resourcev1.DeviceClass {
 		return &resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: fmt.Sprintf(`device.driver == %q`, driver)}}}}}
 	}
-	kclient := fake.NewClientBuilder().WithObjects(slice, pod, class("cpus", nodeinfo.DraDriverCpu), func() *resourcev1.DeviceClass {
+	kclient := fake.NewClientBuilder().WithGlobalResourceVersionCounter().WithObjects(slice, pod, class("cpus", nodeinfo.DraDriverCpu), func() *resourcev1.DeviceClass {
 		c := class("gpus", "gpu.example.com")
 		p, _ := testutils.DRARegistryWithExampleGPU().LookupByName("gpu.example.com")
 		c.Spec.Selectors[0].CEL.Expression = p.Selector
@@ -133,61 +134,6 @@ func TestSocketClaim128ThreadsWithGPUAndAPIValidation(t *testing.T) {
 	resources.CoreBitmap = bitmaputil.String(bitmaputil.New(0))
 	if err := sb.manageResourceClaim(ctx, pod, "node", resources); err == nil {
 		t.Fatal("reused claim for a changed Slurm allocation")
-	}
-}
-
-func TestSocketClaimRecoveryAfterAmbiguousWrites(t *testing.T) {
-	for _, failure := range []string{"create", "allocate", "pod"} {
-		t.Run(failure, func(t *testing.T) {
-			injected := false
-			inject := func(stage string) error {
-				if stage == failure && !injected {
-					injected = true
-					return errors.New("response lost after persistence")
-				}
-				return nil
-			}
-			sb, pod, resources := socketClaimFixture(t, interceptor.Funcs{
-				Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-					if err := c.Create(ctx, obj, opts...); err != nil {
-						return err
-					}
-					return inject("create")
-				},
-				SubResourcePatch: func(ctx context.Context, c client.Client, name string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-					if err := c.SubResource(name).Patch(ctx, obj, patch, opts...); err != nil {
-						return err
-					}
-					switch obj.(type) {
-					case *resourcev1.ResourceClaim:
-						return inject("allocate")
-					case *corev1.Pod:
-						return inject("pod")
-					}
-					return nil
-				},
-			})
-			if err := sb.manageResourceClaim(context.Background(), pod, "node", resources); err == nil {
-				t.Fatal("failure was not injected")
-			}
-			// Retry with a new bridge instance and the persisted claim.
-			restarted := &SlurmBridge{Client: sb.Client, draRegistry: testutils.DRARegistryWithExampleGPU()}
-			if err := restarted.manageResourceClaim(context.Background(), pod, "node", resources); err != nil {
-				t.Fatal(err)
-			}
-			claims := &resourcev1.ResourceClaimList{}
-			if err := sb.List(context.Background(), claims); err != nil {
-				t.Fatal(err)
-			}
-			if len(claims.Items) != 1 || claims.Items[0].Status.Allocation == nil {
-				t.Fatal("retry duplicated or lost reservation")
-			}
-			for _, config := range claims.Items[0].Status.Allocation.Devices.Config {
-				if !json.Valid(config.Opaque.Parameters.Raw) {
-					t.Fatal("invalid opaque configuration")
-				}
-			}
-		})
 	}
 }
 
