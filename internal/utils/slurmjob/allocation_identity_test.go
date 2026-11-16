@@ -4,6 +4,7 @@
 package slurmjob
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestAllocationMembershipWithoutGroupMetadata(t *testing.T) {
 			jobs := []RegisteredJob{{ExternalJob: ExternalJob{JobId: 100}, info: externaljobinfo.ExternalJobInfo{Pods: tc.pods}}}
 			got, err := SelectAllocation(ir, jobs)
 			if tc.members == 0 {
-				if err != ErrAllocationMembership {
+				if !errors.Is(err, ErrAllocationMembership) {
 					t.Fatalf("error=%v, want membership rejection", err)
 				}
 				return
