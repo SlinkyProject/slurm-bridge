@@ -34,6 +34,7 @@ import (
 	kubefake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -68,12 +69,12 @@ func (r *compositeUpdateRecorder) GetJob(_ context.Context, pod *corev1.Pod) (*s
 	return &slurmcontrol.ExternalJob{JobId: slurmjobir.ParseSlurmJobId(pod.Labels[wellknown.LabelExternalJobId]), Pending: true, Held: true}, nil
 }
 
-func (r *compositeUpdateRecorder) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+func (r *compositeUpdateRecorder) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	jobs := testAllocation(ir)
 	for i := range jobs {
 		jobs[i].Pending, jobs[i].Held = true, true
 	}
-	return jobs, nil
+	return slurmjob.Allocation{IR: ir, Jobs: jobs}, nil
 }
 
 // sortUpdates orders recorded updates by root, since releases run concurrently.

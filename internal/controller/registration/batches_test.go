@@ -35,8 +35,17 @@ import (
 
 func TestRegisterPodGroupNextBatch(t *testing.T) {
 	for _, version := range []string{slurmjobir.WorkloadAPIVersionV1Alpha2, slurmjobir.WorkloadAPIVersionV1Beta1} {
-		for _, pending := range []int{1, 2} {
-			t.Run(fmt.Sprintf("%s/pending-%d", version, pending), func(t *testing.T) {
+		for _, batch := range []struct {
+			state   api.V0044JobInfoJobState
+			pending int
+		}{
+			{api.V0044JobInfoJobStateCOMPLETED, 1},
+			{api.V0044JobInfoJobStateCOMPLETED, 2},
+			{api.V0044JobInfoJobStateRUNNING, 1},
+			{api.V0044JobInfoJobStateRUNNING, 2},
+		} {
+			oldState, pending := batch.state, batch.pending
+			t.Run(fmt.Sprintf("%s/%s/pending-%d", version, oldState, pending), func(t *testing.T) {
 				scheme := runtime.NewScheme()
 				if err := corev1.AddToScheme(scheme); err != nil {
 					t.Fatal(err)
@@ -76,7 +85,7 @@ func TestRegisterPodGroupNextBatch(t *testing.T) {
 				kube := kubefake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 				root := metav1.PartialObjectMetadata{TypeMeta: group.TypeMeta, ObjectMeta: group.ObjectMeta}
 				oldInfo := schedulercontrol.ExternalJobInfoFor(root, slurmjobir.SlurmJobComponent{Pods: corev1.PodList{Items: pods[:2]}})
-				base := slurmfake.NewClientBuilder().WithObjects(&api.V0044JobInfo{JobId: ptr.To(int32(10)), AdminComment: ptr.To(oldInfo.ToString()), JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStateCOMPLETED}}).Build()
+				base := slurmfake.NewClientBuilder().WithObjects(&api.V0044JobInfo{JobId: ptr.To(int32(10)), AdminComment: ptr.To(oldInfo.ToString()), JobState: &[]api.V0044JobInfoJobState{oldState}}).Build()
 				submissions := 0
 				slurm := interceptor.NewClient(base, interceptor.Funcs{Create: func(ctx context.Context, obj object.Object, request any, opts ...slurmclient.CreateOption) error {
 					submissions++
@@ -106,7 +115,8 @@ func TestRegisterPodGroupNextBatch(t *testing.T) {
 				}})
 				r := NewReconciler(kube, slurm, "slurm-bridge", dra.DefaultRegistry(), workloadAPI, "", "")
 				r.informer = &registrationInformer{InformerCache: base.GetInformer(api.ObjectTypeV0044JobInfo), synced: true}
-				if _, err := slurmjob.NewPodIndex(slurm, r.informer); err != nil {
+				r.jobIndex, err = slurmjob.NewPodIndex(slurm, r.informer)
+				if err != nil {
 					t.Fatal(err)
 				}
 				key := objectRequest(group)
@@ -114,7 +124,7 @@ func TestRegisterPodGroupNextBatch(t *testing.T) {
 				if err != nil || len(members) != len(pods) {
 					t.Fatalf("cleanup lost historical membership: members=%d err=%v", len(members), err)
 				}
-				for range 2 {
+				for range 4 {
 					if _, err := r.Reconcile(t.Context(), key); err != nil {
 						t.Fatal(err)
 					}

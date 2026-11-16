@@ -25,6 +25,7 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/object"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -159,8 +160,8 @@ type placementConfirmationControl struct {
 	reads, effects int
 }
 
-func (c *placementConfirmationControl) GetAllocation(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return []slurmcontrol.ExternalJob{{JobId: 10, Nodes: "node1"}}, nil
+func (c *placementConfirmationControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
+	return slurmjob.Allocation{IR: ir, Jobs: []slurmcontrol.ExternalJob{{JobId: 10, Nodes: "node1"}}}, nil
 }
 
 func (c *placementConfirmationControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {

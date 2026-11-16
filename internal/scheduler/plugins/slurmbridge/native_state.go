@@ -104,14 +104,14 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 	key := client.ObjectKeyFromObject(pod)
 	allocation := group.allocations[key]
 	if allocation == nil {
-		ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
-			slurmjobir.WithResourceSlices(sb.resourceSlices), slurmjobir.WithNUMASpans(sb.numaCache))
+		allocationResult, err := sb.translateAllocation(ctx, pod)
 		if err != nil {
 			if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
 				return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 			}
-			return nil, fwk.AsStatus(err)
+			return nil, (&stateData{slurmJobIR: allocationResult.IR}).checkAllocation(pod, allocationResult.Jobs, err)
 		}
+		ir := allocationResult.IR
 		// A newly arriving/replaced member must not create a second decision for
 		// an allocation already prepared in this attempt. Retry with a new cycle.
 		for _, component := range ir.Components {
@@ -135,7 +135,7 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 				allocation.members[key] = nativeMember{pod: member, component: index}
 			}
 		}
-		allocation.status = sb.prepareNativeAllocation(ctx, pod, allocation)
+		allocation.status = sb.prepareNativeAllocation(ctx, pod, allocation, allocationResult.Jobs)
 	}
 	s.native = allocation
 	if !allocation.status.IsSuccess() {
@@ -174,7 +174,7 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState
 	return &fwk.PreFilterResult{NodeNames: sets.New(s.nodeName)}, nil
 }
 
-func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.Pod, allocation *nativeAllocation) *fwk.Status {
+func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.Pod, allocation *nativeAllocation, jobs []slurmcontrol.ExternalJob) *fwk.Status {
 	for _, component := range allocation.ir.Components {
 		for _, member := range component.Pods.Items {
 			if member.Spec.ResourceClaims != nil {
@@ -188,9 +188,8 @@ func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.
 			return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 		}
 	}
-	jobs, err := sb.slurmControl.GetAllocation(ctx, pod, allocation.ir)
 	s := &stateData{slurmJobIR: allocation.ir}
-	if status := s.checkAllocation(pod, jobs, err); !status.IsSuccess() {
+	if status := s.checkAllocation(pod, jobs, nil); !status.IsSuccess() {
 		return status
 	}
 	allocation.jobs = slices.Clone(jobs)
@@ -294,9 +293,9 @@ func (a *nativeAllocation) resourcesFor(ctx context.Context, control slurmcontro
 		return nil, fwk.NewStatus(fwk.Unschedulable, "Pod identity changed before gang binding")
 	}
 	a.validationOnce.Do(func() {
-		jobs, err := control.GetAllocation(ctx, pod, a.ir)
+		resolved, err := control.GetAllocation(ctx, pod, a.ir)
 		state := &stateData{slurmJobIR: a.ir, allocation: a.jobs}
-		a.validationStatus = state.checkAllocation(pod, jobs, err)
+		a.validationStatus = state.checkAllocation(pod, resolved.Jobs, err)
 	})
 	if !a.validationStatus.IsSuccess() {
 		return nil, a.validationStatus

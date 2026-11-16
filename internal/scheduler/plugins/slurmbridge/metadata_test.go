@@ -30,8 +30,8 @@ func (*unregisteredControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.
 	return &slurmcontrol.ExternalJob{}, nil
 }
 
-func (*unregisteredControl) GetAllocation(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return nil, slurmjob.ErrAllocationMissing
+func (*unregisteredControl) GetAllocation(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
+	return slurmjob.Allocation{}, slurmjob.ErrAllocationMissing
 }
 
 func TestPostFilterWaitsForRegistration(t *testing.T) {
@@ -51,8 +51,8 @@ type releaseControl struct {
 	fail  bool
 }
 
-func (*releaseControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return testAllocation(ir), nil
+func (*releaseControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
+	return slurmjob.Allocation{IR: ir, Jobs: testAllocation(ir)}, nil
 }
 
 func (c *releaseControl) UpdateJob(_ context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) (int32, error) {

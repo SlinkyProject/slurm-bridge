@@ -467,13 +467,13 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	s := &stateData{}
 	state.Write(stateKey, s)
 
-	// Construct an intermediate representation of the Slurm external job
-	s.slurmJobIR, err = slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
-		slurmjobir.WithResourceSlices(sb.resourceSlices), slurmjobir.WithNUMASpans(sb.numaCache))
+	allocationResult, allocationErr := sb.translateAllocation(ctx, pod)
+	s.slurmJobIR = allocationResult.IR
+	err = allocationErr
 	if errors.Is(err, slurmjobir.ErrorPodGroupUnsupported) {
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
-	if err != nil {
+	if err != nil && !allocationWait(err) {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
 	}
 	root := &s.slurmJobIR.RootPOM
@@ -493,7 +493,7 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 		}
 	}
 
-	jobs, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
+	jobs := allocationResult.Jobs
 	allocationStatus := s.checkAllocation(pod, jobs, allocationErr)
 	if !allocationStatus.IsSuccess() {
 		// Only a missing or finished allocation may retry stale metadata cleanup.
@@ -661,7 +661,8 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	// allocation snapshots remain immutable through concurrent binding.
 	s.slurmJobIR = copySchedulingIR(s.slurmJobIR)
 	assignedNode := s.assignedNode(pod)
-	jobs, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
+	allocationResult, allocationErr := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
+	jobs := allocationResult.Jobs
 	if status := s.checkAllocation(pod, jobs, allocationErr); !status.IsSuccess() {
 		return nil, status
 	}

@@ -177,6 +177,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, key Request) (reconcile.Resu
 	if membershipErr != nil {
 		return r.registrationReadEvent(key, membershipErr)
 	}
+	// Publishing an existing allocation needs only its recorded Pod identities.
+	// Do not translate late arrivals or let their resources block publication.
+	if slices.ContainsFunc(jobs, func(job slurmjob.RegisteredJob) bool { return !job.Finished }) {
+		r.recent.Delete(key)
+		return r.publishRegistered(ctx, key, pods, jobs)
+	}
 	slices.SortFunc(pods, func(a, b corev1.Pod) int { return strings.Compare(a.Name, b.Name) })
 	for i := range pods {
 		pod := &pods[i]
