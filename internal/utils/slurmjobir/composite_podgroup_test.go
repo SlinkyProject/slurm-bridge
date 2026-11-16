@@ -17,7 +17,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -194,6 +196,8 @@ func TestCompositeReadinessStopsAtBasicParent(t *testing.T) {
 	tr := translator{handle: readinessHandle{manager: snapshot}}
 	ir := &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "gang"}}}
 	pod := podWithSchedulingGroup(ns, "pod", "leaf")
+	pod.UID = "leaf-0"
+	ir.Components = []SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}}
 	if status := tr.PreFilterCompositePodGroup(pod, ir); !status.IsSuccess() {
 		t.Fatalf("PreFilterCompositePodGroup(ready gang below basic) = %v, want success", status)
 	}
@@ -374,7 +378,7 @@ type readinessGroupStateLister map[string]int
 
 func (l readinessGroupStateLister) Get(_, name string) (fwk.PodGroupState, error) {
 	if count, ok := l[name]; ok {
-		return readinessGroupState{count: count}, nil
+		return readinessGroupState{count: count, name: name}, nil
 	}
 	return nil, fmt.Errorf("pod group state %q missing", name)
 }
@@ -382,9 +386,17 @@ func (l readinessGroupStateLister) Get(_, name string) (fwk.PodGroupState, error
 type readinessGroupState struct {
 	fwk.PodGroupState
 	count int
+	name  string
 }
 
 func (s readinessGroupState) AllPodsCount() int { return s.count }
+func (s readinessGroupState) AllPods() sets.Set[types.UID] {
+	members := sets.New[types.UID]()
+	for i := range s.count {
+		members.Insert(types.UID(fmt.Sprintf("%s-%d", s.name, i)))
+	}
+	return members
+}
 
 type readinessCompositeLister map[string]*schedulingv1alpha3.CompositePodGroup
 
@@ -528,14 +540,14 @@ func Test_translator_PreFilterCompositePodGroup(t *testing.T) {
 				tr.Reader = fake.NewClientBuilder().WithScheme(scheme).WithObjects(root).Build()
 				tr.ctx = context.Background()
 			}
-			jobIR := &SlurmJobIR{
-				RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root"}},
-				Components: []SlurmJobComponent{
-					{Pods: corev1.PodList{Items: []corev1.Pod{{}}}},
-					{Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{
-						Labels: map[string]string{wellknown.LabelExternalJobId: tt.jobID},
-					}}}}},
-				}}
+			jobIR := &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}}}
+			for name, count := range snapshot.counts {
+				component := SlurmJobComponent{ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}}
+				for uid := range (readinessGroupState{name: name, count: count}).AllPods() {
+					component.Pods.Items = append(component.Pods.Items, corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: uid, Labels: map[string]string{wellknown.LabelExternalJobId: tt.jobID}}})
+				}
+				jobIR.Components = append(jobIR.Components, component)
+			}
 			got := tr.PreFilterCompositePodGroup(podWithSchedulingGroup(ns, "pod", "leaf"), jobIR)
 			if !got.Equal(tt.want) {
 				t.Errorf("PreFilterCompositePodGroup(%q) = %v, want %v", tt.name, got, tt.want)
@@ -585,10 +597,14 @@ func TestPreFilterCompositePodGroupConfirmsLiveQuorum(t *testing.T) {
 			if tt.liveOther {
 				other := newPodGroup("other", ns, schedulingv1beta1.PodGroupSchedulingPolicy{})
 				other.Spec.ParentCompositePodGroupName = ptr.To("root")
-				objects = append(objects, other, podWithSchedulingGroup(ns, "other-pod", "other"))
+				otherPod := podWithSchedulingGroup(ns, "other-pod", "other")
+				otherPod.UID = "other-0"
+				objects = append(objects, other, otherPod)
 			}
 			for i := range tt.livePods {
-				objects = append(objects, podWithSchedulingGroup(ns, fmt.Sprintf("pod-%d", i), "leaf"))
+				member := podWithSchedulingGroup(ns, fmt.Sprintf("pod-%d", i), "leaf")
+				member.UID = types.UID(fmt.Sprintf("leaf-%d", i))
+				objects = append(objects, member)
 			}
 			cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{
 				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
@@ -618,9 +634,23 @@ func TestPreFilterCompositePodGroupConfirmsLiveQuorum(t *testing.T) {
 			}
 			pod := podWithSchedulingGroup(ns, "pod-0", "leaf")
 			pod.Labels = map[string]string{wellknown.LabelExternalJobId: "42"}
+			pod.UID = "leaf-0"
 			ir := &SlurmJobIR{
 				RootPOM:    metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}},
-				Components: []SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}},
+				Components: []SlurmJobComponent{{ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "leaf", Namespace: ns}}, Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}},
+			}
+			// The API-discovered allocation contains original members missing from
+			// the framework snapshot. Late members are covered separately below.
+			for _, obj := range objects {
+				member, ok := obj.(*corev1.Pod)
+				if !ok || member.Name == pod.Name {
+					continue
+				}
+				if *member.Spec.SchedulingGroup.PodGroupName == "leaf" {
+					ir.Components[0].Pods.Items = append(ir.Components[0].Pods.Items, *member)
+				} else {
+					ir.Components = append(ir.Components, SlurmJobComponent{ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: ns}}, Pods: corev1.PodList{Items: []corev1.Pod{*member}}})
+				}
 			}
 			tr := translator{Reader: cl, ctx: context.Background(), workloadAPI: api, handle: readinessHandle{manager: snapshot},
 				podsByGroup: map[string]corev1.PodList{"leaf": {Items: []corev1.Pod{*pod}}}}
@@ -766,5 +796,65 @@ func TestCompositePodGroupAnnotationsPerLeaf(t *testing.T) {
 		if len(component.Pods.Items) != 2 || ptr.Deref(component.JobInfo.Account, "") != name+"-account" || ptr.Deref(component.JobInfo.Partition, "") != name+"-partition" {
 			t.Fatalf("leaf %s lost its Pod overrides or PodGroup defaults: %+v", name, component.JobInfo)
 		}
+	}
+}
+
+func TestCompositeQuorumExcludesUnregisteredMembers(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	for _, lateChild := range []bool{false, true} {
+		t.Run(fmt.Sprintf("late-child-%t", lateChild), func(t *testing.T) {
+			minimum := int32(2)
+			if lateChild {
+				minimum = 1
+			}
+			snapshot := &readinessSnapshot{
+				groups:     map[string]*schedulingv1beta1.PodGroup{"leaf": {Spec: schedulingv1beta1.PodGroupSpec{SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: minimum}}}}},
+				counts:     map[string]int{"leaf": 2},
+				composites: map[string]*schedulingv1alpha3.CompositePodGroup{"root": {Spec: schedulingv1alpha3.CompositePodGroupSpec{SchedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{Gang: &schedulingv1alpha3.CompositeGangSchedulingPolicy{MinGroupCount: 1}}}}},
+				children:   map[string][]fwk.EntityKey{"root": {fwk.PodGroupKey(ns, "leaf")}},
+				root:       fwk.CompositePodGroupKey(ns, "root"), found: true,
+			}
+			if lateChild {
+				snapshot.composites["root"].Spec.SchedulingPolicy.Gang.MinGroupCount = 2
+				snapshot.groups["late"] = &schedulingv1beta1.PodGroup{}
+				snapshot.counts["late"] = 1
+				snapshot.children["root"] = append(snapshot.children["root"], fwk.PodGroupKey(ns, "late"))
+			}
+			pod := podWithSchedulingGroup(ns, "leaf", "leaf")
+			pod.UID = "leaf-0"
+			ir := &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "root"}}, Components: []SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{*pod}}}}}
+			tr := translator{handle: readinessHandle{manager: snapshot}}
+			if status := tr.PreFilterCompositePodGroup(pod, ir); status.IsSuccess() {
+				t.Fatal("unregistered member satisfied submitted allocation quorum")
+			}
+		})
+	}
+}
+
+func TestCompositeLostRecordedQuorum(t *testing.T) {
+	const ns = corev1.NamespaceDefault
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	api := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+	root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(1)}}})
+	leaf := newPodGroup("leaf", ns, schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2}})
+	leaf.Spec.ParentCompositePodGroupName = ptr.To("root")
+	first := podWithSchedulingGroup(ns, "first", "leaf")
+	first.UID = "leaf-0"
+	first.Labels = map[string]string{wellknown.LabelExternalJobId: "100"}
+	late := podWithSchedulingGroup(ns, "late", "leaf")
+	late.UID = "leaf-1"
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(root, leaf, first, late).Build()
+	snapshot := &readinessSnapshot{
+		groups:     map[string]*schedulingv1beta1.PodGroup{"leaf": {Spec: schedulingv1beta1.PodGroupSpec{SchedulingPolicy: schedulingv1beta1.PodGroupSchedulingPolicy{Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2}}}}},
+		counts:     map[string]int{"leaf": 2},
+		composites: map[string]*schedulingv1alpha3.CompositePodGroup{"root": {Spec: schedulingv1alpha3.CompositePodGroupSpec{SchedulingPolicy: schedulingv1alpha3.CompositePodGroupSchedulingPolicy{Gang: &schedulingv1alpha3.CompositeGangSchedulingPolicy{MinGroupCount: 1}}}}},
+		children:   map[string][]fwk.EntityKey{"root": {fwk.PodGroupKey(ns, "leaf")}}, root: fwk.CompositePodGroupKey(ns, "root"), found: true,
+	}
+	ir := &SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{TypeMeta: compositePodGroupV1Alpha3, ObjectMeta: metav1.ObjectMeta{Name: "root", Namespace: ns}}, Components: []SlurmJobComponent{{ObjectMeta: metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{Name: "leaf", Namespace: ns}}, Pods: corev1.PodList{Items: []corev1.Pod{*first}}}}}
+	tr := translator{Reader: cl, ctx: t.Context(), workloadAPI: api, handle: readinessHandle{manager: snapshot}}
+	got := tr.PreFilterCompositePodGroup(first, ir)
+	if !slices.Contains(got.Reasons(), ErrorExternalJobInvalid.Error()) {
+		t.Fatalf("recorded allocation permanently below quorum, but no invalid-allocation recovery: code=%v status=%v", got.Code(), got)
 	}
 }

@@ -50,9 +50,9 @@ type nativeStateControl struct {
 	liveJob         *slurmcontrol.ExternalJob
 }
 
-func (c *nativeStateControl) GetAllocation(context.Context, *corev1.Pod, *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+func (c *nativeStateControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	c.allocationReads.Add(1)
-	return []slurmcontrol.ExternalJob{c.job}, c.allocationErr
+	return slurmjob.Allocation{IR: ir, Jobs: []slurmcontrol.ExternalJob{c.job}}, c.allocationErr
 }
 
 func (c *nativeStateControl) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {
@@ -456,13 +456,13 @@ type nativeHetControl struct {
 	effects []string
 }
 
-func (c *nativeHetControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+func (c *nativeHetControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	c.reads++
 	jobs := testAllocation(ir)
 	for i := range jobs {
 		jobs[i].Pending, jobs[i].Held, jobs[i].HetJobId = true, true, 10
 	}
-	return jobs, nil
+	return slurmjob.Allocation{IR: ir, Jobs: jobs}, nil
 }
 func (c *nativeHetControl) UpdateJob(_ context.Context, pod *corev1.Pod, _ *slurmjobir.SlurmJobIR) (int32, error) {
 	c.effects = append(c.effects, "update:"+pod.Labels[wellknown.LabelExternalJobId])

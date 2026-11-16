@@ -49,15 +49,6 @@ func submissionAllowed(jobs []slurmjob.RegisteredJob, cooldown *int32, members [
 
 func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR, jobs []slurmjob.RegisteredJob) (reconcile.Result, error) {
 	waiting := reconcile.Result{RequeueAfter: registrationRetry}
-	if slices.ContainsFunc(jobs, func(job slurmjob.RegisteredJob) bool { return !job.Finished }) {
-		r.recent.Delete(key)
-		components, complete, err := slurmjob.MatchAllocationComponents(ir, jobs)
-		if err != nil || !complete {
-			return waiting, err
-		}
-		r.clearRegistrationEvent(key)
-		return reconcile.Result{}, r.publish(ctx, ir, components)
-	}
 	var cooldown *int32
 	if previous, cooling := r.recent.Get(key); cooling {
 		id := previous.(int32)
@@ -95,22 +86,52 @@ func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod,
 	return waiting, err
 }
 
-func (r *Reconciler) publish(ctx context.Context, ir *slurmjobir.SlurmJobIR, components []slurmjob.ExternalJob) error {
+// publishRegistered uses the submission records directly; current group shape
+// and resource requests matter only when submitting the next batch.
+func (r *Reconciler) publishRegistered(ctx context.Context, key Request, pods []corev1.Pod, jobs []slurmjob.RegisteredJob) (reconcile.Result, error) {
+	membership := slurmjob.IndexAllocationPods(jobs)
+	selected := make(map[client.ObjectKey]bool, len(pods))
 	var errs []error
-	for i, component := range ir.Components {
-		job := components[i]
+	waiting := false
+	for _, job := range jobs {
 		if job.Finished {
 			continue
 		}
-		for _, member := range component.Pods.Items {
-			if !r.eligible(&member) {
-				continue
+		var members []corev1.Pod
+		for _, pod := range pods {
+			if membership.Contains(&pod, job.JobId) {
+				members = append(members, pod)
+				selected[client.ObjectKeyFromObject(&pod)] = true
 			}
-			updated := slurmjob.PodWithMetadata(ctx, &member, job, true)
-			updated.Spec.SchedulingGates = slices.DeleteFunc(updated.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration })
-			if !reflect.DeepEqual(&member, updated) {
-				errs = append(errs, client.IgnoreNotFound(r.Patch(ctx, updated, client.StrategicMergeFrom(&member, client.MergeFromWithOptimisticLock{}))))
-			}
+		}
+		errs = append(errs, r.publish(ctx, members, job.ExternalJob))
+	}
+	for _, pod := range pods {
+		if r.eligible(&pod) && !selected[client.ObjectKeyFromObject(&pod)] {
+			waiting = true
+		}
+	}
+	result := reconcile.Result{}
+	if waiting {
+		r.registrationEvent(key, corev1.EventTypeNormal, "WaitingForNextAllocation",
+			"The submitted Slurm allocation has fixed membership; later Pods and child groups must wait for it to finish and for a new batch to meet quorum")
+		result.RequeueAfter = registrationRetry
+	} else {
+		r.clearRegistrationEvent(key)
+	}
+	return result, errors.Join(errs...)
+}
+
+func (r *Reconciler) publish(ctx context.Context, members []corev1.Pod, job slurmjob.ExternalJob) error {
+	var errs []error
+	for _, member := range members {
+		if !r.eligible(&member) {
+			continue
+		}
+		updated := slurmjob.PodWithMetadata(ctx, &member, job, true)
+		updated.Spec.SchedulingGates = slices.DeleteFunc(updated.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration })
+		if !reflect.DeepEqual(&member, updated) {
+			errs = append(errs, client.IgnoreNotFound(r.Patch(ctx, updated, client.StrategicMergeFrom(&member, client.MergeFromWithOptimisticLock{}))))
 		}
 	}
 	return errors.Join(errs...)

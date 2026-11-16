@@ -73,25 +73,28 @@ func jobGroupKeys(obj object.Object) []string {
 	return keys
 }
 
-// GetAllocation resolves every component of a single active Kubernetes allocation.
+// GetAllocation selects the recorded batch without mutating the caller's IR.
 // Pod labels never select between conflicting allocations.
-func (r *PodIndex) GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]ExternalJob, error) {
+func (r *PodIndex) GetAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) (Allocation, error) {
 	identity, err := IdentityForAllocation(pod, ir)
 	if err != nil {
-		return nil, err
+		return Allocation{}, err
 	}
 	jobs, err := IndexedAllocation(ctx, r.jobInformer, identity)
 	if err != nil {
-		return nil, err
+		return Allocation{}, err
 	}
-	components, complete, err := MatchAllocationComponents(ir, jobs)
+	allocation, err := SelectAllocation(ir, jobs)
 	if err != nil {
-		return nil, err
+		return Allocation{}, err
 	}
-	if !complete {
-		return nil, ErrAllocationMissing
+	component := allocation.IR.ComponentOf(pod.Namespace, pod.Name)
+	if component < 0 || !slices.ContainsFunc(allocation.IR.Components[component].Pods.Items, func(p corev1.Pod) bool {
+		return p.UID == pod.UID && p.Namespace == pod.Namespace && p.Name == pod.Name
+	}) {
+		return Allocation{}, ErrAllocationMembership
 	}
-	return components, nil
+	return allocation, nil
 }
 
 func jobPodKeys(obj object.Object) []string {

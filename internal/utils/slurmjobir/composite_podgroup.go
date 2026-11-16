@@ -6,9 +6,12 @@ package slurmjobir
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	fwk "k8s.io/kube-scheduler/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -40,11 +43,23 @@ func (t *translator) PreFilterCompositePodGroup(pod *corev1.Pod, slurmJobIR *Slu
 		return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, fmt.Sprintf("waiting for pods's pod group %q to appear in scheduling queue", *schedulingGroup.PodGroupName))
 	}
 
-	status := t.checkCPGHierarchyReadiness(snapshot, namespace, slurmJobIR.RootPOM.Name, func(s fwk.PodGroupState) int { return s.AllPodsCount() })
+	members := sets.New[types.UID]()
+	for _, member := range slurmJobIR.AllPods() {
+		members.Insert(member.UID)
+	}
+	status := t.checkCPGHierarchyReadiness(snapshot, namespace, slurmJobIR.RootPOM.Name, func(s fwk.PodGroupState) int {
+		count := 0
+		for uid := range s.AllPods() {
+			if members.Has(uid) {
+				count++
+			}
+		}
+		return count
+	})
 	if status.Code() == fwk.UnschedulableAndUnresolvable {
 		for _, leafPod := range slurmJobIR.AllPods() {
 			if ParseSlurmJobId(leafPod.Labels[wellknown.LabelExternalJobId]) != 0 {
-				ready, err := t.liveCPGTreeReady(namespace, slurmJobIR.RootPOM.Name)
+				ready, err := t.liveCPGTreeReady(slurmJobIR)
 				if err != nil {
 					return fwk.AsStatus(err)
 				}
@@ -58,72 +73,33 @@ func (t *translator) PreFilterCompositePodGroup(pod *corev1.Pod, slurmJobIR *Slu
 	return status
 }
 
-func (t *translator) liveCPGTreeReady(namespace, rootName string) (bool, error) {
-	groups, err := t.listCompositePodGroup(namespace)
-	if err != nil {
-		return false, err
-	}
-	podGroups := &PodGroupList{TypeMeta: metav1.TypeMeta{
-		APIVersion: t.workloadAPI.PodGroupTypeMeta.APIVersion,
-		Kind:       "PodGroupList",
-	}}
-	if err := t.List(t.ctx, podGroups, client.InNamespace(namespace)); err != nil {
-		return false, err
-	}
-	// Use a new pod list even if this translator has already listed pods.
+// Confirm quorum with fresh API membership, restricted to the selected Pod UIDs.
+// Independent allocations below basic boundaries are counted by the shared
+// registration readiness check.
+func (t *translator) liveCPGTreeReady(ir *SlurmJobIR) (bool, error) {
 	fresh := *t
 	fresh.podsByGroup = nil
-	var ready func(string, int) (bool, error)
-	ready = func(name string, depth int) (bool, error) {
-		minCount := 1
-		found := false
-		for _, group := range groups {
-			if group.name == name {
-				found = true
-				if group.schedulingPolicy.Gang != nil {
-					minCount = int(group.schedulingPolicy.Gang.MinGroupCount)
-				}
-				break
+	selected := *ir
+	selected.Components = slices.Clone(ir.Components)
+	for i := range selected.Components {
+		component := &selected.Components[i]
+		if len(component.Pods.Items) == 0 {
+			continue
+		}
+		pods, err := fresh.podsForPodGroup(component.ObjectMeta.Namespace, component.ObjectMeta.Name)
+		if err != nil {
+			return false, err
+		}
+		live := sets.New[types.UID]()
+		for _, pod := range pods.Items {
+			if pod.DeletionTimestamp == nil {
+				live.Insert(pod.UID)
 			}
 		}
-		if !found {
-			return false, fmt.Errorf("composite pod group %s/%s missing from API", namespace, name)
-		}
-		if depth >= len(groups) {
-			return false, fmt.Errorf("cycle in composite pod group hierarchy at %s/%s", namespace, name)
-		}
-		count := 0
-		for _, group := range groups {
-			if group.parentName != name {
-				continue
-			}
-			childReady, err := ready(group.name, depth+1)
-			if err != nil {
-				return false, err
-			}
-			if childReady {
-				count++
-			}
-		}
-		for _, pg := range podGroups.Items {
-			if pg.Spec.ParentCompositePodGroupName == nil || *pg.Spec.ParentCompositePodGroupName != name {
-				continue
-			}
-			pods, err := fresh.podsForPodGroup(namespace, pg.Name)
-			if err != nil {
-				return false, err
-			}
-			minPods := 1
-			if pg.Spec.SchedulingPolicy.Gang != nil {
-				minPods = int(pg.Spec.SchedulingPolicy.Gang.MinCount)
-			}
-			if len(pods.Items) >= minPods {
-				count++
-			}
-		}
-		return count >= minCount, nil
+		component.Pods.Items = slices.DeleteFunc(slices.Clone(component.Pods.Items), func(p corev1.Pod) bool { return !live.Has(p.UID) })
 	}
-	return ready(rootName, 0)
+	ready, _, err := fresh.compositeRegistrationReady(&selected)
+	return ready, err
 }
 
 // checkCPGHierarchyReadiness checks the selected allocation's subtree, without
@@ -153,6 +129,10 @@ func (t *translator) isCPGTreeReady(snapshot fwk.PodGroupManager, namespace, cpg
 	cpgSpec, err := snapshot.CompositePodGroups().Get(namespace, cpgName)
 	if err != nil {
 		return false
+	}
+	// Children below a basic boundary have independent allocations.
+	if cpgSpec.Spec.SchedulingPolicy.Basic != nil {
+		readinessCountFn = func(s fwk.PodGroupState) int { return s.AllPodsCount() }
 	}
 	minGroupCount := 1
 	policy := cpgSpec.Spec.SchedulingPolicy
