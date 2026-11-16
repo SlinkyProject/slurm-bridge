@@ -21,3 +21,12 @@ spec:
     - cel:
         expression: device.driver == 'dra.net' && has(device.attributes['dra.net'].pciAddress) && has(device.attributes['dra.net'].rdma) && device.attributes['dra.net'].rdma
           == true
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: dra.cpu
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "dra.cpu"
