@@ -324,6 +324,8 @@ func (r *realSlurmControl) buildJobSubmission(root metav1.PartialObjectMetadata,
 	// Ownership and allocation setup belong only to submission. In an update,
 	// user_id impersonates the owner, account triggers association lookup, and
 	// shared has different semantics that can clear MCS isolation.
+	info := ExternalJobInfoFor(root, component)
+	desc.AdminComment = ptr.To(info.ToString())
 	desc.UserId = component.JobInfo.UserId
 	desc.GroupId = component.JobInfo.GroupId
 	desc.Account = component.JobInfo.Account
@@ -356,13 +358,11 @@ func (r *realSlurmControl) buildJobUpdate(root metav1.PartialObjectMetadata, com
 // buildJobDesc contains only fields that support pending-job updates. Keep
 // submission-only fields in buildJobSubmission and release in ReleaseJob.
 func (r *realSlurmControl) buildJobDesc(root metav1.PartialObjectMetadata, jobComponent slurmjobir.SlurmJobComponent) (api.V0044JobDescMsg, error) {
-	extInfo := ExternalJobInfoFor(root, jobComponent)
 	constraints, err := gresCompatibilityConstraint(jobComponent.JobInfo.Constraints)
 	if err != nil {
 		return api.V0044JobDescMsg{}, err
 	}
 	jobDesc := api.V0044JobDescMsg{
-		AdminComment:  ptr.To(extInfo.ToString()),
 		CpusPerTask:   jobComponent.JobInfo.CpuPerTask,
 		Constraints:   constraints,
 		Licenses:      jobComponent.JobInfo.Licenses,
