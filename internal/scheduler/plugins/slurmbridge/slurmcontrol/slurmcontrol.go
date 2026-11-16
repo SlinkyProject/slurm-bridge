@@ -503,11 +503,11 @@ func (r *realSlurmControl) GetResourcesForNodes(ctx context.Context, pod *corev1
 	return out, nil
 }
 
-// Extra uses the node cache; re-registration must reach it before new inventory
-// is used. Job validation and resource-layout reads remain live.
+// Read Extra live so GRES indexes use the current registration even before
+// the scheduler node informer observes a drained and recreated node.
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {
 	node := &api.V0044Node{}
-	if err := r.Get(ctx, object.ObjectKey(nodeName), node); err != nil {
+	if err := r.Get(ctx, object.ObjectKey(nodeName), node, &client.GetOptions{SkipCache: true}); err != nil {
 		return "", err
 	}
 	return ptr.Deref(node.Extra, ""), nil

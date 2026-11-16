@@ -160,6 +160,7 @@ func isJobNotPendingError(err error) bool {
 // Slurmbridge is a plugin that schedules pods in a group.
 type SlurmBridge struct {
 	client.Client
+	claimTracker       allocationClaimTracker
 	claimMu            sync.Mutex
 	uncertainClaims    map[string]*resourcev1.ResourceClaim
 	schedulerName      string
@@ -351,6 +352,7 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	}
 	plugin := &SlurmBridge{
 		Client:        kubeClient,
+		claimTracker:  handle.SharedDRAManager().ResourceClaims(),
 		schedulerName: cfg.SchedulerName,
 		handle:        handle,
 		draRegistry:   draRegistry,

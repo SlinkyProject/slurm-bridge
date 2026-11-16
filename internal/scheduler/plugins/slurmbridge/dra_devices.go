@@ -7,13 +7,49 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"slices"
 
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// allocationClaimTracker is supplied by the scheduler's shared DRA manager.
+type allocationClaimTracker interface {
+	List() ([]*resourcev1.ResourceClaim, error)
+	AssumeClaimAfterAPICall(*resourcev1.ResourceClaim) error
+}
+
+// allocationClaims falls back to live reads for callers without a scheduler.
+func (sb *SlurmBridge) allocationClaims(ctx context.Context) ([]*resourcev1.ResourceClaim, error) {
+	if sb.claimTracker != nil {
+		return sb.claimTracker.List()
+	}
+	list := &resourcev1.ResourceClaimList{}
+	if err := sb.List(ctx, list); err != nil {
+		return nil, err
+	}
+	claims := make([]*resourcev1.ResourceClaim, len(list.Items))
+	for i := range list.Items {
+		claims[i] = &list.Items[i]
+	}
+	return claims, nil
+}
+
+// rememberClaim publishes successful writes to the shared assume cache. A new
+// claim may not be in the informer yet; retain ownership locally until it is.
+func (sb *SlurmBridge) rememberClaim(claim *resourcev1.ResourceClaim) {
+	if sb.claimTracker == nil {
+		return
+	}
+	if err := sb.claimTracker.AssumeClaimAfterAPICall(claim); err == nil {
+		return
+	}
+	if sb.uncertainClaims == nil {
+		sb.uncertainClaims = make(map[string]*resourcev1.ResourceClaim)
+	}
+	sb.uncertainClaims[claimOwner(claim)] = claim.DeepCopy()
+}
 
 type claimDevice struct{ driver, pool, device string }
 
@@ -49,24 +85,42 @@ func checkClaimDevices(devices map[claimDevice]bool, other *resourcev1.ResourceC
 	return nil
 }
 
-// patchClaimAllocation serializes the live ownership check and conditional write.
-// ResourceClaim reads must use the direct API client, as they do in New.
-// Only ambiguous failures survive this call; successful writes need no local cache.
+// patchClaimAllocation serializes this plugin's ownership checks and writes.
+// Normal binds use the shared assume cache. Only ambiguous writes and successful
+// writes not yet accepted by that cache require individual live reads.
 func (sb *SlurmBridge) patchClaimAllocation(ctx context.Context, claim, toUpdate *resourcev1.ResourceClaim) error {
 	sb.claimMu.Lock()
 	defer sb.claimMu.Unlock()
-	claims := &resourcev1.ResourceClaimList{}
-	if err := sb.List(ctx, claims); err != nil {
+	claims, err := sb.allocationClaims(ctx)
+	if err != nil {
 		return err
 	}
-	for owner, uncertain := range sb.uncertainClaims {
-		// An absent/replaced claim or changed version fences the old conditional
-		// PATCH: it either already committed or can no longer commit.
-		if !slices.ContainsFunc(claims.Items, func(current resourcev1.ResourceClaim) bool {
-			return claimOwner(&current) == owner && current.ResourceVersion == uncertain.ResourceVersion
-		}) {
-			delete(sb.uncertainClaims, owner)
+	for owner, uncertain := range maps.Clone(sb.uncertainClaims) {
+		current := &resourcev1.ResourceClaim{}
+		err := sb.Get(ctx, client.ObjectKeyFromObject(uncertain), current)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
 		}
+		if apierrors.IsNotFound(err) || claimOwner(current) != owner {
+			delete(sb.uncertainClaims, owner)
+			// A replacement may itself own devices before its informer event arrives.
+			if err == nil {
+				claims = append(claims, current)
+				if current.Status.Allocation != nil {
+					sb.rememberClaim(current)
+				}
+			}
+			continue
+		}
+		if current.ResourceVersion != uncertain.ResourceVersion || current.Status.Allocation != nil {
+			// A changed version fences the old conditional PATCH, but an allocation
+			// discovered live still owns its devices even if the tracker is behind.
+			delete(sb.uncertainClaims, owner)
+			if current.Status.Allocation != nil {
+				sb.rememberClaim(current)
+			}
+		}
+		claims = append(claims, current)
 	}
 	owner, devices := claimOwner(claim), claimedDevices(toUpdate)
 	for other, uncertain := range sb.uncertainClaims {
@@ -78,17 +132,17 @@ func (sb *SlurmBridge) patchClaimAllocation(ctx context.Context, claim, toUpdate
 			return err
 		}
 	}
-	for i := range claims.Items {
-		other := &claims.Items[i]
+	for _, other := range claims {
 		if claimOwner(other) != owner {
 			if err := checkClaimDevices(devices, other); err != nil {
 				return err
 			}
 		}
 	}
-	err := sb.Status().Patch(ctx, toUpdate, client.StrategicMergeFrom(claim, client.MergeFromWithOptimisticLock{}))
+	err = sb.Status().Patch(ctx, toUpdate, client.StrategicMergeFrom(claim, client.MergeFromWithOptimisticLock{}))
 	if err == nil {
 		delete(sb.uncertainClaims, owner)
+		sb.rememberClaim(toUpdate)
 	} else if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) && !apierrors.IsInvalid(err) &&
 		!apierrors.IsForbidden(err) && !apierrors.IsUnauthorized(err) && !apierrors.IsBadRequest(err) {
 		if sb.uncertainClaims == nil {
