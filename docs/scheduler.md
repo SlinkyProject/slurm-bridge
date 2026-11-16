@@ -73,9 +73,7 @@ translation, and all components must pass eligibility before hold release.
 Each new scheduling attempt rebuilds its snapshots, including after membership,
 identity, allocation, or feasibility changes. A changed member encountered
 within an attempt is rejected rather than added to an existing allocation
-decision. Snapshots are not cached across retries. This does not change the
-registration policy for composite children that arrive after allocation
-submission.
+decision. Snapshots are not cached across retries.
 
 Member state retains the decision when the framework detaches group state for
 concurrent binding. Each Pod still validates allocation identity and its
