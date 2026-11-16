@@ -17,6 +17,8 @@ tasks:
           gpus:
             count: ${BENCHMARK_GPUS_PER_NODE:-8}
             product: NVIDIA-H100-80GB-HBM3
+          # Publishes CPUs through DRA, such as {sockets: 2, coresPerSocket: 48, smt: true}.
+          cpus: ${BENCHMARK_CPU_TOPOLOGY:-null}
           # More DRA drivers on every node; docs/testing.md has a NIC example.
           resourceSlices: ${BENCHMARK_RESOURCE_SLICES:-[]}
           resources:

@@ -303,6 +303,16 @@ BENCHMARK_POD_DEVICES='[{class: dranet-rdma, count: 1}]' \
 make benchmark
 ```
 
+For CPUs, `BENCHMARK_CPU_TOPOLOGY` publishes each node's CPUs through DRA and
+`BENCHMARK_CPU_RESOURCE` moves the pod's CPU request there. A pod requests CPUs
+either way, not both, and CPU DRA needs the default `BENCHMARK_EXCLUSIVE=false`:
+
+```sh
+BENCHMARK_CPU_TOPOLOGY='{sockets: 2, coresPerSocket: 48, smt: true}' \
+BENCHMARK_CPU_RESOURCE=deviceclass.resource.kubernetes.io/dra.cpu \
+make benchmark
+```
+
 The run applies `deviceclasses.yaml` from the configuration bundle when it is
 present. Each class there copies the selector of a built-in device profile,
 because the bridge matches the two byte for byte.
