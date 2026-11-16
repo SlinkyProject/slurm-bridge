@@ -24,25 +24,19 @@ func TestBuildJobDescPodIdentity(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "work", UID: "work-uid"}},
 		{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "member", UID: "member-uid"}},
 	}}}
-	for _, update := range []bool{false, true} {
-		build := (&realSlurmControl{}).buildJobSubmission
-		if update {
-			build = (&realSlurmControl{}).buildJobUpdate
-		}
-		desc, err := build(metav1.PartialObjectMetadata{}, component)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var info externaljobinfo.ExternalJobInfo
-		if err := externaljobinfo.ParseIntoExternalJobInfo(desc.AdminComment, &info); err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Equal(info.Pods, []string{"default/work/work-uid", "default/member/member-uid"}) {
-			t.Errorf("update=%t: pod identities = %v", update, info.Pods)
-		}
-		if want := `{"pods":"default/work/work-uid,default/member/member-uid"}`; ptr.Deref(desc.AdminComment, "") != want {
-			t.Errorf("update=%t: admin comment = %s, want %s", update, ptr.Deref(desc.AdminComment, ""), want)
-		}
+	desc, err := (&realSlurmControl{}).buildJobSubmission(metav1.PartialObjectMetadata{}, component)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info externaljobinfo.ExternalJobInfo
+	if err := externaljobinfo.ParseIntoExternalJobInfo(desc.AdminComment, &info); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(info.Pods, []string{"default/work/work-uid", "default/member/member-uid"}) {
+		t.Errorf("pod identities = %v", info.Pods)
+	}
+	if want := `{"pods":"default/work/work-uid,default/member/member-uid"}`; ptr.Deref(desc.AdminComment, "") != want {
+		t.Errorf("admin comment = %s, want %s", ptr.Deref(desc.AdminComment, ""), want)
 	}
 }
 

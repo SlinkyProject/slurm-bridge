@@ -39,22 +39,16 @@ func TestBuildJobDescAllocationIdentity(t *testing.T) {
 				want.CompositePodGroup = &externaljobinfo.GroupIdentity{APIGroup: "scheduling.k8s.io", Kind: "CompositePodGroup", Namespace: "ns", Name: "root", UID: "root-uid"}
 				want.PodGroup = &externaljobinfo.GroupIdentity{APIGroup: "scheduling.k8s.io", Kind: "PodGroup", Namespace: "ns", Name: "leaf", UID: "leaf-uid"}
 			}
-			for _, update := range []bool{false, true} {
-				build := (&realSlurmControl{}).buildJobSubmission
-				if update {
-					build = (&realSlurmControl{}).buildJobUpdate
-				}
-				desc, err := build(root, ir.Components[0])
-				if err != nil {
-					t.Fatal(err)
-				}
-				var got externaljobinfo.ExternalJobInfo
-				if err := externaljobinfo.ParseIntoExternalJobInfo(desc.AdminComment, &got); err != nil {
-					t.Fatal(err)
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("update=%t: metadata=%s, want %s", update, got.ToString(), want.ToString())
-				}
+			desc, err := (&realSlurmControl{}).buildJobSubmission(root, ir.Components[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got externaljobinfo.ExternalJobInfo
+			if err := externaljobinfo.ParseIntoExternalJobInfo(desc.AdminComment, &got); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("metadata=%s, want %s", got.ToString(), want.ToString())
 			}
 		})
 	}

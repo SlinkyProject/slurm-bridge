@@ -698,13 +698,10 @@ func Test_realSlurmControl_UpdateJobPreservesSubmissionFields(t *testing.T) {
 						}
 						// Check the wire payload: null or zero still differs from
 						// omitting fields with submission-only semantics in Slurm.
-						for _, key := range []string{"user_id", "group_id", "account", "shared", "mcs_label", "current_working_directory", "flags", "hold"} {
+						for _, key := range []string{"user_id", "group_id", "account", "shared", "mcs_label", "current_working_directory", "flags", "hold", "admin_comment"} {
 							if value, present := fields[key]; present {
 								t.Errorf("pending-job update sends %s=%s; want omitted", key, value)
 							}
-						}
-						if desc.AdminComment == nil {
-							t.Error("update lost administrative metadata")
 						}
 						for key, want := range map[string]string{
 							"name": `"training"`, "licenses": `"solver:1"`,
