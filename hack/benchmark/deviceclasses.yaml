@@ -1,0 +1,23 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# DeviceClasses for pods that request devices through DRA. The bridge maps a class to a device
+# profile by matching its selector byte for byte, so each one copies a built-in profile's selector.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: gpu.nvidia.com
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == 'gpu.nvidia.com' && device.attributes['gpu.nvidia.com'].type == 'gpu'
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: dranet-rdma
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == 'dra.net' && has(device.attributes['dra.net'].pciAddress) && has(device.attributes['dra.net'].rdma) && device.attributes['dra.net'].rdma
+          == true

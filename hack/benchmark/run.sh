@@ -27,6 +27,10 @@ for file in nodes.yaml podgroup.yaml.tmpl kwok-stage.yaml; do
 	cp "$CONFIG_DIR/$file" "$artifacts/$file"
 done
 cp "${WORKLOAD:-$CONFIG_DIR/workload.yaml}" "$artifacts/workload.yaml"
+# Optional, so configuration bundles without DRA keep working.
+if [[ -f "$CONFIG_DIR/deviceclasses.yaml" ]]; then
+	cp "$CONFIG_DIR/deviceclasses.yaml" "$artifacts/deviceclasses.yaml"
+fi
 artifacts="$(cd "$artifacts" && pwd)"
 exec > >(tee "$artifacts/benchmark.log") 2>&1
 echo "Run $run_id on $CONTEXT; artifacts: $artifacts"
@@ -61,7 +65,8 @@ report_progress() {
 		--slurpfile pods "$artifacts/pods-live.json" --slurpfile fleet "$artifacts/fleet.json" '
   def counts: {waiting: map(select(.state == "waiting")) | length,
    active: map(select(.state == "active")) | length, completed: map(select(.state == "completed")) | length};
-  def gpus: [.[] | .spec.containers[].resources.requests["nvidia.com/gpu"] // 0 | tonumber] | add // 0;
+  def gpus: [.[] | .spec.containers[].resources.requests |
+   (.["nvidia.com/gpu"] // 0 | tonumber) + (.["deviceclass.resource.kubernetes.io/gpu.nvidia.com"] // 0 | tonumber)] | add // 0;
   [$pods[0].items[] | select((.spec.nodeName // "") != "") | .metadata.ownerReferences[] | select(.kind == "Job") | .uid] |
    group_by(.) | map({key: .[0], value: length}) | from_entries as $bound |
   [$jobs[0].items[] | (.spec.completions // 1) as $size | {size: $size, state:
@@ -176,6 +181,9 @@ wait_idle
 # Replace the generic fast-completion stage with the workflow's timed stage.
 kube delete stages.kwok.x-k8s.io pod-complete --ignore-not-found
 kube apply -f "$artifacts/kwok-stage.yaml"
+if [[ -f "$artifacts/deviceclasses.yaml" ]]; then
+	kube apply -f "$artifacts/deviceclasses.yaml"
+fi
 jq -n --arg run "$run_id" --arg context "$CONTEXT" --arg speedup "$SPEEDUP" \
 	--arg knavigator "$KNAVIGATOR_VERSION" --arg bridge "$(git rev-parse HEAD)" \
 	'{run: $run, context: $context, speedup: $speedup, knavigator: $knavigator, bridge: $bridge}' >"$artifacts/run.json"
