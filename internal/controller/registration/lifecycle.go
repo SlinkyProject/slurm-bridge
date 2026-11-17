@@ -43,9 +43,7 @@ func (c membershipClient) List(ctx context.Context, obj client.ObjectList, opts 
 	return c.reader.List(ctx, obj, opts...)
 }
 
-// componentMembers combines current group membership with recorded identities.
-// The recorded list alone misses late arrivals; current membership alone loses
-// terminating Pods when their group is deleted or recreated.
+// componentMembers retains recorded members and already-published or bound Pods.
 func (r *Reconciler) componentMembers(ctx context.Context, reader client.Reader, job slurmjob.RegisteredJob) ([]corev1.Pod, error) {
 	info := job.Ownership()
 	members := make(map[string]corev1.Pod)
@@ -56,12 +54,20 @@ func (r *Reconciler) componentMembers(ctx context.Context, reader client.Reader,
 			}
 		}
 	}
+	membership := slurmjob.IndexAllocationPods([]slurmjob.RegisteredJob{job})
+	addGroup := func(pods []corev1.Pod) {
+		for _, pod := range pods {
+			if membership.Contains(&pod, job.JobId) || pod.Spec.NodeName != "" || pod.Labels[wellknown.LabelExternalJobId] == strconv.Itoa(int(job.JobId)) {
+				add([]corev1.Pod{pod})
+			}
+		}
+	}
 	if info.PodGroup != nil {
 		pods, _, err := r.membersFrom(ctx, reader, groupKey(*info.PodGroup))
 		if err != nil && !errors.Is(err, slurmjobir.ErrorPodGroupNoPods) {
 			return nil, err
 		}
-		add(pods)
+		addGroup(pods)
 	}
 	for _, key := range info.Pods {
 		ref := externaljobinfo.ParsePodKey(key)
@@ -92,7 +98,7 @@ func (r *Reconciler) componentMembers(ctx context.Context, reader client.Reader,
 				if err != nil && !errors.Is(err, slurmjobir.ErrorPodGroupNoPods) && !errors.Is(err, slurmjob.ErrLWSLeaderMissing) {
 					return nil, err
 				}
-				add(pods)
+				addGroup(pods)
 			}
 		}
 	}

@@ -52,6 +52,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -221,9 +222,9 @@ func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcon
 
 func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error { return nil }
 
-func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
+func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	if c.allocationErr != nil {
-		return nil, c.allocationErr
+		return slurmjob.Allocation{}, c.allocationErr
 	}
 	jobs := testAllocation(ir)
 	for i := range jobs {
@@ -234,7 +235,7 @@ func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod,
 			}
 		}
 	}
-	return jobs, nil
+	return slurmjob.Allocation{IR: ir, Jobs: jobs}, nil
 }
 
 func testJobComment(ir *slurmjobir.SlurmJobIR, component int) string {

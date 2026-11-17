@@ -16,11 +16,31 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
+// translateAllocation resolves membership before interpreting resource requests.
+// Both scheduler paths use the same selection and error handling.
+func (sb *SlurmBridge) translateAllocation(ctx context.Context, pod *corev1.Pod) (slurmjob.Allocation, error) {
+	var allocation slurmjob.Allocation
+	ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
+		slurmjobir.WithResourceSlices(sb.resourceSlices),
+		slurmjobir.WithNUMASpans(sb.numaCache),
+		slurmjobir.WithAllocation(func(ir *slurmjobir.SlurmJobIR) (*slurmjobir.SlurmJobIR, error) {
+			var err error
+			allocation, err = sb.slurmControl.GetAllocation(ctx, pod, ir)
+			return allocation.IR, err
+		}))
+	allocation.IR = ir
+	return allocation, err
+}
+
+func allocationWait(err error) bool {
+	return errors.Is(err, slurmjob.ErrAmbiguousAllocation) || errors.Is(err, slurmjob.ErrAllocationMissing) || errors.Is(err, slurmjob.ErrAllocationMembership)
+}
+
 // Pin all component IDs for the cycle. A refreshed index can invalidate this
 // selection, but cannot switch a scheduling attempt to another allocation.
 func (sb *SlurmBridge) checkAllocation(ctx context.Context, s *stateData, pod *corev1.Pod) *fwk.Status {
-	jobs, err := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
-	return s.checkAllocation(pod, jobs, err)
+	allocation, err := sb.slurmControl.GetAllocation(ctx, pod, s.slurmJobIR)
+	return s.checkAllocation(pod, allocation.Jobs, err)
 }
 
 // Confirm a cached placement before a scheduling failure can cancel it.
@@ -38,7 +58,7 @@ func (sb *SlurmBridge) confirmPlacement(ctx context.Context, pod *corev1.Pod, ex
 
 func (s *stateData) checkAllocation(pod *corev1.Pod, jobs []slurmcontrol.ExternalJob, err error) *fwk.Status {
 	if err != nil {
-		if errors.Is(err, slurmjob.ErrAmbiguousAllocation) || errors.Is(err, slurmjob.ErrAllocationMissing) {
+		if allocationWait(err) {
 			return fwk.NewStatus(fwk.Unschedulable, err.Error())
 		}
 		return fwk.AsStatus(err)

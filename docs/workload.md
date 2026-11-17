@@ -404,7 +404,9 @@ isolation when updating the job through its privileged Slurm identity.
 Other annotations can update a Slurm job while it is pending. Slurm validates
 each change, but a failed update can still have partially applied changes.
 Removing an annotation does not necessarily reset the stored Slurm value. Once
-Slurm allocates the job, treat its annotations and Pod membership as fixed.
+Slurm allocates the job, treat its annotations as fixed. Pod membership is fixed
+at submission, as described in
+[Changing the number of Pods](#changing-the-number-of-pods).
 
 ### Scheduler-managed Pod metadata
 
@@ -511,21 +513,27 @@ for workload-specific replacement behavior.
 
 ### Changing the number of Pods
 
-| Change                                                                                                       | Before Slurm allocates the job                                                                                                                                                | After Slurm allocates the job                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| Change membership of an existing gang                                                                        | The scheduler can update the pending Slurm job from the current group on a scheduling retry, subject to workload API validation, gang quorum, and Slurm accepting the update. | Live expansion or shrinking is unsupported. Recreate the group for a new allocation.                                            |
-| Add or remove independent Pods, including ungrouped [JobSet Pods](jobset.md#scaling) when the API permits it | Each added Pod submits its own job; removed Pods have their pending jobs canceled during cleanup.                                                                             | New Pods queue for separate allocations; removed Pods release their own allocations during cleanup. Other allocations continue. |
+| Change                                                                                                       | Before Slurm allocates the job                                                                    | After Slurm allocates the job                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Change membership of an existing gang                                                                        | Membership is fixed when the Slurm job is submitted. Later Pods cannot join the pending job.      | Live expansion or shrinking is unsupported. Recreate the group for a new allocation.                                            |
+| Add or remove independent Pods, including ungrouped [JobSet Pods](jobset.md#scaling) when the API permits it | Each added Pod submits its own job; removed Pods have their pending jobs canceled during cleanup. | New Pods queue for separate allocations; removed Pods release their own allocations during cleanup. Other allocations continue. |
 
 Gang quorum is `spec.schedulingPolicy.gang.minCount` for built-in PodGroups,
 `spec.minMember` for legacy PodGroups, or the configured LWS group size for
-[implicit LWS gangs](lws.md#scaling). If membership falls below quorum before
-allocation, the scheduler waits for enough Pods and cancels an existing job it
-detects as invalid. Pending updates are not an atomic scaling operation and can
-race with Slurm allocation. Once allocated, treat group membership as fixed:
-additional Pods cannot expand that allocation and may remain Pending. For LWS,
-[scale whole replica groups](lws.md#scaling) instead. If templates put multiple
-LWS replica groups into one Gang PodGroup, those groups share an allocation and
-cannot scale independently.
+[implicit LWS gangs](lws.md#scaling). A CompositePodGroup also applies
+`spec.schedulingPolicy.gang.minGroupCount` at each level of its hierarchy.
+Quorum is a readiness threshold, not a cap: submission records the Pod UIDs and
+child groups present in the submitted batch.
+
+Later Pods and child groups wait for the current allocation to finish and a new
+batch to meet quorum. They cannot join or block its original members. The
+controller reports `WaitingForNextAllocation`; a long-running allocation can
+leave late arrivals waiting indefinitely. Concurrent batches under one gang
+identity are unsupported. Set quorum to the intended total when all members must
+share an allocation.
+
+For LWS, [scale whole replica groups](lws.md#scaling). Replica groups combined
+into one Gang PodGroup share an allocation and cannot scale independently.
 
 ### Scale-down and resource release
 

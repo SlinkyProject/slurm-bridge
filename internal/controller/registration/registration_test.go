@@ -60,7 +60,7 @@ func TestPublishRegistration(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		return r.publish(t.Context(), ir, components)
+		return r.publish(t.Context(), ir.AllPods(), components[0])
 	}
 	check := func(name string, registered bool) {
 		t.Helper()

@@ -4,6 +4,7 @@
 package slurmjob
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
-func TestLegacyAllocationMembership(t *testing.T) {
+func TestAllocationMembershipWithoutGroupMetadata(t *testing.T) {
 	ir := &slurmjobir.SlurmJobIR{
 		RootPOM: metav1.PartialObjectMetadata{TypeMeta: metav1.TypeMeta{Kind: "PodGroup"}},
 		Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: []corev1.Pod{
@@ -26,24 +27,27 @@ func TestLegacyAllocationMembership(t *testing.T) {
 		}}}},
 	}
 	for _, tc := range []struct {
-		name     string
-		pods     []string
-		complete bool
+		name    string
+		pods    []string
+		members int
 	}{
-		{"UID membership", []string{"ns/first/first-uid", "ns/second/second-uid"}, true},
-		{"legacy names", []string{"ns/first", "ns/second"}, true},
-		{"partial group", []string{"ns/first/first-uid"}, false},
-		{"replaced member", []string{"ns/first/first-uid", "ns/second/old-uid"}, false},
-		{"different namespace", []string{"other/first", "other/second"}, false},
+		{"UID membership", []string{"ns/first/first-uid", "ns/second/second-uid"}, 2},
+		{"legacy names", []string{"ns/first", "ns/second"}, 2},
+		{"partial group", []string{"ns/first/first-uid"}, 1},
+		{"replaced member", []string{"ns/first/first-uid", "ns/second/old-uid"}, 1},
+		{"different namespace", []string{"other/first", "other/second"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			jobs := []RegisteredJob{{ExternalJob: ExternalJob{JobId: 100}, info: externaljobinfo.ExternalJobInfo{Pods: tc.pods}}}
-			got, complete, err := MatchAllocationComponents(ir, jobs)
-			if err != nil || complete != tc.complete {
-				t.Fatalf("match=%v, complete=%t, error=%v", got, complete, err)
+			got, err := SelectAllocation(ir, jobs)
+			if tc.members == 0 {
+				if !errors.Is(err, ErrAllocationMembership) {
+					t.Fatalf("error=%v, want membership rejection", err)
+				}
+				return
 			}
-			if complete && (len(got) != 1 || got[0].JobId != 100) {
-				t.Fatalf("wrong allocation: %v", got)
+			if err != nil || len(got.Jobs) != 1 || got.Jobs[0].JobId != 100 || len(got.IR.AllPods()) != tc.members {
+				t.Fatalf("allocation=%+v error=%v, want %d recorded members", got, err, tc.members)
 			}
 		})
 	}

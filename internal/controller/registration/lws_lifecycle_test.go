@@ -43,7 +43,7 @@ func TestLifecycleWithoutLWSLeader(t *testing.T) {
 		{name: "running allocation retained", phase: corev1.PodRunning, liveJob: true, indexed: true},
 		{name: "uncached allocation retained", phase: corev1.PodSucceeded, liveJob: true},
 		{name: "terminal allocation canceled", phase: corev1.PodSucceeded, liveJob: true, indexed: true, wantRelease: true},
-		{name: "late worker retains unlabeled member", phase: corev1.PodSucceeded, liveJob: true, indexed: true, lateWorker: true, unlabeled: true},
+		{name: "unregistered late worker does not retain allocation", phase: corev1.PodSucceeded, liveJob: true, indexed: true, lateWorker: true, unlabeled: true, wantRelease: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
