@@ -202,11 +202,13 @@ The following non-DRA extended resources are also supported:
 | `nvidia.com/gpu`  | NVIDIA GPU    |
 | `amd.com/gpu`     | AMD GPU       |
 
-These resources use the generic device-plugin path. Their quantities are
-translated to a generic Slurm `gres/gpu=<count>` request. Slurm selects and
-reserves the node and GPU count, while kubelet and the device plugin choose the
-physical devices. No DRA ResourceClaim is created, so Slurm and Kubernetes do
-not coordinate exact GPU identities on this path.
+These resources use the generic device-plugin path unless a DeviceClass alias
+resolves to a configured bridge DeviceProfile. Aliases without a matching
+profile retain their device-plugin meaning. On the device-plugin path,
+quantities are translated to a generic Slurm `gres/gpu=<count>` request. Slurm
+selects and reserves the node and GPU count, while kubelet and the device plugin
+choose the physical devices. No DRA ResourceClaim is created, so Slurm and
+Kubernetes do not coordinate exact GPU identities on this path.
 
 ## CPU DRA
 
