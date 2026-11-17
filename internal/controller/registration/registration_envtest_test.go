@@ -23,8 +23,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	api "github.com/SlinkyProject/slurm-client/api/v0044"
 	slurmfake "github.com/SlinkyProject/slurm-client/pkg/client/fake"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/testutils"
@@ -167,8 +169,13 @@ func TestRegistrationAPI(t *testing.T) {
 	// Exercise registration's actual optimistic Kubernetes patch, using a
 	// supplied allocation record rather than a simulated Slurm service.
 	ir := &slurmjobir.SlurmJobIR{Components: []slurmjobir.SlurmJobComponent{{Pods: corev1.PodList{Items: members}}}}
-	jobs := []slurmjob.RegisteredJob{{ExternalJob: slurmjob.ExternalJob{JobId: 100}}}
-	if _, err := r.register(ctx, key, standalone, ir, jobs); err != nil {
+	info := externaljobinfo.ExternalJobInfo{Pods: []string{externaljobinfo.PodKey(standalone)}}
+	job, err := slurmjob.RegisteredJobFromInfo(&api.V0044JobInfo{JobId: ptr.To(int32(100)), AdminComment: ptr.To(info.ToString()), JobState: ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := []slurmjob.RegisteredJob{job}
+	if _, err := r.publishRegistered(ctx, key, ir.AllPods(), jobs); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Get(ctx, client.ObjectKeyFromObject(standalone), standalone); err != nil {

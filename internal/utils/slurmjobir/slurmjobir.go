@@ -43,6 +43,16 @@ type SlurmJobComponent struct {
 	Pods       corev1.PodList
 }
 
+// SelectPods updates the exact node count of a built-in PodGroup batch.
+func (s *SlurmJobComponent) SelectPods(pods []corev1.Pod) {
+	s.Pods.Items = pods
+	n := int32(len(pods)) //nolint:gosec // Pod count is bounded by Kubernetes limits.
+	switch s.ObjectMeta.TypeMeta {
+	case podGroupV1Alpha2, podGroupV1Beta1:
+		s.JobInfo.MinNodes, s.JobInfo.MaxNodes = ptr.To(n), ptr.To(n)
+	}
+}
+
 func (s SlurmJobComponent) GetNamespacedName() types.NamespacedName {
 	return types.NamespacedName{
 		Namespace: s.ObjectMeta.Namespace,
@@ -93,6 +103,7 @@ type translator struct {
 	numaSlicesLoaded    bool
 	podGroupStates      fwk.PodGroupStateLister
 	podsByGroup         map[string]corev1.PodList
+	selectAllocation    func(*SlurmJobIR) (*SlurmJobIR, error)
 	includeTerminalPods bool // Membership discovery retains history; allocation translation does not.
 }
 
@@ -147,6 +158,11 @@ func PreFilter(c client.Client, registry *dra.Registry, handle fwk.Handle, workl
 
 // TranslateOption configures TranslateToSlurmJobIR.
 type TranslateOption func(*translator)
+
+// WithAllocation selects a submitted batch before computing resource requests.
+func WithAllocation(selectPods func(*SlurmJobIR) (*SlurmJobIR, error)) TranslateOption {
+	return func(t *translator) { t.selectAllocation = selectPods }
+}
 
 // ResourceSliceLister lists cached ResourceSlices, as client-go listers do.
 type ResourceSliceLister interface {
@@ -219,6 +235,13 @@ func TranslateToSlurmJobIR(c client.Client, registry *dra.Registry, workloadAPI 
 	}
 
 	slurmJobIR.RootPOM = *rootPOM
+	if t.selectAllocation != nil {
+		selected, err := t.selectAllocation(slurmJobIR)
+		if err != nil {
+			return slurmJobIR, err
+		}
+		slurmJobIR = selected
+	}
 	for i := range slurmJobIR.Components {
 		parsePodsCpuAndMemory(&slurmJobIR.Components[i])
 		if err := t.parseDeviceResources(&slurmJobIR.Components[i]); err != nil {

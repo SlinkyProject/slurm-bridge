@@ -14,6 +14,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -212,7 +213,7 @@ func TestLifecycleRecentSubmissionBeforePublication(t *testing.T) {
 	}
 }
 
-func TestLifecycleRetainsCurrentMembers(t *testing.T) {
+func TestLifecycleRetainsOnlyAllocationMembers(t *testing.T) {
 	for _, scenario := range []string{"late-member", "late-member-only-in-api", "replaced-pod-in-same-group", "deleting-bound-member"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newLifecycleFixture(t)
@@ -259,8 +260,9 @@ func TestLifecycleRetainsCurrentMembers(t *testing.T) {
 			if _, err := f.reconcile(t); err != nil {
 				t.Fatal(err)
 			}
-			if len(f.cancellations) != 0 {
-				t.Fatalf("canceled allocation with a current member: %v", f.cancellations)
+			wantCancel := scenario != "deleting-bound-member"
+			if slices.Contains(f.cancellations, 100) != wantCancel {
+				t.Fatalf("cancellations=%v, want cancellation=%t", f.cancellations, wantCancel)
 			}
 		})
 	}
@@ -538,7 +540,7 @@ func TestLifecyclePendingCompositeLeaves(t *testing.T) {
 				t.Fatal(err)
 			}
 			// The second component is absent from the informer. Its recorded Pod is
-			// gone, but a late member of its leaf must still prevent cancellation.
+			// gone. An unregistered replacement must not prevent cancellation.
 			sibling := f.job.DeepCopy()
 			sibling.JobId = ptr.To[int32](101)
 			sibling.HetJobOffset.Number = ptr.To[int32](1)
@@ -556,11 +558,8 @@ func TestLifecyclePendingCompositeLeaves(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var wantCancellations []int32
-			if !represented {
-				wantCancellations = []int32{100}
-			}
-			if released == represented || !slices.Equal(f.cancellations, wantCancellations) {
+			wantCancellations := []int32{100}
+			if !released || !slices.Equal(f.cancellations, wantCancellations) {
 				t.Fatalf("released=%t, cancellations=%v; leaf represented=%t", released, f.cancellations, represented)
 			}
 		})
@@ -587,7 +586,7 @@ func TestLifecycleIndexedMembership(t *testing.T) {
 	if _, err := f.reconcile(t); err != nil {
 		t.Fatal(err)
 	}
-	if lists == 0 || len(f.cancellations) != 0 {
+	if lists == 0 || !slices.Equal(f.cancellations, []int32{100}) {
 		t.Fatalf("lists=%d, cancellations=%v", lists, f.cancellations)
 	}
 }
@@ -715,5 +714,55 @@ func TestLifecycleReleaseReadsGroupMembersFromIndex(t *testing.T) {
 				t.Fatalf("released=%t, cancellations=%v; want %t", released, f.cancellations, tc.wantRelease)
 			}
 		})
+	}
+}
+
+func TestUnregisteredReplacementWaitsForRelease(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.acknowledgeOnly = true
+	late := f.latePod(t)
+	result, err := f.r.Reconcile(t.Context(), objectRequest(f.group))
+	if err != nil || result.RequeueAfter == 0 {
+		t.Fatalf("result=%v error=%v", result, err)
+	}
+	if !slices.Equal(f.cancellations, []int32{100}) {
+		t.Fatalf("cancellations=%v", f.cancellations)
+	}
+	if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(late), late); err != nil {
+		t.Fatal(err)
+	}
+	if !hasRegistrationGate(late) || late.Labels[wellknown.LabelExternalJobId] != "" {
+		t.Fatalf("replacement adopted a releasing allocation: %+v", late)
+	}
+}
+
+// A late Pod can outlive its DeviceClass. Existing members must still be published.
+func TestPublicationIgnoresLatePodResources(t *testing.T) {
+	f := newLifecycleFixture(t)
+	f.pod.Status.Phase = corev1.PodPending
+	f.pod.Labels = nil
+	f.pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: wellknown.SchedulingGateRegistration}}
+	f.kube = fake.NewClientBuilder().WithScheme(f.kube.Scheme()).WithObjects(f.group, f.pod).Build()
+	f.r.Client, f.r.apiReader = f.kube, f.kube
+	late := f.latePod(t)
+	late.Spec.Containers = []corev1.Container{{Name: "worker", Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceName(resourcev1.ResourceDeviceClassPrefix + "deleted-class"): resource.MustParse("1")}}}}
+	if err := f.kube.Update(t.Context(), late); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.r.Reconcile(t.Context(), objectRequest(f.group))
+	if err != nil || result.RequeueAfter == 0 {
+		t.Fatalf("result=%v error=%v", result, err)
+	}
+	if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(f.pod), f.pod); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.kube.Get(t.Context(), client.ObjectKeyFromObject(late), late); err != nil {
+		t.Fatal(err)
+	}
+	if hasRegistrationGate(f.pod) || f.pod.Labels[wellknown.LabelExternalJobId] != "100" {
+		t.Fatalf("original member was not published: %+v", f.pod)
+	}
+	if !hasRegistrationGate(late) || late.Labels[wellknown.LabelExternalJobId] != "" {
+		t.Fatalf("late member adopted old allocation: %+v", late)
 	}
 }

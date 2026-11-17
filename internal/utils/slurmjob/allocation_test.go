@@ -7,13 +7,14 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
-func TestMatchAllocationWithFinishedComponents(t *testing.T) {
+func TestSelectAllocationWithFinishedComponents(t *testing.T) {
 	for _, mode := range []string{"completed sibling", "all finished", "missing component", "historical sibling", "historical duplicates", "active duplicate", "duplicate component"} {
 		t.Run(mode, func(t *testing.T) {
 			ir := &slurmjobir.SlurmJobIR{RootPOM: metav1.PartialObjectMetadata{TypeMeta: metav1.TypeMeta{Kind: "CompositePodGroup"}}}
@@ -23,24 +24,23 @@ func TestMatchAllocationWithFinishedComponents(t *testing.T) {
 					TypeMeta:   metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1beta1", Kind: "PodGroup"},
 					ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name, UID: "group-uid"},
 				}
-				ir.Components = append(ir.Components, slurmjobir.SlurmJobComponent{ObjectMeta: group})
+				ir.Components = append(ir.Components, slurmjobir.SlurmJobComponent{ObjectMeta: group, Pods: corev1.PodList{Items: []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name, UID: "pod-uid"}}}}})
 				jobs = append(jobs, RegisteredJob{
 					ExternalJob: ExternalJob{JobId: []int32{100, 107}[i], HetJobId: 100, Finished: i == 0},
-					info:        externaljobinfo.ExternalJobInfo{PodGroup: externaljobinfo.NewGroupIdentity(group)},
+					info:        externaljobinfo.ExternalJobInfo{PodGroup: externaljobinfo.NewGroupIdentity(group), Pods: []string{"ns/" + name + "/pod-uid"}},
 				})
 			}
-			complete := true
 			var wantErr error
 			switch mode {
 			case "all finished":
 				jobs[1].Finished = true
-				complete = false
+				wantErr = ErrAllocationMissing
 			case "missing component":
 				jobs = jobs[1:]
-				complete = false
+				wantErr = ErrAllocationMissing
 			case "historical sibling":
 				jobs[0].JobId, jobs[0].HetJobId = 50, 50
-				complete = false
+				wantErr = ErrAllocationMissing
 			case "historical duplicates":
 				for _, job := range jobs[:2] {
 					job.JobId -= 50
@@ -51,19 +51,19 @@ func TestMatchAllocationWithFinishedComponents(t *testing.T) {
 				duplicate := jobs[1]
 				duplicate.JobId, duplicate.HetJobId = 207, 200
 				jobs = append(jobs, duplicate)
-				complete, wantErr = false, ErrAmbiguousAllocation
+				wantErr = ErrAmbiguousAllocation
 			case "duplicate component":
 				duplicate := jobs[0]
 				duplicate.JobId = 101
 				jobs = append(jobs, duplicate)
-				complete, wantErr = false, ErrAmbiguousAllocation
+				wantErr = ErrAmbiguousAllocation
 			}
-			got, matched, err := MatchAllocationComponents(ir, jobs)
-			if matched != complete || !errors.Is(err, wantErr) {
-				t.Fatalf("match = %v, %t, %v; want complete=%t error=%v", got, matched, err, complete, wantErr)
+			got, err := SelectAllocation(ir, jobs)
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("allocation=%+v error=%v; want error=%v", got, err, wantErr)
 			}
-			if complete && (len(got) != 2 || got[0].JobId != 100 || !got[0].Finished || got[1].JobId != 107 || got[1].Finished) {
-				t.Fatalf("lost active allocation or its finished component: %v", got)
+			if err == nil && (len(got.Jobs) != 2 || got.Jobs[0].JobId != 100 || !got.Jobs[0].Finished || got.Jobs[1].JobId != 107 || got.Jobs[1].Finished) {
+				t.Fatalf("lost surviving component: %+v", got)
 			}
 		})
 	}

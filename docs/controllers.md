@@ -128,10 +128,9 @@ The registration controller creates held Slurm allocations and removes Pod
 registration gates once allocation metadata is published. It also repairs
 metadata and cleans up completed allocations.
 
-Cleanup uses current Kubernetes group membership, including late members, as
-well as the Pod identities recorded in Slurm. Before cancellation it confirms
-membership through the Kubernetes API and ownership through Slurm. A deleting,
-bound Pod retains its allocation until it becomes terminal. Running
+Cleanup retains recorded, published, or bound members. Before cancellation it
+confirms membership through the Kubernetes API and ownership through Slurm. A
+deleting, bound Pod retains its allocation until it becomes terminal. Running
 heterogeneous jobs can release individual nonzero components. Component zero and
 pending heterogeneous jobs are retained while any member needs the allocation.
 

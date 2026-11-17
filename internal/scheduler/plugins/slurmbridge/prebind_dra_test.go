@@ -16,6 +16,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
@@ -26,8 +27,8 @@ type getResourcesSpy struct {
 	resourceErr error
 }
 
-func (s *getResourcesSpy) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) ([]slurmcontrol.ExternalJob, error) {
-	return testAllocation(ir), nil
+func (s *getResourcesSpy) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
+	return slurmjob.Allocation{IR: ir, Jobs: testAllocation(ir)}, nil
 }
 
 func (s *getResourcesSpy) GetJob(context.Context, *corev1.Pod) (*slurmcontrol.ExternalJob, error) {

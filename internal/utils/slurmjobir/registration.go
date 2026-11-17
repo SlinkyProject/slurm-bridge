@@ -32,7 +32,14 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 		return false, status.Message(), nil
 	}
 	t := translator{Reader: c, ctx: ctx, workloadAPI: api}
-	groups, err := t.listCompositePodGroup(pod.Namespace)
+	return t.compositeRegistrationReady(ir)
+}
+
+// compositeRegistrationReady uses the selected batch, including during live recovery.
+func (t *translator) compositeRegistrationReady(ir *SlurmJobIR) (bool, string, error) {
+	ctx, api := t.ctx, t.workloadAPI
+	namespace := ir.RootPOM.Namespace
+	groups, err := t.listCompositePodGroup(namespace)
 	if err != nil {
 		return false, "", err
 	}
@@ -41,7 +48,7 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 		byName[g.name] = g
 	}
 	leaves := &PodGroupList{TypeMeta: metav1.TypeMeta{APIVersion: api.PodGroupTypeMeta.APIVersion, Kind: "PodGroupList"}}
-	if err := c.List(ctx, leaves, client.InNamespace(pod.Namespace)); err != nil {
+	if err := t.List(ctx, leaves, client.InNamespace(namespace)); err != nil {
 		return false, "", err
 	}
 	// Count the members this IR submits, not a fresh list: a Pod created after
@@ -56,7 +63,7 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 		if depth > maxCompositePodGroupTreeDepth {
 			return false, fmt.Errorf("CompositePodGroup hierarchy exceeds maximum depth")
 		}
-		group, err := t.getCompositePodGroup(client.ObjectKey{Namespace: pod.Namespace, Name: name})
+		group, err := t.getCompositePodGroup(client.ObjectKey{Namespace: namespace, Name: name})
 		if err != nil {
 			return false, err
 		}
@@ -107,7 +114,7 @@ func RegistrationReady(c client.Client, registry *dra.Registry, api *WorkloadAPI
 			minGroupCount = int64(group.schedulingPolicy.Gang.MinGroupCount)
 		}
 		if depth == 1 && children < minGroupCount {
-			message = fmt.Sprintf("CompositePodGroup %s/%s has %d ready child groups; requires %d", pod.Namespace, name, children, minGroupCount)
+			message = fmt.Sprintf("CompositePodGroup %s/%s has %d ready child groups; requires %d", namespace, name, children, minGroupCount)
 		}
 		return children >= minGroupCount, nil
 	}
