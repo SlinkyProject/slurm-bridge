@@ -6,9 +6,9 @@ package slurmbridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -64,7 +64,7 @@ func (sb *SlurmBridge) manageResourceClaim(ctx context.Context, pod *corev1.Pod,
 		return err
 	}
 	if existing.Status.Allocation != nil {
-		mappings, err := createContainerRequestMappings(pod, existing.Spec.Devices.Requests)
+		mappings, err := requestMappingsFromClaim(pod, existing)
 		if err != nil {
 			return err
 		}
@@ -114,21 +114,21 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		return nil, nil, nil, errors.New("expected node resources")
 	}
 
+	profileRequests, err := sb.registry().ResolvePod(ctx, sb.Client, pod)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	indexedGRESResources, remainingResources, err := splitGRESResources(sb.registry(), *resources)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	profileRequests, err := sb.deviceProfileRequests(ctx, pod)
+	allocationRequests := profileRequestsWithoutLegacyAllocations(profileRequests, remainingResources.Gres)
+	coreBitmapAllocation, err := allocateCoreBitmapProfile(allocationRequests)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	profileRequests = profileRequestsWithoutLegacyAllocations(profileRequests, remainingResources.Gres)
-	coreBitmapAllocation, err := allocateCoreBitmapProfile(profileRequests)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	indexedGRESAllocations, err := allocateIndexedGRESProfiles(profileRequests, indexedGRESResources.Gres)
+	indexedGRESAllocations, err := allocateIndexedGRESProfiles(allocationRequests, indexedGRESResources.Gres)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -151,7 +151,10 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	}
 	allocatedRequests = append(allocatedRequests, legacyRequests...)
 
-	requestedCounts := deviceClassRequestCounts(pod)
+	requestedCounts := make(map[string]int64, len(profileRequests))
+	for _, request := range profileRequests {
+		requestedCounts[request.DeviceClassName] = request.Count
+	}
 	for _, allocation := range indexedGRESAllocations {
 		delete(requestedCounts, allocation.DeviceClassName)
 	}
@@ -174,10 +177,7 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 	deviceRequests = append(deviceRequests, legacyRequests...)
 	deviceRequests, indexedGRESAllocations = appendIndexedGRESRequests(deviceRequests, indexedGRESAllocations)
 
-	mappings, err := createContainerRequestMappings(pod, deviceRequests)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	mappings := createContainerRequestMappings(profileRequests, deviceRequests)
 
 	if len(deviceRequests) == 0 || len(mappings) == 0 {
 		return nil, nil, nil, nil
@@ -211,6 +211,13 @@ func (sb *SlurmBridge) createRequestsAndMappings(ctx context.Context, pod *corev
 		},
 	}
 
+	if len(mappings) > 0 {
+		raw, err := json.Marshal(mappings)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		claim.Annotations[requestMappingsAnnotation] = string(raw)
+	}
 	if coreBitmapAllocation != nil {
 		claim.Spec.Devices.Config = coreBitmapAllocation.CPU.Config
 	}
@@ -393,58 +400,25 @@ func validateDeviceProfileAllocationCounts(allocation *claimAllocation, results 
 	return nil
 }
 
-func validateDeviceClassRequests(pod *corev1.Pod) error {
-	requestingContainer := make(map[string]string)
-	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
-	for _, container := range containers {
-		for resourceName, quantity := range container.Resources.Requests {
-			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
-			if !ok || quantity.Value() <= 0 {
-				continue
-			}
-			if existing, ok := requestingContainer[className]; ok && existing != container.Name {
-				return fmt.Errorf("DRA DeviceClass %q is requested by multiple containers %q and %q; slurm-bridge currently supports one requesting container per DeviceClass", className, existing, container.Name)
-			}
-			requestingContainer[className] = container.Name
-		}
-	}
-	return nil
-}
-
 func (sb *SlurmBridge) validateDeviceClassRequestsForPods(ctx context.Context, pods []corev1.Pod, exclusive bool) error {
 	for i := range pods {
 		pod := &pods[i]
-		profileRequests, err := sb.deviceProfileRequests(ctx, pod)
+		requests, err := sb.registry().ResolvePod(ctx, sb.Client, pod)
 		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
-		cpu, err := allocateCoreBitmapProfile(profileRequests)
+		if err := dra.ValidateRequestContainers(requests); err != nil {
+			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
+		}
+		cpu, err := allocateCoreBitmapProfile(requests)
 		if err != nil {
 			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
 		}
 		if cpu != nil && exclusive {
 			return fmt.Errorf("pod %s, DeviceClass %q: %w", klog.KObj(pod), cpu.DeviceClassName, dra.ErrExclusiveCPUAllocation)
 		}
-		if err := validateDeviceClassRequests(pod); err != nil {
-			return fmt.Errorf("pod %s: %w", klog.KObj(pod), err)
-		}
 	}
 	return nil
-}
-
-func deviceClassRequestCounts(pod *corev1.Pod) map[string]int64 {
-	counts := make(map[string]int64)
-	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
-	for _, container := range containers {
-		for resourceName, quantity := range container.Resources.Requests {
-			className, ok := strings.CutPrefix(resourceName.String(), resourcev1.ResourceDeviceClassPrefix)
-			if !ok || quantity.Value() <= 0 {
-				continue
-			}
-			counts[className] = quantity.Value()
-		}
-	}
-	return counts
 }
 
 func subsetGRESResources(resources slurmcontrol.NodeResources, requestedCounts map[string]int64, supportedClasses map[string]struct{}) (*slurmcontrol.NodeResources, error) {
@@ -480,51 +454,20 @@ func deviceClassNames(requests []resourcev1.DeviceRequest) map[string]struct{} {
 	return deviceClasses
 }
 
-func createContainerRequestMappings(pod *corev1.Pod, deviceRequests []resourcev1.DeviceRequest) ([]corev1.ContainerExtendedResourceRequest, error) {
-	containers := slices.Concat(pod.Spec.InitContainers, pod.Spec.Containers)
-
-	requestNames := make(map[string][]string, len(deviceRequests))
-	for _, request := range deviceRequests {
-		if request.Exactly == nil {
-			continue
-		}
-		className := request.Exactly.DeviceClassName
-		requestNames[className] = append(requestNames[className], request.Name)
-	}
-
+func createContainerRequestMappings(requests []dra.ResourceRequest, deviceRequests []resourcev1.DeviceRequest) []corev1.ContainerExtendedResourceRequest {
 	var mappings []corev1.ContainerExtendedResourceRequest
-	for _, container := range containers {
-		keys := make([]string, 0, len(container.Resources.Requests))
-		for resourceName := range container.Resources.Requests {
-			keys = append(keys, resourceName.String())
-		}
-		slices.Sort(keys)
-		for _, resourceName := range keys {
-			quantity := container.Resources.Requests[corev1.ResourceName(resourceName)]
-			if quantity.Value() <= 0 {
-				continue
-			}
-
-			className, ok := strings.CutPrefix(resourceName, resourcev1.ResourceDeviceClassPrefix)
-			if !ok {
-				continue
-			}
-
-			names, ok := requestNames[className]
-			if !ok {
-				continue
-			}
-			for _, requestName := range names {
+	for _, request := range requests {
+		for _, deviceRequest := range deviceRequests {
+			if deviceRequest.Exactly != nil && deviceRequest.Exactly.DeviceClassName == request.DeviceClassName {
 				mappings = append(mappings, corev1.ContainerExtendedResourceRequest{
-					ContainerName: container.Name,
-					RequestName:   requestName,
-					ResourceName:  resourceName,
+					ContainerName: request.ContainerName,
+					RequestName:   deviceRequest.Name,
+					ResourceName:  string(request.ResourceName),
 				})
 			}
 		}
 	}
-
-	return mappings, nil
+	return mappings
 }
 
 // patchPodExtendedResourceClaimStatus links allocated requests to their containers.

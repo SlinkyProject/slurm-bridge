@@ -114,11 +114,10 @@ version number, upgrade one series at a time: `1.1` → `1.2` → `1.3`. See the
   [DRA Example Driver][dra-example-driver] requires an explicitly configured
   profile. The bridge also retains its specialized
   [NVIDIA k8s-dra-driver-gpu][nvidia-dra-driver] path.
-- NVIDIA GPU backend selection is resource-name based:
-  `deviceclass.resource.kubernetes.io/gpu.nvidia.com` selects the NVIDIA DRA
-  DeviceClass, while `nvidia.com/gpu` selects the NVIDIA device plugin.
-  `DeviceClass.spec.extendedResourceName` aliases are not resolved by
-  `slurm-bridge`; use the implicit DeviceClass resource name for NVIDIA DRA.
+- DRA requests can use `deviceclass.resource.kubernetes.io/<class>` or the
+  class's `spec.extendedResourceName`. Aliases take precedence over
+  device-plugin names; without an alias, `nvidia.com/gpu` and `amd.com/gpu`
+  retain their device-plugin path. Use one resource name per class in each Pod.
 - Native `cpu` requests do not activate CPU DRA. Pods must explicitly request
   `deviceclass.resource.kubernetes.io/dra.cpu` and cannot combine it with native
   `cpu` requests or limits.

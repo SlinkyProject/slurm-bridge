@@ -20,6 +20,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	sched "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
@@ -264,7 +265,18 @@ func TestValidateAnnotationConflicts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateAnnotationConflicts(tt.pod)
+			registry := dra.DefaultRegistry()
+			cpu, _ := registry.LookupByName("cpu")
+			gpu, _ := registry.LookupByName("gpu.nvidia.com")
+			classes := []client.Object{
+				&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: nodeinfo.DraDriverCpu}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: cpu.Selector}}}}},
+				&resourcev1.DeviceClass{ObjectMeta: metav1.ObjectMeta{Name: "gpu.nvidia.com"}, Spec: resourcev1.DeviceClassSpec{Selectors: []resourcev1.DeviceSelector{{CEL: &resourcev1.CELDeviceSelector{Expression: gpu.Selector}}}}},
+			}
+			requests, err := registry.ResolvePod(t.Context(), fake.NewClientBuilder().WithObjects(classes...).Build(), tt.pod)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = validateAnnotationConflicts(tt.pod, requests)
 			if tt.wantErrContains == "" {
 				if err != nil {
 					t.Fatalf("validateAnnotationConflicts() unexpected error = %v", err)
@@ -1152,6 +1164,38 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 		}
 	}
 
+	for _, tc := range []struct {
+		name        string
+		count       string
+		annotations map[string]string
+		unsupported bool
+		want        string
+	}{
+		{name: "alias", count: "2"},
+		{name: "zero alias", count: "0", want: "must be greater than zero"},
+		{name: "alias GRES override", count: "2", annotations: map[string]string{wellknown.AnnotationGres: "gpu:4"}, want: "conflicts with DRA resource"},
+		{name: "unsupported alias profile stays on device-plugin path", count: "2", unsupported: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := newPod()
+			pod.Annotations = tc.annotations
+			pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{"example.com/gpu": resource.MustParse(tc.count)}
+			class := validClass()
+			class.Spec.ExtendedResourceName = ptr.To("example.com/gpu")
+			admission := newAdmission(class)
+			if tc.unsupported {
+				admission.DRARegistry = nil
+			}
+			_, err := admission.ValidateCreate(context.Background(), pod)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("ValidateCreate() = %v, want %q", err, tc.want)
+			}
+			if _, exists := pod.Spec.Containers[0].Resources.Requests["example.com/gpu"]; !exists {
+				t.Fatal("admission changed the Pod resource name")
+			}
+		})
+	}
+
 	t.Run("example GPU requires configuration", func(t *testing.T) {
 		pod := newPod()
 		pod.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
@@ -1316,7 +1360,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 			deviceResource: resource.MustParse("1"),
 		}
 		warnings, err := newAdmission().ValidateCreate(context.Background(), pod)
-		if err == nil || !strings.Contains(err.Error(), `get device class "gpu.example.com"`) {
+		if err == nil || !strings.Contains(err.Error(), `DeviceClass "gpu.example.com" was not found`) {
 			t.Fatalf("PodAdmission.ValidateCreate() error = %v, want missing DeviceClass error", err)
 		}
 		if len(warnings) != 0 {

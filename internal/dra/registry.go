@@ -22,6 +22,7 @@ var deviceProfileNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_.-]*[
 
 // Registry indexes supported DeviceProfiles by name and canonical selector.
 type Registry struct {
+	classes           classIndex
 	byName            map[string]DeviceProfile
 	bySelector        map[string]DeviceProfile
 	byDriver          map[string][]DeviceProfile
