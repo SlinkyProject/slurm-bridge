@@ -16,6 +16,11 @@ proceeding to the next release series.
 
 ## Before upgrading
 
+Follow the [upgrade policy](upgrades.md): pause submissions and drain pending
+Bridge work before starting the upgrade. The Helm hook checks pending Pods
+before stopping Bridge components; Slurm queue verification remains an operator
+step.
+
 Check the installed release's chart version and application version:
 
 ```sh
@@ -39,4 +44,5 @@ the upgrade.
 
 For release validation on a dedicated cluster, the `TestUpgrade` e2e spec checks
 the version path before changing the release, preserves running workloads across
-the upgrade, and verifies that queued and new work can run afterward.
+the upgrade, rejects an upgrade with pending work, and verifies that new work
+can run after upgrading with a drained queue.

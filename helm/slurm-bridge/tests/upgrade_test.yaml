@@ -45,19 +45,19 @@ tests:
     template: upgrade/job.yaml
     asserts:
       - equal:
-          path: spec.template.spec.initContainers[0].name
+          path: spec.template.spec.initContainers[1].name
           value: scale-down
       - contains:
-          path: spec.template.spec.initContainers[0].args
+          path: spec.template.spec.initContainers[1].args
           content: --replicas=0
       - equal:
-          path: spec.template.spec.initContainers[1].name
+          path: spec.template.spec.initContainers[2].name
           value: wait-for-deployments
       - contains:
-          path: spec.template.spec.initContainers[1].args
+          path: spec.template.spec.initContainers[2].args
           content: --for=condition=Available
       - contains:
-          path: spec.template.spec.initContainers[1].args
+          path: spec.template.spec.initContainers[2].args
           content: --for=jsonpath={.spec.replicas}=0
       - contains:
           path: spec.template.spec.containers[0].args
@@ -80,16 +80,16 @@ tests:
           path: metadata.namespace
           value: custom-namespace
       - contains:
-          path: spec.template.spec.initContainers[0].args
+          path: spec.template.spec.initContainers[1].args
           content: --namespace=custom-namespace
       - contains:
-          path: spec.template.spec.initContainers[0].args
+          path: spec.template.spec.initContainers[1].args
           content: --selector=app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
       - contains:
-          path: spec.template.spec.initContainers[1].args
+          path: spec.template.spec.initContainers[2].args
           content: --namespace=custom-namespace
       - contains:
-          path: spec.template.spec.initContainers[1].args
+          path: spec.template.spec.initContainers[2].args
           content: --selector=app.kubernetes.io/instance=test-release,app.kubernetes.io/component in (scheduler,controllers,admission)
       - contains:
           path: spec.template.spec.containers[0].args
@@ -100,6 +100,7 @@ tests:
   - it: creates namespace permissions before the job with matching identities
     template: upgrade/rbac.yaml
     set:
+      upgradeHook.skipPendingCheck: true
       fullnameOverride: custom-bridge
       namespaceOverride: custom-namespace
     asserts:
@@ -178,16 +179,16 @@ tests:
           path: spec.template.spec.containers[0].image
           value: registry.example.com/kubectl:v1.36.1
       - equal:
-          path: spec.template.spec.initContainers[0].image
-          value: registry.example.com/kubectl:v1.36.1
-      - equal:
           path: spec.template.spec.initContainers[1].image
           value: registry.example.com/kubectl:v1.36.1
-      - contains:
-          path: spec.template.spec.initContainers[0].args
-          content: --timeout=600s
+      - equal:
+          path: spec.template.spec.initContainers[2].image
+          value: registry.example.com/kubectl:v1.36.1
       - contains:
           path: spec.template.spec.initContainers[1].args
+          content: --timeout=600s
+      - contains:
+          path: spec.template.spec.initContainers[2].args
           content: --timeout=600s
       - contains:
           path: spec.template.spec.containers[0].args
@@ -207,3 +208,107 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].resources.requests.cpu
           value: 100m
+  - it: checks pending Pods in all namespaces before scaling any deployments
+    template: upgrade/job.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: check-pending-workloads
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: [kubectl]
+      - equal:
+          path: spec.template.spec.initContainers[0].args
+          value:
+            - wait
+            - pods
+            - --all-namespaces
+            - --for=delete
+            - --timeout=0s
+            - --field-selector=spec.schedulerName=slurm-bridge-scheduler,status.phase=Pending
+            - --cache-dir=/tmp/kubectl-cache
+  - it: checks the configured scheduler without requiring job labels
+    template: upgrade/job.yaml
+    set:
+      schedulerConfig.schedulerName: custom-scheduler
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].args
+          content: --field-selector=spec.schedulerName=custom-scheduler,status.phase=Pending
+  - it: skips only the pending check and retains the shutdown sequence
+    template: upgrade/job.yaml
+    set:
+      upgradeHook.skipPendingCheck: true
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.initContainers
+          count: 2
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: scale-down
+      - equal:
+          path: spec.template.spec.initContainers[1].name
+          value: wait-for-deployments
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: wait-for-pods
+  - it: grants only cluster-wide Pod reads for the pending check
+    template: upgrade/rbac.yaml
+    documentSelector:
+      path: kind
+      value: ClusterRole
+    asserts:
+      - equal:
+          path: rules
+          value:
+            - apiGroups: [""]
+              resources: [pods]
+              verbs: [get, list]
+      - equal:
+          path: metadata.name
+          value: test-namespace-test-release-slurm-bridge-pre-upgrade
+      - equal:
+          path: metadata.annotations["helm.sh/hook-weight"]
+          value: "-20"
+  - it: binds the cluster read permissions to the hook in the overridden namespace
+    template: upgrade/rbac.yaml
+    set:
+      namespaceOverride: custom-namespace
+    documentSelector:
+      path: kind
+      value: ClusterRoleBinding
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-namespace-test-release-slurm-bridge-pre-upgrade
+      - equal:
+          path: roleRef
+          value:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: custom-namespace-test-release-slurm-bridge-pre-upgrade
+      - equal:
+          path: subjects
+          value:
+            - kind: ServiceAccount
+              name: test-release-slurm-bridge-pre-upgrade
+              namespace: custom-namespace
+      - equal:
+          path: metadata.annotations["helm.sh/hook-weight"]
+          value: "-10"
+  - it: omits the cluster read permissions when the check is skipped
+    template: upgrade/rbac.yaml
+    set:
+      upgradeHook.skipPendingCheck: true
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: ServiceAccount
+        documentIndex: 0
+      - isKind:
+          of: Role
+        documentIndex: 1
+      - isKind:
+          of: RoleBinding
+        documentIndex: 2
