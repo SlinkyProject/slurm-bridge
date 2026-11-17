@@ -4,8 +4,6 @@ kind: Job
 metadata:
   name: job-gpu-nvidia
   namespace: slurm-bridge
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: job-gpu-nvidia
 spec:
   completions: 1
   parallelism: 1

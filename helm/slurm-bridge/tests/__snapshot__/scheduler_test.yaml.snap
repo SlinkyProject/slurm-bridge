@@ -242,8 +242,6 @@ manifests should match snapshot:
       - apiGroups:
           - apps
         resources:
-          - daemonsets
-          - deployments
           - replicasets
           - statefulsets
         verbs:
@@ -299,15 +297,6 @@ manifests should match snapshot:
           - leaderworkerset.x-k8s.io
         resources:
           - leaderworkersets
-        verbs:
-          - get
-          - list
-          - watch
-      - apiGroups:
-          - ray.io
-        resources:
-          - rayclusters
-          - rayjobs
         verbs:
           - get
           - list

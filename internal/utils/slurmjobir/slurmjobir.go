@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	resourcehelper "k8s.io/component-helpers/resource"
 	"k8s.io/klog/v2"
@@ -127,15 +126,6 @@ func workloadTranslatorFor(typeMeta metav1.TypeMeta) (workloadTranslator, bool) 
 	default:
 		return nil, false
 	}
-}
-
-func isSupportedWorkload(gvk schema.GroupVersionKind) bool {
-	typeMeta := metav1.TypeMeta{
-		APIVersion: gvk.GroupVersion().String(),
-		Kind:       gvk.Kind,
-	}
-	_, ok := workloadTranslatorFor(typeMeta)
-	return ok
 }
 
 func PreFilter(c client.Client, registry *dra.Registry, handle fwk.Handle, workloadAPI *WorkloadAPI, ctx context.Context, pod *corev1.Pod, slurmJobIR *SlurmJobIR) *fwk.Status {

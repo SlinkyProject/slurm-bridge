@@ -729,3 +729,42 @@ func TestRegistrationReadyCountsBasicSubtreeLive(t *testing.T) {
 		t.Errorf("RegistrationReady() = %v, %q, %v, want true", got, msg, err)
 	}
 }
+
+func TestCompositePodGroupAnnotationsPerLeaf(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	workloadAPI := mustRegisterWorkloadAPI(t, scheme, WorkloadAPIVersionV1Beta1)
+	root := newSchedulingV1Alpha3Object("CompositePodGroup", "root", map[string]any{
+		"schedulingPolicy": map[string]any{"gang": map[string]any{"minGroupCount": int64(2)}},
+	})
+	objects := []client.Object{root}
+	var seed *corev1.Pod
+	for _, name := range []string{"cpu", "gpu"} {
+		pg := newPodGroup(name, corev1.NamespaceDefault, schedulingv1beta1.PodGroupSchedulingPolicy{
+			Gang: &schedulingv1beta1.GangSchedulingPolicy{MinCount: 2},
+		})
+		pg.Spec.ParentCompositePodGroupName = ptr.To(root.GetName())
+		pg.Annotations = map[string]string{wellknown.AnnotationAccount: "legacy-account", wellknown.AnnotationPartition: name + "-partition"}
+		objects = append(objects, pg)
+		for i := range 2 {
+			pod := podWithSchedulingGroup(pg.Namespace, fmt.Sprintf("%s-%d", name, i), name)
+			pod.Annotations = map[string]string{wellknown.AnnotationAccount: name + "-account"}
+			objects = append(objects, pod)
+			seed = pod
+		}
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	ir, err := TranslateToSlurmJobIR(c, nil, workloadAPI, t.Context(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ir.RootPOM.TypeMeta != compositePodGroupV1Alpha3 || len(ir.Components) != 2 {
+		t.Fatalf("expected two components under the composite root: %+v", ir)
+	}
+	for _, component := range ir.Components {
+		name := component.ObjectMeta.Name
+		if len(component.Pods.Items) != 2 || ptr.Deref(component.JobInfo.Account, "") != name+"-account" || ptr.Deref(component.JobInfo.Partition, "") != name+"-partition" {
+			t.Fatalf("leaf %s lost its Pod overrides or PodGroup defaults: %+v", name, component.JobInfo)
+		}
+	}
+}

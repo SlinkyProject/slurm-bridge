@@ -307,7 +307,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 		wantQOS       *string
 		wantAccount   *string
 		wantNoAccount bool
-		wantNoWckey   bool
+		wantWckey     *string
 	}{
 		{
 			name: "podgroup is selected instead of intermediate job",
@@ -366,7 +366,7 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			wantPartition: ptr.To("podgroup-partition"),
 			wantQOS:       ptr.To("workload-qos"),
 			wantNoAccount: true,
-			wantNoWckey:   true,
+			wantWckey:     ptr.To("pod-wckey"),
 		},
 		{
 			name: "workload overrides job and podgroup",
@@ -618,8 +618,8 @@ func TestTranslateToSlurmJobIR_PodGroupAnnotations(t *testing.T) {
 			if tt.wantNoAccount && got.Components[0].JobInfo.Account != nil {
 				t.Errorf("Account = %q, want intermediate Job annotation ignored", *got.Components[0].JobInfo.Account)
 			}
-			if tt.wantNoWckey && got.Components[0].JobInfo.Wckey != nil {
-				t.Errorf("Wckey = %q, want Pod annotation ignored", *got.Components[0].JobInfo.Wckey)
+			if tt.wantWckey != nil && ptr.Deref(got.Components[0].JobInfo.Wckey, "") != *tt.wantWckey {
+				t.Errorf("Wckey = %v, want %s from Pod", got.Components[0].JobInfo.Wckey, *tt.wantWckey)
 			}
 		})
 	}

@@ -4,17 +4,22 @@
 package registration
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	lwsv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 
 	api "github.com/SlinkyProject/slurm-client/api/v0044"
 
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 )
 
 func TestAllocationKeys(t *testing.T) {
@@ -75,6 +80,33 @@ func TestJobEventRouting(t *testing.T) {
 			enqueueJob(&api.V0044JobInfo{AdminComment: ptr.To(tc.info.ToString())}, func(key Request) { got = append(got, key) })
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("queued %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnknownAllocationDoesNotReadObjects(t *testing.T) {
+	kube := fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(_ context.Context, _ client.WithWatch, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+			t.Fatalf("unexpected Get of %T %s", obj, key)
+			return nil
+		},
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			t.Fatalf("unexpected List of %T", list)
+			return nil
+		},
+	}).Build()
+	r := &Reconciler{Client: kube, workloadAPI: &slurmjobir.WorkloadAPI{PodGroupTypeMeta: metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1beta1", Kind: "PodGroup"}}}
+	for _, key := range []Request{
+		{APIGroup: "example.test", Kind: "Controller"},
+		{APIGroup: "example.test", Kind: "Pod"},
+		{APIGroup: "example.test", Kind: "PodGroup"},
+		{APIGroup: "scheduling.k8s.io", Kind: "Controller"},
+		{APIGroup: "apps", Kind: "Deployment"},
+	} {
+		t.Run(key.APIGroup+"/"+key.Kind, func(t *testing.T) {
+			if _, _, err := r.membersFrom(t.Context(), kube, key); err == nil {
+				t.Fatal("unsupported allocation must be rejected before any lookup")
 			}
 		})
 	}

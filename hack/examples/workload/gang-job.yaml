@@ -4,9 +4,6 @@ kind: Workload
 metadata:
   name: training-workload
   namespace: slurm-bridge
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: training-job
-    slurmjob.slinky.slurm.net/timelimit: '5'
 spec:
   controllerRef:
     apiGroup: batch
@@ -42,6 +39,10 @@ spec:
   completions: 2
   completionMode: NonIndexed
   template:
+    metadata:
+      annotations:
+        slurmjob.slinky.slurm.net/job-name: training-job
+        slurmjob.slinky.slurm.net/timelimit: '5'
     spec:
       schedulerName: slurm-bridge-scheduler
       restartPolicy: Never

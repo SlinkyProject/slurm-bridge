@@ -765,7 +765,7 @@ func TestValidateDeviceClassRequestsForPodsRejectsCoreBitmapMultipleContainers(t
 	}
 }
 
-func TestExclusiveCPUUsesWorkloadPolicy(t *testing.T) {
+func TestExclusiveCPUUsesResolvedAnnotations(t *testing.T) {
 	ctx := context.Background()
 	testScheme, err := newClientScheme()
 	if err != nil {
@@ -816,7 +816,7 @@ func TestExclusiveCPUUsesWorkloadPolicy(t *testing.T) {
 				}
 				component := job.Components[0]
 				err = sb.validateDeviceClassRequestsForPods(ctx, component.Pods.Items, ptr.Deref(component.JobInfo.Exclusive, true))
-				wantErr := exclusive != "false"
+				wantErr := owner != "Job" && exclusive != "false"
 				if (err != nil) != wantErr || (wantErr && !errors.Is(err, dra.ErrExclusiveCPUAllocation)) {
 					t.Fatalf("validation = %v, want exclusive CPU rejection: %v", err, wantErr)
 				}
