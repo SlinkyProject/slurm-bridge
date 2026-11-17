@@ -1,0 +1,19 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+fullnameOverride: dra-tpu
+image:
+  pullPolicy: IfNotPresent
+kubeletPlugin:
+  nodeSelector:
+    scheduler.slinky.slurm.net/slurm-bridge: worker
+  tolerations:
+    - key: google.com/tpu
+      operator: Exists
+      effect: NoSchedule
+    - key: slinky.slurm.net/managed-node
+      operator: Equal
+      value: slurm-bridge-scheduler
+      effect: NoExecute
+featureGates:
+  ConsumableShares: false

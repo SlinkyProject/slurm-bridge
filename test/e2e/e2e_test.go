@@ -37,6 +37,7 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeSequentialJobScheduling(),
 		testSlurmBridgeJobSetScheduling(),
 		testSchedulerPluginsPodGroupScheduling(),
+		testRayPodGroupScheduling(),
 		testLeaderWorkerSetScheduling(),
 		testLeaderWorkerSetWorkerFailure(),
 		testSlurmJobRoundTrip(),
@@ -46,6 +47,8 @@ func TestScheduling(t *testing.T) {
 		testSlurmBridgeDRAResourceScheduling(false),
 		testSlurmBridgeNvidiaGPUResourceScheduling(requireNvidiaGPU),
 		testSlurmBridgeDRANETResourceScheduling(),
+		testRayScheduling(true),
+		testLWSTPUAlias(),
 	}
 	for _, api := range []kubernetesPodGroupAPI{podGroupV1Beta1, podGroupV1Alpha2} {
 		testFeatures = append(testFeatures,

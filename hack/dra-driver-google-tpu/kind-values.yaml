@@ -1,0 +1,13 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+kubeletPlugin:
+  tpu:
+    accelerator: tpu-v4-podslice
+  containers:
+    networkOptimizer:
+      enabled: false
+    logCollector:
+      enabled: false
+    vbarControlAgent:
+      enabled: false

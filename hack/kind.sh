@@ -170,7 +170,22 @@ function kind::start() {
 	if $OPT_DRANET; then
 		kind::configure_dranet_interfaces
 	fi
+	if $OPT_DRA_DRIVER_GOOGLE_TPU; then
+		kind::configure_tpu_devices
+	fi
 	kubectl cluster-info --context kind-"$cluster_name"
+}
+
+function kind::configure_tpu_devices() {
+	local bridge_nodes bridge_node
+	bridge_nodes=$(kubectl get nodes -l scheduler.slinky.slurm.net/slurm-bridge=worker -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+	for bridge_node in $bridge_nodes; do
+		# Match upstream's fake v4 device nodes.
+		docker exec "$bridge_node" sh -ec 'for i in 0 1 2 3; do
+            test -b /dev/accel$i || mknod /dev/accel$i b 100 "$i"
+            chmod 666 /dev/accel$i
+        done'
+	done
 }
 
 function kind::delete() {
@@ -400,6 +415,51 @@ function lws::install() {
 		helm install "$chartName" oci://registry.k8s.io/lws/charts/lws \
 			"${install_args[@]}"
 	fi
+}
+
+function kuberay::install() {
+	local chart="kuberay-operator"
+	local install_args=(--namespace kuberay-system --create-namespace --wait --timeout 300s)
+	local resources
+	if resources="$(kubectl get --raw /apis/scheduling.k8s.io/v1alpha3 2>/dev/null)" &&
+		[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"podgroups\" ]]; then
+		# Released KubeRay 1.7.1 only supports the v1alpha2 native API.
+		local source_dir image context cluster
+		source_dir=$("$SCRIPT_DIR/kuberay/build.sh" --prepare)
+		chart="$source_dir/helm-chart/kuberay-operator"
+		if $OPT_EXISTING_CLUSTER; then
+			if [[ -z ${KUBERAY_IMAGE:-} ]]; then
+				echo "Set KUBERAY_IMAGE to a tagged build of hack/kuberay/build.sh available to this cluster." >&2
+				return 1
+			fi
+			image="$KUBERAY_IMAGE"
+		else
+			"$SCRIPT_DIR/kuberay/build.sh" --build
+			image=$("$SCRIPT_DIR/kuberay/build.sh" --image)
+			context=$(kubectl config current-context)
+			cluster="${context#kind-}"
+			if [[ $context == "$cluster" ]]; then
+				echo "KubeRay image loading requires an explicitly selected Kind context." >&2
+				return 1
+			fi
+			kind load docker-image --name "$cluster" "$image"
+		fi
+		if [[ $image == *@* || ${image##*/} != *:* ]]; then
+			echo "KUBERAY_IMAGE must use an explicit repository:tag for the pinned chart." >&2
+			return 1
+		fi
+		install_args+=(--set-string "image.repository=${image%:*}"
+			--set-string "image.tag=${image##*:}" --set image.pullPolicy=IfNotPresent
+			--set 'featureGates[0].name=KubernetesWAS' --set 'featureGates[0].enabled=true')
+	else
+		install_args+=(--repo https://ray-project.github.io/kuberay-helm/ --version 1.7.1)
+		if resources="$(kubectl get --raw /apis/scheduling.k8s.io/v1alpha2 2>/dev/null)" &&
+			[[ $resources =~ \"name\"[[:space:]]*:[[:space:]]*\"podgroups\" ]]; then
+			install_args+=(--set 'featureGates[0].name=KubernetesWAS' --set 'featureGates[0].enabled=true')
+		fi
+	fi
+	echo "[kuberay] Installing KubeRay operator..."
+	helm upgrade --install kuberay-operator "$chart" "${install_args[@]}"
 }
 
 function storage::has_default_class() {
@@ -737,6 +797,43 @@ function dra-driver-cpu::install() {
 	kubectl -n kube-system rollout status daemonset/dracpu --timeout=300s
 }
 
+function dra-driver-google-tpu::install() {
+	local config_dir="$SCRIPT_DIR/dra-driver-google-tpu"
+	local source_dir image
+	local values_args=(--values "$config_dir/values.yaml")
+	source_dir=$("$config_dir/build.sh" --prepare)
+	if $OPT_EXISTING_CLUSTER; then
+		if [[ -z ${DRA_TPU_IMAGE:-} ]]; then
+			echo "Set DRA_TPU_IMAGE to a tagged build of hack/dra-driver-google-tpu/build.sh available to this cluster." >&2
+			return 1
+		fi
+		image="$DRA_TPU_IMAGE"
+	else
+		"$config_dir/build.sh" --build
+		image=$("$config_dir/build.sh" --image)
+		local context cluster
+		context=$(kubectl config current-context)
+		cluster="${context#kind-}"
+		if [[ $context == "$cluster" ]]; then
+			echo "TPU driver image loading requires an explicitly selected Kind context." >&2
+			return 1
+		fi
+		kind load docker-image --name "$cluster" "$image"
+		values_args+=(--values "$config_dir/kind-values.yaml")
+	fi
+	if [[ $image == *@* || ${image##*/} != *:* ]]; then
+		echo "DRA_TPU_IMAGE must use an explicit repository:tag for the pinned TPU chart." >&2
+		return 1
+	fi
+	helm upgrade --install dra-tpu "$source_dir/deployments/helm/dra-driver-google-tpu" \
+		--namespace dra-driver-google-tpu --create-namespace \
+		"${values_args[@]}" \
+		--set-string "image.repository=${image%:*}" \
+		--set-string "image.tag=${image##*:}" \
+		--wait --timeout=300s
+	kubectl apply -f "$SCRIPT_DIR/examples/dra/tpu/deviceclass-alias.yaml"
+}
+
 function dra-driver-nvidia-gpu::install() {
 	local version="0.5.1"
 	local chart="oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu"
@@ -831,8 +928,8 @@ $(basename "$0") - Manage a kind cluster for a slurm-bridge slurm-bridge-demo
 	usage: $(basename "$0") [--config=KIND_CONFIG_PATH] [--existing-cluster]
 	        [--recreate|--delete]
 	        [--core|--prereqs][--extras][--all] [--registry=REPO]
-	        [--dra-example-driver] [--dra-driver-cpu]
-	        [--dra-driver-nvidia-gpu] [--dranet] [--kwok] [--metrics]
+	        [--dra-example-driver] [--dra-driver-cpu] [--dra-driver-google-tpu]
+	        [--dra-driver-nvidia-gpu] [--dranet] [--kuberay] [--kwok] [--metrics]
 	        [--slurm-node-mode=MODE] [--bridge-version=VERSION]
 	        [--slurm-operator-repo=URL] [--slurm-operator-ref=REF]
 	        [--print-image] [-h|--help] [--debug] [KIND_CLUSTER_NAME]
@@ -851,16 +948,21 @@ KIND OPTIONS:
 
 HELM OPTIONS:
 	--all               Equivalent of: --core --extras
-	--extras            Install all DRA driver fixtures below.
+	--extras            Install all DRA driver fixtures and the KubeRay operator.
 	--core              Install the slurm-bridge stack.
 	--prereqs           Install slurm-bridge prerequisites only.
 	--dra-driver-cpu    Install dra-driver-cpu on Kubernetes 1.36 or newer.
+	--dra-driver-google-tpu Install Google TPU DRA with four fake v4 chips per Kind worker.
+	                    With --existing-cluster, set DRA_TPU_IMAGE to the pinned build.
 	--dra-example-driver Install DRA driver: dra-example-driver
 	--dra-driver-nvidia-gpu Install DRA driver: dra-driver-nvidia-gpu
 	                    Set MOCK_NVML=true to expose fake GPUs on Kind workers.
 	                    It also mocks a two-NUMA-node GPU and DRANET topology, and
 	                    the CPU topology for external Slurm nodes.
 	--dranet            Install DRA driver: DRANET
+	--kuberay           Install KubeRay, enabling native PodGroups when available.
+	                    Kubernetes 1.37 builds a pinned upstream operator image.
+	                    With --existing-cluster, set KUBERAY_IMAGE to that build.
 	--kwok              Install KWOK and its fast stage configuration.
 	--metrics           Install metrics collection for Slurm Bridge.
 
@@ -925,11 +1027,17 @@ function main() {
 
 	make -C "$ROOT_DIR" values-dev || true
 
+	if $OPT_KUBERAY; then
+		kuberay::install
+	fi
 	if $OPT_KWOK; then
 		kwok::install
 	fi
 	if $OPT_DRA_DRIVER_CPU; then
 		dra-driver-cpu::install
+	fi
+	if $OPT_DRA_DRIVER_GOOGLE_TPU; then
+		dra-driver-google-tpu::install
 	fi
 	if $OPT_DRA_EXAMPLE_DRIVER; then
 		dra-example-driver::install
@@ -950,7 +1058,7 @@ function main() {
 	elif $OPT_CORE; then
 		slurm-bridge::install
 	fi
-	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET; then
+	if $OPT_DRA_EXAMPLE_DRIVER || $OPT_DRANET || $OPT_DRA_DRIVER_GOOGLE_TPU; then
 		slurm-bridge::configure_e2e_device_profiles
 	fi
 	if $OPT_METRICS; then
@@ -968,7 +1076,9 @@ OPT_CORE=false
 OPT_PREREQS=false
 OPT_REGISTRY="${SKAFFOLD_DEFAULT_REPO:-}"
 OPT_EXTRAS=false
+OPT_KUBERAY=false
 OPT_DRA_DRIVER_CPU=false
+OPT_DRA_DRIVER_GOOGLE_TPU=false
 OPT_DRA_EXAMPLE_DRIVER=false
 OPT_DRA_DRIVER_NVIDIA_GPU=false
 MOCK_NVML="${MOCK_NVML:-false}"
@@ -989,7 +1099,7 @@ true | false) ;;
 esac
 
 SHORT="+h"
-LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,dra-driver-cpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
+LONG="all,recreate,config:,print-image,delete,debug,existing-cluster,registry:,core,prereqs,extras,kuberay,dra-driver-cpu,dra-driver-google-tpu,dra-example-driver,dra-driver-nvidia-gpu,dranet,kwok,metrics,slurm-operator-repo:,slurm-operator-ref:,slurm-node-mode:,bridge-version:,help"
 OPTS="$(getopt -a --options "$SHORT" --longoptions "$LONG" -- "$@")"
 eval set -- "${OPTS}"
 while :; do
@@ -1074,8 +1184,16 @@ while :; do
 		OPT_EXTRAS=true
 		shift
 		;;
+	--kuberay)
+		OPT_KUBERAY=true
+		shift
+		;;
 	--dra-driver-cpu)
 		OPT_DRA_DRIVER_CPU=true
+		shift
+		;;
+	--dra-driver-google-tpu)
+		OPT_DRA_DRIVER_GOOGLE_TPU=true
 		shift
 		;;
 	--dra-example-driver)
@@ -1120,6 +1238,8 @@ while :; do
 done
 
 if $OPT_EXTRAS; then
+	OPT_DRA_DRIVER_GOOGLE_TPU=true
+	OPT_KUBERAY=true
 	OPT_DRA_DRIVER_CPU=true
 	OPT_DRA_EXAMPLE_DRIVER=true
 	OPT_DRA_DRIVER_NVIDIA_GPU=true

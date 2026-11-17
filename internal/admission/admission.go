@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
@@ -29,7 +28,6 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
-	"github.com/SlinkyProject/slurm-bridge/internal/nodeinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -53,6 +51,14 @@ func (r *PodAdmission) draRegistry() *dra.Registry {
 }
 
 func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	r.DRARegistry = r.draRegistry()
+	informer, err := mgr.GetCache().GetInformer(context.Background(), &resourcev1.DeviceClass{})
+	if err != nil {
+		return err
+	}
+	if err := r.DRARegistry.WatchDeviceClasses(informer); err != nil {
+		return err
+	}
 	return ctrl.NewWebhookManagedBy(mgr, &corev1.Pod{}).
 		WithDefaulter(r).
 		WithValidator(r).
@@ -152,13 +158,17 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if hasRequiredAffinity(pod) {
 		return nil, fmt.Errorf("spec.affinity's required fields are not supported by the slurm-bridge scheduler, use a Slurm partition or constraint instead")
 	}
+	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, pod)
+	if err != nil {
+		return nil, err
+	}
 	if err := validatePositiveResourceQuantities(pod); err != nil {
 		return nil, err
 	}
-	if err := r.validateDRAResources(ctx, pod); err != nil {
+	if err := r.validateDRAResources(pod, requests); err != nil {
 		return nil, err
 	}
-	if err := validateAnnotationConflicts(pod); err != nil {
+	if err := validateAnnotationConflicts(pod, requests); err != nil {
 		return nil, err
 	}
 	if err := validateTimeLimitAnnotation(pod); err != nil {
@@ -191,10 +201,14 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
 	}
-	if err := r.validateDRAResources(ctx, newPod); err != nil {
+	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, newPod)
+	if err != nil {
 		return nil, err
 	}
-	if err := validateAnnotationConflicts(newPod); err != nil {
+	if err := r.validateDRAResources(newPod, requests); err != nil {
+		return nil, err
+	}
+	if err := validateAnnotationConflicts(newPod, requests); err != nil {
 		return nil, err
 	}
 	if err := validateConstraintsAnnotation(newPod); err != nil {
@@ -339,8 +353,7 @@ func validatePositiveResourceRequirements(resources corev1.ResourceRequirements,
 		{field: "limit", list: resources.Limits},
 	} {
 		for resourceName, quantity := range resourceList.list {
-			name := resourceName.String()
-			if resourceName != corev1.ResourceCPU && !strings.HasPrefix(name, resourcev1.ResourceDeviceClassPrefix) {
+			if resourceName != corev1.ResourceCPU {
 				continue
 			}
 			if quantity.Sign() <= 0 {
@@ -351,53 +364,22 @@ func validatePositiveResourceRequirements(resources corev1.ResourceRequirements,
 	return nil
 }
 
-func (r *PodAdmission) validateDRAResources(ctx context.Context, pod *corev1.Pod) error {
-	classNames := make(map[string]struct{})
-	containers := slices.Clone(pod.Spec.InitContainers)
-	containers = append(containers, pod.Spec.Containers...)
-	for _, container := range containers {
-		for resourceName := range container.Resources.Requests {
-			addDeviceClassName(classNames, resourceName)
-		}
-		for resourceName := range container.Resources.Limits {
-			addDeviceClassName(classNames, resourceName)
-		}
+func (r *PodAdmission) validateDRAResources(pod *corev1.Pod, requests []dra.ResourceRequest) error {
+	if err := dra.ValidateRequestContainers(requests); err != nil {
+		return err
 	}
-
-	registry := r.draRegistry()
 	hasNativeCPU := podRequestsNativeCPU(pod)
-	// The scheduler checks controller and PodGroup annotations after resolving
-	// the workload's annotation source.
 	standalone := metav1.GetControllerOf(pod) == nil && pod.Spec.SchedulingGroup == nil && pod.Labels[sched.PodGroupLabel] == ""
 	exclusive := !strings.EqualFold(strings.TrimSpace(pod.Annotations[wellknown.AnnotationExclusive]), "false")
-	for _, className := range slices.Sorted(maps.Keys(classNames)) {
-		deviceClass := &resourcev1.DeviceClass{}
-		if err := r.Get(ctx, client.ObjectKey{Name: className}, deviceClass); err != nil {
-			return fmt.Errorf("get device class %q: %w", className, err)
+	for _, request := range requests {
+		if request.Profile.UsesCoreBitmap() && hasNativeCPU {
+			return fmt.Errorf("can't specify both native %q and core-bitmap DeviceClass %q", corev1.ResourceCPU, request.DeviceClassName)
 		}
-		// TODO: Persist the admitted DeviceProfile if DeviceClasses may be repointed
-		// while a workload is scheduling. The current flow assumes DeviceClass
-		// selectors remain stable and re-resolves them during scheduling.
-		profile, err := registry.MatchDeviceClass(deviceClass)
-		if err != nil {
-			return err
-		}
-		if profile.UsesCoreBitmap() && hasNativeCPU {
-			return fmt.Errorf("can't specify both native %q and core-bitmap DeviceClass %q", corev1.ResourceCPU, className)
-		}
-		if profile.UsesCoreBitmap() && standalone && exclusive {
-			return fmt.Errorf("DeviceClass %q: %w", className, dra.ErrExclusiveCPUAllocation)
+		if request.Profile.UsesCoreBitmap() && standalone && exclusive {
+			return fmt.Errorf("DeviceClass %q: %w", request.DeviceClassName, dra.ErrExclusiveCPUAllocation)
 		}
 	}
 	return nil
-}
-
-func addDeviceClassName(classNames map[string]struct{}, resourceName corev1.ResourceName) {
-	name := string(resourceName)
-	if !strings.HasPrefix(name, resourcev1.ResourceDeviceClassPrefix) {
-		return
-	}
-	classNames[strings.TrimPrefix(name, resourcev1.ResourceDeviceClassPrefix)] = struct{}{}
 }
 
 // validateTimeLimitAnnotation rejects a time limit the scheduler would fail to
@@ -413,43 +395,16 @@ func validateTimeLimitAnnotation(pod *corev1.Pod) error {
 	return nil
 }
 
-// validateAnnotationConflicts rejects Slurm annotation overrides that would
-// contradict explicit DRA resource requests declared on the pod. DRA requests
-// are authoritative: the generated ResourceClaim must match what the pod
-// declared, so annotations that would replace those values are disallowed.
-func validateAnnotationConflicts(pod *corev1.Pod) error {
-	_, hasCpuPerTask := pod.Annotations[wellknown.AnnotationCpuPerTask]
-	_, hasGres := pod.Annotations[wellknown.AnnotationGres]
-	if !hasCpuPerTask && !hasGres {
-		return nil
-	}
-
-	checkResourceList := func(rl corev1.ResourceList) error {
-		for resourceName := range rl {
-			cls, isDRA := strings.CutPrefix(string(resourceName), resourcev1.ResourceDeviceClassPrefix)
-			if !isDRA {
-				continue
-			}
-			if hasCpuPerTask && cls == nodeinfo.DraDriverCpu {
-				return fmt.Errorf("annotation %q conflicts with CPU DRA resource %q: explicit DRA requests are authoritative",
-					wellknown.AnnotationCpuPerTask, resourceName)
-			}
-			if hasGres && cls != nodeinfo.DraDriverCpu {
-				return fmt.Errorf("annotation %q conflicts with DRA resource %q: explicit DRA requests are authoritative",
-					wellknown.AnnotationGres, resourceName)
-			}
+// Explicit DRA requests must agree with the Slurm allocation.
+func validateAnnotationConflicts(pod *corev1.Pod, requests []dra.ResourceRequest) error {
+	_, hasCPU := pod.Annotations[wellknown.AnnotationCpuPerTask]
+	_, hasGRES := pod.Annotations[wellknown.AnnotationGres]
+	for _, request := range requests {
+		if hasCPU && request.Profile.UsesCoreBitmap() {
+			return fmt.Errorf("annotation %q conflicts with CPU DRA resource %q: explicit DRA requests are authoritative", wellknown.AnnotationCpuPerTask, request.ResourceName)
 		}
-		return nil
-	}
-
-	for _, containers := range [][]corev1.Container{pod.Spec.InitContainers, pod.Spec.Containers} {
-		for _, c := range containers {
-			if err := checkResourceList(c.Resources.Requests); err != nil {
-				return err
-			}
-			if err := checkResourceList(c.Resources.Limits); err != nil {
-				return err
-			}
+		if hasGRES && !request.Profile.UsesCoreBitmap() {
+			return fmt.Errorf("annotation %q conflicts with DRA resource %q: explicit DRA requests are authoritative", wellknown.AnnotationGres, request.ResourceName)
 		}
 	}
 	return nil

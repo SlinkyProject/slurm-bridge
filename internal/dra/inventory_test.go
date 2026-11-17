@@ -6,6 +6,7 @@ package dra
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -101,6 +102,65 @@ func TestBuildNodeInventory(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("BuildNodeInventory() = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("orders more than ten devices by device name string", func(t *testing.T) {
+		// External nodes take Slurm GRES indexes from this order, so index 2 is
+		// gpu-10, not gpu-2. Hybrid nodes take indexes from gres.conf instead and
+		// must list devices in this same order; see the TODO in
+		// sortedProfileInventories.
+		const gpus = 12
+		names := make([]string, 0, gpus)
+		for i := range gpus {
+			names = append(names, fmt.Sprintf("gpu-%d", i))
+		}
+		slice := resourceSlice("node-a", "gpu.nvidia.com", "node-a", names...)
+		for i := range slice.Spec.Devices {
+			slice.Spec.Devices[i].Attributes = map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				"type": {StringValue: new("gpu")},
+			}
+		}
+
+		got, err := BuildNodeInventory(t.Context(), registry, nodeForTest("node-a"), []resourcev1.ResourceSlice{slice})
+		if err != nil {
+			t.Fatalf("BuildNodeInventory() error = %v", err)
+		}
+		wantOrder := []string{
+			"gpu-0", "gpu-1", "gpu-10", "gpu-11", "gpu-2", "gpu-3",
+			"gpu-4", "gpu-5", "gpu-6", "gpu-7", "gpu-8", "gpu-9",
+		}
+		if len(got.Profiles) != 1 {
+			t.Fatalf("BuildNodeInventory() profiles = %#v, want one NVIDIA profile", got.Profiles)
+		}
+		gotOrder := make([]string, 0, gpus)
+		for _, device := range got.Profiles[0].Devices {
+			gotOrder = append(gotOrder, device.Device.String())
+		}
+		if !reflect.DeepEqual(gotOrder, wantOrder) {
+			t.Fatalf("BuildNodeInventory() device order = %v, want %v", gotOrder, wantOrder)
+		}
+
+		gres, err := got.GRES()
+		if err != nil {
+			t.Fatalf("NodeInventory.GRES() error = %v", err)
+		}
+		extra, err := EncodeAppliedInventory(gres)
+		if err != nil {
+			t.Fatalf("EncodeAppliedInventory() error = %v", err)
+		}
+		applied, err := DecodeAppliedInventory(extra)
+		if err != nil {
+			t.Fatalf("DecodeAppliedInventory() error = %v", err)
+		}
+		for index, name := range wantOrder {
+			devices, err := applied.Devices("gpu.nvidia.com", []int{index})
+			if err != nil {
+				t.Fatalf("AppliedInventory.Devices(%d) error = %v", index, err)
+			}
+			if want := deviceIDForTest("gpu.nvidia.com", "node-a", name); devices[0] != want {
+				t.Errorf("Slurm GRES index %d = %v, want %v", index, devices[0], want)
+			}
 		}
 	})
 

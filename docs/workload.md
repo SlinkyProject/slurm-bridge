@@ -87,7 +87,8 @@ For these resources, `slurm-bridge` translates the Slurm allocation into a DRA
 ResourceClaim and records the allocated devices for the Pod. Additional indexed
 DeviceClasses are supported when they resolve to a configured device profile.
 Other DeviceClass extended resources are unsupported. Validation covers requests
-and limits in both init containers and regular containers.
+and limits in both init containers and regular containers. For NVIDIA GPUs and
+MIG devices, see [NVIDIA GPUs and MIG with DRA](nvidia-gpu-dra-mig.md).
 
 The bridge keeps `DRADeviceTaintRules` disabled by default because clusters
 older than Kubernetes 1.37 do not serve `resource.k8s.io/v1` DeviceTaintRules.
@@ -199,11 +200,13 @@ The following non-DRA extended resources are also supported:
 | `nvidia.com/gpu`  | NVIDIA GPU    |
 | `amd.com/gpu`     | AMD GPU       |
 
-These resources use the generic device-plugin path. Their quantities are
-translated to a generic Slurm `gres/gpu=<count>` request. Slurm selects and
-reserves the node and GPU count, while kubelet and the device plugin choose the
-physical devices. No DRA ResourceClaim is created, so Slurm and Kubernetes do
-not coordinate exact GPU identities on this path.
+These resources use the generic device-plugin path unless a DeviceClass alias
+resolves to a configured bridge DeviceProfile. Aliases without a matching
+profile retain their device-plugin meaning. On the device-plugin path,
+quantities are translated to a generic Slurm `gres/gpu=<count>` request. Slurm
+selects and reserves the node and GPU count, while kubelet and the device plugin
+choose the physical devices. No DRA ResourceClaim is created, so Slurm and
+Kubernetes do not coordinate exact GPU identities on this path.
 
 ## CPU DRA
 
@@ -461,6 +464,9 @@ scheduling.
   and Kubernetes version upgrades.
 - [JobSets](jobset.md): per-Pod allocations, scaling restrictions, and recovery.
 - [LeaderWorkerSet](lws.md): group scheduling, replica scaling, and recovery.
+- [NVIDIA GPUs and MIG with DRA](nvidia-gpu-dra-mig.md): driver installation,
+  MIG device profiles, and allocation checks.
+- [TPU DRA](tpu.md): per-Pod whole-host requests and a fake-device Kind check.
 - [PodGroup coscheduling](podgroup-coscheduling.md): legacy scheduler-plugins
   integration and migration to built-in PodGroups.
 
