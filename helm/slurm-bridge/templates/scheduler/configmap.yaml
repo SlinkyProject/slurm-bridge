@@ -18,6 +18,15 @@ data:
     # disabled, Kubernetes overrides this target to one feasible node; full scans
     # still depend on SlurmBridge.Filter rejecting every node until allocation.
     percentageOfNodesToScore: 100
+    {{- if or .Values.schedulerConfig.clientQPS .Values.schedulerConfig.clientBurst }}
+    clientConnection:
+      {{- with .Values.schedulerConfig.clientQPS }}
+      qps: {{ . }}
+      {{- end }}
+      {{- with .Values.schedulerConfig.clientBurst }}
+      burst: {{ . }}
+      {{- end }}
+    {{- end }}
     profiles:
     - schedulerName: {{ include "slurm-bridge.scheduler.name" . }}
       plugins:
