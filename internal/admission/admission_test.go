@@ -1174,7 +1174,7 @@ func TestPodAdmission_ValidateCreate_DRA(t *testing.T) {
 		{name: "alias", count: "2"},
 		{name: "zero alias", count: "0", want: "must be greater than zero"},
 		{name: "alias GRES override", count: "2", annotations: map[string]string{wellknown.AnnotationGres: "gpu:4"}, want: "conflicts with DRA resource"},
-		{name: "unsupported alias profile", count: "2", unsupported: true, want: "selector does not match"},
+		{name: "unsupported alias profile stays on device-plugin path", count: "2", unsupported: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pod := newPod()

@@ -149,6 +149,13 @@ func (r *Registry) ResolvePod(ctx context.Context, reader client.Reader, pod *co
 				}
 				continue
 			}
+			profile, err := r.MatchDeviceClass(class)
+			if err != nil {
+				if !strings.HasPrefix(string(name), resourcev1.ResourceDeviceClassPrefix) {
+					continue // Leave aliases without a bridge profile on the device-plugin path.
+				}
+				return nil, err
+			}
 			for field, list := range map[string]corev1.ResourceList{"request": container.Resources.Requests, "limit": container.Resources.Limits} {
 				if quantity, ok := list[name]; ok && quantity.Sign() <= 0 {
 					return nil, fmt.Errorf("container %q resource %s %q must be greater than zero", container.Name, field, name)
@@ -158,10 +165,6 @@ func (r *Registry) ResolvePod(ctx context.Context, reader client.Reader, pod *co
 				if previous.ResourceName != name {
 					return nil, fmt.Errorf("resources %q and %q both select DeviceClass %q; use one resource name per DeviceClass", previous.ResourceName, name, class.Name)
 				}
-			}
-			profile, err := r.MatchDeviceClass(class)
-			if err != nil {
-				return nil, err
 			}
 			quantity := names[name]
 			request := ResourceRequest{ResourceName: name, ContainerName: container.Name, DeviceClassName: class.Name, Profile: profile, Count: quantity.Value()}
