@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 	var gpuAllocation upgradeGPUAllocation
 	var fresh *corev1.Pod
 
-	return features.New("Bridge upgrade preserves GPU DRA workloads").
+	return features.New("Bridge upgrade requires a drained queue and preserves GPU DRA workloads").
 		WithLabel("suite", "upgrade").
 		Setup(func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			// Cleanup must also run when baseline preparation fails.
@@ -166,11 +167,67 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 			}
 			return ctx
 		}).
+		Assess("pending work blocks the upgrade before shutdown", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			// No target images are needed: the kubectl hook must reject the upgrade
+			// before Helm applies any of the target chart's ordinary resources.
+			output, err := tryUpgradeCommand(ctx, t, "helm",
+				"--kube-context", os.Getenv(e2eKubeContextEnvironment), "--namespace", slurmNamespace,
+				"upgrade", "slurm-bridge", chart, "--reset-then-reuse-values", "--timeout", "360s",
+				"--set", "upgradeHook.enabled=true,upgradeHook.skipPendingCheck=false")
+			if err == nil {
+				t.Fatalf("upgrade accepted pending work: %s", output)
+			}
+			t.Logf("upgrade rejected: %v", err)
+			logs := runUpgradeCommand(ctx, t, "kubectl", "--context", os.Getenv(e2eKubeContextEnvironment),
+				"--namespace", slurmNamespace, "logs", "job/slurm-bridge-pre-upgrade", "-c", "check-pending-workloads")
+			if !strings.Contains(string(logs), "condition not met") || !strings.Contains(string(logs), pending.Name) {
+				t.Fatalf("upgrade failed for a reason other than the pending workload: %s", logs)
+			}
+			for component, image := range upgradeDeploymentImages(ctx, t, crClient) {
+				if image != baselineImages[component] {
+					t.Fatalf("rejected upgrade changed the %s image", component)
+				}
+			}
+			hookPods := &corev1.PodList{}
+			if err := crClient.List(ctx, hookPods, client.InNamespace(slurmNamespace),
+				client.MatchingLabels{"job-name": "slurm-bridge-pre-upgrade"}); err != nil {
+				t.Fatal(err)
+			}
+			if len(hookPods.Items) == 0 {
+				t.Fatal("missing failed hook Pod")
+			}
+			for _, pod := range hookPods.Items {
+				for _, status := range pod.Status.InitContainerStatuses {
+					if status.Name == "scale-down" && (status.State.Running != nil || status.State.Terminated != nil) {
+						t.Fatal("shutdown started despite the pending workload")
+					}
+				}
+			}
+
+			// This dedicated cluster has no other submitters. Drain the pending
+			// workload and verify Slurm too: the hook only checks Kubernetes Pods.
+			deletePodAndAssertCleanup(ctx, t, config, crClient, pending)
+			if t.Failed() {
+				t.FailNow()
+			}
+			controllerPod, err := getSlurmControllerPod(ctx, crClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				output, err := execInPod(ctx, config, controllerPod,
+					"squeue", "--noheader", "--states=PENDING", "--format=%i")
+				return strings.TrimSpace(output) == "", err
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmCleanupTimeout), wait.WithInterval(2*time.Second)); err != nil {
+				t.Fatalf("pending Slurm queue did not drain: %v", err)
+			}
+			return ctx
+		}).
 		Assess("the normal deployment upgrades the existing release", func(ctx context.Context, t *testing.T, _ *envconf.Config) context.Context {
 			t.Log(string(runUpgradeCommand(ctx, t, "make", "deploy")))
 			after := getUpgradeMetadata(ctx, t)
 			if after.Version != target.Version || after.AppVersion != target.AppVersion ||
-				after.Revision != before.Revision+1 || after.Status != "deployed" {
+				after.Revision != before.Revision+2 || after.Status != "deployed" {
 				t.Fatalf("unexpected upgraded release: %+v", after)
 			}
 			for component, image := range upgradeDeploymentImages(ctx, t, crClient, "scheduler", "admission") {
@@ -185,7 +242,7 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 			}
 			return ctx
 		}).
-		Assess("running GPU allocation survives and pending GPU work resumes", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("running GPU allocation survives and new GPU work runs", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			observed := &corev1.Pod{}
 			for _, pod := range occupants {
 				if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), observed); err != nil {
@@ -209,28 +266,27 @@ func testSlurmBridgeUpgrade(fromVersion string) types.Feature {
 					t.Fatalf("original allocation for %s is no longer RUNNING: state=%q, error=%v", pod.Name, state, err)
 				}
 			}
-			if err := crClient.Get(ctx, client.ObjectKeyFromObject(pending), observed); err != nil {
-				t.Fatal(err)
-			}
-			if observed.UID != pending.UID || observed.Spec.NodeName != "" || observed.Status.Phase != corev1.PodPending {
-				t.Fatalf("pending workload was replaced or bound before capacity was released: %s", statusJSON(observed))
-			}
 
 			// Releasing capacity is part of the assertion, even with E2E_CLEANUP=false.
 			deletePodAndAssertCleanup(ctx, t, config, crClient, running)
 			if t.Failed() {
 				return ctx
 			}
+			pending = slurmTestPod(slurmBridgeNamespace, envconf.RandomName("upgrade-new", 40),
+				[]string{"sh", "-c", "sleep 3600"})
+			pending.Annotations = map[string]string{wellknown.AnnotationExclusive: "true"}
+			addUpgradeGPURequest(pending)
+			if err := crClient.Create(ctx, pending); err != nil {
+				t.Fatalf("create post-upgrade workload: %v", err)
+			}
 			observed, err := waitForPod(ctx, crClient, client.ObjectKeyFromObject(pending), upgradePodRunning)
 			if err != nil {
-				t.Fatalf("pre-upgrade pending workload did not run after capacity was released: %v", err)
+				t.Fatalf("new workload did not run after the upgrade: %v", err)
 			}
 			if observed.UID != pending.UID || observed.Spec.NodeName != running.Spec.NodeName {
-				t.Fatal("pending workload was replaced or did not use the released node")
+				t.Fatal("new workload was replaced or did not use the released node")
 			}
-			if jobID := pending.Labels[slurmJobIDLabel]; jobID != "" && observed.Labels[slurmJobIDLabel] != jobID {
-				t.Fatalf("pending allocation changed from %s to %s", jobID, observed.Labels[slurmJobIDLabel])
-			}
+
 			pending = observed
 			assertBridgePod(t, ctx, crClient, pending)
 			observeUpgradeGPU(ctx, t, config, crClient, pending)
@@ -310,6 +366,15 @@ func runUpgradeHelm(ctx context.Context, t *testing.T, args ...string) []byte {
 
 func runUpgradeCommand(ctx context.Context, t *testing.T, name string, args ...string) []byte {
 	t.Helper()
+	output, err := tryUpgradeCommand(ctx, t, name, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+func tryUpgradeCommand(ctx context.Context, t *testing.T, name string, args ...string) ([]byte, error) {
+	t.Helper()
 	kubeContext := os.Getenv(e2eKubeContextEnvironment)
 	if kubeContext == "" {
 		t.Fatalf("%s must name the upgrade cluster context", e2eKubeContextEnvironment)
@@ -324,12 +389,12 @@ func runUpgradeCommand(ctx context.Context, t *testing.T, name string, args ...s
 	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		t.Fatalf("%s %v: %v\n%s\n%s", name, args, err, output, stderr.String())
+		return output, fmt.Errorf("%s %v: %w\n%s\n%s", name, args, err, output, stderr.String())
 	}
 	if stderr.Len() > 0 {
 		t.Logf("%s: %s", name, stderr.String())
 	}
-	return output
+	return output, nil
 }
 
 func upgradeDeploymentImages(ctx context.Context, t *testing.T, crClient client.Client, components ...string) map[string]string {
