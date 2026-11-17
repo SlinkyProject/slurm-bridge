@@ -128,7 +128,11 @@ func (r *Reconciler) publish(ctx context.Context, members []corev1.Pod, job slur
 		if !r.eligible(&member) {
 			continue
 		}
-		updated := slurmjob.PodWithMetadata(ctx, &member, job, true)
+		updated, err := r.podWithMetadata(ctx, &member, job, true)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		updated.Spec.SchedulingGates = slices.DeleteFunc(updated.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration })
 		if !reflect.DeepEqual(&member, updated) {
 			errs = append(errs, client.IgnoreNotFound(r.Patch(ctx, updated, client.StrategicMergeFrom(&member, client.MergeFromWithOptimisticLock{}))))

@@ -145,9 +145,9 @@ kubectl create secret generic slurm-bridge-token --namespace=slurm --from-litera
 Install the slurm-bridge scheduler after configuring the
 [quickstart prerequisites](./docs/quickstart.md#pre-requisites), including
 cert-manager for the default webhook certificates. The default configuration
-requires the built-in Workload and PodGroup APIs. On Kubernetes 1.35, add
-`--set scheduler.featureGates.SlurmBridgeGenericWorkload=false` to the command
-below; see [Built-in PodGroup](./docs/podgroup.md) for other cluster versions.
+requires the built-in Workload and PodGroup APIs on Kubernetes 1.36 or newer.
+Helm automatically disables native group scheduling on Kubernetes 1.35; see
+[Built-in PodGroup](./docs/podgroup.md) for cluster configuration.
 
 ```sh
 helm install slurm-bridge oci://ghcr.io/slinkyproject/charts/slurm-bridge \
