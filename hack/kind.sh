@@ -186,6 +186,10 @@ function cluster::use_existing() {
 	fi
 	if $OPT_CORE || $OPT_PREREQS; then
 		slurm-stack::check_node_mode "$OPT_SLURM_NODE_MODE"
+		# Only kind nodes carry the demo labels; leave real cluster nodes alone.
+		if [[ "$(kubectl config current-context)" == kind-* ]]; then
+			kind::configure_nodes "$OPT_SLURM_NODE_MODE"
+		fi
 	fi
 	kubectl cluster-info
 }
