@@ -76,7 +76,7 @@ func TestMetadataRepairVerifiesOnlyChanges(t *testing.T) {
 			}, Spec: corev1.PodSpec{SchedulerName: schedulerName}}
 			want := pod.DeepCopy()
 			want.Annotations[wellknown.AnnotationExternalJobNode] = tt.wantNode
-			kube := kubefake.NewClientBuilder().WithObjects(pod.DeepCopy()).Build()
+			kube := kubefake.NewClientBuilder().WithObjects(pod.DeepCopy(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}).Build()
 			cache := fake.NewClientBuilder()
 			if tt.cached != nil {
 				cache.WithObjects(tt.cached)
@@ -246,7 +246,7 @@ func TestMetadataRepairConflictsWithConcurrentPodChanges(t *testing.T) {
 				Namespace: "ns", Name: "pod", UID: "current-uid", Labels: map[string]string{wellknown.LabelExternalJobId: "2"},
 				Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "obsolete-node"},
 			}, Spec: corev1.PodSpec{SchedulerName: schedulerName}}
-			kube := kubefake.NewClientBuilder().WithObjects(pod).WithStatusSubresource(&corev1.Pod{}).Build()
+			kube := kubefake.NewClientBuilder().WithObjects(pod, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "obsolete-node"}}).WithStatusSubresource(&corev1.Pod{}).Build()
 			job := metadataJob(2, 0, 0)
 			base := fake.NewClientBuilder().WithObjects(job).Build()
 			var concurrent *corev1.Pod
@@ -371,5 +371,84 @@ func TestPodCleanupPreservesConcurrentAllocation(t *testing.T) {
 	}
 	if current.Labels[wellknown.LabelExternalJobId] != "2" {
 		t.Fatalf("new allocation was lost: %v", current.Labels)
+	}
+}
+
+// Exercise both metadata writers with the same supported hybrid node mapping.
+func TestMetadataPreservesHybridPlacement(t *testing.T) {
+	for _, publish := range []bool{false, true} {
+		mode := "reconcile"
+		if publish {
+			mode = "publish"
+		}
+		t.Run(mode, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, slurmName, allocation, wantNode string
+				bound, missing, readError             bool
+			}{
+				{name: "mapped node", slurmName: "slurm-worker-1", allocation: "slurm-worker-[1-2]", wantNode: "kube-worker-1"},
+				{name: "identical names", allocation: "kube-worker-[1-2]", wantNode: "kube-worker-1"},
+				{name: "outside allocation", slurmName: "slurm-worker-3", allocation: "slurm-worker-[1-2]"},
+				{name: "mapping overrides matching Kubernetes name", slurmName: "slurm-worker-3", allocation: "kube-worker-1"},
+				{name: "bound pod", slurmName: "slurm-worker-1", allocation: "slurm-worker-[1-2]", bound: true, wantNode: "kube-worker-1"},
+				{name: "missing node", allocation: "slurm-worker-[1-2]", missing: true, wantNode: "kube-worker-1"},
+				{name: "node read failure", allocation: "slurm-worker-[1-2]", readError: true, wantNode: "kube-worker-1"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+						Namespace: "ns", Name: "pod", UID: "current-uid",
+						Labels:      map[string]string{wellknown.LabelExternalJobId: "1"},
+						Annotations: map[string]string{wellknown.AnnotationExternalJobNode: "kube-worker-1"},
+						Finalizers:  []string{wellknown.FinalizerScheduler},
+					}, Spec: corev1.PodSpec{SchedulerName: schedulerName}}
+					if tc.bound {
+						pod.Spec.NodeName = "kube-worker-1"
+					}
+					builder := kubefake.NewClientBuilder().WithObjects(pod.DeepCopy())
+					if !tc.missing {
+						node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "kube-worker-1"}}
+						if tc.slurmName != "" {
+							node.Labels = map[string]string{wellknown.LabelSlurmNodeName: tc.slurmName}
+						}
+						builder.WithObjects(node)
+					}
+					kube := builder.WithInterceptorFuncs(kubeinterceptor.Funcs{
+						Get: func(ctx context.Context, c kubeclient.WithWatch, key kubeclient.ObjectKey, obj kubeclient.Object, opts ...kubeclient.GetOption) error {
+							if _, isNode := obj.(*corev1.Node); isNode && tc.readError {
+								return errors.New("node read failed")
+							}
+							return c.Get(ctx, key, obj, opts...)
+						},
+					}).Build()
+					job := metadataJob(1, 0, 0)
+					job.Nodes = ptr.To(tc.allocation)
+					live := fake.NewClientBuilder().WithObjects(job.DeepCopy()).Build()
+					cache := fake.NewClientBuilder().WithObjects(job.DeepCopy()).Build()
+					index, err := slurmjob.NewPodIndex(live, cache.GetInformer(api.ObjectTypeV0044JobInfo))
+					if err != nil {
+						t.Fatal(err)
+					}
+					r := &Reconciler{Client: kube, jobIndex: index, schedulerName: schedulerName}
+					if publish {
+						if err := kube.Get(t.Context(), kubeclient.ObjectKeyFromObject(pod), pod); err != nil {
+							t.Fatal(err)
+						}
+						err = r.publish(t.Context(), []corev1.Pod{*pod}, slurmjob.ExternalJob{JobId: 1, Nodes: tc.allocation})
+					} else {
+						_, err = r.reconcilePodMetadata(t.Context(), reconcile.Request{NamespacedName: kubeclient.ObjectKeyFromObject(pod)})
+					}
+					if (err != nil) != (tc.missing || tc.readError) {
+						t.Fatalf("error = %v, want error %t", err, tc.missing || tc.readError)
+					}
+					got := &corev1.Pod{}
+					if err := kube.Get(t.Context(), kubeclient.ObjectKeyFromObject(pod), got); err != nil {
+						t.Fatal(err)
+					}
+					if got.Annotations[wellknown.AnnotationExternalJobNode] != tc.wantNode {
+						t.Fatalf("node annotation = %q, want %q", got.Annotations[wellknown.AnnotationExternalJobNode], tc.wantNode)
+					}
+				})
+			}
+		})
 	}
 }

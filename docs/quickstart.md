@@ -44,8 +44,8 @@ started.
     [Host-installed Hybrid Slurm Nodes](native-hybrid-nodes.md).
 
 - The built-in Workload and PodGroup APIs enabled on Kubernetes 1.36 or 1.37.
-  Kubernetes 1.35 requires disabling the bridge's `SlurmBridgeGenericWorkload`
-  feature gate. See [Built-in PodGroup](podgroup.md) for cluster configuration.
+  Helm automatically disables native group scheduling on Kubernetes 1.35. See
+  [Built-in PodGroup](podgroup.md) for cluster configuration.
 
 - Matching NodeNames in Slurm and Kubernetes for all overlapping nodes
 
@@ -111,14 +111,6 @@ Download the chart defaults before editing:
 
 ```sh
 helm show values oci://ghcr.io/slinkyproject/charts/slurm-bridge > values.yaml
-```
-
-On Kubernetes 1.35, set this in `values.yaml`:
-
-```yaml
-scheduler:
-  featureGates:
-    SlurmBridgeGenericWorkload: false
 ```
 
 Depending on your Slurm configuration, you may need to configure the following

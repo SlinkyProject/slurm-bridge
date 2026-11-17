@@ -250,6 +250,10 @@
 
 ### Changed
 
+- When upgrading from v1.3.0-rc1, remove
+  `scheduler.featureGates.SlurmBridgeGenericWorkload` from Helm values to avoid
+  scheduler startup failure with "unrecognized feature gate". Use
+  `scheduler.featureGates.GenericWorkload` instead.
 - Slurm-bridge is now deployed to the slurm namespace instead of slinky.
 - Disabled SchedulerPopFromBackoffQ.
 - PostFilter now uses list to scan slurm nodes.
