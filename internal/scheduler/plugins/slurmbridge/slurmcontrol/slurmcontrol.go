@@ -503,7 +503,8 @@ func (r *realSlurmControl) GetResourcesForNodes(ctx context.Context, pod *corev1
 	return out, nil
 }
 
-// Read Extra live: it maps GRES indexes to devices and changes when a node re-registers.
+// Read Extra live so GRES indexes use the current registration even before
+// the scheduler node informer observes a drained and recreated node.
 func (r *realSlurmControl) getNodeExtra(ctx context.Context, nodeName string) (string, error) {
 	node := &api.V0044Node{}
 	if err := r.Get(ctx, object.ObjectKey(nodeName), node, &client.GetOptions{SkipCache: true}); err != nil {

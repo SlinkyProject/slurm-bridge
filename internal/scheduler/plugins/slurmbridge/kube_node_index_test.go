@@ -27,7 +27,10 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/klog/v2"
 	fwk "k8s.io/kube-scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/dynamicresources"
+	"k8s.io/kubernetes/pkg/scheduler/util/assumecache"
 	"k8s.io/utils/ptr"
 	kubeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,12 +42,15 @@ import (
 
 type nodeIndexTestHandle struct {
 	fwk.Handle
-	factory informers.SharedInformerFactory
+	factory    informers.SharedInformerFactory
+	draManager fwk.SharedDRAManager
 }
 
 func (h *nodeIndexTestHandle) SharedInformerFactory() informers.SharedInformerFactory {
 	return h.factory
 }
+
+func (h *nodeIndexTestHandle) SharedDRAManager() fwk.SharedDRAManager { return h.draManager }
 
 func (h *nodeIndexTestHandle) KubeConfig() *rest.Config {
 	return &rest.Config{Host: "https://kubernetes.test", Transport: kubeRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -85,7 +91,9 @@ func TestNewInitializesIndexes(t *testing.T) {
 	factory := informers.NewSharedInformerFactory(fake.NewClientset(), 0)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	plugin, err := New(ctx, nil, &nodeIndexTestHandle{factory: factory})
+	claims := assumecache.NewAssumeCache(klog.Background(), factory.Resource().V1().ResourceClaims().Informer(), "claims", "", nil)
+	draManager := dynamicresources.NewDRAManager(ctx, claims, nil, factory)
+	plugin, err := New(ctx, nil, &nodeIndexTestHandle{factory: factory, draManager: draManager})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +105,9 @@ func TestNewInitializesIndexes(t *testing.T) {
 	}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "pod", UID: "pod-uid"}}
 	sb := plugin.(*SlurmBridge)
+	if sb.claimTracker != draManager.ResourceClaims() {
+		t.Fatal("shared claim tracker is not configured")
+	}
 	if lists.Load() != 0 {
 		t.Fatal("standby scheduler started polling jobs")
 	}

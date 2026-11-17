@@ -21,7 +21,10 @@ import (
 	serverconfig "k8s.io/kubernetes/cmd/kube-scheduler/app/config"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app/options"
 	"k8s.io/kubernetes/pkg/features"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 )
 
 // Runnable runs scheduling while its manager holds leadership.
@@ -30,6 +33,7 @@ type Runnable struct {
 	delayCache      bool
 	registryOptions []app.Option
 	elected         <-chan struct{}
+	inventoryReader client.Reader
 	initialized     atomic.Bool
 	ready           atomic.Bool
 }
@@ -102,6 +106,7 @@ func (r *Runnable) ConfigureManager(opts *manager.Options) {
 // SetupWithManager registers the scheduler and its readiness check.
 func (r *Runnable) SetupWithManager(mgr manager.Manager) error {
 	r.elected = mgr.Elected()
+	r.inventoryReader = mgr.GetClient()
 	if err := mgr.Add(r); err != nil {
 		return err
 	}
@@ -134,6 +139,9 @@ func (r *Runnable) Check(*http.Request) error {
 func (r *Runnable) Start(ctx context.Context) error {
 	if r.elected == nil {
 		return fmt.Errorf("scheduler must be registered with SetupWithManager")
+	}
+	if r.inventoryReader != nil {
+		ctx = dra.WithInventoryReader(ctx, r.inventoryReader)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

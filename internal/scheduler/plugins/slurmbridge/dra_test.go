@@ -1458,6 +1458,7 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: corev1.NamespaceDefault,
 					Name:      "foo",
+					UID:       "pod-uid",
 				},
 			},
 			wantErr: true,
@@ -1470,6 +1471,7 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: corev1.NamespaceDefault,
 							Name:      "foo",
+							UID:       "pod-uid",
 						},
 					},
 				).
@@ -1478,6 +1480,7 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 						ObjectMeta: metav1.ObjectMeta{
 							Namespace: corev1.NamespaceDefault,
 							Name:      "foo",
+							UID:       "pod-uid",
 						},
 					},
 				).
@@ -1486,6 +1489,7 @@ func TestSlurmBridge_patchPodExtendedResourceClaimStatus(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: corev1.NamespaceDefault,
 					Name:      "foo",
+					UID:       "pod-uid",
 				},
 			},
 			claim: &resourcev1.ResourceClaim{

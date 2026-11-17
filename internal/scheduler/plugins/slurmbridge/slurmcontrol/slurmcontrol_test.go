@@ -1192,6 +1192,11 @@ func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 			switch out := obj.(type) {
 			case *api.V0044NodeResourceLayoutListObject:
 				layouts.Add(1)
+				options := &client.GetOptions{}
+				options.ApplyOptions(opts)
+				if !options.SkipCache {
+					t.Error("resource layout must remain live")
+				}
 				if key != "10" {
 					t.Errorf("layout key=%s, want 10", key)
 				}
@@ -1200,8 +1205,8 @@ func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 			case *api.V0044Node:
 				options := &client.GetOptions{}
 				options.ApplyOptions(opts)
-				if !options.SkipCache {
-					t.Error("node metadata must bypass informer to match the live allocation")
+				if !options.SkipCache || options.RefreshCache || options.WaitRefreshCache {
+					t.Error("DRA node metadata must use a live read")
 				}
 				extras.Add(1)
 				out.Extra = ptr.To("extra-" + string(key))
@@ -1224,5 +1229,39 @@ func TestGetResourcesForNodesSharesLayout(t *testing.T) {
 		if resources[node] == nil || resources[node].NodeExtra != "extra-"+node || resources[node].CoreBitmap == "" {
 			t.Fatalf("invalid resource snapshot: %v", resources)
 		}
+	}
+}
+
+func TestDRAExtraUsesLiveReadAndPropagatesMiss(t *testing.T) {
+	value := "generation-a"
+	missing := errors.New("node absent from Slurm")
+	calls := 0
+	r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(_ context.Context, key object.ObjectKey, obj object.Object, opts ...client.GetOption) error {
+			calls++
+			options := &client.GetOptions{}
+			options.ApplyOptions(opts)
+			if !options.SkipCache || options.RefreshCache || options.WaitRefreshCache {
+				t.Fatal("DRA metadata did not use a direct live read")
+			}
+			if value == "" {
+				return missing
+			}
+			obj.(*api.V0044Node).Extra = ptr.To(value)
+			return nil
+		},
+	}).Build()}
+	for _, expected := range []string{"generation-a", "generation-b"} {
+		value = expected
+		if got, err := r.getNodeExtra(t.Context(), "node"); err != nil || got != expected {
+			t.Fatalf("extra=%q err=%v", got, err)
+		}
+	}
+	value = ""
+	if _, err := r.getNodeExtra(t.Context(), "node"); !errors.Is(err, missing) {
+		t.Fatalf("cache miss=%v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("unexpected retries/live fallback: %d", calls)
 	}
 }

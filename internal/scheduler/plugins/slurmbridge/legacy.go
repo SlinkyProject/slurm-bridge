@@ -15,6 +15,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
 )
 
@@ -86,10 +87,7 @@ func legacyGPUAllocationResults(ctx context.Context, kubeClient client.Client, n
 	if !hasLegacyGPUResources(resources) {
 		return nil, nil
 	}
-	inventory, err := loadLegacyGPUInventory(ctx, kubeClient, nodeName)
-	if err != nil {
-		return nil, err
-	}
+	var inventory legacyGPUInventory
 
 	var results []resourcev1.DeviceRequestAllocationResult
 	for _, gres := range resources {
@@ -102,6 +100,12 @@ func legacyGPUAllocationResults(ctx context.Context, kubeClient client.Client, n
 		}
 		if !exists {
 			continue
+		}
+		if inventory == nil {
+			inventory, err = loadLegacyGPUInventory(ctx, kubeClient, nodeName)
+			if err != nil {
+				return nil, err
+			}
 		}
 		indexes, err := expandGRESIndexes(gres)
 		if err != nil {
@@ -124,14 +128,14 @@ func legacyGPUAllocationResults(ctx context.Context, kubeClient client.Client, n
 }
 
 func loadLegacyGPUInventory(ctx context.Context, kubeClient client.Client, nodeName string) (legacyGPUInventory, error) {
-	resourceSlices := &resourcev1.ResourceSliceList{}
-	if err := kubeClient.List(ctx, resourceSlices); err != nil {
+	resourceSlices, err := nodeutils.GetResourceSlicesForNode(ctx, kubeClient, nodeName)
+	if err != nil {
 		return nil, err
 	}
 
 	inventory := make(legacyGPUInventory)
-	for i := range resourceSlices.Items {
-		resourceSlice := &resourceSlices.Items[i]
+	for i := range resourceSlices {
+		resourceSlice := &resourceSlices[i]
 		if ptr.Deref(resourceSlice.Spec.NodeName, "") != nodeName || !isLegacyGPUDriver(resourceSlice.Spec.Driver) {
 			continue
 		}
