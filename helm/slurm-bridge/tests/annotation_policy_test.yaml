@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-License-Identifier: Apache-2.0
+suite: workload annotation deprecation policy
+templates:
+  - admission/annotation-policy.yaml
+release:
+  name: test-release
+  namespace: slinky
+tests:
+  - it: warns on known workload metadata without denying requests
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ValidatingAdmissionPolicy
+        documentIndex: 0
+      - equal:
+          path: spec.failurePolicy
+          value: Ignore
+        documentIndex: 0
+      - matchRegex:
+          path: spec.validations[0].expression
+          pattern: "object.metadata.annotations"
+        documentIndex: 0
+      - notMatchRegex:
+          path: spec.validations[0].expression
+          pattern: "spec.template"
+        documentIndex: 0
+      - isKind:
+          of: ValidatingAdmissionPolicyBinding
+        documentIndex: 1
+      - equal:
+          path: spec.policyName
+          value: test-release-slurm-bridge-admission-workload-annotations
+        documentIndex: 1
+      - equal:
+          path: spec.validationActions
+          value: [Warn]
+        documentIndex: 1
+      - equal:
+          path: spec.matchConstraints.resourceRules[*].operations
+          value: [CREATE]
+        documentIndex: 0
+      - equal:
+          path: spec.matchResources.namespaceSelector.matchExpressions
+          value:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values: [slurm-bridge]
+            - key: kubernetes.io/metadata.name
+              operator: NotIn
+              values: [kube-system, slinky]
+        documentIndex: 1
+  - it: rejects deprecated annotations when configured to deny
+    set:
+      admission.workloadAnnotationAction: Deny
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: spec.validationActions
+          value: [Deny]
+        documentIndex: 1
+      - equal:
+          path: spec.matchConstraints.resourceRules[*].operations
+          value: [CREATE]
+        documentIndex: 0
+  - it: rejects unsupported validation actions
+    set:
+      admission.workloadAnnotationAction: Error
+    asserts:
+      - failedTemplate:
+          errorMessage: admission.workloadAnnotationAction must be Warn or Deny
+  - it: scopes warnings to the namespace selector instead of the namespace list
+    set:
+      admission.managedNamespaceSelector:
+        matchLabels:
+          slinky: enabled
+        matchExpressions:
+          - key: team
+            operator: In
+            values: [compute]
+    asserts:
+      - equal:
+          path: spec.matchResources.namespaceSelector
+          value:
+            matchLabels:
+              slinky: enabled
+            matchExpressions:
+              - key: team
+                operator: In
+                values: [compute]
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values: [kube-system, slinky]
+        documentIndex: 1
+  - it: does not install an unscoped warning policy
+    set:
+      admission.managedNamespaces: []
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: does not install policies when admission is disabled
+    set:
+      admission.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

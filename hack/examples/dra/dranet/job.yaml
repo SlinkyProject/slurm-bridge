@@ -17,10 +17,11 @@ kind: Job
 metadata:
   name: job-dranet
   namespace: slurm-bridge
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: job-dranet
 spec:
   template:
+    metadata:
+      annotations:
+        slurmjob.slinky.slurm.net/job-name: job-dranet
     spec:
       schedulerName: slurm-bridge-scheduler
       restartPolicy: Never

@@ -5,7 +5,7 @@ package slurmjobir
 
 import (
 	"context"
-	"fmt"
+	"maps"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,35 +16,27 @@ import (
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
-// applySlurmAnnotations applies root annotations or merges PodGroup, controller,
-// and Workload annotations when the pod belongs to a built-in PodGroup.
+// applySlurmAnnotations merges legacy defaults before applying Pod annotations.
+// Merge before parsing so an overridden, deprecated value cannot reject a Pod.
 func (t *translator) applySlurmAnnotations(
 	ctx context.Context,
 	slurmJobIR *SlurmJobIR,
 	rootPOM *metav1.PartialObjectMetadata,
 	pg *PodGroup,
 ) error {
-	if pg == nil {
-		for i := range slurmJobIR.Components {
-			if err := parseUserAnnotations(&slurmJobIR.Components[i], rootPOM.Annotations); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	controllerPOM := rootPOM
-
 	for i := range slurmJobIR.Components {
-		firstPod := getFirstPod(slurmJobIR.Components[i].Pods)
-		if firstPod != nil {
+		component := &slurmJobIR.Components[i]
+		firstPod := getFirstPod(component.Pods)
+		if firstPod == nil {
+			continue
+		}
+		annotations := make(map[string]string)
+		maps.Copy(annotations, rootPOM.Annotations)
+		if pg != nil {
+			controllerPOM := rootPOM
 			if pg.Spec.SchedulingPolicy.Gang != nil || len(slurmJobIR.Components) > 1 {
-				c, ok := t.Reader.(client.Client)
-				if !ok {
-					return fmt.Errorf("client does not support owner metadata lookup")
-				}
 				var err error
-				controllerPOM, err = getRootOwnerMetadata(c, t.ctx, firstPod)
+				controllerPOM, err = getRootOwnerMetadata(t.Reader, ctx, firstPod)
 				if err != nil {
 					return err
 				}
@@ -55,9 +47,16 @@ func (t *translator) applySlurmAnnotations(
 					return err
 				}
 			}
-			if err := t.parsePodGroupSlurmAnnotations(&slurmJobIR.Components[i], componentPg, controllerPOM); err != nil {
+			var err error
+			annotations, err = t.podGroupSlurmAnnotations(ctx, componentPg, controllerPOM)
+			if err != nil {
 				return err
 			}
+		}
+		// Pods within a component must share annotations; read one representative.
+		maps.Copy(annotations, firstPod.Annotations)
+		if err := parseUserAnnotations(component, annotations); err != nil {
+			return err
 		}
 	}
 	return nil

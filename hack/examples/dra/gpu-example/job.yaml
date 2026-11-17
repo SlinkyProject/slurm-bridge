@@ -4,12 +4,13 @@ kind: Job
 metadata:
   name: job-sleep-dra
   namespace: slurm-bridge
-  annotations:
-    slurmjob.slinky.slurm.net/job-name: job-sleep-dra
 spec:
   completions: 1
   parallelism: 1
   template:
+    metadata:
+      annotations:
+        slurmjob.slinky.slurm.net/job-name: job-sleep-dra
     spec:
       schedulerName: slurm-bridge-scheduler
       containers:
