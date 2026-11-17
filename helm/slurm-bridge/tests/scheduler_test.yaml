@@ -44,6 +44,34 @@ tests:
       - notMatchRegex:
           path: data["scheduler-config.yaml"]
           pattern: "(?s)preEnqueue:.*SlurmBridge.*preFilter:"
+  - it: raises kube-scheduler's client limits by default
+    template: scheduler/configmap.yaml
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?m)^clientConnection:\\n  qps: 200\\n  burst: 400$"
+  - it: passes custom client limits to kube-scheduler and the plugin
+    set:
+      schedulerConfig.clientQPS: 75
+      schedulerConfig.clientBurst: 150
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: "(?m)^clientConnection:\\n  qps: 75\\n  burst: 150$"
+        template: scheduler/configmap.yaml
+      - matchRegex:
+          path: data["config.yaml"]
+          pattern: "(?m)^clientQPS: 75\\nclientBurst: 150$"
+        template: configmap.yaml
+  - it: leaves kube-scheduler's client defaults when unset
+    template: scheduler/configmap.yaml
+    set:
+      schedulerConfig.clientQPS: null
+      schedulerConfig.clientBurst: null
+    asserts:
+      - notMatchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: clientConnection
   - it: manifests should match snapshot
     asserts:
       - matchSnapshot: {}

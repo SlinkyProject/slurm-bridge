@@ -101,12 +101,13 @@ schedulerConfig:
   # -- Set the default Slurm partition to use for external jobs.
   # Ref: https://slurm.schedmd.com/sbatch.html#OPT_partition
   partition: slurm-bridge
-  # -- (float) Set the scheduler plugin's own Kubernetes client QPS. Defaults
-  # to kube-scheduler's own client QPS (50) when unset.
-  clientQPS: null
-  # -- (integer) Set the scheduler plugin's own Kubernetes client Burst.
-  # Defaults to kube-scheduler's own client Burst (100) when unset.
-  clientBurst: null
+  # -- (float) Set the Kubernetes client QPS for kube-scheduler and the
+  # scheduler plugin. Large gangs bind one API call per pod, so the
+  # kube-scheduler default of 50 slows them. Unset uses that default.
+  clientQPS: 200
+  # -- (integer) Set the Kubernetes client Burst for kube-scheduler and the
+  # scheduler plugin. Unset uses the kube-scheduler default of 100.
+  clientBurst: 400
 
 # Configuration settings for the admission controller.
 admission:
