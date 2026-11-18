@@ -32,6 +32,7 @@ func ValidatePod(pod *corev1.Pod) field.ErrorList {
 	errs = append(errs, validateGenericEphemeralVolumes(pod)...)
 	errs = append(errs, validateHostLocalVolumes(pod)...)
 	errs = append(errs, validateVolumeSources(pod)...)
+	errs = append(errs, validateNodeSelector(pod)...)
 	return errs
 }
 
