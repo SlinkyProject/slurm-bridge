@@ -130,9 +130,13 @@ metadata and cleans up completed allocations.
 
 Cleanup retains recorded, published, or bound members. Before cancellation it
 confirms membership through the Kubernetes API and ownership through Slurm. A
-deleting, bound Pod retains its allocation until it becomes terminal. Running
-heterogeneous jobs can release individual nonzero components. Component zero and
-pending heterogeneous jobs are retained while any member needs the allocation.
+deleting, bound Pod retains its allocation until it becomes terminal. A Pod on a
+node with no working kubelet never does; once its containers have stopped, taint
+the node with `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute`. Pod
+garbage collection then marks the Pod `Failed` and cleanup releases its job.
+Running heterogeneous jobs can release individual nonzero components. Component
+zero and pending heterogeneous jobs are retained while any member needs the
+allocation.
 
 Bound Pods whose jobs stop running are deleted after a live Slurm check. Claims
 and scheduler finalizers are removed only after Slurm reports the allocation
