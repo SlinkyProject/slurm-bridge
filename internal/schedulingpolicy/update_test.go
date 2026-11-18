@@ -18,6 +18,7 @@ func TestBoundUpdatesPreserveOnlyUnchangedRequests(t *testing.T) {
 		{"preferred affinity", preferredPod(), func(p *corev1.Pod) {
 			p.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0].Weight = 2
 		}},
+		{"host path", &corev1.Pod{Spec: corev1.PodSpec{Volumes: []corev1.Volume{{VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/old"}}}}}}, func(p *corev1.Pod) { p.Spec.Volumes[0].HostPath.Path = "/new" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

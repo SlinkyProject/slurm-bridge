@@ -30,6 +30,7 @@ func ValidatePod(pod *corev1.Pod) field.ErrorList {
 	errs = append(errs, validateTopologySpread(pod)...)
 	errs = append(errs, validateInlineCSIVolumes(pod)...)
 	errs = append(errs, validateGenericEphemeralVolumes(pod)...)
+	errs = append(errs, validateHostLocalVolumes(pod)...)
 	return errs
 }
 
