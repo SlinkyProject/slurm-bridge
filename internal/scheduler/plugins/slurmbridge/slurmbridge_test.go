@@ -51,6 +51,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
+	"github.com/SlinkyProject/slurm-bridge/internal/schedulingpolicy"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -165,6 +166,7 @@ func TestFindMatchingError(t *testing.T) {
 }
 
 type postFilterSlurmControl struct {
+	releaseCalls         int
 	deleteCalls          int
 	deletedPod           *corev1.Pod
 	getJobCalls          int
@@ -220,7 +222,10 @@ func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcon
 	return &slurmcontrol.ExternalJob{}, nil
 }
 
-func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error { return nil }
+func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error {
+	c.releaseCalls++
+	return nil
+}
 
 func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	if c.allocationErr != nil {
@@ -418,8 +423,11 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					},
 				}).Obj(),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
+			want: nil,
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
+				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
+				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{}}}}}),
+			).Error()),
 		},
 		{
 			name: "pod with required pod anti-affinity is rejected",
@@ -436,11 +444,14 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					}, st.PodAntiAffinityWithRequiredReq).
 					Obj(),
 			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
+			want: nil,
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
+				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
+				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{TopologyKey: "kubernetes.io/hostname"}}}}}}),
+			).Error()),
 		},
 		{
-			name: "pod with preferred node affinity is allowed, Slurm just won't honor the preference",
+			name: "pod with preferred node affinity is rejected",
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
@@ -487,8 +498,11 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					}).
 					Obj(),
 			},
-			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
-			want1: fwk.NewStatus(fwk.Success),
+			want: nil,
+			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
+				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
+				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{Weight: 1}}}}}}),
+			).Error()),
 		},
 		{
 			name: "JobId and Node assignment exist in annotations",
@@ -766,7 +780,8 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 		workloadAPI:  workloadAPI,
 	}
 
-	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
+	state := framework.NewCycleState()
+	got, status := sb.PreFilter(ctx, state, podA.DeepCopy(), nil)
 	if got != nil {
 		t.Fatalf("PreFilter() result = %v, want nil", got)
 	}
@@ -777,6 +792,10 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	if !apiequality.Semantic.DeepEqual(status.Reasons(), []string{wantReason}) {
 		t.Fatalf("PreFilter() reasons = %v, want %q", status.Reasons(), wantReason)
 	}
+	if _, after := sb.PostFilter(ctx, state, podA.DeepCopy(), nil); after.Code() != status.Code() || after.Message() != status.Message() {
+		t.Fatalf("PostFilter bypassed DRA capability rejection: %v", after)
+	}
+
 }
 
 func TestSlurmBridge_PostFilterWaitsForExistingGroupAllocation(t *testing.T) {
