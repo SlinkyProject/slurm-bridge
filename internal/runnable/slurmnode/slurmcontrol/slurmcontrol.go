@@ -6,7 +6,6 @@ package slurmcontrol
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"k8s.io/utils/ptr"
 
@@ -22,10 +21,8 @@ import (
 type SlurmControlInterface interface {
 	// RefreshNodeCache forces the Node cache to be refreshed
 	RefreshNodeCache(ctx context.Context) error
-	// ListNodeNames returns a list of Slurm nodes
-	ListNodeNames(ctx context.Context) ([]string, error)
-	// ListBridgeNodeNames returns the external Slurm nodes that slurm-bridge registered
-	ListBridgeNodeNames(ctx context.Context) ([]string, error)
+	// ListNodeNames returns all Slurm nodes, and the external ones that slurm-bridge registered
+	ListNodeNames(ctx context.Context) (all, bridge []string, err error)
 	// RemoveNode drains a Slurm node, then deletes it
 	RemoveNode(ctx context.Context, name string) error
 }
@@ -48,32 +45,20 @@ func (r *realSlurmControl) RefreshNodeCache(ctx context.Context) error {
 }
 
 // ListNodeNames implements SlurmControlInterface.
-func (r *realSlurmControl) ListNodeNames(ctx context.Context) ([]string, error) {
+func (r *realSlurmControl) ListNodeNames(ctx context.Context) (all, bridge []string, err error) {
 	list := &slurmapi.V0044NodeObjectList{}
 	if err := r.List(ctx, list); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	nodenames := make([]string, len(list.Items))
+	all = make([]string, len(list.Items))
 	for i, node := range list.Items {
-		nodenames[i] = ptr.Deref(node.Name, "")
-	}
-	return nodenames, nil
-}
-
-func (r *realSlurmControl) ListBridgeNodeNames(ctx context.Context) ([]string, error) {
-	list := &slurmapi.V0044NodeObjectList{}
-	if err := r.List(ctx, list); err != nil {
-		return nil, err
-	}
-	var names []string
-	for _, node := range list.Items {
+		all[i] = ptr.Deref(node.Name, "")
 		external := slurmutils.GetStateAsSet(node.State).Has(slurmapi.V0044NodeStateEXTERNAL)
-		features := ptr.Deref(node.Features, slurmapi.V0044CsvString{})
-		if external && slices.Contains(features, wellknown.SlurmFeatureGRESCompatible) {
-			names = append(names, ptr.Deref(node.Name, ""))
+		if external && ptr.Deref(node.Comment, "") == wellknown.SlurmNodeComment {
+			bridge = append(bridge, all[i])
 		}
 	}
-	return names, nil
+	return all, bridge, nil
 }
 
 func (r *realSlurmControl) RemoveNode(ctx context.Context, name string) error {
