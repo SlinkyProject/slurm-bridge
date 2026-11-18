@@ -17,7 +17,6 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/config"
 	schedulercontrol "github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/schedulingpolicy"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
@@ -49,9 +48,6 @@ func submissionAllowed(jobs []slurmjob.RegisteredJob, cooldown *int32, members [
 }
 
 func (r *Reconciler) register(ctx context.Context, key Request, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR, jobs []slurmjob.RegisteredJob) (reconcile.Result, error) {
-	if err := schedulingpolicy.ValidateAllocation(ir); err != nil {
-		return r.registrationReadEvent(key, err)
-	}
 	waiting := reconcile.Result{RequeueAfter: registrationRetry}
 	var cooldown *int32
 	if previous, cooling := r.recent.Get(key); cooling {
@@ -97,29 +93,18 @@ func (r *Reconciler) publishRegistered(ctx context.Context, key Request, pods []
 	selected := make(map[client.ObjectKey]bool, len(pods))
 	var errs []error
 	waiting := false
-	ir := &slurmjobir.SlurmJobIR{Components: make([]slurmjobir.SlurmJobComponent, len(jobs))}
-	for i, job := range jobs {
+	for _, job := range jobs {
 		if job.Finished {
 			continue
 		}
 		var members []corev1.Pod
 		for _, pod := range pods {
 			if membership.Contains(&pod, job.JobId) {
-				if r.eligible(&pod) {
-					members = append(members, pod)
-				}
+				members = append(members, pod)
 				selected[client.ObjectKeyFromObject(&pod)] = true
 			}
 		}
-		ir.Components[i].Pods.Items = members
-	}
-	if err := schedulingpolicy.ValidateAllocation(ir); err != nil {
-		return r.registrationReadEvent(key, err)
-	}
-	for i, job := range jobs {
-		if !job.Finished {
-			errs = append(errs, r.publish(ctx, ir.Components[i].Pods.Items, job.ExternalJob))
-		}
+		errs = append(errs, r.publish(ctx, members, job.ExternalJob))
 	}
 	for _, pod := range pods {
 		if r.eligible(&pod) && !selected[client.ObjectKeyFromObject(&pod)] {

@@ -51,7 +51,6 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/scheduler/plugins/slurmbridge/slurmcontrol"
-	"github.com/SlinkyProject/slurm-bridge/internal/schedulingpolicy"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjob"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -403,55 +402,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		want1  *fwk.Status
 	}{
 		{
-			name: "pod with required node affinity is rejected",
-			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
-				handle: f,
-			},
-			args: args{
-				ctx:   ctx,
-				state: framework.NewCycleState(),
-				pod: st.MakePod().Name("pod1").NodeAffinity(&corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"rack-a"}},
-								},
-							},
-						},
-					},
-				}).Obj(),
-			},
-			want: nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
-				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{}}}}}),
-			).Error()),
-		},
-		{
-			name: "pod with required pod anti-affinity is rejected",
-			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
-				handle: f,
-			},
-			args: args{
-				ctx:   context.Background(),
-				state: framework.NewCycleState(),
-				pod: st.MakePod().Name("pod1").
-					PodAntiAffinity("kubernetes.io/hostname", &metav1.LabelSelector{
-						MatchLabels: map[string]string{"app": "example"},
-					}, st.PodAntiAffinityWithRequiredReq).
-					Obj(),
-			},
-			want: nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
-				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{TopologyKey: "kubernetes.io/hostname"}}}}}}),
-			).Error()),
-		},
-		{
-			name: "pod with preferred node affinity is rejected",
+			name: "pod with preferred node affinity is allowed, Slurm just won't honor the preference",
 			fields: fields{
 				client: kubefake.NewFakeClient(pod.DeepCopy(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}),
 				slurmControl: func() slurmcontrol.SlurmControlInterface {
@@ -498,11 +449,8 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 					}).
 					Obj(),
 			},
-			want: nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, schedulingpolicy.PodError(
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1"}},
-				schedulingpolicy.ValidatePod(&corev1.Pod{Spec: corev1.PodSpec{Affinity: &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{Weight: 1}}}}}}),
-			).Error()),
+			want:  &fwk.PreFilterResult{NodeNames: sets.New("node1")},
+			want1: fwk.NewStatus(fwk.Success),
 		},
 		{
 			name: "JobId and Node assignment exist in annotations",

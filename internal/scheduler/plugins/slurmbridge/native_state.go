@@ -173,9 +173,6 @@ func (sb *SlurmBridge) preFilterNative(ctx context.Context, s *stateData, pod *c
 }
 
 func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.Pod, allocation *nativeAllocation, jobs []slurmcontrol.ExternalJob) *fwk.Status {
-	if status := validateSchedulingPolicy(pod, allocation.ir); status != nil {
-		return status
-	}
 	for _, component := range allocation.ir.Components {
 		for _, member := range component.Pods.Items {
 			if member.Spec.ResourceClaims != nil {

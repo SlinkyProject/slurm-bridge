@@ -429,9 +429,6 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 			s.schedulingStatus = status
 		}
 	}()
-	if status := validateSchedulingPolicy(pod, nil); status != nil {
-		return nil, status
-	}
 
 	if pod.Spec.ResourceClaims != nil {
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
@@ -450,9 +447,6 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	}
 	if err != nil && !allocationWait(err) {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
-	}
-	if status := validateSchedulingPolicy(pod, s.slurmJobIR); status != nil {
-		return nil, status
 	}
 	root := &s.slurmJobIR.RootPOM
 	rootName := root.Name
@@ -628,9 +622,6 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	if err := slurmjobir.ValidatePodGroupSupport(sb.workloadAPI, pod); err != nil {
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
-	if status := validateSchedulingPolicy(pod, nil); status != nil {
-		return nil, status
-	}
 	logger := klog.FromContext(ctx)
 
 	s, err := getStateData(state)
@@ -639,9 +630,6 @@ func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod
 	}
 	if s.schedulingStatus != nil {
 		return nil, s.schedulingStatus
-	}
-	if status := validateSchedulingPolicy(pod, s.slurmJobIR); status != nil {
-		return nil, status
 	}
 	// PreFilter rejected the workload, so there is nothing to update or release.
 	if s.slurmJobIR == nil {

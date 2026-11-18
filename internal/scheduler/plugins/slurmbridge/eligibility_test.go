@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +81,6 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 		mutate            func(*corev1.Node, *corev1.Pod, *corev1.Pod)
 		extraPod          *corev1.Pod
 		wantSubmit        bool
-		wantRejectedField string
 		wantExcluded      []string
 	}{
 		{name: "48-node gang with only 16 free nodes", nodes: 64, busy: 48, gang: 48, wantSubmit: true},
@@ -131,19 +129,19 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 					n.Spec.Taints = []corev1.Taint{{Key: "dedicated", Effect: corev1.TaintEffectNoSchedule}}
 				}
 			}, wantSubmit: true, wantExcluded: []string{"node0"}},
-		{name: "node selectors remain rejected on busy nodes", wantRejectedField: "spec.nodeSelector", nodes: 3, busy: 2, gang: 2,
+		{name: "queue on remaining nodes while respecting node selector", nodes: 3, busy: 2, gang: 2,
 			mutate: func(n *corev1.Node, _, p *corev1.Pod) {
 				p.Spec.NodeSelector = map[string]string{"pool": "batch"}
 				if n.Name == "node0" {
 					n.Labels["pool"] = "other"
 				}
-			}},
+			}, wantSubmit: true, wantExcluded: []string{"node0"}},
 		{name: "removing occupant must not conceal host port conflict", mutate: func(_ *corev1.Node, occupant, pending *corev1.Pod) {
 			port := []corev1.ContainerPort{{HostPort: 8080, Protocol: corev1.ProtocolTCP}}
 			occupant.Spec.Containers[0].Ports = port
 			pending.Spec.Containers[0].Ports = port
 		}},
-		{name: "pod anti-affinity remains rejected on busy nodes", wantRejectedField: "spec.affinity.podAntiAffinity", mutate: func(_ *corev1.Node, _, pending *corev1.Pod) {
+		{name: "removing occupant must not conceal pod anti-affinity", mutate: func(_ *corev1.Node, _, pending *corev1.Pod) {
 			pending.Spec.Affinity = &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
 				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
 					LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{wellknown.LabelExternalJobId: "1"}},
@@ -151,8 +149,8 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				}},
 			}}
 		}},
-		{name: "pod affinity remains rejected with an unmanaged peer", wantRejectedField: "spec.affinity.podAffinity", nodes: 1, busy: 1, gang: 1,
-			extraPod: affinityPeer,
+		{name: "retain affinity to an unmanaged pod", nodes: 1, busy: 1, gang: 1,
+			extraPod: affinityPeer, wantSubmit: true,
 			mutate: func(_ *corev1.Node, _, pending *corev1.Pod) {
 				pending.Spec.Affinity = &corev1.Affinity{PodAffinity: &corev1.PodAffinity{
 					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
@@ -299,12 +297,7 @@ func TestPostFilterQueuesBusyNodes(t *testing.T) {
 				slurmControl:  newTestSlurmControl(t, slurm, "kubernetes", schedulerName),
 				handle:        f,
 			}
-			_, status := sb.PostFilter(ctx, state, pending, m)
-			if tt.wantRejectedField != "" {
-				if status.Code() != fwk.UnschedulableAndUnresolvable || !strings.Contains(status.Message(), tt.wantRejectedField) {
-					t.Fatalf("PostFilter: %v; want capability rejection for %s", status, tt.wantRejectedField)
-				}
-			} else if tt.wantSubmit && !status.IsSuccess() {
+			if _, status := sb.PostFilter(ctx, state, pending, m); tt.wantSubmit && !status.IsSuccess() {
 				t.Fatalf("PostFilter: %v", status)
 			}
 			sb.releases.Wait()
