@@ -1419,6 +1419,8 @@ func Test_realSlurmControl_AddNode_setsNodeAddr(t *testing.T) {
 					}
 					return nil
 				},
+				// The fake does not store created nodes, so accept the follow-up update.
+				Update: func(context.Context, object.Object, any, ...slurmclient.UpdateOption) error { return nil },
 			}
 			r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build()}
 			node := &corev1.Node{
@@ -1492,8 +1494,8 @@ func Test_realSlurmControl_AddNode_includesAppliedDRAInventory(t *testing.T) {
 	if extra != wantExtra {
 		t.Errorf("AddNode() extra = %q, want %q", extra, wantExtra)
 	}
-	if comment != nil {
-		t.Errorf("AddNode() comment = %q, want nil", ptr.Deref(comment, ""))
+	if ptr.Deref(comment, "") != wellknown.SlurmNodeComment {
+		t.Errorf("AddNode() comment = %q, want %q", ptr.Deref(comment, ""), wellknown.SlurmNodeComment)
 	}
 }
 
@@ -1856,6 +1858,8 @@ func Test_realSlurmControl_AddNode_includesTopologyInNodeConfig(t *testing.T) {
 			}
 			return nil
 		},
+		// The fake does not store created nodes, so accept the follow-up update.
+		Update: func(context.Context, object.Object, any, ...slurmclient.UpdateOption) error { return nil },
 	}
 	r := &realSlurmControl{
 		Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build(),
@@ -2110,6 +2114,8 @@ func Test_realSlurmControl_AddNode_syncsExternalNodeFeatures(t *testing.T) {
 				}
 				return nil
 			},
+			// The fake does not store created nodes, so accept the follow-up update.
+			Update: func(context.Context, object.Object, any, ...slurmclient.UpdateOption) error { return nil },
 		}
 		r := &realSlurmControl{Client: fake.NewClientBuilder().WithInterceptorFuncs(f).Build()}
 		node := &corev1.Node{
@@ -2130,4 +2136,40 @@ func Test_realSlurmControl_AddNode_syncsExternalNodeFeatures(t *testing.T) {
 			t.Errorf("NodeConf missing %q: %q", want, nodeConf)
 		}
 	})
+}
+
+func Test_realSlurmControl_AddNode_marksExistingExternalNode(t *testing.T) {
+	for name, tt := range map[string]struct {
+		comment     *string
+		wantComment *string
+	}{
+		"unmarked":      {comment: nil, wantComment: ptr.To(wellknown.SlurmNodeComment)},
+		"admin comment": {comment: ptr.To("rack 7"), wantComment: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var gotComment *string
+			f := interceptor.Funcs{
+				Update: func(_ context.Context, _ object.Object, req any, _ ...slurmclient.UpdateOption) error {
+					if r := req.(api.V0044UpdateNodeMsg); r.Comment != nil {
+						gotComment = r.Comment
+					}
+					return nil
+				},
+			}
+			existing := &api.V0044Node{
+				Name:     ptr.To("test-node"),
+				State:    ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+				Features: ptr.To(api.V0044CsvString{wellknown.SlurmFeatureGRESCompatible}),
+				Comment:  tt.comment,
+			}
+			r := &realSlurmControl{Client: fake.NewClientBuilder().WithObjects(existing).WithInterceptorFuncs(f).Build()}
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+			if err := r.AddNode(context.Background(), node, nil, nil); err != nil {
+				t.Fatalf("AddNode: %v", err)
+			}
+			if ptr.Deref(gotComment, "") != ptr.Deref(tt.wantComment, "") {
+				t.Errorf("comment update = %q, want %q", ptr.Deref(gotComment, ""), ptr.Deref(tt.wantComment, ""))
+			}
+		})
+	}
 }
