@@ -28,7 +28,6 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
-	"github.com/SlinkyProject/slurm-bridge/internal/schedulingpolicy"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -92,7 +91,7 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 		// The scheduler translates native PodGroups itself, so their members need no published
 		// allocation. A gate would make it recheck the whole group on each member's release.
 		nativeGroup := pod.Spec.SchedulingGroup != nil && ptr.Deref(pod.Spec.SchedulingGroup.PodGroupName, "") != ""
-		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && !nativeGroup {
+		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && !nativeGroup && pod.Spec.NodeName == "" {
 			if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration }) {
 				pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
 			}
@@ -114,11 +113,6 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	}
 	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
-	}
-	if r.usesBridgeScheduler(pod, isManaged) {
-		if err := schedulingpolicy.PodError(pod, schedulingpolicy.ValidatePod(pod)); err != nil {
-			return nil, err
-		}
 	}
 	if pod.Labels[wellknown.LabelExternalJobId] != "" {
 		return nil, fmt.Errorf("can't create a pod with a slurm external jobid label")
@@ -171,11 +165,6 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	}
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
-	}
-	if r.usesBridgeScheduler(newPod, isManaged) {
-		if err := schedulingpolicy.PodError(newPod, schedulingpolicy.ValidateUpdate(oldPod, newPod)); err != nil {
-			return nil, err
-		}
 	}
 	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, newPod)
 	if err != nil {
@@ -399,10 +388,4 @@ func validateConstraintsAnnotation(pod *corev1.Pod) error {
 		return fmt.Errorf("annotation %q: %w", wellknown.AnnotationConstraints, err)
 	}
 	return nil
-}
-
-// usesBridgeScheduler includes default-scheduler pods admission will route to
-// the bridge, while leaving explicitly selected custom schedulers alone.
-func (r *PodAdmission) usesBridgeScheduler(pod *corev1.Pod, managedNamespace bool) bool {
-	return pod.Spec.SchedulerName == r.SchedulerName || (managedNamespace && (pod.Spec.SchedulerName == "" || pod.Spec.SchedulerName == corev1.DefaultSchedulerName))
 }

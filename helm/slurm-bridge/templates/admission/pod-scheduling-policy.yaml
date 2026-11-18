@@ -24,6 +24,35 @@ spec:
   validations:
     - expression: "!has(object.spec.nodeName) || object.spec.nodeName == ''"
       message: "spec.nodeName bypasses Slurm scheduling. Use a Slurm partition or constraint for placement."
+    - expression: "!has(object.spec.nodeSelector) || size(object.spec.nodeSelector) == 0"
+      message: "spec.nodeSelector is unsupported by the bridge. Use a Slurm partition or constraint for placement."
+    - expression: >-
+        !has(object.spec.affinity) || !has(object.spec.affinity.nodeAffinity) ||
+        (!has(object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) &&
+         (!has(object.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution) ||
+          size(object.spec.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution) == 0))
+      message: "spec.affinity.nodeAffinity is unsupported. Slurm controls node selection and scoring. Use a Slurm partition or constraint for placement."
+    - expression: >-
+        !has(object.spec.affinity) || !has(object.spec.affinity.podAffinity) ||
+        ((!has(object.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution) ||
+          size(object.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution) == 0) &&
+         (!has(object.spec.affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution) ||
+          size(object.spec.affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution) == 0))
+      message: "spec.affinity.podAffinity is unsupported. Slurm cannot place allocations according to inter-pod affinity."
+    - expression: >-
+        !has(object.spec.affinity) || !has(object.spec.affinity.podAntiAffinity) ||
+        ((!has(object.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution) ||
+          size(object.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution) == 0) &&
+         (!has(object.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution) ||
+          size(object.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution) == 0))
+      message: "spec.affinity.podAntiAffinity is unsupported. Slurm cannot place allocations according to inter-pod anti-affinity."
+    - expression: "!has(object.spec.topologySpreadConstraints) || size(object.spec.topologySpreadConstraints) == 0"
+      message: "spec.topologySpreadConstraints is unsupported. Slurm cannot spread pods across Kubernetes topology domains."
+    - expression: >-
+        !has(object.spec.volumes) || object.spec.volumes.all(v,
+          has(v.emptyDir) || has(v.configMap) || has(v.secret) || has(v.projected) ||
+          has(v.downwardAPI) || has(v.image) || has(v.nfs) || has(v.persistentVolumeClaim))
+      message: "spec.volumes contains an unsupported source. Use emptyDir, configMap, secret, projected, downwardAPI, image, nfs, or persistentVolumeClaim."
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -80,6 +80,33 @@ func testAdmissionRoutingBoundaries() types.Feature {
 			}
 			return ctx
 		}).
+		Assess("the default scheduling policy follows the scheduler selected after mutation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+			crClient, err := getControllerRuntimeClient(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				namespace, scheduler string
+				wantDenial           bool
+			}{
+				{slurmBridgeNamespace, corev1.DefaultSchedulerName, true},
+				{namespaceName, slurmBridgeScheduler, true},
+				{slurmBridgeNamespace, "other-scheduler", false},
+			} {
+				pod := slurmTestPod(tc.namespace, envconf.RandomName("preassigned", 40), []string{"true"})
+				pod.Spec.SchedulerName = tc.scheduler
+				pod.Spec.NodeName = "worker"
+				err := crClient.Create(ctx, pod, client.DryRunAll)
+				if tc.wantDenial {
+					if err == nil || !strings.Contains(err.Error(), "spec.nodeName bypasses Slurm scheduling") {
+						t.Fatalf("scheduler %s in %s: expected nodeName policy denial, got %v", tc.scheduler, tc.namespace, err)
+					}
+				} else if err != nil {
+					t.Fatalf("scheduler %s in %s: %v", tc.scheduler, tc.namespace, err)
+				}
+			}
+			return ctx
+		}).
 		Assess("managed and explicit pods use Slurm while the control pod does not", func(
 			ctx context.Context,
 			t *testing.T,

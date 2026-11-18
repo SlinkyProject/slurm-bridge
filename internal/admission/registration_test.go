@@ -53,6 +53,13 @@ func TestRegistrationAdmission(t *testing.T) {
 	if len(native.Spec.SchedulingGates) != 0 {
 		t.Fatalf("gated a native PodGroup member: %v", native.Spec.SchedulingGates)
 	}
+	assigned := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: r.SchedulerName, NodeName: "worker"}}
+	if err := r.Default(ctx, assigned); err != nil {
+		t.Fatal(err)
+	}
+	if len(assigned.Spec.SchedulingGates) != 0 || assigned.Spec.NodeName != "worker" {
+		t.Fatalf("preassigned pod after defaulting: %+v", assigned.Spec)
+	}
 	foreign := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: "other"}}
 	if err := r.Default(ctx, foreign); err != nil {
 		t.Fatal(err)

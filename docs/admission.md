@@ -40,9 +40,10 @@ Pods created in the specified namespaces with the default Kubernetes scheduler
 have `.spec.schedulerName` changed to the slurm-bridge [scheduler]. Explicitly
 selected custom schedulers are preserved. Pods selecting the bridge scheduler,
 including those outside managed namespaces, receive its managed-node toleration
-and a registration scheduling gate. New Pods remain `SchedulingGated` until the
-controller registers their Slurm allocation. The Helm webhooks exclude
-`kube-system` and the bridge's installation namespace.
+and, for unassigned pods that require registration, a scheduling gate. These
+pods remain `SchedulingGated` until the controller registers their Slurm
+allocation. The Helm webhooks exclude `kube-system` and the bridge's
+installation namespace.
 
 Managed namespaces are defined as a list of namespaces as configured in the
 admission controller's `values.yaml` for `managedNamespaces[]`. Alternatively, a
@@ -71,12 +72,8 @@ In-place resizing is not supported for managed pods. The admission controller
 rejects requests to the `pods/resize` subresource so Kubernetes resources cannot
 diverge from the corresponding Slurm allocation.
 
-Pod topology spread constraints are not supported. The admission controller
-rejects managed pods with a non-empty `spec.topologySpreadConstraints` field.
-Required node affinity, Pod affinity, and Pod anti-affinity are also rejected at
-creation; use a Slurm partition or constraint for placement. Pods cannot provide
-`spec.resourceClaims`; request DRA devices through DeviceClass extended
-resources instead.
+Pods cannot provide `spec.resourceClaims`. Request DRA devices through
+DeviceClass extended resources instead.
 
 The `slurmjob.slinky.slurm.net/constraints` annotation is combined with the
 `slurm_bridge_gres_compatible` node feature that every bridge job requires. The
@@ -135,55 +132,25 @@ modes. Disabling admission or clearing both namespace settings omits the policy.
 
 ## Unsupported scheduling requests
 
-Pods routed to the bridge are rejected with field-specific Kubernetes errors
-when they request unsupported scheduling behavior. The registration controller
-checks every allocation member before creating a held Slurm job or publishing
-registration metadata and removing its gate. The scheduler repeats these checks
-before updating or releasing an allocation, including when admission is
-disabled. Duplicate-allocation cleanup remains available for rejected workloads.
-Direct node targeting is rejected at admission because it bypasses scheduling
-entirely. Unchanged violations on already-bound pods do not block metadata or
-status updates after an upgrade. Pods using another scheduler are outside this
-policy.
+When admission is enabled, a ValidatingAdmissionPolicy checks pods on creation
+after scheduler defaulting. It applies to pods selecting the bridge scheduler
+explicitly or through a managed namespace. It excludes `kube-system` and the
+bridge installation namespace.
 
-- Preferred node affinity is rejected because Slurm controls node scoring.
+The policy rejects these requests by default:
 
-- Inter-pod affinity is rejected for both required and preferred terms.
+- An explicit `spec.nodeName`, which bypasses Slurm scheduling.
+- A nonempty `spec.nodeSelector`, required or preferred node affinity, pod
+  affinity or anti-affinity, and topology spread constraints. Use a Slurm
+  partition or constraint for node placement.
+- A volume source outside the supported set of `emptyDir`, `configMap`,
+  `secret`, `projected`, `downwardAPI`, `image`, `nfs`, and
+  `persistentVolumeClaim`. This includes `hostPath`, inline CSI, and generic
+  ephemeral volumes. PVCs still go through Kubernetes VolumeBinding checks.
 
-- Inter-pod anti-affinity is rejected for both required and preferred terms.
-
-- Required node affinity remains blocked until the hard-node-placement support
-  phase. This check also covers empty required selectors and every shared
-  allocation member.
-
-- Explicit topology spreading is rejected for both `DoNotSchedule` and
-  `ScheduleAnyway`.
-
-- Creating a pod with `spec.nodeName` is rejected rather than silently clearing
-  the requested node. Normal scheduler binding and bound-pod updates remain
-  allowed.
-
-- `csi` volumes are rejected: inline CSI ephemeral volumes need a validated
-  driver lifecycle and node availability contract; use supported kubelet volume
-  sources.
-
-- `ephemeral` volumes are rejected: generic ephemeral volumes need validated PVC
-  provisioning, ownership and cleanup; use supported kubelet volume sources.
-
-- `hostPath` volumes are rejected: hostPath needs an explicit node-local data
-  placement contract; use supported shared storage.
-
-- All other volume sources are rejected by an explicit allowlist. Kubelet
-  volumes (`emptyDir`, ConfigMap, Secret, projected, downwardAPI, image), inline
-  NFS, and PVCs remain allowed. PVCs use the scheduler's existing VolumeBinding
-  checks. This does not guarantee node disk capacity, image feature
-  availability, or NFS reachability.
-
-- Shared allocation members must use the same hard node policy within each Slurm
-  component. The comparison does not span heterogeneous components. Nonempty
-  node policies are rejected.
-
-- Nonempty `nodeSelector` requests are rejected.
+Set `--set admission.strictPodValidation=false` to admit these pods with a
+warning. Slurm may place a pod without honoring the requested constraints. Pod
+updates, including binding and registration, are outside this policy.
 
 <!-- Links -->
 
