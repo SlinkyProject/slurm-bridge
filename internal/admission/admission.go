@@ -28,6 +28,7 @@ import (
 
 	"github.com/SlinkyProject/slurm-bridge/internal/dra"
 	"github.com/SlinkyProject/slurm-bridge/internal/features"
+	"github.com/SlinkyProject/slurm-bridge/internal/schedulingpolicy"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmconstraint"
 	"github.com/SlinkyProject/slurm-bridge/internal/utils/slurmjobir"
@@ -83,14 +84,6 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 		return nil
 	}
 
-	// On create, unset spec.nodeName so the pod is scheduled by slurm-bridge.
-	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
-		if pod.Spec.NodeName != "" {
-			logger.V(1).Info("Unsetting spec.nodeName on create so slurm scheduling will occur", "pod", klog.KObj(pod), "previousNodeName", pod.Spec.NodeName)
-			pod.Spec.NodeName = ""
-		}
-	}
-
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
 		pod.Spec.SchedulerName = r.SchedulerName
 	}
@@ -105,28 +98,10 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 			}
 		}
 	}
+	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && r.usesBridgeScheduler(pod, isManaged) {
+		return schedulingpolicy.PodError(pod, schedulingpolicy.ValidateNodeName(pod))
+	}
 	return nil
-}
-
-// hasRequiredAffinity reports whether pod has a required (as opposed to
-// preferred) node or pod (anti-)affinity term.
-func hasRequiredAffinity(pod *corev1.Pod) bool {
-	affinity := pod.Spec.Affinity
-	if affinity == nil {
-		return false
-	}
-	if na := affinity.NodeAffinity; na != nil {
-		if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
-			return true
-		}
-	}
-	if pa := affinity.PodAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	if pa := affinity.PodAntiAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	return false
 }
 
 // +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods;pods/resize,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
@@ -143,6 +118,11 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	if !isManaged && pod.Spec.SchedulerName != r.SchedulerName {
 		return nil, nil
 	}
+	if r.usesBridgeScheduler(pod, isManaged) {
+		if err := schedulingpolicy.PodError(pod, schedulingpolicy.ValidateCreate(pod)); err != nil {
+			return nil, err
+		}
+	}
 	if pod.Labels[wellknown.LabelExternalJobId] != "" {
 		return nil, fmt.Errorf("can't create a pod with a slurm external jobid label")
 	}
@@ -151,12 +131,6 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	}
 	if pod.Spec.ResourceClaims != nil {
 		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
-	}
-	if len(pod.Spec.TopologySpreadConstraints) > 0 {
-		return nil, fmt.Errorf("spec.topologySpreadConstraints is not supported by the slurm-bridge scheduler")
-	}
-	if hasRequiredAffinity(pod) {
-		return nil, fmt.Errorf("spec.affinity's required fields are not supported by the slurm-bridge scheduler, use a Slurm partition or constraint instead")
 	}
 	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, pod)
 	if err != nil {
@@ -200,6 +174,11 @@ func (r *PodAdmission) ValidateUpdate(ctx context.Context, oldPod *corev1.Pod, n
 	}
 	if req.SubResource == "resize" {
 		return nil, fmt.Errorf("can't resize a Slurm Bridge-managed pod")
+	}
+	if r.usesBridgeScheduler(newPod, isManaged) {
+		if err := schedulingpolicy.PodError(newPod, schedulingpolicy.ValidateUpdate(oldPod, newPod)); err != nil {
+			return nil, err
+		}
 	}
 	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, newPod)
 	if err != nil {
@@ -423,4 +402,10 @@ func validateConstraintsAnnotation(pod *corev1.Pod) error {
 		return fmt.Errorf("annotation %q: %w", wellknown.AnnotationConstraints, err)
 	}
 	return nil
+}
+
+// usesBridgeScheduler includes default-scheduler pods admission will route to
+// the bridge, while leaving explicitly selected custom schedulers alone.
+func (r *PodAdmission) usesBridgeScheduler(pod *corev1.Pod, managedNamespace bool) bool {
+	return pod.Spec.SchedulerName == r.SchedulerName || (managedNamespace && (pod.Spec.SchedulerName == "" || pod.Spec.SchedulerName == corev1.DefaultSchedulerName))
 }

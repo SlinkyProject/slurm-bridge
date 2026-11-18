@@ -61,3 +61,40 @@ func TestRegistrationAdmission(t *testing.T) {
 		t.Fatal("changed a foreign scheduler's Pod")
 	}
 }
+
+func TestRegistrationGateValidation(t *testing.T) {
+	r := &PodAdmission{SchedulerName: "slurm-bridge"}
+	create := contextWithAdmissionOperation("CREATE")
+	update := contextWithAdmissionOperation("UPDATE")
+	for _, gate := range []string{"", "e2e.slurm.slinky.slurm.net/hold", "leaderworkerset.sigs.k8s.io/group-replacement"} {
+		t.Run(gate, func(t *testing.T) {
+			pod := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: r.SchedulerName}}
+			if gate != "" {
+				pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: gate}}
+			}
+			originalGates := slices.Clone(pod.Spec.SchedulingGates)
+			if err := r.Default(create, pod); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.ValidateCreate(create, pod); err != nil {
+				t.Fatalf("mutated bridge pod rejected: %v", err)
+			}
+			registered := pod.DeepCopy()
+			registered.Spec.SchedulingGates = slices.DeleteFunc(registered.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool {
+				return g.Name == wellknown.SchedulingGateRegistration
+			})
+			registered.Labels = map[string]string{wellknown.LabelExternalJobId: "100"}
+			if !slices.Equal(registered.Spec.SchedulingGates, originalGates) {
+				t.Fatalf("unrelated gates changed: %v", registered.Spec.SchedulingGates)
+			}
+			if _, err := r.ValidateUpdate(update, pod, registered); err != nil {
+				t.Fatalf("controller publication rejected: %v", err)
+			}
+			ready := registered.DeepCopy()
+			ready.Spec.SchedulingGates = nil
+			if _, err := r.ValidateUpdate(update, registered, ready); err != nil {
+				t.Fatalf("external gate removal rejected: %v", err)
+			}
+		})
+	}
+}
