@@ -20,7 +20,7 @@ import (
 // Both scheduler paths use the same selection and error handling.
 func (sb *SlurmBridge) translateAllocation(ctx context.Context, pod *corev1.Pod) (slurmjob.Allocation, error) {
 	var allocation slurmjob.Allocation
-	ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod,
+	ir, err := slurmjobir.TranslateToSlurmJobIR(sb.translationClient(), sb.registry(), sb.workloadAPI, ctx, pod,
 		slurmjobir.WithResourceSlices(sb.resourceSlices),
 		slurmjobir.WithNUMASpans(sb.numaCache),
 		slurmjobir.WithAllocation(func(ir *slurmjobir.SlurmJobIR) (*slurmjobir.SlurmJobIR, error) {

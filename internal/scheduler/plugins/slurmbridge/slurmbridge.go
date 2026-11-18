@@ -147,6 +147,7 @@ type SlurmBridge struct {
 	workloadAPI        *slurmjobir.WorkloadAPI
 	kubeNodeIndex      *kubeNodeNameIndex
 	allocationObserver *allocationObserver
+	translation        client.Client
 	mu                 sync.Mutex
 	pending            map[groupAllocation]*groupProgress
 
@@ -169,6 +170,14 @@ type groupAllocation struct {
 
 // pendingTimeout drops hetjob progress no component has touched recently.
 const pendingTimeout = 5 * time.Minute
+
+// translationClient reads members from the Pod informer; plugins built without New use the API.
+func (sb *SlurmBridge) translationClient() client.Client {
+	if sb.translation != nil {
+		return sb.translation
+	}
+	return sb.Client
+}
 
 type groupProgress struct {
 	components map[types.NamespacedName][]string
@@ -357,6 +366,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 		AddFunc: plugin.recordRegistrationPending,
 	}); err != nil {
 		return nil, fmt.Errorf("register initial Pod diagnostics: %w", err)
+	}
+	plugin.translation, err = newTranslationReader(kubeClient, handle.SharedInformerFactory().Core().V1().Pods().Informer())
+	if err != nil {
+		return nil, err
 	}
 	plugin.allocationObserver, err = newAllocationObserver(ctx, plugin, clientConfig)
 	if err != nil {
