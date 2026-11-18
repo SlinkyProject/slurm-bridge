@@ -7,4 +7,8 @@ const (
 	// SlurmFeatureGRESCompatible identifies nodes which the bridge has verified
 	// can represent their Kubernetes DRA inventory in Slurm.
 	SlurmFeatureGRESCompatible = "slurm_bridge_gres_compatible"
+
+	// SlurmNodeComment marks external Slurm nodes that slurm-bridge registered, so
+	// they can be removed once their Kubernetes node is gone.
+	SlurmNodeComment = "slurm-bridge"
 )
