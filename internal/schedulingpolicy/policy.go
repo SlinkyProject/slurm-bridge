@@ -17,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	podv1 "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
 // ValidatePod checks scheduling features, without rejecting metadata or
@@ -38,10 +39,23 @@ func ValidatePod(pod *corev1.Pod) field.ErrorList {
 
 // ValidateUpdate preserves existing violations on bound pods so an upgrade
 // cannot prevent status, finalizer, or bridge metadata updates. New violations
-// are still rejected. Unbound pods must satisfy the current policy.
+// are still rejected. Unbound pods must satisfy the current policy except for
+// finalizer removal from deleting or terminal pods with an unchanged spec.
 func ValidateUpdate(oldPod, newPod *corev1.Pod) field.ErrorList {
 	errs := ValidatePod(newPod)
-	if len(errs) == 0 || oldPod.Spec.NodeName == "" || newPod.Spec.NodeName == "" {
+	if len(errs) == 0 {
+		return nil
+	}
+	if oldPod.DeletionTimestamp != nil || podv1.IsPodTerminal(oldPod) {
+		onlyRemovesFinalizers := len(newPod.Finalizers) < len(oldPod.Finalizers) &&
+			!slices.ContainsFunc(newPod.Finalizers, func(finalizer string) bool {
+				return !slices.Contains(oldPod.Finalizers, finalizer)
+			})
+		if onlyRemovesFinalizers && apiequality.Semantic.DeepEqual(oldPod.Spec, newPod.Spec) {
+			return nil
+		}
+	}
+	if oldPod.Spec.NodeName == "" || newPod.Spec.NodeName == "" {
 		return errs
 	}
 	oldErrors := ValidatePod(oldPod)

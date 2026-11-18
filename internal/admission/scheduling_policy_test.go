@@ -10,6 +10,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func TestSchedulingPolicyAdmission(t *testing.T) {
@@ -124,6 +126,78 @@ func TestSchedulingPolicyAdmissionAllowsSupportedRequests(t *testing.T) {
 			}
 			if _, err := r.ValidateUpdate(contextWithAdmissionOperation("UPDATE"), pod.DeepCopy(), pod); err != nil {
 				t.Fatalf("unbound update: %v", err)
+			}
+		})
+	}
+}
+
+func TestSchedulingPolicyAdmissionFinalizerCleanup(t *testing.T) {
+	cases := []struct {
+		name        string
+		prepare     func(*corev1.Pod)
+		update      func(*corev1.Pod)
+		wantInvalid bool
+	}{
+		{name: "deleting unbound pod"},
+		{name: "retain another finalizer", update: func(p *corev1.Pod) {
+			p.Finalizers = []string{"example.com/cleanup"}
+		}},
+		{name: "failed unbound pod", prepare: func(p *corev1.Pod) {
+			p.DeletionTimestamp = nil
+			p.Status.Phase = corev1.PodFailed
+		}},
+		{name: "succeeded pod", prepare: func(p *corev1.Pod) {
+			p.DeletionTimestamp = nil
+			p.Status.Phase = corev1.PodSucceeded
+		}},
+		{name: "active unbound pod", wantInvalid: true, prepare: func(p *corev1.Pod) {
+			p.DeletionTimestamp = nil
+		}},
+		{name: "metadata update without finalizer removal", wantInvalid: true, update: func(p *corev1.Pod) {
+			p.Finalizers = []string{wellknown.FinalizerScheduler, "example.com/cleanup", "example.com/other"}
+			p.Labels = map[string]string{"updated": "true"}
+		}},
+		{name: "replace finalizers", wantInvalid: true, update: func(p *corev1.Pod) {
+			p.Finalizers = []string{"example.com/cleanup", "example.com/new"}
+		}},
+		{name: "change unsupported field", wantInvalid: true, update: func(p *corev1.Pod) {
+			p.Spec.Volumes[0].HostPath.Path = "/new"
+		}},
+		{name: "change supported field", wantInvalid: true, update: func(p *corev1.Pod) {
+			p.Spec.Containers[0].Image = "new"
+		}},
+		{name: "add unsupported field", wantInvalid: true, update: func(p *corev1.Pod) {
+			p.Spec.NodeSelector = map[string]string{"rack": "a"}
+		}},
+	}
+	r := &PodAdmission{SchedulerName: SchedulerName, ManagedNamespaces: []string{namespace}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := metav1.Now()
+			old := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pending-before-upgrade", Namespace: namespace,
+					DeletionTimestamp: &now,
+					Finalizers:        []string{wellknown.FinalizerScheduler, "example.com/cleanup", "example.com/other"}},
+				Spec: corev1.PodSpec{SchedulerName: SchedulerName,
+					Containers: []corev1.Container{{Name: "app", Image: "old"}},
+					Volumes:    []corev1.Volume{{Name: "data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/data"}}}}},
+				Status: corev1.PodStatus{Phase: corev1.PodPending},
+			}
+			if tc.prepare != nil {
+				tc.prepare(old)
+			}
+			updated := old.DeepCopy()
+			updated.Finalizers = nil
+			if tc.update != nil {
+				tc.update(updated)
+			}
+			_, err := r.ValidateUpdate(contextWithAdmissionOperation("UPDATE"), old, updated)
+			if tc.wantInvalid {
+				if !apierrors.IsInvalid(err) {
+					t.Fatalf("expected scheduling policy rejection, got %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("finalizer cleanup rejected: %v", err)
 			}
 		})
 	}
