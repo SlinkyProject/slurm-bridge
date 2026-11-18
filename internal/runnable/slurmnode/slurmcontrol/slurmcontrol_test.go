@@ -17,6 +17,8 @@ import (
 	"github.com/SlinkyProject/slurm-client/pkg/client/fake"
 	"github.com/SlinkyProject/slurm-client/pkg/client/interceptor"
 	"github.com/SlinkyProject/slurm-client/pkg/object"
+
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 func Test_realSlurmControl_RefreshNodeCache(t *testing.T) {
@@ -73,11 +75,12 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 		ctx context.Context
 	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    []string
-		wantErr bool
+		name       string
+		fields     fields
+		args       args
+		want       []string
+		wantBridge []string
+		wantErr    bool
 	}{
 		{
 			name: "Empty",
@@ -98,6 +101,13 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 						Items: []api.V0044Node{
 							{Name: ptr.To("node-0")},
 							{Name: ptr.To("node-1")},
+							{
+								Name:    ptr.To("bridge-0"),
+								State:   ptr.To([]api.V0044NodeState{api.V0044NodeStateEXTERNAL}),
+								Comment: ptr.To(wellknown.SlurmNodeComment),
+							},
+							// Marked but not external: slurmd owns its lifecycle.
+							{Name: ptr.To("hybrid-0"), Comment: ptr.To(wellknown.SlurmNodeComment)},
 						},
 					}
 					c := fake.NewClientBuilder().
@@ -109,8 +119,9 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 			args: args{
 				ctx: ctx,
 			},
-			want:    []string{"node-0", "node-1"},
-			wantErr: false,
+			want:       []string{"node-0", "node-1", "bridge-0", "hybrid-0"},
+			wantBridge: []string{"bridge-0"},
+			wantErr:    false,
 		},
 		{
 			name: "Failure",
@@ -139,7 +150,7 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 			r := &realSlurmControl{
 				Client: tt.fields.Client,
 			}
-			got, err := r.ListNodeNames(tt.args.ctx)
+			got, gotBridge, err := r.ListNodeNames(tt.args.ctx)
 			slices.Sort(got)
 			slices.Sort(tt.want)
 			if (err != nil) != tt.wantErr {
@@ -148,6 +159,9 @@ func Test_realSlurmControl_ListNodeNames(t *testing.T) {
 			}
 			if !apiequality.Semantic.DeepEqual(got, tt.want) {
 				t.Errorf("ListNodeNames() = %v, want %v", got, tt.want)
+			}
+			if !apiequality.Semantic.DeepEqual(gotBridge, tt.wantBridge) {
+				t.Errorf("ListNodeNames() bridge = %v, want %v", gotBridge, tt.wantBridge)
 			}
 		})
 	}

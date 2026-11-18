@@ -379,18 +379,20 @@ func (r *realSlurmControl) AddNode(ctx context.Context, node *corev1.Node, nodeI
 			"slurmNode", slurmNodeName)
 		return err
 	}
+	// Node creation can't set Comment or Extra. If this update fails, the next
+	// reconcile backfills the comment, and a missing fingerprint makes
+	// NodeNeedsRecreate drain and replace the node.
+	createdNode := &api.V0044Node{Name: ptr.To(slurmNodeName)}
+	update := api.V0044UpdateNodeMsg{Comment: ptr.To(wellknown.SlurmNodeComment)}
 	if gresConfig.extra != "" {
-		// Node creation and Extra updates are separate operations. A missing
-		// fingerprint makes NodeNeedsRecreate drain and replace the node.
-		createdNode := &api.V0044Node{Name: ptr.To(slurmNodeName)}
-		req := api.V0044UpdateNodeMsg{Extra: ptr.To(gresConfig.extra)}
+		update.Extra = ptr.To(gresConfig.extra)
 		if cpuConfig.fromDRA {
-			req.State = ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN})
-			req.Reason = ptr.To("slurm-bridge: applying CPU topology")
+			update.State = ptr.To([]api.V0044UpdateNodeMsgState{api.V0044UpdateNodeMsgStateDRAIN})
+			update.Reason = ptr.To("slurm-bridge: applying CPU topology")
 		}
-		if err := r.Update(ctx, createdNode, req); err != nil {
-			return fmt.Errorf("could not record applied DRA inventory on Slurm node %q: %w", slurmNodeName, err)
-		}
+	}
+	if err := r.Update(ctx, createdNode, update); err != nil {
+		return fmt.Errorf("could not mark Slurm node %q or record its DRA inventory: %w", slurmNodeName, err)
 	}
 
 	return nil
@@ -537,10 +539,26 @@ func (r *realSlurmControl) updateExistingNode(
 	if !slurmutils.GetStateAsSet(slurmNode.State).Has(api.V0044NodeStateEXTERNAL) {
 		return r.reconcileHybridNode(ctx, slurmNode, nodeInfo, gresConfig)
 	}
+	if err := r.markNode(ctx, slurmNode); err != nil {
+		return err
+	}
 	if err := r.updateNodeFeatures(ctx, node, slurmNode); err != nil {
 		return err
 	}
 	return r.updateNodeTopology(ctx, node, slurmNode)
+}
+
+// markNode backfills the ownership comment on external nodes registered before
+// we set it. An administrator's comment is left alone.
+func (r *realSlurmControl) markNode(ctx context.Context, slurmNode *api.V0044Node) error {
+	if ptr.Deref(slurmNode.Comment, "") != "" {
+		return nil
+	}
+	req := api.V0044UpdateNodeMsg{Comment: ptr.To(wellknown.SlurmNodeComment)}
+	if err := r.Update(ctx, slurmNode, req); err != nil {
+		return fmt.Errorf("could not mark Slurm node %q: %w", slurmNode.GetKey(), err)
+	}
+	return nil
 }
 
 // updateGRESCompatibilityFeature adds or removes only the feature owned by
