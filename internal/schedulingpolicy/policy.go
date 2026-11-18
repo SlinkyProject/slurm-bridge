@@ -27,6 +27,7 @@ func ValidatePod(pod *corev1.Pod) field.ErrorList {
 	errs = append(errs, validatePodAffinity(pod)...)
 	errs = append(errs, validatePodAntiAffinity(pod)...)
 	errs = append(errs, validateRequiredNodeAffinity(pod)...)
+	errs = append(errs, validateTopologySpread(pod)...)
 	return errs
 }
 
