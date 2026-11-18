@@ -24,6 +24,8 @@ import (
 func ValidatePod(pod *corev1.Pod) field.ErrorList {
 	var errs field.ErrorList
 	errs = append(errs, validatePreferredNodeAffinity(pod)...)
+	errs = append(errs, validatePodAffinity(pod)...)
+	errs = append(errs, validatePodAntiAffinity(pod)...)
 	return errs
 }
 
