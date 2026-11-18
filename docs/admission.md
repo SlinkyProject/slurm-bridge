@@ -10,6 +10,7 @@
   - [Design](#design)
     - [Sequence Diagram](#sequence-diagram)
   - [Workload annotation deprecation](#workload-annotation-deprecation)
+  - [Unsupported scheduling requests](#unsupported-scheduling-requests)
 
 <!-- mdformat-toc end -->
 
@@ -131,6 +132,58 @@ The policy uses `admission.managedNamespaces` or
 `admission.managedNamespaceSelector`, excluding `kube-system` and the bridge
 installation namespace. Pod and Pod template annotations are allowed in both
 modes. Disabling admission or clearing both namespace settings omits the policy.
+
+## Unsupported scheduling requests
+
+Pods routed to the bridge are rejected with field-specific Kubernetes errors
+when they request unsupported scheduling behavior. The registration controller
+checks every allocation member before creating a held Slurm job or publishing
+registration metadata and removing its gate. The scheduler repeats these checks
+before updating or releasing an allocation, including when admission is
+disabled. Duplicate-allocation cleanup remains available for rejected workloads.
+Direct node targeting is rejected at admission because it bypasses scheduling
+entirely. Unchanged violations on already-bound pods do not block metadata or
+status updates after an upgrade. Pods using another scheduler are outside this
+policy.
+
+- Preferred node affinity is rejected because Slurm controls node scoring.
+
+- Inter-pod affinity is rejected for both required and preferred terms.
+
+- Inter-pod anti-affinity is rejected for both required and preferred terms.
+
+- Required node affinity remains blocked until the hard-node-placement support
+  phase. This check also covers empty required selectors and every shared
+  allocation member.
+
+- Explicit topology spreading is rejected for both `DoNotSchedule` and
+  `ScheduleAnyway`.
+
+- Creating a pod with `spec.nodeName` is rejected rather than silently clearing
+  the requested node. Normal scheduler binding and bound-pod updates remain
+  allowed.
+
+- `csi` volumes are rejected: inline CSI ephemeral volumes need a validated
+  driver lifecycle and node availability contract; use supported kubelet volume
+  sources.
+
+- `ephemeral` volumes are rejected: generic ephemeral volumes need validated PVC
+  provisioning, ownership and cleanup; use supported kubelet volume sources.
+
+- `hostPath` volumes are rejected: hostPath needs an explicit node-local data
+  placement contract; use supported shared storage.
+
+- All other volume sources are rejected by an explicit allowlist. Kubelet
+  volumes (`emptyDir`, ConfigMap, Secret, projected, downwardAPI, image), inline
+  NFS, and PVCs remain allowed. PVCs use the scheduler's existing VolumeBinding
+  checks. This does not guarantee node disk capacity, image feature
+  availability, or NFS reachability.
+
+- Shared allocation members must use the same hard node policy within each Slurm
+  component. The comparison does not span heterogeneous components. Nonempty
+  node policies are rejected.
+
+- Nonempty `nodeSelector` requests are rejected.
 
 <!-- Links -->
 
