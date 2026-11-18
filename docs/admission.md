@@ -137,9 +137,12 @@ after scheduler defaulting. It applies to pods selecting the bridge scheduler
 explicitly or through a managed namespace. It excludes `kube-system` and the
 bridge installation namespace.
 
+On creation, the mutating webhook removes an explicit `spec.nodeName` from
+bridge pods and returns a warning so Slurm can select the node. This applies in
+both strict and warning modes; updates retain their existing node assignment.
+
 The policy rejects these requests by default:
 
-- An explicit `spec.nodeName`, which bypasses Slurm scheduling.
 - A nonempty `spec.nodeSelector`, required or preferred node affinity, pod
   affinity or anti-affinity, and topology spread constraints. Use a Slurm
   partition or constraint for node placement.

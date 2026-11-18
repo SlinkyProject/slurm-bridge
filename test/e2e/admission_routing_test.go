@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,8 +57,10 @@ func testAdmissionRoutingBoundaries() types.Feature {
 	managedPod := slurmTestPod(slurmBridgeNamespace,
 		envconf.RandomName("admission-managed", 40), []string{"sh", "-c", "sleep 300"})
 	managedPod.Spec.SchedulerName = corev1.DefaultSchedulerName
+	managedPod.Spec.NodeName = "ignored-node"
 	explicitPod := slurmTestPod(namespaceName,
 		envconf.RandomName("admission-explicit", 40), []string{"sh", "-c", "sleep 300"})
+	explicitPod.Spec.NodeName = "ignored-node"
 	controlPod := slurmTestPod(namespaceName,
 		envconf.RandomName("admission-control", 40), []string{"sh", "-c", "sleep 300"})
 	controlPod.Spec.SchedulerName = corev1.DefaultSchedulerName
@@ -80,14 +83,14 @@ func testAdmissionRoutingBoundaries() types.Feature {
 			}
 			return ctx
 		}).
-		Assess("the default scheduling policy follows the scheduler selected after mutation", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+		Assess("direct node assignments are cleared only for bridge pods", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, tc := range []struct {
 				namespace, scheduler string
-				wantDenial           bool
+				wantMutation         bool
 			}{
 				{slurmBridgeNamespace, corev1.DefaultSchedulerName, true},
 				{namespaceName, slurmBridgeScheduler, true},
@@ -97,12 +100,19 @@ func testAdmissionRoutingBoundaries() types.Feature {
 				pod.Spec.SchedulerName = tc.scheduler
 				pod.Spec.NodeName = "worker"
 				err := crClient.Create(ctx, pod, client.DryRunAll)
-				if tc.wantDenial {
-					if err == nil || !strings.Contains(err.Error(), "spec.nodeName bypasses Slurm scheduling") {
-						t.Fatalf("scheduler %s in %s: expected nodeName policy denial, got %v", tc.scheduler, tc.namespace, err)
-					}
-				} else if err != nil {
+				if err != nil {
 					t.Fatalf("scheduler %s in %s: %v", tc.scheduler, tc.namespace, err)
+				}
+				wantNodeName := "worker"
+				if tc.wantMutation {
+					wantNodeName = ""
+				}
+				if pod.Spec.NodeName != wantNodeName {
+					t.Fatalf("scheduler %s in %s: nodeName = %q, want %q", tc.scheduler, tc.namespace, pod.Spec.NodeName, wantNodeName)
+				}
+				hasGate := slices.Contains(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
+				if hasGate != tc.wantMutation {
+					t.Fatalf("scheduler %s in %s: registration gate = %v, want %v", tc.scheduler, tc.namespace, hasGate, tc.wantMutation)
 				}
 			}
 			return ctx

@@ -10,10 +10,12 @@ import (
 	"slices"
 	"strings"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/featuregate"
@@ -59,10 +61,25 @@ func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	if err := r.DRARegistry.WatchDeviceClasses(informer); err != nil {
 		return err
 	}
+	mgr.GetWebhookServer().Register("/mutate--v1-pod", r.mutatingWebhook(mgr.GetScheme()))
 	return ctrl.NewWebhookManagedBy(mgr, &corev1.Pod{}).
-		WithDefaulter(r).
 		WithValidator(r).
 		Complete()
+}
+
+func (r *PodAdmission) mutatingWebhook(scheme *runtime.Scheme) *admission.Webhook {
+	webhook := admission.WithDefaulter(scheme, r)
+	handler := webhook.Handler
+	webhook.Handler = admission.HandlerFunc(func(ctx context.Context, req admission.Request) admission.Response {
+		response := handler.Handle(ctx, req)
+		for _, patch := range response.Patches {
+			if patch.Operation == "remove" && patch.Path == "/spec/nodeName" {
+				return response.WithWarnings("spec.nodeName was removed so Slurm can select the node. Use a Slurm partition or constraint for placement.")
+			}
+		}
+		return response
+	})
+	return webhook
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
@@ -91,7 +108,11 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 		// The scheduler translates native PodGroups itself, so their members need no published
 		// allocation. A gate would make it recheck the whole group on each member's release.
 		nativeGroup := pod.Spec.SchedulingGroup != nil && ptr.Deref(pod.Spec.SchedulingGroup.PodGroupName, "") != ""
-		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && !nativeGroup && pod.Spec.NodeName == "" {
+		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == admissionv1.Create {
+			pod.Spec.NodeName = ""
+			if nativeGroup {
+				return nil
+			}
 			if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration }) {
 				pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
 			}

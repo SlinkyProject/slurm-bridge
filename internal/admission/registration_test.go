@@ -57,7 +57,7 @@ func TestRegistrationAdmission(t *testing.T) {
 	if err := r.Default(ctx, assigned); err != nil {
 		t.Fatal(err)
 	}
-	if len(assigned.Spec.SchedulingGates) != 0 || assigned.Spec.NodeName != "worker" {
+	if !slices.Equal(assigned.Spec.SchedulingGates, []corev1.PodSchedulingGate{{Name: wellknown.SchedulingGateRegistration}}) || assigned.Spec.NodeName != "" {
 		t.Fatalf("preassigned pod after defaulting: %+v", assigned.Spec)
 	}
 	foreign := &corev1.Pod{Spec: corev1.PodSpec{SchedulerName: "other"}}
