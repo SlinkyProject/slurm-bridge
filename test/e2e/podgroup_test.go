@@ -6,6 +6,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/types"
 	schedv1alpha1 "sigs.k8s.io/scheduler-plugins/apis/scheduling/v1alpha1"
 
+	"github.com/SlinkyProject/slurm-bridge/internal/utils/externaljobinfo"
 	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
@@ -404,14 +406,14 @@ func TestPodGroupLateArrivals(t *testing.T) {
 	_ = testEnv.Test(t, feature)
 }
 
-// TestPodGroupLateArrivalsPending grows the original job before Slurm allocates nodes.
+// TestPodGroupLateArrivalsPending preserves pending membership and starts the next batch.
 func TestPodGroupLateArrivalsPending(t *testing.T) {
 	testEnv, err := newTestEnvironment()
 	if err != nil {
 		t.Fatal(err)
 	}
-	feature := features.New("PodGroup late arrivals grow pending allocation").
-		Assess("late members increase the node count of the same pending job", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
+	feature := features.New("PodGroup late arrivals preserve pending membership").
+		Assess("late members wait for a new allocation after the original batch is removed", func(ctx context.Context, t *testing.T, config *envconf.Config) context.Context {
 			requireKubernetesPodGroupAPI(t, config, podGroupV1Beta1)
 			crClient, err := getControllerRuntimeClient(config)
 			if err != nil {
@@ -427,8 +429,8 @@ func TestPodGroupLateArrivalsPending(t *testing.T) {
 				t.Fatalf("query bridge nodes: %v", err)
 			}
 			nodes := strings.Fields(output)
-			if len(nodes) < 4 {
-				t.Fatalf("Slurm partition %s has %d nodes, want at least 4", slurmBridgePartition, len(nodes))
+			if len(nodes) < 2 {
+				t.Fatalf("Slurm partition %s has %d nodes, want at least 2", slurmBridgePartition, len(nodes))
 			}
 			name := envconf.RandomName("pending-gang", 32)
 			// A private DOWN partition accepts submissions but cannot allocate nodes.
@@ -467,54 +469,124 @@ func TestPodGroupLateArrivalsPending(t *testing.T) {
 			}
 			createMember()
 			createMember()
-			first, err := waitForPod(ctx, crClient, client.ObjectKeyFromObject(pods[0]), func(p *corev1.Pod) bool {
-				return p.Labels[slurmJobIDLabel] != ""
-			})
-			if err != nil {
-				t.Fatalf("initial gang did not receive a Slurm job ID: %v", err)
-			}
-			jobID := first.Labels[slurmJobIDLabel]
-			for want := 2; want <= 4; want++ {
-				if want > 2 {
-					createMember()
+			jobID := ""
+			for i, pod := range pods {
+				observed, err := waitForPod(ctx, crClient, client.ObjectKeyFromObject(pod), func(p *corev1.Pod) bool {
+					return p.Labels[slurmJobIDLabel] != ""
+				})
+				if err != nil {
+					t.Fatalf("initial member %s did not receive a Slurm job ID: %v", pod.Name, err)
 				}
-				var lastOutput string
-				if err := wait.For(func(ctx context.Context) (bool, error) {
-					lastOutput, err = querySlurmJob(ctx, config, crClient, jobID)
-					if err != nil {
-						return false, err
-					}
-					state, err := slurmJobField(lastOutput, "JobState")
-					if err != nil {
-						return false, err
-					}
-					if state != "PENDING" || (!strings.Contains(" "+lastOutput+" ", " NodeList=(null) ") && !strings.Contains(" "+lastOutput+" ", " NodeList= ")) {
-						return false, fmt.Errorf("job %s must stay pending without allocated nodes: %s", jobID, lastOutput)
-					}
-					count, err := slurmJobField(lastOutput, "NumNodes")
-					if err != nil || (count != fmt.Sprint(want) && count != fmt.Sprintf("%d-%d", want, want)) {
-						return false, err
-					}
-					for _, pod := range pods {
-						current := &corev1.Pod{}
-						if err := crClient.Get(ctx, client.ObjectKeyFromObject(pod), current); err != nil {
-							return false, err
-						}
-						if id := current.Labels[slurmJobIDLabel]; id != "" && id != jobID {
-							return false, fmt.Errorf("member %s received replacement job %q, want %s", pod.Name, id, jobID)
-						}
-						if current.UID != pod.UID || current.DeletionTimestamp != nil || current.Spec.NodeName != "" || current.Status.Phase != corev1.PodPending {
-							return false, fmt.Errorf("member %s changed identity or left Pending: %+v", pod.Name, current)
-						}
-						if current.Labels[slurmJobIDLabel] == "" {
-							return false, nil
-						}
-					}
-					return true, nil
-				}, wait.WithContext(ctx), wait.WithTimeout(slurmWorkloadTimeout), wait.WithInterval(time.Second)); err != nil {
-					t.Fatalf("pending job %s did not grow to %d nodes: %v; last job: %s", jobID, want, err, lastOutput)
+				if jobID == "" {
+					jobID = observed.Labels[slurmJobIDLabel]
 				}
+				pods[i] = observed
 			}
+			originals := slices.Clone(pods)
+			checkPendingMembers := func(ctx context.Context, members []*corev1.Pod, wantJobID string) error {
+				for _, member := range members {
+					current := &corev1.Pod{}
+					if err := crClient.Get(ctx, client.ObjectKeyFromObject(member), current); err != nil {
+						return err
+					}
+					if current.UID != member.UID || current.DeletionTimestamp != nil || current.Spec.NodeName != "" ||
+						current.Status.Phase != corev1.PodPending || current.Labels[slurmJobIDLabel] != wantJobID {
+						return fmt.Errorf("member %s changed identity, allocation, or pending state: UID=%s jobID=%q node=%q phase=%s deleting=%v; want UID=%s jobID=%q",
+							current.Name, current.UID, current.Labels[slurmJobIDLabel], current.Spec.NodeName,
+							current.Status.Phase, current.DeletionTimestamp, member.UID, wantJobID)
+					}
+				}
+				return nil
+			}
+			checkPendingAllocation := func(ctx context.Context, id string, members []*corev1.Pod) error {
+				output, err := querySlurmJob(ctx, config, crClient, id)
+				if err != nil {
+					return err
+				}
+				for field, want := range map[string]string{"JobState": "PENDING", "NumNodes": fmt.Sprint(len(members))} {
+					got, err := slurmJobField(output, field)
+					if err != nil {
+						return err
+					}
+					if got != want && (field != "NumNodes" || got != want+"-"+want) {
+						return fmt.Errorf("Slurm job %s %s=%q, want %s: %s", id, field, got, want, output)
+					}
+				}
+				if !strings.Contains(" "+output+" ", " NodeList=(null) ") && !strings.Contains(" "+output+" ", " NodeList= ") {
+					return fmt.Errorf("Slurm job %s unexpectedly allocated nodes: %s", id, output)
+				}
+				comment, err := slurmJobField(output, "AdminComment")
+				if err != nil {
+					return err
+				}
+				var info externaljobinfo.ExternalJobInfo
+				if err := externaljobinfo.ParseIntoExternalJobInfo(&comment, &info); err != nil {
+					return err
+				}
+				want := make([]string, 0, len(members))
+				for _, member := range members {
+					want = append(want, fmt.Sprintf("%s/%s/%s", member.Namespace, member.Name, member.UID))
+				}
+				slices.Sort(want)
+				slices.Sort(info.Pods)
+				if !slices.Equal(info.Pods, want) {
+					return fmt.Errorf("Slurm job %s membership=%v, want %v", id, info.Pods, want)
+				}
+				return checkPendingMembers(ctx, members, id)
+			}
+			if err := checkPendingAllocation(ctx, jobID, originals); err != nil {
+				t.Fatal(err)
+			}
+			createMember()
+			createMember()
+			late := pods[len(originals):]
+			var stableUntil time.Time
+			if err := wait.For(func(ctx context.Context) (bool, error) {
+				if err := checkPendingAllocation(ctx, jobID, originals); err != nil {
+					return false, err
+				}
+				if err := checkPendingMembers(ctx, late, ""); err != nil {
+					return false, err
+				}
+				if stableUntil.IsZero() {
+					events := &corev1.EventList{}
+					if err := crClient.List(ctx, events, client.InNamespace(slurmBridgeNamespace)); err != nil {
+						return false, err
+					}
+					for _, event := range events.Items {
+						if event.InvolvedObject.UID == podGroup.GetUID() && event.Reason == "WaitingForNextAllocation" {
+							stableUntil = time.Now().Add(15 * time.Second)
+							break
+						}
+					}
+				}
+				return !stableUntil.IsZero() && time.Now().After(stableUntil), nil
+			}, wait.WithContext(ctx), wait.WithTimeout(slurmBridgeReadinessTimeout), wait.WithInterval(time.Second)); err != nil {
+				t.Fatalf("late arrivals changed the pending allocation or did not wait for the next batch: %v", err)
+			}
+
+			deletePodsAndAssertCleanup(ctx, t, config, crClient, originals...)
+			if t.Failed() {
+				return ctx
+			}
+			nextJobID := ""
+			for _, pod := range late {
+				observed, err := waitForPod(ctx, crClient, client.ObjectKeyFromObject(pod), func(p *corev1.Pod) bool {
+					return p.Labels[slurmJobIDLabel] != ""
+				})
+				if err != nil {
+					t.Fatalf("late member %s did not receive a new allocation: %v", pod.Name, err)
+				}
+				id := observed.Labels[slurmJobIDLabel]
+				if id == jobID || (nextJobID != "" && id != nextJobID) {
+					t.Fatalf("late member %s has job %q, want one new shared allocation after %s", pod.Name, id, jobID)
+				}
+				nextJobID = id
+			}
+			if err := checkPendingAllocation(ctx, nextJobID, late); err != nil {
+				t.Fatalf("new allocation does not contain exactly the late members: %v", err)
+			}
+
 			return ctx
 		}).Feature()
 	_ = testEnv.Test(t, feature)
