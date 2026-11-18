@@ -28,6 +28,14 @@ tests:
               operator: NotIn
               values: [kube-system, slinky]
         documentIndex: 1
+  - it: denies unsupported requests when upgrading with values that omit strictPodValidation
+    set:
+      admission.strictPodValidation: null
+    asserts:
+      - equal:
+          path: spec.validationActions
+          value: [Deny]
+        documentIndex: 1
   - it: warns for pods explicitly selecting the bridge even without managed namespaces
     set:
       admission.strictPodValidation: false
