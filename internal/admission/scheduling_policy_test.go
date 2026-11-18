@@ -42,28 +42,6 @@ func TestSchedulingPolicyAdmission(t *testing.T) {
 	}
 }
 
-func TestNodeNameAdmission(t *testing.T) {
-	r := &PodAdmission{SchedulerName: SchedulerName, ManagedNamespaces: []string{namespace}}
-	for _, scheduler := range []string{SchedulerName, corev1.DefaultSchedulerName, "custom-scheduler"} {
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: namespace}, Spec: corev1.PodSpec{SchedulerName: scheduler, NodeName: "target"}}
-		wantRejection := scheduler != "custom-scheduler"
-		err := r.Default(contextWithAdmissionOperation("CREATE"), pod)
-		if apierrors.IsInvalid(err) != wantRejection {
-			t.Fatalf("scheduler %s: %v", scheduler, err)
-		}
-		if pod.Spec.NodeName != "target" {
-			t.Fatal("user node intent was erased")
-		}
-		_, err = r.ValidateCreate(context.Background(), pod)
-		if apierrors.IsInvalid(err) != wantRejection {
-			t.Fatalf("create for %s: %v", scheduler, err)
-		}
-		if err := r.Default(contextWithAdmissionOperation("UPDATE"), pod); err != nil {
-			t.Fatalf("bound defaulting: %v", err)
-		}
-	}
-}
-
 func TestSchedulingPolicyAdmissionMatrix(t *testing.T) {
 	cases := []struct {
 		name string

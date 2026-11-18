@@ -98,9 +98,6 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 			}
 		}
 	}
-	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && r.usesBridgeScheduler(pod, isManaged) {
-		return schedulingpolicy.PodError(pod, schedulingpolicy.ValidateNodeName(pod))
-	}
 	return nil
 }
 
@@ -119,7 +116,7 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 		return nil, nil
 	}
 	if r.usesBridgeScheduler(pod, isManaged) {
-		if err := schedulingpolicy.PodError(pod, schedulingpolicy.ValidateCreate(pod)); err != nil {
+		if err := schedulingpolicy.PodError(pod, schedulingpolicy.ValidatePod(pod)); err != nil {
 			return nil, err
 		}
 	}

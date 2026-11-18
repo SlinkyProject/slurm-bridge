@@ -42,6 +42,7 @@ Kubernetes: `>= 1.34.0-0`
 | admission.priorityClassName | string | `""` | Set the priority class to use. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass |
 | admission.replicas | int | `1` | Set the number of replicas to deploy. |
 | admission.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
+| admission.strictPodValidation | bool | `true` | Reject unsupported scheduling requests when creating bridge pods. Set to false to issue warnings. |
 | admission.tls.caBundle | string | `""` | Base64 encoded PEM CA bundle that validates the serving certificate, written into both webhook configurations. |
 | admission.tls.existingSecret | string | `""` | Name of an existing `kubernetes.io/tls` Secret holding the webhook serving certificate. Requires `certManager.enabled` to be false. |
 | admission.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |

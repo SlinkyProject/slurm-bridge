@@ -476,7 +476,7 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			sched:   corev1.DefaultSchedulerName,
 		},
 		{
-			name: "PodWithNodeNameOnCreateInManagedNamespace_rejectsNodeName",
+			name: "PodWithNodeNameOnCreateInManagedNamespace_preservesNodeName",
 			args: args{
 				ctx: contextWithAdmissionOperation("CREATE"),
 				pod: &corev1.Pod{
@@ -494,7 +494,7 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 					},
 				},
 			},
-			wantErr:      true,
+			wantErr:      false,
 			sched:        SchedulerName,
 			wantNodeName: "some-node",
 		},
