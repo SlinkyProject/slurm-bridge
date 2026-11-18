@@ -41,6 +41,7 @@ spec:
         slurmjob.slinky.slurm.net/account: '{{.account}}'
         slurmjob.slinky.slurm.net/timelimit: '{{.timeLimitMinutes}}'
         slurmjob.slinky.slurm.net/priority: '{{.priority}}'
+        slurmjob.slinky.slurm.net/constraints: benchmark_kwok
         benchmark.slinky.slurm.net/runtime: '{{.runtime}}'
     spec:
       schedulerName: slurm-bridge-scheduler
@@ -48,9 +49,6 @@ spec:
         podGroupName: '{{._NAME_}}-workers'
       restartPolicy: Never
       terminationGracePeriodSeconds: 0
-      nodeSelector:
-        type: kwok
-        scheduler.slinky.slurm.net/external-node: 'true'
       tolerations:
         - key: kwok.x-k8s.io/node
           value: fake
