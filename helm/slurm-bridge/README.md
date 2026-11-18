@@ -67,8 +67,8 @@ Kubernetes: `>= 1.34.0-0`
 | scheduler.resources | object | `{}` | Set container resource requests and limits for Kubernetes Pod scheduling. Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container |
 | scheduler.tolerations | list | `[]` | Configure pod tolerations. Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/ |
 | scheduler.verbosity | string | `nil` | Set the scheduler log level (debug, info, error, or an integer). |
-| schedulerConfig.clientBurst | integer | `nil` | Set the scheduler plugin's own Kubernetes client Burst. Defaults to kube-scheduler's own client Burst (100) when unset. |
-| schedulerConfig.clientQPS | float | `nil` | Set the scheduler plugin's own Kubernetes client QPS. Defaults to kube-scheduler's own client QPS (50) when unset. |
+| schedulerConfig.clientBurst | integer | `400` | Set the Kubernetes client Burst for kube-scheduler and the scheduler plugin. Unset uses the kube-scheduler default of 100. |
+| schedulerConfig.clientQPS | float | `200` | Set the Kubernetes client QPS for kube-scheduler and the scheduler plugin. Large gangs bind one API call per pod, so the kube-scheduler default of 50 slows them. Unset uses that default. |
 | schedulerConfig.mcsLabel | string | `"kubernetes"` | Set the Slurm MCS Label to use for external jobs. Ref: https://slurm.schedmd.com/sbatch.html#OPT_mcs-label |
 | schedulerConfig.partition | string | `"slurm-bridge"` | Set the default Slurm partition to use for external jobs. Ref: https://slurm.schedmd.com/sbatch.html#OPT_partition |
 | schedulerConfig.schedulerName | string | `"slurm-bridge-scheduler"` | Set the name of the scheduler. |
