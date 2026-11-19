@@ -32,6 +32,7 @@ func TestClassifyRejection(t *testing.T) {
 	}{
 		"invalid time limit":  {slurm(slurmerrors.ErrInvalidTimeLimit), rejectRequest},
 		"invalid account":     {slurm(slurmerrors.ErrInvalidAccount), rejectRequest},
+		"invalid feature":     {slurm(slurmerrors.ErrInvalidFeature), rejectRequest},
 		"invalid GRES string": {slurm(slurmerrors.ErrInvalidGRES), rejectRequest},
 		"invalid user ID":     {slurm(slurmerrors.ErrUserIDInvalid), rejectRequest},
 		"accounting policy":   {slurm(slurmerrors.ErrAccountingPolicy), rejectLimit},
@@ -40,7 +41,7 @@ func TestClassifyRejection(t *testing.T) {
 		"no Slurm error":      {errors.New("connection refused"), rejectOther},
 		"nil":                 {nil, rejectOther},
 	} {
-		if got := classifyRejection(tt.err); got != tt.want {
+		if got, _ := classifyRejection(tt.err); got != tt.want {
 			t.Errorf("%s: got %v, want %v", name, got, tt.want)
 		}
 	}
@@ -53,8 +54,9 @@ func TestRegisterRejectionBehavior(t *testing.T) {
 		wantType  string
 		wantWhy   string
 	}{
-		"refused request retries slowly": {slurmerrors.ErrInvalidGRES, requestRetry, corev1.EventTypeWarning, "SlurmRegistrationRejected"},
-		"limit waits without errors":     {slurmerrors.ErrAccountingPolicy, limitRetry, corev1.EventTypeNormal, "WaitingForSlurm"},
+		"refused request retries slowly":           {slurmerrors.ErrInvalidGRES, requestRetry, corev1.EventTypeWarning, "SlurmRegistrationRejected"},
+		"invalid feature retries in three minutes": {slurmerrors.ErrInvalidFeature, 3 * time.Minute, corev1.EventTypeWarning, "SlurmRegistrationRejected"},
+		"limit waits without errors":               {slurmerrors.ErrAccountingPolicy, limitRetry, corev1.EventTypeNormal, "WaitingForSlurm"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
