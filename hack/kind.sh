@@ -678,9 +678,22 @@ function slurm::install_from_source() {
 function slurm::configure_for_bridge() {
 	local chart="$1"
 	local chartName="slurm"
+	local mode_values="$SCRIPT_DIR/slurm-bridge-${OPT_SLURM_NODE_MODE}.yaml"
+	if [[ $OPT_SLURM_NODE_MODE == "$SLURM_NODE_MODE_HYBRID" ]] &&
+		helm::find dra-driver-nvidia-gpu && ! helm::find dra-example-driver; then
+		# Example GPUs occupy the first Slurm GPU indices in the shared fixture.
+		# Drop them from both gres.conf and the NodeSet when only NVIDIA supplies GPUs.
+		local nvidia_values="$SLURM_BRIDGE_TMP/slurm-bridge-hybrid-nvidia.yaml"
+		sed -E \
+			-e '/Name=gpu Type=gpu\.example\.com /d' \
+			-e 's/gpu:gpu\.example\.com:[0-9]+,//' \
+			-e 's/,gpu:gpu\.example\.com:[0-9]+$//' \
+			"$mode_values" >"$nvidia_values"
+		mode_values="$nvidia_values"
+	fi
 	local values_args=(
 		--values "$SCRIPT_DIR/slurm-bridge-common.yaml"
-		--values "$SCRIPT_DIR/slurm-bridge-${OPT_SLURM_NODE_MODE}.yaml"
+		--values "$mode_values"
 	)
 	if [[ -n ${SLURM_VALUES:-} ]]; then
 		values_args+=(--values "$SLURM_VALUES")
