@@ -118,7 +118,7 @@ func SelectAllocation(ir *slurmjobir.SlurmJobIR, jobs []RegisteredJob) (Allocati
 		if len(pods) == 0 {
 			continue
 		}
-		component.SelectPods(pods)
+		component.SelectPods(pods, len(job.info.Pods))
 		selected.Components = append(selected.Components, component)
 		allocation.Jobs = append(allocation.Jobs, job.ExternalJob)
 	}
