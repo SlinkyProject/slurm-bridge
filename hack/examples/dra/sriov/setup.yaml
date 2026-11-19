@@ -1,0 +1,57 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Kind-only synthetic SR-IOV fixture. The fake sysfs exercises discovery and
+# allocation, while PTP creates the configured sriovkind0 interface because
+# Kind has no real VF to move into the pod network namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: slurm-bridge
+---
+apiVersion: sriovnetwork.k8snetworkplumbingwg.io/v1alpha1
+kind: SriovResourcePolicy
+metadata:
+  name: all-devices
+  namespace: dra-driver-sriov
+spec:
+  configs:
+    - {}
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: sriov-vf
+  namespace: slurm-bridge
+spec:
+  config: |-
+    {
+      "cniVersion": "1.0.0",
+      "name": "sriov-vf",
+      "type": "ptp",
+      "ipMasq": false,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [[{"subnet": "10.245.0.0/16"}]]
+      }
+    }
+---
+# This dedicated DeviceClass uses the driver's selector and adds the class-level
+# VfConfig that Slurm Bridge copies into each allocation.
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: sriov-vf
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == 'sriovnetwork.k8snetworkplumbingwg.io'
+  config:
+    - opaque:
+        driver: sriovnetwork.k8snetworkplumbingwg.io
+        parameters:
+          apiVersion: sriovnetwork.k8snetworkplumbingwg.io/v1alpha1
+          kind: VfConfig
+          netAttachDefName: sriov-vf
+          ifName: sriovkind0

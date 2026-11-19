@@ -1,0 +1,15 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+image:
+  pullPolicy: IfNotPresent
+
+kubeletPlugin:
+  nodeSelector:
+    scheduler.slinky.slurm.net/slurm-bridge: worker
+  tolerations:
+    - key: slinky.slurm.net/managed-node
+      operator: Equal
+      value: slurm-bridge-scheduler
+      effect: NoExecute

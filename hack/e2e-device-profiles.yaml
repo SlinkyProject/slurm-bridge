@@ -1,5 +1,6 @@
 ---
 # SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # A configured registry replaces the built-ins, so repeat them alongside the
@@ -59,3 +60,9 @@ sharedConfig:
       backend:
         type: indexed-gres
         gresName: tpu
+    - name: sriov-vf
+      driver: sriovnetwork.k8snetworkplumbingwg.io
+      selector: device.driver == 'sriovnetwork.k8snetworkplumbingwg.io'
+      backend:
+        type: indexed-gres
+        gresName: nic
