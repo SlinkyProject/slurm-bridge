@@ -188,13 +188,7 @@ func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.
 		return status
 	}
 	allocation.jobs = slices.Clone(jobs)
-	status := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.handle, sb.workloadAPI, ctx, pod, allocation.ir)
-	if !status.IsSuccess() && slices.Contains(status.Reasons(), slurmjobir.ErrorExternalJobInvalid.Error()) {
-		if err := sb.deleteExternalJob(ctx, pod); err != nil {
-			return fwk.AsStatus(err)
-		}
-	}
-	return status
+	return sb.preFilterAllocation(ctx, pod, allocation.ir)
 }
 
 func (sb *SlurmBridge) prepareNativePlacement(ctx context.Context, pod *corev1.Pod, s *stateData, index int) *fwk.Status {

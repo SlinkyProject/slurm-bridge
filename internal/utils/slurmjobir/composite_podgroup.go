@@ -219,19 +219,14 @@ func (t *translator) fromCompositePodGroup(pod *corev1.Pod, rootPOM *metav1.Part
 				return slurmJobIR, err
 			}
 
+			if len(pods.Items) == 0 {
+				continue
+			}
 			pgPOM := metav1.PartialObjectMetadata{
 				TypeMeta:   t.workloadAPI.PodGroupTypeMeta,
 				ObjectMeta: pg.ObjectMeta,
 			}
-
-			firstPod := getFirstPod(pods)
-			if firstPod != nil {
-				pgIR, err := t.fromPodGroup(firstPod, &pgPOM)
-				if err != nil {
-					return slurmJobIR, err
-				}
-				slurmJobIR.Components = append(slurmJobIR.Components, pgIR.Components...)
-			}
+			slurmJobIR.Components = append(slurmJobIR.Components, podGroupComponent(pgPOM, pods))
 		}
 	}
 

@@ -77,8 +77,8 @@ func TestSchedulerPodGroupNextBatch(t *testing.T) {
 				return nil
 			}
 			updates++
-			if ptr.Deref(desc.Nodes, "") != "2" || ptr.Deref(desc.MinimumNodes, 0) != 2 || ptr.Deref(desc.MaximumNodes, 0) != 2 {
-				t.Fatalf("scheduler expanded the allocation: %+v", desc)
+			if desc.Nodes != nil || desc.MinimumNodes != nil || desc.MaximumNodes != nil {
+				t.Fatalf("eligibility update included node sizing: %+v", desc)
 			}
 			return nil
 		}}).Build()

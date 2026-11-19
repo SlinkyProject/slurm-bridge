@@ -147,6 +147,7 @@ type SlurmBridge struct {
 	workloadAPI        *slurmjobir.WorkloadAPI
 	kubeNodeIndex      *kubeNodeNameIndex
 	allocationObserver *allocationObserver
+	translation        client.Client
 	mu                 sync.Mutex
 	pending            map[groupAllocation]*groupProgress
 
@@ -169,6 +170,14 @@ type groupAllocation struct {
 
 // pendingTimeout drops hetjob progress no component has touched recently.
 const pendingTimeout = 5 * time.Minute
+
+// translationClient reads members from the Pod informer; plugins built without New use the API.
+func (sb *SlurmBridge) translationClient() client.Client {
+	if sb.translation != nil {
+		return sb.translation
+	}
+	return sb.Client
+}
 
 type groupProgress struct {
 	components map[types.NamespacedName][]string
@@ -358,6 +367,10 @@ func New(ctx context.Context, obj runtime.Object, handle fwk.Handle) (fwk.Plugin
 	}); err != nil {
 		return nil, fmt.Errorf("register initial Pod diagnostics: %w", err)
 	}
+	plugin.translation, err = newTranslationReader(kubeClient, handle.SharedInformerFactory().Core().V1().Pods().Informer())
+	if err != nil {
+		return nil, err
+	}
 	plugin.allocationObserver, err = newAllocationObserver(ctx, plugin, clientConfig)
 	if err != nil {
 		return nil, err
@@ -509,21 +522,10 @@ func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, p
 	externalJob := jobs[s.slurmJobIR.ComponentOf(pod.Namespace, pod.Name)]
 
 	// Perform resource specific PreFilter
-	fs := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.handle, sb.workloadAPI, ctx, pod, s.slurmJobIR)
-	if fs.Code() != fwk.Success {
-		// An Unschedulable status still reaches PostFilter; do not release an invalid workload.
+	fs := sb.preFilterAllocation(ctx, pod, s.slurmJobIR)
+	if !fs.IsSuccess() {
+		// PostFilter must wait for a new scheduling cycle to compute eligibility.
 		s.slurmJobIR = nil
-		// If the external job is determined to no longer be valid
-		// delete the external job and remove the associated annotations
-		for _, r := range fs.Reasons() {
-			if r == slurmjobir.ErrorExternalJobInvalid.Error() {
-				logger.Error(err, "external job no longer valid, deleting job")
-				err := sb.deleteExternalJob(ctx, pod)
-				if err != nil {
-					return nil, fwk.NewStatus(fwk.Error, err.Error())
-				}
-			}
-		}
 		return nil, fs
 	}
 
@@ -944,8 +946,8 @@ func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s
 		}
 	}
 
-	// A gang still needs enough eligible nodes, but they need not be free now.
-	if len(feasibleSlurmNodes) < len(component.Pods.Items) {
+	// A cached Pod list can omit registered members. Reserve enough eligible nodes for the submitted batch.
+	if len(feasibleSlurmNodes) < max(component.RegisteredPodCount, len(component.Pods.Items)) {
 		return fwk.NewStatus(fwk.Unschedulable, "insufficient eligible nodes for allocation")
 	}
 
@@ -1112,7 +1114,7 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		}
 		toUpdate := p.DeepCopy()
 		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = node
-		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
+		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p, client.MergeFromWithOptimisticLock{})); err != nil {
 			// A sibling can vanish (e.g. recreated elsewhere) between the
 			// snapshot and this patch; don't fail the whole gang for it.
 			if apierrors.IsNotFound(err) {
@@ -1131,13 +1133,15 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 // deleteExternalJob will delete the external job associated with the pod
 // and remove allocation metadata from pods sharing its job or heterogeneous job ID.
 func (sb *SlurmBridge) deleteExternalJob(ctx context.Context, pod *corev1.Pod) error {
-	logger := klog.FromContext(ctx)
-	// Construct an intermediate representation of the Slurm external job
 	slurmJobIR, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
 	if err != nil {
-		logger.Error(err, "failed to translate to slurmjobir")
 		return err
 	}
+	return sb.deleteTranslatedJob(ctx, pod, slurmJobIR)
+}
+
+func (sb *SlurmBridge) deleteTranslatedJob(ctx context.Context, pod *corev1.Pod, slurmJobIR *slurmjobir.SlurmJobIR) error {
+	logger := klog.FromContext(ctx)
 	jobId := pod.Labels[wellknown.LabelExternalJobId]
 	if err := sb.slurmControl.DeleteJob(ctx, pod); err != nil {
 		logger.Error(err, "failed to delete Slurm job for pod", "jobId", jobId, "pod", klog.KObj(pod))
