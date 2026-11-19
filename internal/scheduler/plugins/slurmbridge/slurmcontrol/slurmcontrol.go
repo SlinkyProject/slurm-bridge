@@ -349,6 +349,10 @@ func (r *realSlurmControl) buildJobUpdate(root metav1.PartialObjectMetadata, com
 	if err != nil {
 		return api.V0044JobDescMsg{}, err
 	}
+	// Built-in PodGroups keep the node request accepted at submission.
+	if component.IsBuiltInPodGroup() {
+		desc.Nodes, desc.MinimumNodes, desc.MaximumNodes = nil, nil, nil
+	}
 	// An empty list must be sent explicitly to clear previous exclusions.
 	excluded := append(api.V0044CsvString{}, component.JobInfo.ExcNodes...)
 	desc.ExcludedNodes = &excluded

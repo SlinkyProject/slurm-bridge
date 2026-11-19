@@ -946,8 +946,8 @@ func (sb *SlurmBridge) populateComponentWithFeasibleNodes(ctx context.Context, s
 		}
 	}
 
-	// A gang still needs enough eligible nodes, but they need not be free now.
-	if len(feasibleSlurmNodes) < len(component.Pods.Items) {
+	// A cached Pod list can omit registered members. Reserve enough eligible nodes for the submitted batch.
+	if len(feasibleSlurmNodes) < max(component.RegisteredPodCount, len(component.Pods.Items)) {
 		return fwk.NewStatus(fwk.Unschedulable, "insufficient eligible nodes for allocation")
 	}
 
