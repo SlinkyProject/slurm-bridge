@@ -165,6 +165,7 @@ func TestFindMatchingError(t *testing.T) {
 }
 
 type postFilterSlurmControl struct {
+	releaseCalls         int
 	deleteCalls          int
 	deletedPod           *corev1.Pod
 	getJobCalls          int
@@ -220,7 +221,10 @@ func (c *postFilterSlurmControl) GetJob(context.Context, *corev1.Pod) (*slurmcon
 	return &slurmcontrol.ExternalJob{}, nil
 }
 
-func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error { return nil }
+func (c *postFilterSlurmControl) ReleaseJob(context.Context, int32, *int32) error {
+	c.releaseCalls++
+	return nil
+}
 
 func (c *postFilterSlurmControl) GetAllocation(_ context.Context, _ *corev1.Pod, ir *slurmjobir.SlurmJobIR) (slurmjob.Allocation, error) {
 	if c.allocationErr != nil {
@@ -397,48 +401,6 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		want   *fwk.PreFilterResult
 		want1  *fwk.Status
 	}{
-		{
-			name: "pod with required node affinity is rejected",
-			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
-				handle: f,
-			},
-			args: args{
-				ctx:   ctx,
-				state: framework.NewCycleState(),
-				pod: st.MakePod().Name("pod1").NodeAffinity(&corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"rack-a"}},
-								},
-							},
-						},
-					},
-				}).Obj(),
-			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
-		},
-		{
-			name: "pod with required pod anti-affinity is rejected",
-			fields: fields{
-				client: kubefake.NewFakeClient(pod.DeepCopy()),
-				handle: f,
-			},
-			args: args{
-				ctx:   context.Background(),
-				state: framework.NewCycleState(),
-				pod: st.MakePod().Name("pod1").
-					PodAntiAffinity("kubernetes.io/hostname", &metav1.LabelSelector{
-						MatchLabels: map[string]string{"app": "example"},
-					}, st.PodAntiAffinityWithRequiredReq).
-					Obj(),
-			},
-			want:  nil,
-			want1: fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error()),
-		},
 		{
 			name: "pod with preferred node affinity is allowed, Slurm just won't honor the preference",
 			fields: fields{
@@ -766,7 +728,8 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 		workloadAPI:  workloadAPI,
 	}
 
-	got, status := sb.PreFilter(ctx, framework.NewCycleState(), podA.DeepCopy(), nil)
+	state := framework.NewCycleState()
+	got, status := sb.PreFilter(ctx, state, podA.DeepCopy(), nil)
 	if got != nil {
 		t.Fatalf("PreFilter() result = %v, want nil", got)
 	}
@@ -777,6 +740,10 @@ func TestSlurmBridge_PreFilterValidatesAllExternalJobPods(t *testing.T) {
 	if !apiequality.Semantic.DeepEqual(status.Reasons(), []string{wantReason}) {
 		t.Fatalf("PreFilter() reasons = %v, want %q", status.Reasons(), wantReason)
 	}
+	if _, after := sb.PostFilter(ctx, state, podA.DeepCopy(), nil); after.Code() != status.Code() || after.Message() != status.Message() {
+		t.Fatalf("PostFilter bypassed DRA capability rejection: %v", after)
+	}
+
 }
 
 func TestSlurmBridge_PostFilterWaitsForExistingGroupAllocation(t *testing.T) {

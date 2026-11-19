@@ -37,6 +37,9 @@ func TestPreFilterRejectsDisabledPodGroupsBeforeSideEffects(t *testing.T) {
 	if _, err := state.Read(stateKey); err == nil {
 		t.Fatal("ineligible Pod should not have scheduling state")
 	}
+	if _, after := sb.PostFilter(context.Background(), state, pod, nil); after.Code() != status.Code() || after.Message() != status.Message() {
+		t.Fatalf("PostFilter bypassed disabled PodGroup rejection: %v", after)
+	}
 	if _, err := slurmjobir.TranslateToSlurmJobIR(nil, nil, nil, context.Background(), pod); err == nil {
 		t.Fatal("direct translation must also reject disabled PodGroups")
 	}

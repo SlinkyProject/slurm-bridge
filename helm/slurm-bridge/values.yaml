@@ -190,6 +190,8 @@ admission:
   managedNamespaceSelector: {}
   # -- Action on creation for deprecated top-level Slurm workload annotations in managed namespaces: Warn or Deny.
   workloadAnnotationAction: Warn
+  # -- Reject unsupported scheduling requests when creating bridge pods. Set to false to issue warnings.
+  strictPodValidation: true
 
 # Configurations shared among all components.
 sharedConfig:
