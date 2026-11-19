@@ -156,7 +156,9 @@ object, such as a PodGroup, and retries later:
 
 - `SlurmRegistrationRejected` (Warning): Slurm refused the request itself, such
   as an invalid account, QOS, or GRES. Fix the workload or the Slurm
-  configuration.
+  configuration. The controller retries an invalid feature specification after
+  three minutes because nodes can advertise new features during an upgrade.
+  Other rejected requests retry after ten minutes.
 - `WaitingForSlurm` (Normal): a Slurm limit or partition state holds the job,
   such as a submit limit or a down partition. The Pods wait until it clears.
 - `SlurmRegistrationFailed` (Warning): any other error, including an unreachable
