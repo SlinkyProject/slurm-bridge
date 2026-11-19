@@ -1,3 +1,66 @@
+## v1.3.0
+
+### Added
+
+- Added documentation for workload preemption.
+- Support driver configuration from DRA DeviceClasses.
+- Allow native Ray PodGroups to register through Ray workload ownership.
+- Support LWS RecreateGroupOnPodRestart.
+- Node feature annotation values and partitions are now propagated to Slurm as
+  node features for external nodes, replacing any other features on them.
+- Deploy extra Kubernetes objects with the bridge Helm chart.
+- Document NVIDIA GPU and MIG configuration with DRA.
+- Support DeviceClass extended resource aliases for DRA workloads.
+- Add examples for configuring an SR-IOV DRA device profile.
+
+### Fixed
+
+- DRA binding no longer fails on an unused pod status readback.
+- GO-2026-5932.
+- Prevent NIC allocation from draining nodes in DRANET Kind deployments.
+- Prevent late PodGroup members from causing job cancellation.
+- Honor scheduler verbosity for contextual logs.
+- Reject unsupported LWS scheduling policies.
+- Allow scheduling jobs owned by non-administrative Slurm users.
+- Preserve device locality when NUMA domains share a physical socket.
+- Register every member of a composite PodGroup gang with Slurm.
+- Start large native PodGroup gangs without a long scheduling delay.
+- GO-2026-6769 GO-2026-6785 GO-2026-6795 GO-2026-6800.
+- Slowed retries for submissions that Slurm refuses.
+- Avoid initial scheduling delays caused by Slurm cache initialization.
+- Reduce Pod registration latency.
+- GO-2026-6859.
+- Protect device ownership and claim publication to replacement Pods.
+- Prevent stale device mappings and reduce claim allocation API reads.
+- Label Kind nodes for Slurm when kind.sh reuses an existing cluster.
+- Preserve recorded Pod membership when updating pending Slurm jobs.
+- Prevent late Pods and child groups from disrupting submitted allocations.
+- Preserve device-plugin requests for aliases without a bridge profile.
+- Preserve hybrid pod assignments when Slurm and Kubernetes node names differ.
+- Remove external Slurm nodes when their Kubernetes node is deleted.
+- Preserve Slurm jobs when cached PodGroup membership lags.
+- Keep built-in PodGroup allocations at their registered size.
+- Prevent stale node assignments from being written to replacement Pods.
+
+### Changed
+
+- Faster translation of large CompositePodGroup namespaces.
+- Run scheduling and controllers in a single scheduler process.
+- Replace the controllers deployment with the combined scheduler.
+- Collect controller metrics from the scheduler service.
+- Releasing Slurm holds no longer blocks scheduling of other pods.
+- Registration keeps up with large backlogs of PodGroups.
+- Cache DRA inventory and topology to reduce scheduling API reads.
+- Prefer Pod annotations and warn about deprecated workload annotations.
+- Block upgrades with pending Bridge Pods unless explicitly skipped.
+- The scheduler's Kubernetes client defaults to 200 QPS and a burst of 400.
+- Reject unsupported scheduling and volume requests when creating bridge pods.
+- Scheduling stays fast with large backlogs of PodGroups.
+
+### Removed
+
+- Drop the obsolete SlurmBridgeGenericWorkload Helm alias.
+
 ## v1.3.0-rc1
 
 ### Added
