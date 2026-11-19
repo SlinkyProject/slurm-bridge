@@ -71,7 +71,7 @@ func TestCompositeLateChildDoesNotBlockSubmittedBatch(t *testing.T) {
 						Spec:       slurmjobir.PodGroupSpec{ParentCompositePodGroupName: ptr.To(parent), SchedulingPolicy: schedulingv1.PodGroupSchedulingPolicy{Gang: &schedulingv1.GangSchedulingPolicy{MinCount: 1}}}}
 					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: name, UID: types.UID(name + "-pod")},
 						Spec: corev1.PodSpec{SchedulerName: "slurm-bridge", SchedulingGroup: &corev1.PodSchedulingGroup{PodGroupName: ptr.To(name)},
-							SchedulingGates: []corev1.PodSchedulingGate{{Name: wellknown.SchedulingGateRegistration}, {Name: "other/gate"}},
+							SchedulingGates: []corev1.PodSchedulingGate{{Name: wellknown.SchedulingGateRegistration}},
 							Containers:      []corev1.Container{{Name: "worker", Image: "busybox"}}}}
 					return group, pod
 				}

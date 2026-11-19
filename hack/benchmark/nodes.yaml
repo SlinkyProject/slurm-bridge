@@ -23,6 +23,7 @@ tasks:
             pods: 256
           annotations:
             scheduler.slinky.slurm.net/external-node-partitions: slurm-bridge
+            feature.slinky.slurm.net/spec: benchmark_kwok
             topology.slinky.slurm.net/spec: topo-switch:s{{ .rack }}
           labels:
             benchmark.slinky.slurm.net/fleet: 'true'

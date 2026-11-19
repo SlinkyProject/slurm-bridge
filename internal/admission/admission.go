@@ -10,10 +10,12 @@ import (
 	"slices"
 	"strings"
 
+	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/featuregate"
@@ -59,10 +61,25 @@ func (r *PodAdmission) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	if err := r.DRARegistry.WatchDeviceClasses(informer); err != nil {
 		return err
 	}
+	mgr.GetWebhookServer().Register("/mutate--v1-pod", r.mutatingWebhook(mgr.GetScheme()))
 	return ctrl.NewWebhookManagedBy(mgr, &corev1.Pod{}).
-		WithDefaulter(r).
 		WithValidator(r).
 		Complete()
+}
+
+func (r *PodAdmission) mutatingWebhook(scheme *runtime.Scheme) *admission.Webhook {
+	webhook := admission.WithDefaulter(scheme, r)
+	handler := webhook.Handler
+	webhook.Handler = admission.HandlerFunc(func(ctx context.Context, req admission.Request) admission.Response {
+		response := handler.Handle(ctx, req)
+		for _, patch := range response.Patches {
+			if patch.Operation == "remove" && patch.Path == "/spec/nodeName" {
+				return response.WithWarnings("spec.nodeName was removed so Slurm can select the node. Use a Slurm partition or constraint for placement.")
+			}
+		}
+		return response
+	})
+	return webhook
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
@@ -83,14 +100,6 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 		return nil
 	}
 
-	// On create, unset spec.nodeName so the pod is scheduled by slurm-bridge.
-	if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" {
-		if pod.Spec.NodeName != "" {
-			logger.V(1).Info("Unsetting spec.nodeName on create so slurm scheduling will occur", "pod", klog.KObj(pod), "previousNodeName", pod.Spec.NodeName)
-			pod.Spec.NodeName = ""
-		}
-	}
-
 	if pod.Spec.SchedulerName == corev1.DefaultSchedulerName {
 		pod.Spec.SchedulerName = r.SchedulerName
 	}
@@ -99,34 +108,17 @@ func (r *PodAdmission) Default(ctx context.Context, pod *corev1.Pod) error {
 		// The scheduler translates native PodGroups itself, so their members need no published
 		// allocation. A gate would make it recheck the whole group on each member's release.
 		nativeGroup := pod.Spec.SchedulingGroup != nil && ptr.Deref(pod.Spec.SchedulingGroup.PodGroupName, "") != ""
-		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == "CREATE" && !nativeGroup {
+		if req, err := admission.RequestFromContext(ctx); err == nil && req.Operation == admissionv1.Create {
+			pod.Spec.NodeName = ""
+			if nativeGroup {
+				return nil
+			}
 			if !slices.ContainsFunc(pod.Spec.SchedulingGates, func(g corev1.PodSchedulingGate) bool { return g.Name == wellknown.SchedulingGateRegistration }) {
 				pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: wellknown.SchedulingGateRegistration})
 			}
 		}
 	}
 	return nil
-}
-
-// hasRequiredAffinity reports whether pod has a required (as opposed to
-// preferred) node or pod (anti-)affinity term.
-func hasRequiredAffinity(pod *corev1.Pod) bool {
-	affinity := pod.Spec.Affinity
-	if affinity == nil {
-		return false
-	}
-	if na := affinity.NodeAffinity; na != nil {
-		if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
-			return true
-		}
-	}
-	if pa := affinity.PodAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	if pa := affinity.PodAntiAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	return false
 }
 
 // +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods;pods/resize,verbs=create;update,versions=v1,name=mcluster.kb.io,admissionReviewVersions=v1
@@ -151,12 +143,6 @@ func (r *PodAdmission) ValidateCreate(ctx context.Context, pod *corev1.Pod) (adm
 	}
 	if pod.Spec.ResourceClaims != nil {
 		return nil, fmt.Errorf("can't schedule a pod with a resourceclaim, use the annotation %s to request devices instead", wellknown.AnnotationGres)
-	}
-	if len(pod.Spec.TopologySpreadConstraints) > 0 {
-		return nil, fmt.Errorf("spec.topologySpreadConstraints is not supported by the slurm-bridge scheduler")
-	}
-	if hasRequiredAffinity(pod) {
-		return nil, fmt.Errorf("spec.affinity's required fields are not supported by the slurm-bridge scheduler, use a Slurm partition or constraint instead")
 	}
 	requests, err := r.draRegistry().ResolvePod(ctx, r.Client, pod)
 	if err != nil {

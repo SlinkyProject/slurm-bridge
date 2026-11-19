@@ -20,6 +20,9 @@ import (
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/pkg/types"
+
+	nodeutils "github.com/SlinkyProject/slurm-bridge/internal/controller/node/utils"
+	"github.com/SlinkyProject/slurm-bridge/internal/wellknown"
 )
 
 // TestTPUAllocation checks whole-host allocation, cleanup, and reuse in Kind.
@@ -83,11 +86,23 @@ func testTPUAllocation(name string, nodeName *string) types.Feature {
 				if err := c.Get(ctx, client.ObjectKey{Name: *nodeName}, node); err != nil {
 					t.Fatal(err)
 				}
-				hostname := node.Labels[corev1.LabelHostname]
-				if hostname == "" {
-					t.Fatal("fixture worker has no hostname label")
+				controller, err := getSlurmControllerPod(ctx, c)
+				if err != nil {
+					t.Fatal(err)
 				}
-				pod.Spec.NodeSelector = map[string]string{corev1.LabelHostname: hostname}
+				partition := pod.Name
+				if _, err := execInPod(ctx, config, controller, "scontrol", "create",
+					"PartitionName="+partition, "Nodes="+nodeutils.GetSlurmNodeName(node), "Default=NO", "State=UP"); err != nil {
+					t.Fatalf("create TPU reuse partition: %v", err)
+				}
+				t.Cleanup(func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), slurmCleanupTimeout)
+					defer cancel()
+					if _, err := execInPod(cleanupCtx, config, controller, "scontrol", "delete", "PartitionName="+partition); err != nil {
+						t.Errorf("delete TPU reuse partition: %v", err)
+					}
+				})
+				pod.Annotations = map[string]string{wellknown.AnnotationPartition: partition}
 			}
 			if err := c.Create(ctx, pod); err != nil {
 				t.Fatal(err)

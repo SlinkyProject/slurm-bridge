@@ -55,37 +55,15 @@ import (
 )
 
 var (
-	ErrorNoKubeNode              = errors.New("no more external nodes available for pod placement")
-	ErrorNoKubeNodeMatch         = errors.New("slurm node matches no Kube nodes")
-	ErrorPodUpdateFailed         = errors.New("failed to update pod")
-	ErrorNodeConfigInvalid       = errors.New("requested node configuration is not available")
-	ErrorPodWithResourceClaim    = errors.New("can't schedule pod with a resource claim")
-	ErrorPodWithRequiredAffinity = errors.New("can't schedule pod with required affinity: use a Slurm partition or constraint instead")
-	ErrorUnprocessedComponents   = errors.New("can't schedule pod: components of SlurmJobIR have not yet passed PostFilter")
+	ErrorNoKubeNode            = errors.New("no more external nodes available for pod placement")
+	ErrorNoKubeNodeMatch       = errors.New("slurm node matches no Kube nodes")
+	ErrorPodUpdateFailed       = errors.New("failed to update pod")
+	ErrorNodeConfigInvalid     = errors.New("requested node configuration is not available")
+	ErrorPodWithResourceClaim  = errors.New("can't schedule pod with a resource claim")
+	ErrorUnprocessedComponents = errors.New("can't schedule pod: components of SlurmJobIR have not yet passed PostFilter")
 )
 
 const slurmJobNotPending = "job is no longer pending execution"
-
-// hasRequiredAffinity reports whether pod has a required (as opposed to
-// preferred) node or pod (anti-)affinity term.
-func hasRequiredAffinity(pod *corev1.Pod) bool {
-	affinity := pod.Spec.Affinity
-	if affinity == nil {
-		return false
-	}
-	if na := affinity.NodeAffinity; na != nil {
-		if req := na.RequiredDuringSchedulingIgnoredDuringExecution; req != nil && len(req.NodeSelectorTerms) > 0 {
-			return true
-		}
-	}
-	if pa := affinity.PodAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	if pa := affinity.PodAntiAffinity; pa != nil && len(pa.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-		return true
-	}
-	return false
-}
 
 func findMatchingError(err error, matches func(error) bool) error {
 	if err == nil {
@@ -236,10 +214,11 @@ func (sb *SlurmBridge) Name() string {
 }
 
 type stateData struct {
-	slurmJobIR *slurmjobir.SlurmJobIR
-	allocation []slurmcontrol.ExternalJob
-	native     *nativeAllocation
-	nodeName   string
+	slurmJobIR       *slurmjobir.SlurmJobIR
+	allocation       []slurmcontrol.ExternalJob
+	native           *nativeAllocation
+	nodeName         string
+	schedulingStatus *fwk.Status
 }
 
 func (d *stateData) Clone() fwk.StateData {
@@ -430,45 +409,35 @@ func (sb *SlurmBridge) PreFilter(ctx context.Context, state fwk.CycleState, pod 
 	return result, status
 }
 
-func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (*fwk.PreFilterResult, *fwk.Status) {
+func (sb *SlurmBridge) preFilterPod(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, nodeInfo []fwk.NodeInfo) (result *fwk.PreFilterResult, status *fwk.Status) {
 	if sb.allocationObserver != nil {
 		// Start only once this replica is scheduling; standby replicas must not patch hints.
 		sb.allocationObserver.start()
 	}
 	logger := klog.FromContext(ctx)
 	var err error
-
 	if err := slurmjobir.ValidatePodGroupSupport(sb.workloadAPI, pod); err != nil {
 		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
 	}
+
+	s := &stateData{}
+	state.Write(stateKey, s)
+	defer func() {
+		// PreFilter failures, including retryable group waits, never authorize
+		// PostFilter allocation dispatch. Keep the original failure diagnostics.
+		if !status.IsSuccess() {
+			s.schedulingStatus = status
+		}
+	}()
 
 	if pod.Spec.ResourceClaims != nil {
 		logger.Error(ErrorPodWithResourceClaim, "use extended resource or device plugin request instead")
 		return nil, fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
 	}
 
-	// Required affinity is a hard constraint; honoring required NodeAffinity would
-	// mean growing the excluded-node list slurm-bridge already sends Slurm per pod
-	// (see #132: that list's churn is a known scheduling performance cost we're
-	// trying to reduce, not add to), and required PodAffinity/PodAntiAffinity would
-	// be silently violated today since InterPodAffinity never runs in this
-	// scheduler's profile. Reject rather than silently violate it; also enforced at
-	// admission for pods that bypass this scheduler. Use a Slurm partition or
-	// constraint instead.
-	//
-	// Preferred affinity is only a scoring hint, even upstream kube-scheduler
-	// treats it as best-effort, so it's fine to silently not act on it.
-	if hasRequiredAffinity(pod) {
-		logger.Error(ErrorPodWithRequiredAffinity, "required affinity is not supported")
-		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error())
-	}
-
 	if group := nativeSchedulingCycle(state, pod); group != nil {
-		return sb.preFilterNative(ctx, state, pod, group)
+		return sb.preFilterNative(ctx, s, pod, group)
 	}
-
-	s := &stateData{}
-	state.Write(stateKey, s)
 
 	allocationResult, allocationErr := sb.translateAllocation(ctx, pod)
 	s.slurmJobIR = allocationResult.IR
@@ -650,11 +619,17 @@ func allocatedNodeRejectedByKubernetes(assignedNode string, externalJob *slurmco
 // PostFilter updates feasible nodes and releases controller-registered jobs.
 // Every hetjob component must pass Kubernetes feasibility checks before release.
 func (sb *SlurmBridge) PostFilter(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, m fwk.NodeToStatusReader) (*fwk.PostFilterResult, *fwk.Status) {
+	if err := slurmjobir.ValidatePodGroupSupport(sb.workloadAPI, pod); err != nil {
+		return nil, fwk.NewStatus(fwk.UnschedulableAndUnresolvable, err.Error())
+	}
 	logger := klog.FromContext(ctx)
 
 	s, err := getStateData(state)
 	if err != nil {
 		return nil, fwk.NewStatus(fwk.Error, err.Error())
+	}
+	if s.schedulingStatus != nil {
+		return nil, s.schedulingStatus
 	}
 	// PreFilter rejected the workload, so there is nothing to update or release.
 	if s.slurmJobIR == nil {
