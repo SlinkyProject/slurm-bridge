@@ -365,7 +365,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		framework.NewNodeInfo(),
 	}
 	nodeInfo[0].SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
+	pod := st.MakePod().Name("pod1").ResourceVersion("1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
@@ -789,7 +789,7 @@ func TestSlurmBridge_PostFilterWaitsForExistingGroupAllocation(t *testing.T) {
 	}
 }
 
-func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T) {
+func TestSlurmBridge_PodGroupPostFilterKeepsRegisteredSize(t *testing.T) {
 	metrics.Register()
 	for _, lateFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("late member first=%v", lateFirst), func(t *testing.T) {
@@ -828,20 +828,29 @@ func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T)
 			jobs := &api.V0044JobInfoObjectList{Items: []api.V0044JobInfo{{
 				JobId: ptr.To(int32(42)), JobState: &[]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING},
 				AdminComment: ptr.To(info.ToString()),
+				Priority:     &api.V0044Uint32NoValStruct{Set: ptr.To(true), Number: ptr.To(int32(0))},
 			}}}
-			updates := 0
+			updates, releases := 0, 0
 			slurm := fake.NewClientBuilder().WithLists(jobs, slurmNodes).WithInterceptorFuncs(interceptor.Funcs{
 				Create: func(context.Context, object.Object, any, ...slurmclient.CreateOption) error {
 					t.Error("PostFilter submitted a replacement job, want an update to job 42")
 					return errors.New("unexpected job submission")
 				},
 				Update: func(_ context.Context, obj object.Object, req any, _ ...slurmclient.UpdateOption) error {
-					updates++
 					if id := ptr.Deref(obj.(*api.V0044JobInfo).JobId, 0); id != 42 {
 						t.Errorf("updated job ID = %d, want 42", id)
 					}
-					if count := ptr.Deref(req.(api.V0044JobDescMsg).Nodes, ""); count != "3" {
-						t.Errorf("updated node count = %q, want 3", count)
+					desc := req.(api.V0044JobDescMsg)
+					if desc.Nodes != nil || desc.MinimumNodes != nil || desc.MaximumNodes != nil {
+						t.Errorf("pending PodGroup update included node sizing: %+v", desc)
+					}
+					if desc.Hold != nil {
+						if *desc.Hold || updates != 1 {
+							t.Error("expected hold release after the eligibility update")
+						}
+						releases++
+					} else {
+						updates++
 					}
 					return nil
 				},
@@ -868,6 +877,30 @@ func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T)
 			}
 			sb := &SlurmBridge{Client: cl, handle: compositePostFilterHandle{Framework: f}, workloadAPI: workloadAPI,
 				slurmControl: control}
+			informer := f.SharedInformerFactory().Core().V1().Pods().Informer()
+			sb.translation, err = newTranslationReader(cl, informer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range pods[:2] {
+				if err := informer.GetStore().Add(pods[i].DeepCopy()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Quorum is two, but the held allocation was registered for three.
+			state := nativePodState(framework.NewCycleState())
+			if _, status := sb.PreFilter(ctx, state, &pods[0], nil); !status.IsSuccess() {
+				t.Fatal(status)
+			}
+			eligible := framework.NewNodeToStatus(map[string]*fwk.Status{nodes[2].Name: fwk.NewStatus(fwk.UnschedulableAndUnresolvable)}, nil)
+			_, status := sb.PostFilter(ctx, state, &pods[0], eligible)
+			sb.releases.Wait()
+			if status.Code() != fwk.Unschedulable || updates != 0 || releases != 0 {
+				t.Fatalf("two eligible nodes: status=%v updates=%d releases=%d", status, updates, releases)
+			}
+			if err := informer.GetStore().Add(pods[2].DeepCopy()); err != nil {
+				t.Fatal(err)
+			}
 			if lateFirst {
 				pods[0], pods[2] = pods[2], pods[0]
 			}
@@ -884,10 +917,10 @@ func TestSlurmBridge_PodGroupPostFilterGrowsPendingGroupAllocation(t *testing.T)
 					t.Errorf("PreFilter(%s) = %v, %v; want no node allocation and Success", pod.Name, result, status)
 				}
 			}
-			_, status := sb.PodGroupPostFilter(ctx, groupState, groupInfo, nil)
+			_, status = sb.PodGroupPostFilter(ctx, groupState, groupInfo, nil)
 			sb.releases.Wait()
-			if !status.IsSuccess() || updates != 1 {
-				t.Fatalf("PodGroupPostFilter status = %v, updates = %d, want Success and one update", status, updates)
+			if !status.IsSuccess() || updates != 1 || releases != 1 {
+				t.Fatalf("three eligible nodes: status=%v updates=%d releases=%d, want Success and one of each", status, updates, releases)
 			}
 			for _, pod := range pods {
 				observed := &corev1.Pod{}
@@ -1963,7 +1996,7 @@ func TestSlurmBridge_annotatePodsWithNodes_doesNotReshuffleAlreadyAssignedPod(t 
 	pod1 := st.MakePod().Name("pod1").UID("uid1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).
 		Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
-	pod2 := st.MakePod().Name("pod2").UID("uid2").
+	pod2 := st.MakePod().Name("pod2").UID("uid2").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 
 	fakeClient := kubefake.NewFakeClient(pod1.DeepCopy(), pod2.DeepCopy())
@@ -2007,9 +2040,9 @@ func TestSlurmBridge_annotatePodsWithNodes_skipsDeletedSibling(t *testing.T) {
 	// pod1 is in podList (e.g. from a snapshot taken earlier) but not in the
 	// fake client, so patching it returns NotFound -- simulating a sibling
 	// deleted between the snapshot and this call.
-	pod1 := st.MakePod().Name("pod1").UID("uid1").
+	pod1 := st.MakePod().Name("pod1").UID("uid1").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
-	pod2 := st.MakePod().Name("pod2").UID("uid2").
+	pod2 := st.MakePod().Name("pod2").UID("uid2").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 
 	cs := clientsetfake.NewClientset()
@@ -2089,7 +2122,7 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Name: "pod1", Namespace: "default", UID: "pod1",
+				Name: "pod1", Namespace: "default", UID: "pod1", ResourceVersion: "1",
 				Labels:      map[string]string{wellknown.LabelExternalJobId: "1", "keep": "label"},
 				Annotations: map[string]string{"keep": "annotation"},
 			}}

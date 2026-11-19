@@ -135,31 +135,28 @@ func gangQuorum(pod *corev1.Pod, pods []corev1.Pod, minCount int) *fwk.Status {
 
 // fromPodGroup builds SlurmJobIR for pods with spec.schedulingGroup.podGroupName set.
 func (t *translator) fromPodGroup(pod *corev1.Pod, rootPOM *metav1.PartialObjectMetadata) (*SlurmJobIR, error) {
-	slurmJobIR := new(SlurmJobIR)
-	slurmJobComponent := new(SlurmJobComponent)
-	slurmJobComponent.ObjectMeta = *rootPOM
-
-	pgPods, err := t.podsForPodGroup(pod.Namespace, *pod.Spec.SchedulingGroup.PodGroupName)
+	pods, err := t.podsForPodGroup(pod.Namespace, *pod.Spec.SchedulingGroup.PodGroupName)
 	if err != nil {
 		return nil, err
 	}
-
-	slurmJobComponent.Pods = pgPods
-	if len(slurmJobComponent.Pods.Items) == 0 {
+	if len(pods.Items) == 0 {
 		return nil, ErrorPodGroupNoPods
 	}
+	return &SlurmJobIR{Components: []SlurmJobComponent{podGroupComponent(*rootPOM, pods)}}, nil
+}
 
-	slurmJobComponent.JobInfo.JobName = ptr.To(rootPOM.Name)
-	n := int32(len(slurmJobComponent.Pods.Items)) //nolint:gosec // count bounded by cluster
-	slurmJobComponent.JobInfo.MinNodes = ptr.To(n)
-	slurmJobComponent.JobInfo.MaxNodes = ptr.To(n)
-	slurmJobComponent.JobInfo.TasksPerNode = ptr.To(int32(1))
-
-	slurmJobIR.Components = []SlurmJobComponent{
-		*slurmJobComponent,
+func podGroupComponent(group metav1.PartialObjectMetadata, pods corev1.PodList) SlurmJobComponent {
+	n := int32(len(pods.Items)) //nolint:gosec // count bounded by cluster
+	return SlurmJobComponent{
+		ObjectMeta: group,
+		Pods:       pods,
+		JobInfo: SlurmJobIRJobInfo{
+			JobName:      ptr.To(group.Name),
+			MinNodes:     ptr.To(n),
+			MaxNodes:     ptr.To(n),
+			TasksPerNode: ptr.To(int32(1)),
+		},
 	}
-
-	return slurmJobIR, nil
 }
 
 func (t *translator) podsForPodGroup(namespace, groupName string) (corev1.PodList, error) {

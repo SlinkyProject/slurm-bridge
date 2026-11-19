@@ -40,14 +40,21 @@ type SlurmJobComponent struct {
 	ObjectMeta metav1.PartialObjectMetadata
 	JobInfo    SlurmJobIRJobInfo
 	Pods       corev1.PodList
+	// RegisteredPodCount is the size recorded by Slurm for a built-in PodGroup component.
+	RegisteredPodCount int
 }
 
-// SelectPods updates the exact node count of a built-in PodGroup batch.
-func (s *SlurmJobComponent) SelectPods(pods []corev1.Pod) {
+// IsBuiltInPodGroup includes PodGroup leaves of composite allocations.
+func (s *SlurmJobComponent) IsBuiltInPodGroup() bool {
+	return isBuiltInPodGroup(s.ObjectMeta.TypeMeta)
+}
+
+// SelectPods retains the registered size even when some members are absent.
+func (s *SlurmJobComponent) SelectPods(pods []corev1.Pod, registeredCount int) {
 	s.Pods.Items = pods
-	n := int32(len(pods)) //nolint:gosec // Pod count is bounded by Kubernetes limits.
-	switch s.ObjectMeta.TypeMeta {
-	case podGroupV1Alpha2, podGroupV1Beta1:
+	if s.IsBuiltInPodGroup() {
+		s.RegisteredPodCount = registeredCount
+		n := int32(registeredCount) //nolint:gosec // Pod count is bounded by Kubernetes limits.
 		s.JobInfo.MinNodes, s.JobInfo.MaxNodes = ptr.To(n), ptr.To(n)
 	}
 }
