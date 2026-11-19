@@ -240,6 +240,21 @@ func Test_translator_fromCompositePodGroup(t *testing.T) {
 	nestedPod0 := podWithSchedulingGroup(corev1.NamespaceDefault, "nested-pod0", nestedGroup.Name)
 	nestedPod1 := podWithSchedulingGroup(corev1.NamespaceDefault, "nested-pod1", nestedGroup.Name)
 
+	t.Run("one indexed member lookup for a nonempty leaf", func(t *testing.T) {
+		reader := &memberLister{
+			Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(root, flatGroup).Build(),
+			pods:   corev1.PodList{Items: []corev1.Pod{*flatPod}},
+		}
+		tr := translator{Reader: reader, ctx: t.Context(), workloadAPI: workloadAPI}
+		ir, err := tr.fromCompositePodGroup(flatPod, rootPOM)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ir.Components) != 1 || reader.calls != 1 {
+			t.Fatalf("components = %d, member lookups = %d, want 1 each", len(ir.Components), reader.calls)
+		}
+	})
+
 	tests := []struct {
 		name    string
 		reader  client.Reader
