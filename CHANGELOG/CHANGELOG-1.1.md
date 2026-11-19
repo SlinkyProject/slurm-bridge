@@ -1,3 +1,14 @@
+## v1.1.6
+
+### Fixed
+
+- Pin Kind images to Kubernetes versions supported by the release.
+- GO-2026-5932.
+- Correct release 1.1 installation instructions.
+- GO-2026-6769 GO-2026-6783 GO-2026-6785 GO-2026-6789 GO-2026-6795 GO-2026-6800
+  GO-2026-6804.
+- GO-2026-6859.
+
 ## v1.1.5
 
 ### Added
@@ -87,7 +98,7 @@
   allocations.
 - Limit DRA claims and allocations to the GRES requested by each pod.
 - Fixed repeated termination of jobs.
-- The node controller will watch resourcesliecs for changes to external nodes in
+- The node controller will watch resourceslices for changes to external nodes in
   order to update them.
 - Replace /readyz probe with StartedChecker instead of a ping.
 - Correct the readinessProbe to use /readyz.
