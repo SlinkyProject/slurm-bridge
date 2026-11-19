@@ -6,6 +6,7 @@ package slurmbridge
 import (
 	"context"
 	"errors"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	fwk "k8s.io/kube-scheduler/framework"
@@ -30,6 +31,39 @@ func (sb *SlurmBridge) translateAllocation(ctx context.Context, pod *corev1.Pod)
 		}))
 	allocation.IR = ir
 	return allocation, err
+}
+
+// preFilterAllocation confirms a native gang's quorum against its recorded members
+// before an informer miss can cancel the Slurm job.
+func (sb *SlurmBridge) preFilterAllocation(ctx context.Context, pod *corev1.Pod, ir *slurmjobir.SlurmJobIR) *fwk.Status {
+	status := slurmjobir.PreFilter(sb.Client, sb.registry(), sb.handle, sb.workloadAPI, ctx, pod, ir)
+	if status.IsSuccess() || !slices.Contains(status.Reasons(), slurmjobir.ErrorExternalJobInvalid.Error()) {
+		return status
+	}
+
+	// Cleanup needs the full live workload. Quorum counts only the submitted batch.
+	live, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod)
+	if err != nil {
+		return fwk.AsStatus(err)
+	}
+	if pod.Spec.SchedulingGroup != nil {
+		allocation, err := sb.slurmControl.GetAllocation(ctx, pod, live)
+		state := stateData{slurmJobIR: allocation.IR}
+		if checked := state.checkAllocation(pod, allocation.Jobs, err); !checked.IsSuccess() {
+			return checked
+		}
+		ready, _, err := slurmjobir.RegistrationReady(sb.Client, sb.registry(), sb.workloadAPI, ctx, pod, allocation.IR)
+		if err != nil {
+			return fwk.AsStatus(err)
+		}
+		if ready {
+			return fwk.NewStatus(fwk.Unschedulable, "waiting for PodGroup membership to reach the scheduler")
+		}
+	}
+	if err := sb.deleteTranslatedJob(ctx, pod, live); err != nil {
+		return fwk.AsStatus(err)
+	}
+	return status
 }
 
 func allocationWait(err error) bool {

@@ -4,6 +4,7 @@
 package slurmbridge
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -13,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/cache"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,5 +89,103 @@ func TestSchedulingRecordedMembers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type quorumControl struct {
+	slurmcontrol.SlurmControlInterface
+	deletes int
+}
+
+func (c *quorumControl) DeleteJob(context.Context, *corev1.Pod) error {
+	c.deletes++
+	return nil
+}
+
+func TestPreFilterConfirmsPodGroupQuorum(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, tc := range []struct {
+			name           string
+			cacheComplete  bool
+			deleteSibling  bool
+			addReplacement bool
+			legacy         bool
+			wantMessage    string
+			wantDeletes    int
+		}{
+			{name: "cache complete", cacheComplete: true},
+			{name: "cache missing registered sibling", wantMessage: "waiting for PodGroup membership to reach the scheduler"},
+			{name: "registered sibling gone", deleteSibling: true, wantMessage: slurmjobir.ErrorExternalJobInvalid.Error(), wantDeletes: 1},
+			{name: "unregistered replacement does not count", addReplacement: true, wantMessage: slurmjobir.ErrorExternalJobInvalid.Error(), wantDeletes: 1},
+			{name: "name-only registration with unlabeled replacement", addReplacement: true, legacy: true, wantMessage: "waiting for Slurm registration metadata"},
+		} {
+			t.Run(fmt.Sprintf("native=%t/%s", native, tc.name), func(t *testing.T) {
+				ctx := t.Context()
+				sb, _, pods, lists := nativeFixture(t, slurmjobir.WorkloadAPIVersionV1Beta1)
+				ir, err := slurmjobir.TranslateToSlurmJobIR(sb.Client, nil, sb.workloadAPI, ctx, pods[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				info := slurmcontrol.ExternalJobInfoFor(ir.RootPOM, ir.Components[0])
+				comment := info.ToString()
+				if tc.legacy {
+					comment = testJobComment(ir, 0)
+				}
+				slurm := slurmfake.NewFakeClient(&api.V0044JobInfo{
+					JobId: ptr.To(int32(10)), AdminComment: &comment,
+					JobState: ptr.To([]api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING}),
+				})
+				control, err := slurmcontrol.NewControl(slurm, slurm.GetInformer(api.ObjectTypeV0044JobInfo), "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				recorder := &quorumControl{SlurmControlInterface: control}
+				sb.slurmControl = recorder
+				informer := cache.NewSharedIndexInformer(nil, &corev1.Pod{}, 0, cache.Indexers{})
+				sb.translation, err = newTranslationReader(sb.Client, informer)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cached := pods[:1]
+				if tc.cacheComplete {
+					cached = pods
+				}
+				for _, pod := range cached {
+					if err := informer.GetStore().Add(pod); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tc.deleteSibling || tc.addReplacement {
+					if err := sb.Delete(ctx, pods[1]); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tc.addReplacement {
+					replacement := pods[1].DeepCopy()
+					replacement.UID = "new-uid"
+					replacement.ResourceVersion = ""
+					delete(replacement.Labels, wellknown.LabelExternalJobId)
+					if err := sb.Create(ctx, replacement); err != nil {
+						t.Fatal(err)
+					}
+				}
+				state := framework.NewCycleState()
+				if native {
+					state = nativePodState(framework.NewCycleState())
+				}
+				lists.Store(0)
+				_, status := sb.PreFilter(ctx, state, pods[0], nil)
+				if tc.cacheComplete {
+					if !status.IsSuccess() || lists.Load() != 0 {
+						t.Fatalf("status = %v, live Pod lists = %d", status, lists.Load())
+					}
+				} else if status.Code() != fwk.Unschedulable || status.Message() != tc.wantMessage || lists.Load() != 1 {
+					t.Fatalf("status = %v, want %q; live Pod lists = %d, want 1", status, tc.wantMessage, lists.Load())
+				}
+				if recorder.deletes != tc.wantDeletes {
+					t.Errorf("DeleteJob calls = %d, want %d", recorder.deletes, tc.wantDeletes)
+				}
+			})
+		}
 	}
 }
