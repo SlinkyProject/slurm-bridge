@@ -1,0 +1,29 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+spec:
+  template:
+    spec:
+      containers:
+        - name: plugin
+          env:
+            - name: GHW_DISABLE_TOPOLOGY
+              value: '1'
+          volumeMounts:
+            # Remove the whole-sysfs mount used by older Kind fixtures.
+            - mountPath: /sys
+              $patch: delete
+            # Keep DMI and other host sysfs paths available to runtime hooks.
+            - name: fake-sys
+              mountPath: /sys/bus/pci
+              subPath: bus/pci
+              readOnly: true
+            - name: fake-sys
+              mountPath: /sys/class/net
+              subPath: class/net
+              readOnly: true
+      volumes:
+        - name: fake-sys
+          hostPath:
+            path: /var/lib/sriov-dra/fake-sys
+            type: Directory

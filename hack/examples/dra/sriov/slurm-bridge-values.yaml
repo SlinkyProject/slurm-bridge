@@ -1,0 +1,52 @@
+---
+# SPDX-FileCopyrightText: Copyright (C) NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# A configured registry replaces the built-ins, so repeat them alongside the
+# example GPU and DRANET e2e fixture profiles. Kind's dummy network interface is
+# neither PCI-backed nor RDMA-capable.
+sharedConfig:
+  deviceProfiles:
+    - name: cpu
+      driver: dra.cpu
+      selector: device.driver == "dra.cpu"
+      backend:
+        type: core-bitmap
+    - name: gpu.example.com
+      driver: gpu.example.com
+      selector: device.driver == 'gpu.example.com'
+      backend:
+        type: indexed-gres
+        gresName: gpu
+    - name: gpu.nvidia.com
+      driver: gpu.nvidia.com
+      selector: >-
+        device.driver == 'gpu.nvidia.com' &&
+        device.attributes['gpu.nvidia.com'].type == 'gpu'
+      backend:
+        type: indexed-gres
+        gresName: gpu
+    - name: dranet-rdma
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' &&
+        has(device.attributes['dra.net'].pciAddress) &&
+        has(device.attributes['dra.net'].rdma) &&
+        device.attributes['dra.net'].rdma == true
+      backend:
+        type: indexed-gres
+        gresName: nic
+    - name: dranet0
+      driver: dra.net
+      selector: >-
+        device.driver == 'dra.net' && has(device.attributes['dra.net'].ifName) &&
+        device.attributes['dra.net'].ifName == 'dranet0'
+      backend:
+        type: indexed-gres
+        gresName: nic
+    - name: sriov-vf
+      driver: sriovnetwork.k8snetworkplumbingwg.io
+      selector: device.driver == 'sriovnetwork.k8snetworkplumbingwg.io'
+      backend:
+        type: indexed-gres
+        gresName: nic
