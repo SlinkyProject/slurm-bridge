@@ -34,6 +34,7 @@ func TestSchedulingDiscoveryUsesCache(t *testing.T) {
 	for _, phase := range []api.V0044JobInfoJobState{api.V0044JobInfoJobStatePENDING, api.V0044JobInfoJobStateRUNNING} {
 		t.Run(string(phase), func(t *testing.T) {
 			pod := allocationPod("pod", 0, "10", "")
+			pod.ResourceVersion = "1"
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
 			job := &api.V0044JobInfo{JobId: ptr.To(int32(10)), Nodes: ptr.To("node1"),
 				AdminComment: ptr.To(`{"pods":["test/pod/pod"]}`), JobState: &[]api.V0044JobInfoJobState{phase}}

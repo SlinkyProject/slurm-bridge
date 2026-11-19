@@ -1113,7 +1113,7 @@ func (sb *SlurmBridge) annotatePodsWithNodes(ctx context.Context, jobid int32, k
 		}
 		toUpdate := p.DeepCopy()
 		toUpdate.Annotations[wellknown.AnnotationExternalJobNode] = node
-		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p)); err != nil {
+		if err := sb.Patch(ctx, toUpdate, client.StrategicMergeFrom(&p, client.MergeFromWithOptimisticLock{})); err != nil {
 			// A sibling can vanish (e.g. recreated elsewhere) between the
 			// snapshot and this patch; don't fail the whole gang for it.
 			if apierrors.IsNotFound(err) {

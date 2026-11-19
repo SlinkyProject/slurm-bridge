@@ -365,7 +365,7 @@ func TestSlurmBridge_PreFilter(t *testing.T) {
 		framework.NewNodeInfo(),
 	}
 	nodeInfo[0].SetNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}})
-	pod := st.MakePod().Name("pod1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
+	pod := st.MakePod().Name("pod1").ResourceVersion("1").Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 	cs := clientsetfake.NewClientset()
 	informerFactory := informers.NewSharedInformerFactory(cs, 0)
 	registeredPlugins := []tf.RegisterPluginFunc{
@@ -1996,7 +1996,7 @@ func TestSlurmBridge_annotatePodsWithNodes_doesNotReshuffleAlreadyAssignedPod(t 
 	pod1 := st.MakePod().Name("pod1").UID("uid1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).
 		Annotations(map[string]string{wellknown.AnnotationExternalJobNode: "node1"}).Obj()
-	pod2 := st.MakePod().Name("pod2").UID("uid2").
+	pod2 := st.MakePod().Name("pod2").UID("uid2").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 
 	fakeClient := kubefake.NewFakeClient(pod1.DeepCopy(), pod2.DeepCopy())
@@ -2040,9 +2040,9 @@ func TestSlurmBridge_annotatePodsWithNodes_skipsDeletedSibling(t *testing.T) {
 	// pod1 is in podList (e.g. from a snapshot taken earlier) but not in the
 	// fake client, so patching it returns NotFound -- simulating a sibling
 	// deleted between the snapshot and this call.
-	pod1 := st.MakePod().Name("pod1").UID("uid1").
+	pod1 := st.MakePod().Name("pod1").UID("uid1").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
-	pod2 := st.MakePod().Name("pod2").UID("uid2").
+	pod2 := st.MakePod().Name("pod2").UID("uid2").ResourceVersion("1").
 		Labels(map[string]string{wellknown.LabelExternalJobId: "1"}).Obj()
 
 	cs := clientsetfake.NewClientset()
@@ -2122,7 +2122,7 @@ func TestPreFilterMissingAllocatedNode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := t.Context()
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Name: "pod1", Namespace: "default", UID: "pod1",
+				Name: "pod1", Namespace: "default", UID: "pod1", ResourceVersion: "1",
 				Labels:      map[string]string{wellknown.LabelExternalJobId: "1", "keep": "label"},
 				Annotations: map[string]string{"keep": "annotation"},
 			}}
