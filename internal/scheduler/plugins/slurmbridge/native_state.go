@@ -98,9 +98,7 @@ func (s *stateData) assignedNode(pod *corev1.Pod) string {
 	return pod.Annotations[wellknown.AnnotationExternalJobNode]
 }
 
-func (sb *SlurmBridge) preFilterNative(ctx context.Context, state fwk.CycleState, pod *corev1.Pod, group *nativeGroupCycle) (*fwk.PreFilterResult, *fwk.Status) {
-	s := &stateData{}
-	state.Write(stateKey, s)
+func (sb *SlurmBridge) preFilterNative(ctx context.Context, s *stateData, pod *corev1.Pod, group *nativeGroupCycle) (*fwk.PreFilterResult, *fwk.Status) {
 	key := client.ObjectKeyFromObject(pod)
 	allocation := group.allocations[key]
 	if allocation == nil {
@@ -179,9 +177,6 @@ func (sb *SlurmBridge) prepareNativeAllocation(ctx context.Context, pod *corev1.
 		for _, member := range component.Pods.Items {
 			if member.Spec.ResourceClaims != nil {
 				return fwk.NewStatus(fwk.Unschedulable, ErrorPodWithResourceClaim.Error())
-			}
-			if hasRequiredAffinity(&member) {
-				return fwk.NewStatus(fwk.UnschedulableAndUnresolvable, ErrorPodWithRequiredAffinity.Error())
 			}
 		}
 		if err := sb.validateDeviceClassRequestsForPods(ctx, component.Pods.Items, ptr.Deref(component.JobInfo.Exclusive, true)); err != nil {

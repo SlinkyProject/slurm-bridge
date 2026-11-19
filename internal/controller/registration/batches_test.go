@@ -73,6 +73,7 @@ func TestRegisterPodGroupNextBatch(t *testing.T) {
 							pod.Status.Phase = corev1.PodFailed
 						}
 						pod.Spec.NodeName = "old-node"
+						pod.Spec.TopologySpreadConstraints = []corev1.TopologySpreadConstraint{{MaxSkew: 1, TopologyKey: corev1.LabelHostname, WhenUnsatisfiable: corev1.ScheduleAnyway}}
 						pod.Spec.SchedulingGates = nil
 						pod.Labels = map[string]string{wellknown.LabelExternalJobId: "10"}
 						// Historical resource requests must not inflate the next allocation.

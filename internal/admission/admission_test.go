@@ -476,7 +476,7 @@ func TestPodAdmission_Namespaces(t *testing.T) {
 			sched:   corev1.DefaultSchedulerName,
 		},
 		{
-			name: "PodWithNodeNameOnCreateInManagedNamespace_unsetsNodeName",
+			name: "PodWithNodeNameOnCreateInManagedNamespace_clearsNodeName",
 			args: args{
 				ctx: contextWithAdmissionOperation("CREATE"),
 				pod: &corev1.Pod{
@@ -787,9 +787,8 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					},
 				},
 			},
-			want:            nil,
-			wantErr:         true,
-			wantErrContains: "spec.topologySpreadConstraints",
+			want:    nil,
+			wantErr: false,
 		},
 		{
 			name: "PodWithEmptyTopologySpreadConstraints",
@@ -834,9 +833,8 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					},
 				},
 			},
-			want:            nil,
-			wantErr:         true,
-			wantErrContains: "spec.affinity",
+			want:    nil,
+			wantErr: false,
 		},
 		{
 			name: "PodWithPreferredNodeAffinity",
@@ -893,9 +891,8 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					},
 				},
 			},
-			want:            nil,
-			wantErr:         true,
-			wantErrContains: "spec.affinity",
+			want:    nil,
+			wantErr: false,
 		},
 		{
 			name: "PodWithUnsupportedDRAClass",
@@ -1046,9 +1043,8 @@ func TestPodAdmission_ValidateCreate(t *testing.T) {
 					},
 				},
 			},
-			want:            nil,
-			wantErr:         true,
-			wantErrContains: "spec.topologySpreadConstraints",
+			want:    nil,
+			wantErr: false,
 		},
 		{
 			name: "PodWithTopologySpreadConstraintAndDifferentSchedulerInUnmanagedNamespace",

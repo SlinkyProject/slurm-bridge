@@ -329,7 +329,7 @@ func TestNativeGangRejectsChangedMember(t *testing.T) {
 			case "job":
 				changed.Labels[wellknown.LabelExternalJobId] = "11"
 			case "spec":
-				changed.Spec.NodeSelector = map[string]string{"changed": "yes"}
+				changed.Spec.Tolerations = []corev1.Toleration{{Key: "changed", Operator: corev1.TolerationOpExists}}
 			case "late member":
 				changed.Name, changed.UID = "late", "late"
 				if err := sb.Create(t.Context(), changed); err != nil {
