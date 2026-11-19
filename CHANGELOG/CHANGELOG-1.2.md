@@ -1,3 +1,14 @@
+## v1.2.5
+
+### Fixed
+
+- Pin Kind images to Kubernetes versions supported by the release.
+- GO-2026-5932.
+- Correct release 1.2 installation instructions.
+- GO-2026-6769 GO-2026-6783 GO-2026-6785 GO-2026-6789 GO-2026-6795 GO-2026-6800
+  GO-2026-6804.
+- GO-2026-6859.
+
 ## v1.2.4
 
 ### Added
