@@ -28,6 +28,8 @@ const (
 	// Slurm validates most requests against its config, so an admin change can
 	// make a refused request valid without any change to the workload.
 	requestRetry = 10 * time.Minute
+	// A feature can become available as upgraded nodes register with Slurm.
+	featureRetry = 3 * time.Minute
 	// limitRetry spaces retries for limit rejections so a full queue is not polled.
 	limitRetry = time.Minute
 )
@@ -37,7 +39,6 @@ var (
 		slurmerrors.ErrInvalidPartitionName,
 		slurmerrors.ErrInvalidNodeCount,
 		slurmerrors.ErrBadTaskCount,
-		slurmerrors.ErrInvalidFeature,
 		slurmerrors.ErrInvalidAccount,
 		slurmerrors.ErrInvalidLicenses,
 		slurmerrors.ErrInvalidTimeLimit,
@@ -57,15 +58,17 @@ var (
 	)
 )
 
-func classifyRejection(err error) rejection {
+func classifyRejection(err error) (rejection, time.Duration) {
 	var se *slurmerrors.SlurmError
 	switch {
 	case !errors.As(err, &se):
-		return rejectOther
+		return rejectOther, 0
+	case se.Number == slurmerrors.ErrInvalidFeature:
+		return rejectRequest, featureRetry
 	case requestErrors.Has(se.Number):
-		return rejectRequest
+		return rejectRequest, requestRetry
 	case limitErrors.Has(se.Number):
-		return rejectLimit
+		return rejectLimit, limitRetry
 	}
-	return rejectOther
+	return rejectOther, 0
 }
