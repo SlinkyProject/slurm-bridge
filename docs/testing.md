@@ -255,3 +255,64 @@ Optional system diagnostics remain a direct command:
 ```sh
 sudo ./hack/sysctl.sh
 ```
+
+## Scale benchmark
+
+The knavigator benchmark defaults to 64 KWOK nodes, 800 mixed workloads, and 60×
+speed. Each trace job uses one PodGroup to gang-schedule the pods of an Indexed
+Job. Use a dedicated Kubernetes 1.37 cluster:
+
+```sh
+./hack/kind.sh --core --kwok slinky-benchmark
+export E2E_KUBE_CONTEXT=kind-slinky-benchmark
+make benchmark
+```
+
+Workflow YAML settings accept `${ENV_VAR:-default}`, for example
+`BENCHMARK_INFERENCE_JOBS=60 BENCHMARK_TRAINING_JOBS=20 make benchmark`. Set
+`BENCHMARK_CONFIG_DIR` to a checked-out configuration bundle (including from the
+CI repo): `nodes.yaml`, `workload.yaml`, `podgroup.yaml.tmpl`, and
+`kwok-stage.yaml`. `BENCHMARK_WORKLOAD=/path/to/workload.yaml` replaces only the
+workload. Its RegisterObj task uses `${BENCHMARK_TEMPLATE}` for the copied pod
+template; `${BENCHMARK_NAMESPACE}` is assigned per run. The default fleet uses
+the existing two-rack Slurm topology. The script forwards referenced environment
+values through knavigator’s native `-var` option and saves them with the YAML.
+
+`BENCHMARK_SPEEDUP` scales arrivals and pod runtime together. KWOK completes
+pods; knavigator collects results. Completed Jobs stay until run cleanup so the
+one-minute reports retain their counts. Each run writes to
+`benchmark-artifacts/<run-id>/`; tail its `benchmark.log` for one-minute GPU
+occupancy and gang progress reports. `summary.txt` contains the final headline
+stats; `results.json` and `timeline.csv` contain the details. CI retains the
+same artifacts. Set `SLURM_VALUES=/path/to/values.yaml` during cluster setup to
+apply extra Slurm Helm values, including CI-owned configuration.
+
+### DRA devices
+
+By default, pods request GPUs through the `nvidia.com/gpu` extended resource.
+Set `BENCHMARK_GPU_RESOURCE` to request them through DRA instead. Every node
+already publishes its GPUs in a `gpu.nvidia.com` ResourceSlice.
+`BENCHMARK_RESOURCE_SLICES` adds more drivers to every node, and
+`BENCHMARK_POD_DEVICES` adds their devices to every pod. For example, this run
+gives each pod one RDMA NIC next to its GPUs:
+
+```sh
+BENCHMARK_GPU_RESOURCE=deviceclass.resource.kubernetes.io/gpu.nvidia.com \
+BENCHMARK_RESOURCE_SLICES='[{driver: dra.net, devices: 8, attributes: {pciAddress: {string: "0000:00:00.0"}, rdma: {bool: true}}}]' \
+BENCHMARK_POD_DEVICES='[{class: dranet-rdma, count: 1}]' \
+make benchmark
+```
+
+For CPUs, `BENCHMARK_CPU_TOPOLOGY` publishes each node's CPUs through DRA and
+`BENCHMARK_CPU_RESOURCE` moves the pod's CPU request there. A pod requests CPUs
+either way, not both, and CPU DRA needs the default `BENCHMARK_EXCLUSIVE=false`:
+
+```sh
+BENCHMARK_CPU_TOPOLOGY='{sockets: 2, coresPerSocket: 48, smt: true}' \
+BENCHMARK_CPU_RESOURCE=deviceclass.resource.kubernetes.io/dra.cpu \
+make benchmark
+```
+
+The run applies `deviceclasses.yaml` from the configuration bundle when it is
+present. Each class there copies the selector of a built-in device profile,
+because the bridge matches the two byte for byte.
