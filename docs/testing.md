@@ -295,3 +295,33 @@ occupancy and gang progress reports. `summary.txt` contains the final headline
 stats; `results.json` and `timeline.csv` contain the details. CI retains the
 same artifacts. Set `SLURM_VALUES=/path/to/values.yaml` during cluster setup to
 apply extra Slurm Helm values, including CI-owned configuration.
+
+### DRA devices
+
+By default, pods request GPUs through the `nvidia.com/gpu` extended resource.
+Set `BENCHMARK_GPU_RESOURCE` to request them through DRA instead. Every node
+already publishes its GPUs in a `gpu.nvidia.com` ResourceSlice.
+`BENCHMARK_RESOURCE_SLICES` adds more drivers to every node, and
+`BENCHMARK_POD_DEVICES` adds their devices to every pod. For example, this run
+gives each pod one RDMA NIC next to its GPUs:
+
+```sh
+BENCHMARK_GPU_RESOURCE=deviceclass.resource.kubernetes.io/gpu.nvidia.com \
+BENCHMARK_RESOURCE_SLICES='[{driver: dra.net, devices: 8, attributes: {pciAddress: {string: "0000:00:00.0"}, rdma: {bool: true}}}]' \
+BENCHMARK_POD_DEVICES='[{class: dranet-rdma, count: 1}]' \
+make benchmark
+```
+
+For CPUs, `BENCHMARK_CPU_TOPOLOGY` publishes each node's CPUs through DRA and
+`BENCHMARK_CPU_RESOURCE` moves the pod's CPU request there. A pod requests CPUs
+either way, not both, and CPU DRA needs the default `BENCHMARK_EXCLUSIVE=false`:
+
+```sh
+BENCHMARK_CPU_TOPOLOGY='{sockets: 2, coresPerSocket: 48, smt: true}' \
+BENCHMARK_CPU_RESOURCE=deviceclass.resource.kubernetes.io/dra.cpu \
+make benchmark
+```
+
+The run applies `deviceclasses.yaml` from the configuration bundle when it is
+present. Each class there copies the selector of a built-in device profile,
+because the bridge matches the two byte for byte.

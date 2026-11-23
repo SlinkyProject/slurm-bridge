@@ -62,9 +62,18 @@ spec:
           image: registry.k8s.io/pause:3.9
           resources:
             requests:
-              cpu: '{{.cpus}}'
+              {{.cpuResource}}: '{{.cpus}}'
               memory: {{.memory}}
-              nvidia.com/gpu: '{{.gpus}}'
+              {{.gpuResource}}: '{{.gpus}}'
+              {{- range .devices}}
+              deviceclass.resource.kubernetes.io/{{.class}}: '{{.count}}'
+              {{- end}}
             limits:
               memory: {{.memory}}
-              nvidia.com/gpu: '{{.gpus}}'
+              {{- if ne .cpuResource "cpu"}}
+              {{.cpuResource}}: '{{.cpus}}'
+              {{- end}}
+              {{.gpuResource}}: '{{.gpus}}'
+              {{- range .devices}}
+              deviceclass.resource.kubernetes.io/{{.class}}: '{{.count}}'
+              {{- end}}

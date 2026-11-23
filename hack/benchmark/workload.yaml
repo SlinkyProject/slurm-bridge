@@ -24,7 +24,13 @@ tasks:
         namespace: ${BENCHMARK_NAMESPACE}
         exclusive: ${BENCHMARK_EXCLUSIVE:-false}
         cpus: ${BENCHMARK_POD_CPUS:-1}
+        # deviceclass.resource.kubernetes.io/dra.cpu requests the CPUs through DRA instead.
+        cpuResource: ${BENCHMARK_CPU_RESOURCE:-cpu}
         memory: ${BENCHMARK_POD_MEMORY:-8Gi}
+        # deviceclass.resource.kubernetes.io/gpu.nvidia.com requests the GPUs through DRA.
+        gpuResource: ${BENCHMARK_GPU_RESOURCE:-nvidia.com/gpu}
+        # More DRA devices for every pod, such as [{class: dranet-rdma, count: 1}].
+        devices: ${BENCHMARK_POD_DEVICES:-[]}
       classes:
         - name: inference
           jobs: ${BENCHMARK_INFERENCE_JOBS:-600}
