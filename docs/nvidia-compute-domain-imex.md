@@ -128,7 +128,7 @@ daemon Pods and is not registered in Slurm.
 
 Add a GRES name for the channel to Slurm's `GresTypes`. This guide uses `imex`:
 
-```conf
+```ini
 GresTypes=gpu,nic,imex
 ```
 

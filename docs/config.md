@@ -69,7 +69,7 @@ partition exists, then registers the Slurm node with matching features. Removing
 a partition from the annotation removes its feature. Slurm `Nodeset`
 configuration can then map those features into partitions:
 
-```conf
+```ini
 Nodeset=slurm-bridge Feature=slurm-bridge
 PartitionName=slurm-bridge Nodes=slurm-bridge State=UP Default=NO
 ```
