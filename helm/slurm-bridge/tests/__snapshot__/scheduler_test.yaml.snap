@@ -28,6 +28,9 @@ manifests should match snapshot:
         apiVersion: kubescheduler.config.k8s.io/v1
         kind: KubeSchedulerConfiguration
         leaderElection:
+          leaseDuration: 15s
+          renewDeadline: 10s
+          retryPeriod: 2s
           resourceNamespace: test-namespace
         # Slurm needs all eligible partition nodes before allocation. With scoring
         # disabled, Kubernetes overrides this target to one feasible node; full scans
@@ -105,7 +108,7 @@ manifests should match snapshot:
         metadata:
           annotations:
             checksum/config: 0dc7e9d80665162ae7e3bd00163c31891fc33f2682b6af65fcdb48462e451f91
-            checksum/scheduler-config: 7462c7c599fe9555728eef245a7f99cd9fb2e0412fa4fb0c69887e6080f141f5
+            checksum/scheduler-config: c017481ecd7a042b2e50e672ff2fecd1001ce89d023c1ab6483c17a7c2f5056d
           labels:
             app.kubernetes.io/component: scheduler
             app.kubernetes.io/instance: test-release

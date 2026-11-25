@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
@@ -83,6 +84,16 @@ current-context: test
 	require.Equal(t, managerConfig.BearerToken, schedulerConfig.KubeConfig.BearerToken)
 	require.Equal(t, managerConfig.TLSClientConfig, schedulerConfig.KubeConfig.TLSClientConfig)
 	require.Equal(t, "application/vnd.kubernetes.protobuf", schedulerConfig.KubeConfig.ContentType)
+}
+
+func TestManagerUsesSchedulerLeaseTimings(t *testing.T) {
+	runnable, err := NewRunnable(schedulerConfigFile(t, "leaderElection:\n  leaseDuration: 60s\n  renewDeadline: 40s\n  retryPeriod: 4s\n"), "")
+	require.NoError(t, err)
+	opts := ctrl.Options{}
+	runnable.ConfigureManager(&opts)
+	require.Equal(t, 60*time.Second, *opts.LeaseDuration)
+	require.Equal(t, 40*time.Second, *opts.RenewDeadline)
+	require.Equal(t, 4*time.Second, *opts.RetryPeriod)
 }
 
 func TestLeaderElectionNamespaceOutsideCluster(t *testing.T) {

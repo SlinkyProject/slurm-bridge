@@ -13,6 +13,9 @@ data:
     apiVersion: kubescheduler.config.k8s.io/v1
     kind: KubeSchedulerConfiguration
     leaderElection:
+      {{- with pick (.Values.schedulerConfig.leaderElection | default dict) "leaseDuration" "renewDeadline" "retryPeriod" }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
       resourceNamespace: {{ include "slurm-bridge.namespace" . }}
     # Slurm needs all eligible partition nodes before allocation. With scoring
     # disabled, Kubernetes overrides this target to one feasible node; full scans
