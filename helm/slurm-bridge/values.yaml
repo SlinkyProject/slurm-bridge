@@ -110,6 +110,14 @@ schedulerConfig:
   # -- (integer) Set the Kubernetes client Burst for kube-scheduler and the
   # scheduler plugin. Unset uses the kube-scheduler default of 100.
   clientBurst: 400
+  # Leader election timing settings.
+  leaderElection:
+    # -- Time a candidate waits after the last observed lease renewal before it can acquire leadership.
+    leaseDuration: 15s
+    # -- Time the leader retries renewing its lease before stepping down.
+    renewDeadline: 10s
+    # -- Interval between attempts to acquire or renew the lease.
+    retryPeriod: 2s
 
 # Configuration settings for the admission controller.
 admission:

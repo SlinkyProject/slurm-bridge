@@ -555,3 +555,14 @@ tests:
       - matchRegex:
           path: data["scheduler-config.yaml"]
           pattern: "(?s)preEnqueue:.*SchedulingGates.*GangScheduling"
+  - it: puts the manager lease timings in the scheduler configuration
+    template: scheduler/configmap.yaml
+    set:
+      schedulerConfig.leaderElection:
+        leaseDuration: 60s
+        renewDeadline: 40s
+        retryPeriod: 4s
+    asserts:
+      - matchRegex:
+          path: data["scheduler-config.yaml"]
+          pattern: '(?s)leaderElection:.*leaseDuration: 60s.*renewDeadline: 40s.*retryPeriod: 4s'
