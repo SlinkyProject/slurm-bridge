@@ -138,10 +138,11 @@ same driver must be mutually exclusive. If a device matches more than one
 profile, the node controller leaves its Slurm GRES inventory unchanged and emits
 an `OverlappingDRADeviceProfiles` Warning event on the Kubernetes Node.
 
-The [SR-IOV example](../hack/examples/dra/sriov) shows how to add your own
-DeviceProfile, configure a matching DeviceClass, and request its devices in a
-workload. Adapt the profile and network configuration to your driver and
-cluster; the bundled network setup is for Kind.
+The
+[SR-IOV example](https://github.com/SlinkyProject/slurm-bridge/tree/main/hack/examples/dra/sriov)
+shows how to add your own DeviceProfile, configure a matching DeviceClass, and
+request its devices in a workload. Adapt the profile and network configuration
+to your driver and cluster; the bundled network setup is for Kind.
 
 The built-in NVIDIA profile uses `gpu.nvidia.com` as its name and maps to
 `gpu:gpu.nvidia.com` in Slurm. The explicitly configured example GPU profile
