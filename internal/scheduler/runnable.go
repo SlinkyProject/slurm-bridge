@@ -88,9 +88,13 @@ func (r *Runnable) KubeConfig(kubeconfig string) (*rest.Config, error) {
 // ConfigureManager applies scheduler lease, shutdown, and profiling settings before
 // constructing the manager.
 func (r *Runnable) ConfigureManager(opts *manager.Options) {
+	election := r.opts.ComponentConfig.LeaderElection
 	if opts.LeaderElectionNamespace == "" {
-		opts.LeaderElectionNamespace = r.opts.ComponentConfig.LeaderElection.ResourceNamespace
+		opts.LeaderElectionNamespace = election.ResourceNamespace
 	}
+	opts.LeaseDuration = &election.LeaseDuration.Duration
+	opts.RenewDeadline = &election.RenewDeadline.Duration
+	opts.RetryPeriod = &election.RetryPeriod.Duration
 	// Scheduler.Run does not join every binding goroutine before returning.
 	opts.LeaderElectionReleaseOnCancel = false
 	if r.opts.ComponentConfig.EnableProfiling {
