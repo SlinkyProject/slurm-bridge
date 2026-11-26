@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -89,6 +90,10 @@ func (r *SlurmJobRunnable) kubeNodeExists(ctx context.Context, slurmNodeName str
 	}
 	if !apierrors.IsNotFound(err) {
 		return false, err
+	}
+	// A longer Node name can match by name, but cannot appear in the alias label.
+	if len(content.IsLabelValue(slurmNodeName)) != 0 {
+		return false, nil
 	}
 	list := &corev1.NodeList{}
 	if err := r.apiReader.List(ctx, list, client.MatchingLabels{wellknown.LabelSlurmNodeName: slurmNodeName}, client.Limit(1)); err != nil {
