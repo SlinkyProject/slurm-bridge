@@ -5,13 +5,16 @@ package slurmnode
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	slurmapi "github.com/SlinkyProject/slurm-client/api/v0044"
@@ -141,6 +144,9 @@ func TestSlurmNodeRunnable_SyncKeepsNodesWhenKubeListEmpty(t *testing.T) {
 }
 
 func TestSlurmNodeRunnable_SyncKeepsNodesMissingFromCache(t *testing.T) {
+	alias := strings.Repeat("a", 63)
+	liveName := strings.Repeat("b", 59) + ".live"
+	deletedName := strings.Repeat("c", 59) + ".gone"
 	bridged := func(name string) slurmapi.V0044Node {
 		return slurmapi.V0044Node{
 			Name:    ptr.To(name),
@@ -150,26 +156,35 @@ func TestSlurmNodeRunnable_SyncKeepsNodesMissingFromCache(t *testing.T) {
 	}
 	slurmClient := slurmclientfake.NewClientBuilder().
 		WithLists(&slurmapi.V0044NodeObjectList{
-			Items: []slurmapi.V0044Node{bridged("cached"), bridged("by-name"), bridged("by-label"), bridged("gone")},
+			Items: []slurmapi.V0044Node{bridged("cached"), bridged(liveName), bridged(alias), bridged(deletedName)},
 		}).
 		Build()
 	cached := fake.NewFakeClient(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cached"}})
 	// The API server has Nodes the cache has not seen yet.
-	live := fake.NewFakeClient(
+	live := fake.NewClientBuilder().WithObjects(
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "cached"}},
-		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "by-name"}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: liveName}},
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name:   "kube-node",
-			Labels: map[string]string{wellknown.LabelSlurmNodeName: "by-label"},
+			Labels: map[string]string{wellknown.LabelSlurmNodeName: alias},
 		}},
-	)
+	).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			// The real API server parses label selectors on the wire.
+			options := (&client.ListOptions{}).ApplyOptions(opts)
+			if _, err := labels.Parse(options.AsListOptions().LabelSelector); err != nil {
+				return err
+			}
+			return c.List(ctx, list, opts...)
+		},
+	}).Build()
 
 	r := NewRunnable(cached, live, slurmClient, make(chan event.GenericEvent, 10))
 	if err := r.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() failed: %v", err)
 	}
 
-	for name, wantExists := range map[string]bool{"cached": true, "by-name": true, "by-label": true, "gone": false} {
+	for name, wantExists := range map[string]bool{"cached": true, liveName: true, alias: true, deletedName: false} {
 		err := slurmClient.Get(context.Background(), slurmobject.ObjectKey(name), &slurmapi.V0044Node{})
 		if exists := err == nil; exists != wantExists {
 			t.Errorf("Slurm node %q exists = %v, want %v (err %v)", name, exists, wantExists, err)
